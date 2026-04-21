@@ -2,7 +2,7 @@
 
 **S**caffold · **H**arvest · **I**nspect · **P**ackage · **S**hip
 
-An autonomous deployment agent for Teradata Vantage. SHIPS takes raw DDL from any source — extracted, generated, hand-coded, migrated — and produces self-contained, environment-specific release packages that a DBA can deploy without any knowledge of the build process.
+An autonomous deployment agent for Teradata. SHIPS takes raw DDL from any source — extracted, generated, hand-coded, migrated — and produces self-contained, environment-specific release packages that a DBA can deploy without any knowledge of the build process.
 
 Equally usable by humans at the command line, CI/CD pipelines, and autonomous AI agents.
 
