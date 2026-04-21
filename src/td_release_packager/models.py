@@ -1,0 +1,214 @@
+"""
+models.py — Data models for the Teradata Release Packager.
+
+Defines the deployment phases, package metadata, build configuration,
+and execution order for self-contained, environment-specific release
+packages.
+"""
+
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Optional, Dict, List
+
+
+class DeployPhase(Enum):
+    """
+    Deployment phases in execution order.
+
+    Each phase maps to a numbered directory in the package payload.
+    The numbering enforces strict ordering: system objects must
+    exist before databases, databases before grants, grants
+    before DDL objects, objects before data.
+
+    Phase semantics:
+        SYSTEM          — CREATE MAP, CREATE ROLE, CREATE PROFILE,
+                          CREATE AUTHORIZATION, CREATE FOREIGN SERVER.
+                          System-level objects identical across
+                          environments. No tokens. SKIP_IF_EXISTS.
+        PRE_REQUISITES  — CREATE DATABASE, CREATE USER.
+                          Foundation objects that contain everything else.
+        DCL             — GRANT ... ON database/user. Container-level
+                          permissions that must exist before objects are
+                          created inside those containers.
+        DDL             — CREATE TABLE, REPLACE VIEW, CREATE JOIN INDEX,
+                          etc. The structural objects.
+        DML             — Reference data loads (MERGE), seed data,
+                          configuration inserts.
+        POST_INSTALL    — Validation queries, statistics collection,
+                          cleanup scripts, smoke tests.
+    """
+
+    SYSTEM = "00_system"
+    PRE_REQUISITES = "01_pre_requisites"
+    DCL = "02_dcl"
+    DDL = "03_ddl"
+    DML = "04_dml"
+    POST_INSTALL = "05_post_install"
+
+
+# -- Maps source directory names to deployment phases --
+# The source project uses Paul's naming convention;
+# the builder maps these to numbered phase directories.
+SOURCE_DIR_MAP = {
+    "system": DeployPhase.SYSTEM,
+    "00_system": DeployPhase.SYSTEM,
+    "pre-requisites": DeployPhase.PRE_REQUISITES,
+    "pre_requisites": DeployPhase.PRE_REQUISITES,
+    "DCL": DeployPhase.DCL,
+    "dcl": DeployPhase.DCL,
+    "DDL": DeployPhase.DDL,
+    "ddl": DeployPhase.DDL,
+    "DML": DeployPhase.DML,
+    "dml": DeployPhase.DML,
+    "post-install": DeployPhase.POST_INSTALL,
+    "post_install": DeployPhase.POST_INSTALL,
+}
+
+# -- Sub-directory ordering within the SYSTEM phase --
+# System-scope objects deploy in this sequence.
+SYSTEM_SUBDIR_ORDER = {
+    "maps": 0,
+    "roles": 1,
+    "profiles": 2,
+    "authorizations": 3,
+    "foreign_servers": 4,
+}
+
+# -- Sub-directory ordering within the DDL phase --
+# Objects within DDL deploy in this sequence.
+DDL_SUBDIR_ORDER = {
+    "tables": 10,
+    "join_indexes": 11,
+    "hash_indexes": 11,
+    "secondary_indexes": 12,
+    "views": 20,
+    "macros": 21,
+    "procedures": 22,
+    "functions": 23,
+    "JARs": 24,
+    "script_table_operators": 25,
+    "triggers": 30,
+}
+
+# -- Sub-directory ordering within the DCL phase --
+DCL_SUBDIR_ORDER = {
+    "roles": 0,
+    "users": 1,
+    "inter_db": 2,
+}
+
+
+@dataclass
+class TokenDefinition:
+    """
+    A single token definition.
+
+    Attributes:
+        name:           Token name (without delimiters), e.g. 'STD_DATABASE'.
+        description:    Human-readable description of what this token represents.
+        required:       True if the token must be defined in properties.
+        default_value:  Default value if not specified in properties.
+        category:       Grouping for display (e.g. 'database', 'user', 'path').
+    """
+
+    name: str
+    description: str = ""
+    required: bool = True
+    default_value: Optional[str] = None
+    category: str = "general"
+
+
+@dataclass
+class BuildConfig:
+    """
+    Configuration for building a release package.
+
+    Attributes:
+        source_dir:       Root of the source project (containing payload/).
+        environment:      Target environment name (e.g. 'DEV', 'TEST', 'PROD').
+        package_name:     Logical package name (e.g. 'create_objects').
+        build_number:     Incrementing build number (zero-padded 4 digits).
+        properties_file:  Path to the environment properties file.
+        output_dir:       Where to write the package (default: current dir).
+        archive_format:   'zip' or 'tar.gz'.
+        author:           Builder's name/ID.
+        description:      Free-text description of this release.
+        source_commit:    Git commit hash (optional, for traceability).
+    """
+
+    source_dir: str
+    environment: str
+    package_name: str
+    properties_file: str
+    build_number: Optional[int] = None
+    output_dir: str = "."
+    archive_format: str = "zip"
+    author: str = ""
+    description: str = ""
+    source_commit: str = ""
+
+
+@dataclass
+class BuildManifest:
+    """
+    Metadata stamped into the package at build time.
+
+    Persisted as BUILD.json inside the package root. Provides
+    traceability from deployed objects back to the source and
+    build process.
+
+    Attributes:
+        build_number:     Formatted build number (e.g. '0012').
+        environment:      Target environment.
+        package_name:     Logical package name.
+        package_filename: Full archive filename.
+        timestamp:        Build timestamp (ISO 8601).
+        author:           Who built it.
+        description:      Release description.
+        source_commit:    Git commit hash.
+        token_count:      Number of tokens substituted.
+        file_count:       Total files in the payload.
+        phase_inventory:  Count of files per phase.
+        tokens_resolved:  Dict of token_name → resolved_value.
+        warnings:         Build-time warnings.
+    """
+
+    build_number: str
+    environment: str
+    package_name: str
+    package_filename: str
+    timestamp: str
+    author: str = ""
+    description: str = ""
+    source_commit: str = ""
+    token_count: int = 0
+    file_count: int = 0
+    phase_inventory: Dict[str, int] = field(default_factory=dict)
+    tokens_resolved: Dict[str, str] = field(default_factory=dict)
+    warnings: List[str] = field(default_factory=list)
+
+
+@dataclass
+class DeployConfig:
+    """
+    Configuration used at deployment time by the DBA.
+
+    Read from the package's config/ directory and CLI arguments.
+
+    Attributes:
+        host:           Teradata host.
+        user:           Teradata user.
+        password:       Teradata password.
+        logmech:        Logon mechanism (e.g. 'LDAP', 'TD2').
+        dry_run:        Simulate without executing.
+        continue_on_error: Continue past failures.
+        query_band:     Additional query band key=value pairs.
+    """
+
+    host: str
+    user: str
+    password: str = ""
+    logmech: str = ""
+    dry_run: bool = False
+    continue_on_error: bool = False
+    query_band: Dict[str, str] = field(default_factory=dict)

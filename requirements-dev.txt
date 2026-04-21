@@ -1,0 +1,6 @@
+# SHIPS — Teradata Deployment Agent
+# Development and testing dependencies
+
+-r requirements.txt
+
+pytest>=9.0.0

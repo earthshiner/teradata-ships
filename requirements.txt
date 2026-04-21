@@ -1,0 +1,7 @@
+# SHIPS — Teradata Deployment Agent
+# Runtime dependencies
+#
+# Core packages use Python standard library only.
+# teradatasql is required only for live deployment (Ship phase).
+
+teradatasql>=20.0.0

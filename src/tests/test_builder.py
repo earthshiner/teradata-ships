@@ -1,0 +1,140 @@
+"""
+test_builder.py — Tests for the SHIPS builder module.
+
+Covers:
+    - Filename resolution (_resolve_filename) from resolved DDL content
+    - Environment-specific prefix replacement in filenames
+    - Binary/non-DDL file preservation
+    - Hidden/underscore file preservation
+"""
+
+import os
+import pytest
+
+from td_release_packager.builder import _resolve_filename
+
+
+# ---------------------------------------------------------------
+# _resolve_filename — Eponymous filename from resolved content
+# ---------------------------------------------------------------
+
+class TestResolveFilename:
+    """Tests for deriving filenames from resolved DDL content."""
+
+    def test_table_filename_resolved(self):
+        """Table filename is derived from resolved DDL content."""
+        content = "CREATE MULTISET TABLE P_CORE.Customer (Id INT);"
+        result = _resolve_filename("DEV01_CORE.Customer.tbl", content)
+        assert result == "P_CORE.Customer.tbl"
+
+    def test_view_filename_resolved(self):
+        """View filename is derived from resolved DDL content."""
+        content = "REPLACE VIEW P_CORE.ActiveCustomers AS SELECT 1;"
+        result = _resolve_filename("DEV01_CORE.ActiveCustomers.viw", content)
+        assert result == "P_CORE.ActiveCustomers.viw"
+
+    def test_procedure_filename_resolved(self):
+        """Procedure filename is derived from resolved DDL content."""
+        content = "REPLACE PROCEDURE P_CORE.sp_Refresh() BEGIN END;"
+        result = _resolve_filename("DEV01_CORE.sp_Refresh.spl", content)
+        assert result == "P_CORE.sp_Refresh.spl"
+
+    def test_join_index_filename_resolved(self):
+        """Join index filename is derived from resolved DDL content."""
+        content = "CREATE JOIN INDEX P_CORE.JI_Cust AS SELECT * FROM P_CORE.Customer;"
+        result = _resolve_filename("DEV01_CORE.JI_Cust.jix", content)
+        assert result == "P_CORE.JI_Cust.jix"
+
+    def test_function_filename_resolved(self):
+        """Function filename is derived from resolved DDL content."""
+        content = "REPLACE FUNCTION P_CORE.fn_Calc(x INT) RETURNS INT RETURN x;"
+        result = _resolve_filename("DEV01_CORE.fn_Calc.fnc", content)
+        assert result == "P_CORE.fn_Calc.fnc"
+
+    def test_trigger_filename_resolved(self):
+        """Trigger filename is derived from resolved DDL content."""
+        content = (
+            "REPLACE TRIGGER P_CORE.trg_Audit "
+            "AFTER INSERT ON P_CORE.Customer (SELECT 1;);"
+        )
+        result = _resolve_filename("DEV01_CORE.trg_Audit.trg", content)
+        assert result == "P_CORE.trg_Audit.trg"
+
+    def test_same_env_no_change(self):
+        """Filename unchanged when source env matches target env."""
+        content = "CREATE MULTISET TABLE P_CORE.Customer (Id INT);"
+        result = _resolve_filename("P_CORE.Customer.tbl", content)
+        assert result == "P_CORE.Customer.tbl"
+
+    def test_extension_preserved(self):
+        """Original file extension is preserved regardless of content."""
+        content = "CREATE MULTISET TABLE P_CORE.Customer (Id INT);"
+        result = _resolve_filename("DEV01_CORE.Customer.tbl", content)
+        assert result.endswith(".tbl")
+
+    def test_no_qualified_name_unchanged(self):
+        """Files without extractable qualified names keep original filename."""
+        content = "GRANT SELECT ON P_CORE TO SomeRole;"
+        result = _resolve_filename("some_grant.dcl", content)
+        assert result == "some_grant.dcl"
+
+    def test_c_source_unchanged(self):
+        """C source files (.c) are never renamed."""
+        content = "#include <stdio.h>\nvoid fn() {}"
+        result = _resolve_filename("OMR_Put_Trace.c", content)
+        assert result == "OMR_Put_Trace.c"
+
+    def test_c_header_unchanged(self):
+        """C header files (.h) are never renamed."""
+        content = "#ifndef GUARD_H\n#define GUARD_H\n#endif"
+        result = _resolve_filename("sqltypes_td.h", content)
+        assert result == "sqltypes_td.h"
+
+    def test_jar_binary_unchanged(self):
+        """JAR binary files (.jar) are never renamed."""
+        content = "binary content"
+        result = _resolve_filename("DataFlowJane.jar", content)
+        assert result == "DataFlowJane.jar"
+
+    def test_hidden_file_unchanged(self):
+        """Hidden files (dot-prefixed) are never renamed."""
+        content = "CREATE TABLE P_CORE.T (Id INT);"
+        result = _resolve_filename(".gitkeep", content)
+        assert result == ".gitkeep"
+
+    def test_underscore_file_unchanged(self):
+        """Underscore-prefixed files (e.g. _waves.txt) are never renamed."""
+        content = "some content"
+        result = _resolve_filename("_waves.txt", content)
+        assert result == "_waves.txt"
+
+    def test_quoted_identifiers(self):
+        """Quoted identifiers have quotes stripped in the filename."""
+        content = 'CREATE MULTISET TABLE "P_CORE"."Customer" (Id INT);'
+        result = _resolve_filename("DEV01_CORE.Customer.tbl", content)
+        assert result == "P_CORE.Customer.tbl"
+
+    def test_volatile_table(self):
+        """VOLATILE TABLE qualified name is extracted correctly."""
+        content = "CREATE MULTISET VOLATILE TABLE P_CORE.TmpWork (Id INT);"
+        result = _resolve_filename("DEV01_CORE.TmpWork.tbl", content)
+        assert result == "P_CORE.TmpWork.tbl"
+
+    def test_global_temporary_trace_table(self):
+        """GLOBAL TEMPORARY TRACE TABLE qualified name is extracted."""
+        content = "CREATE MULTISET GLOBAL TEMPORARY TRACE TABLE P_CORE.Trace (Id INT);"
+        result = _resolve_filename("DEV01_CORE.Trace.tbl", content)
+        assert result == "P_CORE.Trace.tbl"
+
+    def test_macro_filename_resolved(self):
+        """Macro filename is derived from resolved DDL content."""
+        content = "REPLACE MACRO P_CORE.mc_Report AS (SELECT 1;);"
+        result = _resolve_filename("DEV01_CORE.mc_Report.mcr", content)
+        assert result == "P_CORE.mc_Report.mcr"
+
+    def test_single_part_name_unchanged(self):
+        """DDL with single-part name (no db prefix) keeps original filename."""
+        content = "CREATE ROLE analyst_role;"
+        result = _resolve_filename("analyst_role.rol", content)
+        # No qualified DB.Object name → original preserved
+        assert result == "analyst_role.rol"
