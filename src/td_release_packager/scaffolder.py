@@ -55,9 +55,18 @@ def scaffold_project(
     output_dir: str,
     environments: List[str] = None,
     sample_tokens: dict = None,
+    repair: bool = False,
 ) -> str:
     """
-    Create a new project directory with the full template structure.
+    Create a new project directory with the full template structure,
+    or repair an existing one by adding missing directories and files.
+
+    In repair mode:
+        - Missing directories are created
+        - Missing config files are generated
+        - Existing files are NEVER overwritten
+        - The .build_counter is preserved
+        - Reports what was created vs what was skipped
 
     Args:
         project_name:   Name of the project (used as directory name).
@@ -65,47 +74,55 @@ def scaffold_project(
         environments:   List of environment names (default: DEV, TST, PRD).
         sample_tokens:  Optional dict of sample token names and descriptions
                         to include in the generated properties files.
+        repair:         If True, repair an existing project instead of
+                        creating a new one. Adds missing structure without
+                        overwriting existing files.
 
     Returns:
-        Absolute path to the created project directory.
+        Absolute path to the created/repaired project directory.
 
     Raises:
-        FileExistsError: If the project directory already exists.
+        FileExistsError: If the project directory already exists
+                         (only in non-repair mode).
+        FileNotFoundError: If the project directory does not exist
+                           (only in repair mode).
     """
     if environments is None:
         environments = ["DEV", "TST", "PRD"]
 
     project_dir = os.path.join(output_dir, project_name)
 
-    if os.path.exists(project_dir):
-        raise FileExistsError(
-            f"Project directory already exists: {project_dir}"
-        )
+    if repair:
+        if not os.path.exists(project_dir):
+            raise FileNotFoundError(
+                f"Cannot repair — project directory not found: {project_dir}"
+            )
+        logger.info("Repairing project: %s", project_dir)
+    else:
+        if os.path.exists(project_dir):
+            raise FileExistsError(
+                f"Project directory already exists: {project_dir}. "
+                f"Use --repair to add missing directories and files."
+            )
+        logger.info("Scaffolding project: %s", project_dir)
 
-    logger.info("Scaffolding project: %s", project_dir)
-
-    # -- Create directory structure --
+    # -- Create directory structure (safe for existing dirs) --
     _create_directories(project_dir)
 
-    # -- Generate properties files --
-    _generate_properties(project_dir, project_name, environments, sample_tokens)
+    # -- Generate files (skip existing in repair mode) --
+    _generate_properties(
+        project_dir, project_name, environments, sample_tokens,
+        skip_existing=repair,
+    )
+    _generate_inspect_config(project_dir)  # Already skips existing
+    _generate_build_counter(project_dir, skip_existing=repair)
+    _generate_gitignore(project_dir, skip_existing=repair)
+    _generate_readme(project_dir, project_name, environments,
+                     skip_existing=repair)
+    _generate_sample_order_file(project_dir, skip_existing=repair)
 
-    # -- Generate inspect.conf --
-    _generate_inspect_config(project_dir)
-
-    # -- Generate .build_counter --
-    _generate_build_counter(project_dir)
-
-    # -- Generate .gitignore --
-    _generate_gitignore(project_dir)
-
-    # -- Generate README.md --
-    _generate_readme(project_dir, project_name, environments)
-
-    # -- Generate sample _order.txt --
-    _generate_sample_order_file(project_dir)
-
-    logger.info("Project scaffolded: %s", project_dir)
+    action = "repaired" if repair else "scaffolded"
+    logger.info("Project %s: %s", action, project_dir)
     return project_dir
 
 
@@ -166,6 +183,7 @@ def _generate_properties(
     project_name: str,
     environments: List[str],
     sample_tokens: dict = None,
+    skip_existing: bool = False,
 ):
     """
     Generate a .properties file per environment.
@@ -228,6 +246,10 @@ def _generate_properties(
         props_path = os.path.join(
             project_dir, "config", "properties", f"{env_upper}.properties"
         )
+
+        if skip_existing and os.path.exists(props_path):
+            logger.info("Properties file exists — skipping: %s", props_path)
+            continue
 
         with open(props_path, 'w', encoding='utf-8') as f:
             # -- Header --
@@ -331,7 +353,7 @@ def _generate_inspect_config(project_dir: str):
     logger.info("Generated: %s", config_path)
 
 
-def _generate_build_counter(project_dir: str):
+def _generate_build_counter(project_dir: str, skip_existing: bool = False):
     """
     Generate the .build_counter file initialised to 0.
 
@@ -339,16 +361,22 @@ def _generate_build_counter(project_dir: str):
     The file contains a single integer.
 
     Args:
-        project_dir: Project root.
+        project_dir:    Project root.
+        skip_existing:  If True, don't overwrite existing counter.
     """
     counter_path = os.path.join(project_dir, ".build_counter")
+
+    if skip_existing and os.path.exists(counter_path):
+        logger.info("Build counter exists — skipping: %s", counter_path)
+        return
+
     with open(counter_path, 'w', encoding='utf-8') as f:
         f.write("0\n")
 
     logger.debug("Generated: %s", counter_path)
 
 
-def _generate_gitignore(project_dir: str):
+def _generate_gitignore(project_dir: str, skip_existing: bool = False):
     """
     Generate a .gitignore appropriate for a release project.
 
@@ -356,8 +384,15 @@ def _generate_gitignore(project_dir: str):
     Tracks the .build_counter (it should be committed).
 
     Args:
-        project_dir: Project root.
+        project_dir:    Project root.
+        skip_existing:  If True, don't overwrite existing .gitignore.
     """
+    gitignore_path = os.path.join(project_dir, ".gitignore")
+
+    if skip_existing and os.path.exists(gitignore_path):
+        logger.info(".gitignore exists — skipping.")
+        return
+
     gitignore = """# Teradata Release Project
 # =======================
 
@@ -393,13 +428,19 @@ Thumbs.db
 # config/properties/*.properties — environment token values
 """
 
-    gitignore_path = os.path.join(project_dir, ".gitignore")
     with open(gitignore_path, 'w', encoding='utf-8') as f:
         f.write(gitignore)
 
 
-def _generate_readme(project_dir: str, project_name: str, environments: List[str]):
+def _generate_readme(project_dir: str, project_name: str, environments: List[str],
+                     skip_existing: bool = False):
     """Generate a project README.md with getting-started instructions."""
+    readme_path = os.path.join(project_dir, "README.md")
+
+    if skip_existing and os.path.exists(readme_path):
+        logger.info("README.md exists — skipping.")
+        return
+
     env_list = ", ".join(environments)
 
     readme = f"""# {project_name}
@@ -483,23 +524,27 @@ dependencies), create an `_order.txt` file in the relevant
 phase directory listing filenames one per line.
 """
 
-    readme_path = os.path.join(project_dir, "README.md")
     with open(readme_path, 'w', encoding='utf-8') as f:
         f.write(readme)
 
 
-def _generate_sample_order_file(project_dir: str):
+def _generate_sample_order_file(project_dir: str, skip_existing: bool = False):
     """
     Generate a sample _order.txt in the DDL/tables directory.
 
     Shows the developer the format for topological ordering.
 
     Args:
-        project_dir: Project root.
+        project_dir:    Project root.
+        skip_existing:  If True, don't overwrite existing file.
     """
     order_path = os.path.join(
         project_dir, "payload", "database", "DDL", "tables", "_order.txt.sample"
     )
+
+    if skip_existing and os.path.exists(order_path):
+        logger.info("Sample order file exists — skipping.")
+        return
 
     with open(order_path, 'w', encoding='utf-8') as f:
         f.write("""# Deployment order for tables (topological sort).
