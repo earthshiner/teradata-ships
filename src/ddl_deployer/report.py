@@ -30,6 +30,19 @@ from ddl_deployer.models import (
 
 logger = logging.getLogger(__name__)
 
+
+def _display_name(obj) -> str:
+    """
+    Build a display name for an object.
+
+    For two-part names (DB.Object): 'MyDB.Customer'
+    For single-part names (system-scope, DCL): 'analyst_role'
+    Avoids the '.analyst_role' leading-period bug.
+    """
+    if obj.database_name:
+        return f"{obj.database_name}.{obj.object_name}"
+    return obj.object_name or "(unknown)"
+
 # -- Teradata brand colours --
 _NAVY = "#00233C"
 _ORANGE = "#FF5F02"
@@ -108,7 +121,13 @@ def generate_report(
 def _build_html(result: PackageDeployResult) -> str:
     """Build the complete HTML report string."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    mode = "DRY RUN" if result.dry_run else "DEPLOYMENT"
+    # Determine report mode from context
+    if result.dry_run:
+        mode = "DRY RUN"
+    elif result.deployment_id and result.deployment_id.startswith("explain_"):
+        mode = "EXPLAIN"
+    else:
+        mode = "DEPLOYMENT"
     status = "PASSED" if result.success else "FAILED"
     status_colour = "#28A745" if result.success else "#DC3545"
 
@@ -224,7 +243,7 @@ def _html_action_items(result):
         if obj.state == DeployState.FAILED:
             items.append(
                 f'<div class="action-item err">'
-                f'<strong>FAILED:</strong> {obj.database_name}.{obj.object_name} '
+                f'<strong>FAILED:</strong> {_display_name(obj)} '
                 f'({obj.object_type.value}) — {obj.error or "Unknown error"}'
                 f'</div>'
             )
@@ -232,7 +251,7 @@ def _html_action_items(result):
             detail = "; ".join(obj.blockers) if obj.blockers else "Incompatible schema"
             items.append(
                 f'<div class="action-item warn">'
-                f'<strong>SKIPPED:</strong> {obj.database_name}.{obj.object_name} '
+                f'<strong>SKIPPED:</strong> {_display_name(obj)} '
                 f'({obj.object_type.value}) — {detail}. '
                 f'Backup preserved as {obj.backup_table}.'
                 f'</div>'
@@ -410,14 +429,21 @@ def _html_object_results(result):
             wn = obj.wave_number if obj.wave_number else "—"
             wave_cell = f'<td style="text-align:center">{wn}</td>'
 
+        # Source file name
+        file_html = ""
+        if hasattr(obj, 'ddl_file') and obj.ddl_file:
+            file_html = f'<span class="mono" style="font-size:11px;color:#6C757D">{obj.ddl_file}</span>'
+
         rows.append(
             f'<tr>'
             f'<td style="text-align:center;color:#6C757D">{i}</td>'
             f'{wave_cell}'
-            f'<td class="mono">{obj.database_name}.{obj.object_name}</td>'
+            f'<td class="mono">{_display_name(obj)}</td>'
             f'<td>{intent_html}{type_html}</td>'
             f'<td>{status_html}</td>'
-            f'<td>{"<br>".join(details)}{rollback_html}{extra_html}</td>'
+            f'<td>{"<br>".join(details)}'
+            f'{("<br>" + file_html) if file_html else ""}'
+            f'{rollback_html}{extra_html}</td>'
             f'</tr>'
         )
 

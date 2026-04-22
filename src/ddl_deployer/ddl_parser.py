@@ -23,6 +23,7 @@ Supported DDL patterns:
     CREATE TRIGGER db.trg ...
 """
 
+import os
 import re
 from typing import Tuple, Optional
 
@@ -376,8 +377,15 @@ def parse_ddl_text(ddl_text: str, file_path: str = "<inline>") -> ParsedDDL:
     # the qualified_name IS the object name — no DB prefix.
     if db_name is None:
         if object_type in _SINGLE_NAME_TYPES:
-            # System-scope and DCL: qualified_name = object_name only
-            qualified_name = obj_name or ""
+            # For GRANT/REVOKE, the DDL has no unique object name.
+            # Derive a unique identifier from the filename so each
+            # GRANT file gets its own manifest entry.
+            if object_type in (ObjectType.GRANT, ObjectType.REVOKE) and file_path:
+                basename = os.path.splitext(os.path.basename(file_path))[0]
+                qualified_name = f"{object_type.value}:{basename}"
+                obj_name = basename
+            else:
+                qualified_name = obj_name or ""
             db_name = ""
         else:
             # Shouldn't reach here (caught above), but be safe
