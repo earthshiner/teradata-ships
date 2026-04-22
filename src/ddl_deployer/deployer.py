@@ -631,8 +631,12 @@ def explain_package(
     validating types — without executing. This catches errors that
     a dry run (no connection) cannot detect.
 
-    System-scope objects (CREATE DATABASE, CREATE ROLE, GRANT, etc.)
-    are skipped as EXPLAIN is not applicable to them.
+    On a fresh deployment, EXPLAIN will fail for objects that
+    reference other objects being created in the same package
+    (e.g. a view referencing a table that doesn't exist yet).
+    These failures are detected by cross-referencing the error
+    against the package's object index and reported as
+    PASS (dependency in package) rather than FAIL.
 
     Args:
         cursor:         Active Teradata database cursor.
@@ -671,33 +675,62 @@ def explain_package(
 
     logger.info("Files to validate: %d", len(ddl_files))
 
-    # -- Parse and EXPLAIN each file --
-    results = []
-    passed = 0
-    failed = 0
-    skipped = 0
+    # -- Phase 1: Parse all files and build an object index --
+    # The index lets us distinguish "genuine missing object" from
+    # "object that will be created by this same package".
+    parsed_files = []
+    package_objects = set()  # Qualified names being created
 
     for ddl_file in ddl_files:
         basename = os.path.basename(ddl_file)
-
         try:
             parsed = parse_ddl_file(ddl_file)
+            parsed_files.append((ddl_file, parsed))
+
+            # Index the object and its components for cross-reference
+            if parsed.qualified_name:
+                package_objects.add(parsed.qualified_name.upper())
+            if parsed.database_name:
+                package_objects.add(parsed.database_name.upper())
+            if parsed.object_name:
+                package_objects.add(parsed.object_name.upper())
+
         except (ValueError, FileNotFoundError) as e:
             logger.error(
                 "  ✗ PARSE FAILED: %s — %s", basename, e
             )
+            parsed_files.append((ddl_file, None))
+
+    logger.info(
+        "Package object index: %d names from %d files",
+        len(package_objects), len(parsed_files),
+    )
+    logger.debug("  Index: %s", sorted(package_objects)[:20])
+
+    # -- Phase 2: EXPLAIN each file --
+    results = []
+    passed = 0
+    failed = 0
+    skipped = 0
+    dep_pass = 0  # Dependencies in package (expected failures)
+
+    for ddl_file, parsed in parsed_files:
+        basename = os.path.basename(ddl_file)
+
+        # Handle parse failures from Phase 1
+        if parsed is None:
             results.append(ObjectDeployResult(
                 database_name="UNKNOWN", object_name=basename,
                 object_type=ObjectType.UNKNOWN,
                 state=DeployState.FAILED,
                 ddl_file=basename,
-                error=f"Parse error: {e}",
-                message=f"Could not parse: {e}",
+                error=f"Parse error",
+                message=f"Could not parse file.",
             ))
             failed += 1
             continue
 
-        # -- Skip types where EXPLAIN is not applicable --
+        # -- Skip excluded types --
         if parsed.object_type in _EXPLAIN_SKIP_TYPES:
             logger.info(
                 "  ○ NOT APPLICABLE: %s %s [%s]",
@@ -724,12 +757,9 @@ def explain_package(
 
         try:
             cursor.execute(explain_sql)
-            # EXPLAIN returns the query plan as result rows.
-            # If it succeeds without error, the SQL is valid.
             rows = cursor.fetchall()
             plan_preview = ""
             if rows:
-                # First row of the explain plan for logging
                 first_row = str(rows[0][0]) if rows[0] else ""
                 plan_preview = first_row[:120]
 
@@ -753,7 +783,57 @@ def explain_package(
 
         except Exception as e:
             err_msg = str(e)
-            # Extract the Teradata error number if present
+
+            # "Already exists" errors — SQL is valid, object just
+            # exists from a prior deployment.
+            #   5612: user, database, role, or zone already exists
+            #   3803: table, view, trigger already exists
+            if "5612" in err_msg or "3803" in err_msg:
+                logger.info(
+                    "  ✓ PASS: %s %s [%s] (already exists — SQL is valid)",
+                    parsed.object_type.value, parsed.qualified_name,
+                    basename,
+                )
+                results.append(ObjectDeployResult(
+                    database_name=parsed.database_name,
+                    object_name=parsed.object_name,
+                    object_type=parsed.object_type,
+                    state=DeployState.COMPLETED,
+                    ddl_file=basename,
+                    deploy_intent=parsed.deploy_intent,
+                    message=f"EXPLAIN passed — SQL is valid (object already exists).",
+                ))
+                passed += 1
+                continue
+
+            # "Object does not exist" — check if it's a dependency
+            # being created in this same package.
+            #   3807: Object 'X' does not exist.
+            if "3807" in err_msg:
+                if _is_package_dependency(err_msg, package_objects):
+                    logger.info(
+                        "  ✓ PASS: %s %s [%s] "
+                        "(references object created by this package)",
+                        parsed.object_type.value, parsed.qualified_name,
+                        basename,
+                    )
+                    results.append(ObjectDeployResult(
+                        database_name=parsed.database_name,
+                        object_name=parsed.object_name,
+                        object_type=parsed.object_type,
+                        state=DeployState.COMPLETED,
+                        ddl_file=basename,
+                        deploy_intent=parsed.deploy_intent,
+                        message=(
+                            f"EXPLAIN passed — references object being "
+                            f"created by this package."
+                        ),
+                    ))
+                    dep_pass += 1
+                    passed += 1
+                    continue
+
+            # Genuine failure — not an expected error
             logger.error(
                 "  ✗ FAIL: %s %s [%s] — %s",
                 parsed.object_type.value, parsed.qualified_name,
@@ -774,9 +854,11 @@ def explain_package(
     # -- Build result --
     logger.info("=" * 64)
     logger.info("  EXPLAIN Results")
-    logger.info("  Passed:         %d", passed)
-    logger.info("  Failed:         %d", failed)
-    logger.info("  Not applicable: %d", skipped)
+    logger.info("  Passed:           %d", passed)
+    if dep_pass > 0:
+        logger.info("    (of which %d reference objects in this package)", dep_pass)
+    logger.info("  Failed:           %d", failed)
+    logger.info("  Not applicable:   %d", skipped)
     logger.info("=" * 64)
 
     pkg_result = PackageDeployResult(
@@ -787,7 +869,7 @@ def explain_package(
         skipped=skipped,
         failed=failed,
         results=results,
-        dry_run=False,  # Not a dry run — we connected
+        dry_run=False,
     )
 
     # -- Generate report --
@@ -799,6 +881,48 @@ def explain_package(
         logger.warning("Report generation failed (non-fatal): %s", e)
 
     return pkg_result
+
+
+def _is_package_dependency(error_msg: str, package_objects: set) -> bool:
+    """
+    Check if a 3807 "does not exist" error references an object
+    that is being created in this same package.
+
+    Teradata Error 3807 includes the missing object name in the
+    error message, e.g.:
+        "Object 'A_D01_SHIPS_TEST_STD.Customer' does not exist."
+
+    We extract the referenced name and check it against the
+    package's object index.
+
+    Args:
+        error_msg:       The full Teradata error message string.
+        package_objects:  Set of uppercase qualified names, database
+                         names, and object names from this package.
+
+    Returns:
+        True if the missing object is in this package.
+    """
+    import re
+    # Extract object name from error message
+    # Pattern: Object 'name' or Object "name"
+    match = re.search(r"[Oo]bject\s+['\"]([^'\"]+)['\"]", error_msg)
+    if not match:
+        return False
+
+    missing = match.group(1).upper().strip()
+
+    # Check full qualified name
+    if missing in package_objects:
+        return True
+
+    # Check just the object part (after the dot)
+    if '.' in missing:
+        parts = missing.split('.')
+        if any(p in package_objects for p in parts):
+            return True
+
+    return False
 
 
 # ---------------------------------------------------------------

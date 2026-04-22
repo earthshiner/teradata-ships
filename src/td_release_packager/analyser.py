@@ -195,7 +195,13 @@ def _extract_body(ddl_text: str, object_type: str) -> str:
 # Matches DB.ObjectName patterns — two-part qualified names.
 # Avoids matching inside keywords like CREATE, REPLACE, etc.
 _QUALIFIED_REF_RE = re.compile(
-    r'\b([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*)\b'
+    r'(?:'
+    r'\{\{([A-Za-z_]\w*)\}\}'    # Group 1: {{TOKEN}} database prefix
+    r'|'
+    r'\b([A-Za-z_]\w*)'          # Group 2: literal database prefix
+    r')'
+    r'\s*\.\s*'
+    r'([A-Za-z_]\w*)\b'          # Group 3: object name
 )
 
 # Keywords and noise that look like qualified names but aren't
@@ -248,18 +254,21 @@ def _scan_references(
     external = set()
 
     for match in _QUALIFIED_REF_RE.finditer(body):
-        db_part = match.group(1)
-        obj_part = match.group(2)
+        # Group 1: {{TOKEN}} prefix, Group 2: literal prefix
+        token_db = match.group(1)
+        literal_db = match.group(2)
+        obj_part = match.group(3)
 
-        # Skip system databases and DDL noise
+        # Reconstruct the database part as it appeared in the DDL
+        if token_db:
+            db_part = "{{" + token_db + "}}"
+        else:
+            db_part = literal_db
+
+        # Skip system databases and DDL noise words
         if db_part.upper() in _IGNORE_PREFIXES:
             continue
         if obj_part.upper() in _IGNORE_SUFFIXES:
-            continue
-
-        # Skip short prefixes — these are table/trigger aliases
-        # (e.g. c.Cust_Id, n.Msg, o.Order_Amt)
-        if len(db_part) <= 2:
             continue
 
         qualified = f"{db_part}.{obj_part}"
@@ -268,7 +277,11 @@ def _scan_references(
         if qualified.upper() == own_qualified.upper():
             continue
 
-        # Classify as internal or external
+        # Only references to known databases in this package
+        # are real dependencies for wave ordering. Everything
+        # else is flagged as a potential external reference.
+        # Table aliases (c.Cust_Id, cust.Name) will appear here
+        # as false positives — the developer can review them.
         if db_part.upper() in known_databases:
             internal.add(qualified)
         else:
@@ -296,6 +309,11 @@ _CLASSIFY_PATTERNS = [
 ]
 
 # Qualified name extraction
+# A name fragment: either a regular identifier, a quoted identifier,
+# or a {{TOKEN}} placeholder.
+_NAME_FRAG = r'(?:"[^"]+"|[A-Za-z_]\w*|\{\{[A-Za-z_]\w*\}\})'
+_QUAL_NAME = _NAME_FRAG + r'(?:\.' + _NAME_FRAG + r')?'
+
 _QUALIFIED_NAME_RE = re.compile(
     r'(?:CREATE|REPLACE)\s+(?:MULTISET\s+|SET\s+)?'
     r'(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?'
@@ -303,20 +321,20 @@ _QUALIFIED_NAME_RE = re.compile(
     r'(?:SPECIFIC\s+)?'
     r'(?:TABLE|VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER|'
     r'JOIN\s+INDEX|HASH\s+INDEX)\s+'
-    r'("?[A-Za-z_]\w*"?(?:\."?[A-Za-z_]\w*"?)?)',
+    r'(' + _QUAL_NAME + r')',
     re.IGNORECASE,
 )
 
 # Base function name (from header, not SPECIFIC clause)
 _FUNCTION_HEADER_RE = re.compile(
     r'(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\s+'
-    r'("?[A-Za-z_]\w*"?(?:\."?[A-Za-z_]\w*"?)?)',
+    r'(' + _QUAL_NAME + r')',
     re.IGNORECASE,
 )
 
 # SPECIFIC clause inside function body
 _SPECIFIC_RE = re.compile(
-    r'SPECIFIC\s+("?[A-Za-z_]\w*"?(?:\."?[A-Za-z_]\w*"?)?)',
+    r'SPECIFIC\s+(' + _QUAL_NAME + r')',
     re.IGNORECASE,
 )
 

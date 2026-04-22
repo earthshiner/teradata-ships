@@ -197,17 +197,17 @@ def build_package(config: BuildConfig) -> Tuple[str, BuildManifest]:
     _create_package_structure(pkg_dir)
 
     # -- Phase 5: Copy and resolve payload files --
-    total_subs, file_count, phase_inventory = _copy_payload(
+    total_subs, file_count, phase_inventory, filename_map = _copy_payload(
         payload_dir, pkg_dir, token_values
     )
     logger.info(
-        "Resolved %d tokens across %d files",
-        total_subs, file_count
+        "Resolved %d tokens across %d files (%d filenames resolved)",
+        total_subs, file_count, len(filename_map)
     )
 
     # -- Phase 6: Copy deployment order files if present --
     _copy_order_files(payload_dir, pkg_dir)
-    _copy_waves_file(config.source_dir, payload_dir, pkg_dir)
+    _copy_waves_file(config.source_dir, payload_dir, pkg_dir, filename_map)
 
     # -- Phase 7: Embed deployment engine --
     _embed_deployer(pkg_dir)
@@ -295,6 +295,7 @@ def _create_package_structure(pkg_dir: str):
         "config",
         "lib",
         "logs",
+        "payload/00_system",
         "payload/01_pre_requisites",
         "payload/02_dcl",
         "payload/03_ddl",
@@ -314,7 +315,7 @@ def _copy_payload(
     source_payload: str,
     pkg_dir: str,
     token_values: Dict[str, str],
-) -> Tuple[int, int, Dict[str, int]]:
+) -> Tuple[int, int, Dict[str, int], Dict[str, str]]:
     """
     Copy source payload files to the package, substituting tokens
     and resolving filenames.
@@ -331,11 +332,14 @@ def _copy_payload(
         token_values:   Token name → value dictionary.
 
     Returns:
-        Tuple of (total_substitutions, file_count, phase_inventory).
+        Tuple of (total_substitutions, file_count, phase_inventory,
+        filename_map). filename_map maps original filenames to
+        resolved filenames (only entries where the name changed).
     """
     total_subs = 0
     file_count = 0
     phase_inventory = {}
+    filename_map = {}  # original → resolved (only changed names)
 
     for root, dirs, files in os.walk(source_payload):
         for filename in files:
@@ -363,6 +367,10 @@ def _copy_payload(
 
                 # Resolve filename from the resolved DDL content
                 resolved_filename = _resolve_filename(filename, resolved_content)
+
+                # Track the mapping (for _waves.txt transformation)
+                if resolved_filename != filename:
+                    filename_map[filename] = resolved_filename
 
                 # Build destination path with resolved filename
                 # Replace the original filename in sub_path
@@ -395,7 +403,7 @@ def _copy_payload(
                 phase_key = phase.value
                 phase_inventory[phase_key] = phase_inventory.get(phase_key, 0) + 1
 
-    return (total_subs, file_count, phase_inventory)
+    return (total_subs, file_count, phase_inventory, filename_map)
 
 
 def _inject_multiset_in_file(file_path: str):
@@ -471,27 +479,40 @@ def _copy_order_files(source_payload: str, pkg_dir: str):
                     shutil.copy2(src, dest)
 
 
-def _copy_waves_file(project_dir: str, source_payload: str, pkg_dir: str):
+def _copy_waves_file(
+    project_dir: str,
+    source_payload: str,
+    pkg_dir: str,
+    filename_map: Dict[str, str] = None,
+):
     """
     Copy _waves.txt from the project root into the package payload,
-    transforming paths from source-relative to package-relative.
+    transforming paths from source-relative to package-relative and
+    resolving tokenised filenames to their environment-specific names.
 
     The analyser writes _waves.txt at the project root with paths
-    like 'payload/database/DDL/tables/DB.Table.tbl'. The deploy.py
+    like 'payload/database/DDL/tables/{{DB}}.Table.tbl'. The deploy.py
     template expects _waves.txt inside each phase directory with
-    paths relative to that phase (e.g. 'tables/DB.Table.tbl').
+    paths relative to that phase and resolved filenames
+    (e.g. 'tables/A_D01_STD.Table.tbl').
 
     Args:
         project_dir:     Project root directory.
         source_payload:  Source payload directory (payload/database/).
         pkg_dir:         Package root directory.
+        filename_map:    Dict of original_filename → resolved_filename
+                         from _copy_payload. Used to transform tokenised
+                         filenames in _waves.txt to match the resolved
+                         filenames in the package.
     """
+    if filename_map is None:
+        filename_map = {}
+
     waves_src = os.path.join(project_dir, "_waves.txt")
     if not os.path.exists(waves_src):
         return
 
     # Read and transform paths, grouping by phase
-    # All DDL objects go into one phase (03_ddl typically)
     phase_lines = {}  # phase_value → list of transformed lines
 
     with open(waves_src, 'r', encoding='utf-8') as f:
@@ -530,6 +551,19 @@ def _copy_waves_file(project_dir: str, source_payload: str, pkg_dir: str):
             if phase_val not in phase_lines:
                 # Flush buffer (comments from before first file)
                 phase_lines[phase_val] = phase_lines.pop('_buffer', [])
+
+            # Resolve the filename if it was renamed during packaging
+            original_filename = os.path.basename(sub_path)
+            resolved_filename = filename_map.get(
+                original_filename, original_filename
+            )
+            if resolved_filename != original_filename:
+                sub_dir = os.path.dirname(sub_path)
+                sub_path = os.path.join(sub_dir, resolved_filename)
+                logger.debug(
+                    "_waves.txt: resolved %s → %s",
+                    original_filename, resolved_filename,
+                )
 
             phase_lines[phase_val].append(sub_path)
 
