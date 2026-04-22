@@ -42,6 +42,7 @@ from ddl_deployer.models import (
     DEPLOY_ORDER,
     SHOW_COMMAND_MAP,
     STRATEGY_MAP,
+    SYSTEM_EXISTENCE_QUERIES,
     TABLE_KIND_MAP,
 )
 from ddl_deployer.preflight import run_preflight
@@ -580,6 +581,12 @@ def deploy_single(cursor, ddl_text: str, dry_run: bool = False) -> ObjectDeployR
         return _deploy_drop_and_create(cursor, parsed, dry_run)
     elif strategy == DeployStrategy.REPLACE_IN_PLACE:
         return _deploy_replace_in_place(cursor, parsed, dry_run)
+    elif strategy == DeployStrategy.DIRECT_EXECUTE:
+        return _deploy_direct_execute(cursor, parsed, dry_run)
+    elif strategy == DeployStrategy.CREATE_ONLY:
+        return _deploy_create_only(cursor, parsed, dry_run)
+    elif strategy == DeployStrategy.SKIP_IF_EXISTS:
+        return _deploy_skip_if_exists(cursor, parsed, dry_run)
     else:
         return ObjectDeployResult(
             database_name=parsed.database_name,
@@ -627,6 +634,8 @@ def _dispatch_deploy(
             result = _deploy_replace_in_place(cursor, parsed, manifest, dry_run)
         elif parsed.strategy == DeployStrategy.DIRECT_EXECUTE:
             result = _deploy_direct_execute(cursor, parsed, dry_run)
+        elif parsed.strategy == DeployStrategy.SKIP_IF_EXISTS:
+            result = _deploy_skip_if_exists(cursor, parsed, dry_run)
         else:
             result = ObjectDeployResult(
                 database_name=parsed.database_name,
@@ -841,6 +850,86 @@ def _deploy_direct_execute(
         database_name=db, object_name=obj,
         object_type=obj_type, state=DeployState.COMPLETED,
         message=f"Executed {obj_type.value}: {qn}",
+    )
+
+
+# ---------------------------------------------------------------
+# Strategy: SKIP_IF_EXISTS (system-scope: maps, roles, profiles,
+#           authorisations, foreign servers)
+# ---------------------------------------------------------------
+
+def _deploy_skip_if_exists(
+    cursor,
+    parsed: ParsedDDL,
+    dry_run: bool,
+) -> ObjectDeployResult:
+    """
+    Check existence first; skip silently if already present.
+
+    Used for system-scope objects (Maps, Roles, Profiles,
+    Authorisations, Foreign Servers) that are identical across
+    environments and only need creating once per Teradata system.
+
+    Existence is checked via SYSTEM_EXISTENCE_QUERIES — each
+    object type has a specialised query against the appropriate
+    DBC system view.
+    """
+    db = parsed.database_name
+    obj = parsed.object_name
+    obj_type = parsed.object_type
+    qn = parsed.qualified_name
+
+    if dry_run:
+        return ObjectDeployResult(
+            database_name=db, object_name=obj,
+            object_type=obj_type, state=DeployState.COMPLETED,
+            message=f"[DRY RUN] Would create {obj_type.value}: {obj} "
+                    f"(skip if already exists)",
+            dry_run=True,
+        )
+
+    # -- Check existence via system view --
+    exists = False
+    existence_query = SYSTEM_EXISTENCE_QUERIES.get(obj_type)
+
+    if existence_query:
+        try:
+            check_sql = existence_query.format(name=obj)
+            cursor.execute(check_sql)
+            row = cursor.fetchone()
+            exists = row is not None
+        except Exception as e:
+            logger.warning(
+                "Existence check failed for %s %s: %s — "
+                "proceeding with CREATE.",
+                obj_type.value, obj, e,
+            )
+
+    if exists:
+        logger.info(
+            "SKIP_IF_EXISTS: %s %s already exists — skipping.",
+            obj_type.value, obj,
+        )
+        return ObjectDeployResult(
+            database_name=db, object_name=obj,
+            object_type=obj_type, state=DeployState.SKIPPED,
+            prior_existed=True,
+            message=f"{obj_type.value} {obj} already exists — skipped.",
+        )
+
+    # -- Object does not exist — create it --
+    _execute_ddl(cursor, parsed.ddl_text)
+
+    logger.info(
+        "SKIP_IF_EXISTS: Created %s %s.",
+        obj_type.value, obj,
+    )
+
+    return ObjectDeployResult(
+        database_name=db, object_name=obj,
+        object_type=obj_type, state=DeployState.COMPLETED,
+        prior_existed=False,
+        message=f"Created {obj_type.value}: {obj}",
     )
 
 

@@ -68,34 +68,49 @@ def main():
 # ---------------------------------------------------------------
 
 def _cmd_scaffold(args):
-    """Create a new project from template."""
+    """Create a new project from template, or repair an existing one."""
     envs = [e.strip().upper() for e in args.environments.split(',')]
+    repair = getattr(args, 'repair', False)
 
     try:
         project_dir = scaffold_project(
             project_name=args.name,
             output_dir=args.output,
             environments=envs,
+            repair=repair,
         )
 
+        action = "repaired" if repair else "scaffolded"
+        icon = "✓"
+
         print(f"\n{'=' * 64}")
-        print(f"  ✓ Project scaffolded: {args.name}")
+        print(f"  {icon} Project {action}: {args.name}")
         print(f"{'=' * 64}")
         print(f"  Location:     {project_dir}")
         print(f"  Environments: {', '.join(envs)}")
-        print(f"\n  SHIPS workflow — next steps:")
-        print(f"    [S] Scaffold  ✓ Done")
-        print(f"    [H] Harvest   python -m td_release_packager harvest \\")
-        print(f"                    --source /raw/ddl/ --project {project_dir}")
-        print(f"    [I] Inspect   python -m td_release_packager inspect \\")
-        print(f"                    --source {project_dir}")
-        print(f"    [P] Package   python -m td_release_packager package \\")
-        print(f"                    --source {project_dir} --env DEV --name {args.name} \\")
-        print(f"                    --properties config/properties/DEV.properties")
-        print(f"    [S] Ship      python deploy.py --host <host> --user <user>")
+
+        if repair:
+            print(f"\n  Repair complete. Missing directories and files have")
+            print(f"  been created. Existing files were NOT overwritten.")
+        else:
+            print(f"\n  SHIPS workflow — next steps:")
+            print(f"    [S] Scaffold  ✓ Done")
+            print(f"    [H] Harvest   python -m td_release_packager harvest \\")
+            print(f"                    --source /raw/ddl/ --project {project_dir}")
+            print(f"    [I] Inspect   python -m td_release_packager inspect \\")
+            print(f"                    --source {project_dir}")
+            print(f"    [P] Package   python -m td_release_packager package \\")
+            print(f"                    --source {project_dir} --env DEV --name {args.name} \\")
+            print(f"                    --properties config/properties/DEV.properties")
+            print(f"    [S] Ship      python deploy.py --host <host> --user <user>")
+
         print(f"{'=' * 64}\n")
 
     except FileExistsError as e:
+        print(f"\nERROR: {e}", file=sys.stderr)
+        print(f"  Tip: use --repair to add missing directories and files", file=sys.stderr)
+        sys.exit(1)
+    except FileNotFoundError as e:
         print(f"\nERROR: {e}", file=sys.stderr)
         sys.exit(1)
 
@@ -510,6 +525,11 @@ def _build_parser():
     sc.add_argument("--environments", default="DEV,TST,PRD",
                     help="Comma-separated environment names "
                          "(default: DEV,TST,PRD).")
+    sc.add_argument("--repair", action="store_true",
+                    help="Repair an existing project — add missing "
+                         "directories and files without overwriting "
+                         "existing configuration. Use after upgrading "
+                         "SHIPS to pick up new directory structure.")
 
     # -- harvest --
     ig = subs.add_parser("harvest",
