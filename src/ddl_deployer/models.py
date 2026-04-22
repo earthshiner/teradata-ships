@@ -443,6 +443,7 @@ class ObjectDeployResult:
     object_type: ObjectType
     state: DeployState
     deploy_intent: Optional[DeployIntent] = None
+    ddl_file: Optional[str] = None
     prior_existed: bool = False
     rollback_file: Optional[str] = None
     backup_table: Optional[str] = None

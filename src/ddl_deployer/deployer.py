@@ -607,6 +607,201 @@ def deploy_single(cursor, ddl_text: str, dry_run: bool = False) -> ObjectDeployR
 
 
 # ---------------------------------------------------------------
+# Public API — EXPLAIN validation
+# ---------------------------------------------------------------
+
+# Object types where EXPLAIN is not applicable.
+# Currently empty — Teradata supports EXPLAIN for all DDL types
+# including CREATE DATABASE, CREATE ROLE, GRANT, and CALL SQLJ.
+# Add types here if specific exclusions are needed in future.
+_EXPLAIN_SKIP_TYPES = set()
+
+
+def explain_package(
+    cursor,
+    package_dir: str,
+    ordered_files: List[str] = None,
+    waves: List[List[str]] = None,
+) -> PackageDeployResult:
+    """
+    Validate all DDL files by running EXPLAIN against the live system.
+
+    EXPLAIN compiles each SQL statement against the current database
+    state — resolving references, checking permissions, and
+    validating types — without executing. This catches errors that
+    a dry run (no connection) cannot detect.
+
+    System-scope objects (CREATE DATABASE, CREATE ROLE, GRANT, etc.)
+    are skipped as EXPLAIN is not applicable to them.
+
+    Args:
+        cursor:         Active Teradata database cursor.
+        package_dir:    Directory containing the package.
+        ordered_files:  Pre-ordered list of DDL file paths.
+        waves:          List of waves (list of file path lists).
+
+    Returns:
+        PackageDeployResult with per-object outcomes.
+    """
+    from ddl_deployer.ddl_parser import parse_ddl_file
+    from ddl_deployer.report import generate_report
+
+    logger.info("=" * 64)
+    logger.info("  EXPLAIN Validation")
+    logger.info("=" * 64)
+
+    # -- Collect files --
+    if ordered_files:
+        ddl_files = ordered_files
+    elif waves:
+        ddl_files = [f for wave in waves for f in wave]
+    else:
+        ddl_files = []
+        for root, dirs, filenames in os.walk(package_dir):
+            dirs.sort()
+            for f in sorted(filenames):
+                if f.startswith('.') or f.startswith('_'):
+                    continue
+                ext = os.path.splitext(f)[1].lower()
+                if ext in ('.tbl', '.viw', '.spl', '.mcr', '.fnc', '.trg',
+                            '.jix', '.idx', '.dcl', '.db', '.rol', '.prf',
+                            '.map', '.auth', '.fsvr', '.sto', '.jcl',
+                            '.dml', '.sql'):
+                    ddl_files.append(os.path.join(root, f))
+
+    logger.info("Files to validate: %d", len(ddl_files))
+
+    # -- Parse and EXPLAIN each file --
+    results = []
+    passed = 0
+    failed = 0
+    skipped = 0
+
+    for ddl_file in ddl_files:
+        basename = os.path.basename(ddl_file)
+
+        try:
+            parsed = parse_ddl_file(ddl_file)
+        except (ValueError, FileNotFoundError) as e:
+            logger.error(
+                "  ✗ PARSE FAILED: %s — %s", basename, e
+            )
+            results.append(ObjectDeployResult(
+                database_name="UNKNOWN", object_name=basename,
+                object_type=ObjectType.UNKNOWN,
+                state=DeployState.FAILED,
+                ddl_file=basename,
+                error=f"Parse error: {e}",
+                message=f"Could not parse: {e}",
+            ))
+            failed += 1
+            continue
+
+        # -- Skip types where EXPLAIN is not applicable --
+        if parsed.object_type in _EXPLAIN_SKIP_TYPES:
+            logger.info(
+                "  ○ NOT APPLICABLE: %s %s [%s]",
+                parsed.object_type.value, parsed.qualified_name, basename,
+            )
+            results.append(ObjectDeployResult(
+                database_name=parsed.database_name,
+                object_name=parsed.object_name,
+                object_type=parsed.object_type,
+                state=DeployState.SKIPPED,
+                ddl_file=basename,
+                deploy_intent=parsed.deploy_intent,
+                message=(
+                    f"EXPLAIN not applicable to "
+                    f"{parsed.object_type.value} — skipped."
+                ),
+            ))
+            skipped += 1
+            continue
+
+        # -- Run EXPLAIN --
+        ddl_text = parsed.ddl_text.strip().rstrip(';').strip()
+        explain_sql = f"EXPLAIN {ddl_text}"
+
+        try:
+            cursor.execute(explain_sql)
+            # EXPLAIN returns the query plan as result rows.
+            # If it succeeds without error, the SQL is valid.
+            rows = cursor.fetchall()
+            plan_preview = ""
+            if rows:
+                # First row of the explain plan for logging
+                first_row = str(rows[0][0]) if rows[0] else ""
+                plan_preview = first_row[:120]
+
+            logger.info(
+                "  ✓ PASS: %s %s [%s]",
+                parsed.object_type.value, parsed.qualified_name, basename,
+            )
+            if plan_preview:
+                logger.debug("    Plan: %s...", plan_preview)
+
+            results.append(ObjectDeployResult(
+                database_name=parsed.database_name,
+                object_name=parsed.object_name,
+                object_type=parsed.object_type,
+                state=DeployState.COMPLETED,
+                ddl_file=basename,
+                deploy_intent=parsed.deploy_intent,
+                message=f"EXPLAIN passed — SQL is valid.",
+            ))
+            passed += 1
+
+        except Exception as e:
+            err_msg = str(e)
+            # Extract the Teradata error number if present
+            logger.error(
+                "  ✗ FAIL: %s %s [%s] — %s",
+                parsed.object_type.value, parsed.qualified_name,
+                basename, err_msg[:200],
+            )
+            results.append(ObjectDeployResult(
+                database_name=parsed.database_name,
+                object_name=parsed.object_name,
+                object_type=parsed.object_type,
+                state=DeployState.FAILED,
+                ddl_file=basename,
+                deploy_intent=parsed.deploy_intent,
+                error=err_msg,
+                message=f"EXPLAIN failed: {err_msg[:200]}",
+            ))
+            failed += 1
+
+    # -- Build result --
+    logger.info("=" * 64)
+    logger.info("  EXPLAIN Results")
+    logger.info("  Passed:         %d", passed)
+    logger.info("  Failed:         %d", failed)
+    logger.info("  Not applicable: %d", skipped)
+    logger.info("=" * 64)
+
+    pkg_result = PackageDeployResult(
+        deployment_id=f"explain_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}",
+        manifest_path="",
+        total=len(ddl_files),
+        completed=passed,
+        skipped=skipped,
+        failed=failed,
+        results=results,
+        dry_run=False,  # Not a dry run — we connected
+    )
+
+    # -- Generate report --
+    try:
+        report_path = generate_report(pkg_result, package_dir)
+        pkg_result.report_path = report_path
+        logger.info("Report: %s", report_path)
+    except Exception as e:
+        logger.warning("Report generation failed (non-fatal): %s", e)
+
+    return pkg_result
+
+
+# ---------------------------------------------------------------
 # Internal — Strategy dispatch
 # ---------------------------------------------------------------
 
@@ -634,11 +829,12 @@ def _dispatch_deploy(
     """
     try:
         logger.info(
-            "Deploying: %s %s [%s → %s]",
+            "Deploying: %s %s [%s → %s] from %s",
             parsed.object_type.value,
             parsed.qualified_name,
             parsed.deploy_intent.value if parsed.deploy_intent else "N/A",
             parsed.strategy.value if parsed.strategy else "N/A",
+            os.path.basename(parsed.file_path) if parsed.file_path else "inline",
         )
 
         if parsed.strategy == DeployStrategy.IDEMPOTENT_DEPLOY:
@@ -662,26 +858,30 @@ def _dispatch_deploy(
                 error=f"No strategy for {parsed.object_type.value}",
             )
 
-        # Set deploy_intent on the result
+        # Set deploy_intent and source file on the result
         result.deploy_intent = parsed.deploy_intent
+        result.ddl_file = os.path.basename(parsed.file_path) if parsed.file_path else None
 
         if result.state == DeployState.COMPLETED:
             logger.info(
-                "  ✓ %s %s — %s",
+                "  ✓ %s %s — %s [%s]",
                 parsed.object_type.value, parsed.qualified_name,
                 result.message or "completed",
+                os.path.basename(parsed.file_path) if parsed.file_path else "",
             )
         elif result.state == DeployState.SKIPPED:
             logger.info(
-                "  ○ %s %s — %s",
+                "  ○ %s %s — %s [%s]",
                 parsed.object_type.value, parsed.qualified_name,
                 result.message or "skipped",
+                os.path.basename(parsed.file_path) if parsed.file_path else "",
             )
         elif result.state == DeployState.FAILED:
             logger.error(
-                "  ✗ %s %s — %s",
+                "  ✗ %s %s — %s [%s]",
                 parsed.object_type.value, parsed.qualified_name,
                 result.error or result.message or "failed",
+                os.path.basename(parsed.file_path) if parsed.file_path else "",
             )
 
         manifest.update_state(
@@ -863,9 +1063,14 @@ def _deploy_direct_execute(
     """
     Execute DDL as-is with no pre-checks, backup, or rollback.
 
-    Used for pre-requisite objects (CREATE DATABASE, CREATE USER,
-    CREATE PROFILE, CREATE ROLE) and DCL (GRANT, REVOKE). These
-    are infrastructure DDL that precedes the main object deployment.
+    Used for pre-requisite objects (CREATE DATABASE, CREATE USER)
+    and DCL (GRANT, REVOKE). These are infrastructure DDL that
+    precedes the main object deployment.
+
+    For DATABASE and USER types, gracefully handles Teradata
+    Error 5612 ("already exists") by treating it as SKIPPED
+    rather than FAILED — this makes re-deployments idempotent
+    without changing the developer's DDL verb.
     """
     db = parsed.database_name
     obj = parsed.object_name
@@ -888,7 +1093,28 @@ def _deploy_direct_execute(
         "DIRECT_EXECUTE: Executing %s %s...",
         obj_type.value, qn,
     )
-    _execute_ddl(cursor, parsed.ddl_text)
+
+    try:
+        _execute_ddl(cursor, parsed.ddl_text)
+    except Exception as e:
+        err_str = str(e)
+        # Teradata Error 5612: "already exists" — for DATABASE
+        # and USER, treat as a successful skip on re-deploy.
+        if "5612" in err_str and obj_type in (
+            ObjectType.DATABASE, ObjectType.USER,
+        ):
+            logger.info(
+                "DIRECT_EXECUTE: %s %s already exists — skipping.",
+                obj_type.value, qn,
+            )
+            return ObjectDeployResult(
+                database_name=db, object_name=obj,
+                object_type=obj_type, state=DeployState.SKIPPED,
+                prior_existed=True,
+                message=f"{obj_type.value} {qn} already exists — skipped.",
+            )
+        # Any other error — propagate
+        raise
 
     return ObjectDeployResult(
         database_name=db, object_name=obj,
