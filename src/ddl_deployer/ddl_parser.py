@@ -372,13 +372,19 @@ def parse_ddl_text(ddl_text: str, file_path: str = "<inline>") -> ParsedDDL:
     else:
         strategy = STRATEGY_MAP.get(object_type, DeployStrategy.DROP_AND_CREATE)
 
-    # For single-part names (databases, users, roles, grants,
-    # maps, profiles, authorisations, foreign servers),
-    # use object_name as both parts
+    # For single-part names (system-scope, pre-requisites, DCL),
+    # the qualified_name IS the object name — no DB prefix.
     if db_name is None:
-        db_name = obj_name or ""
-
-    qualified_name = f"{db_name}.{obj_name}" if obj_name else db_name
+        if object_type in _SINGLE_NAME_TYPES:
+            # System-scope and DCL: qualified_name = object_name only
+            qualified_name = obj_name or ""
+            db_name = ""
+        else:
+            # Shouldn't reach here (caught above), but be safe
+            db_name = obj_name or ""
+            qualified_name = f"{db_name}.{obj_name}" if obj_name else db_name
+    else:
+        qualified_name = f"{db_name}.{obj_name}" if obj_name else db_name
 
     return ParsedDDL(
         file_path=file_path,

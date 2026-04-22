@@ -377,6 +377,19 @@ class TestParseDdlText:
         assert parsed.object_name == "Customer"
         assert parsed.qualified_name == "MyDB.Customer"
 
+    def test_single_part_name_not_duplicated(self):
+        """Single-part names are not duplicated (e.g. role.role)."""
+        parsed = parse_ddl_text("CREATE ROLE analyst_role;")
+        assert parsed.qualified_name == "analyst_role"
+        assert parsed.database_name == ""
+        assert parsed.object_name == "analyst_role"
+
+    def test_map_single_part_name(self):
+        """MAP has single-part qualified name."""
+        parsed = parse_ddl_text("CREATE MAP TD_GlobalMap CONTIGUOUS AMP BETWEEN 0 AND 7;")
+        assert parsed.qualified_name == "TD_GlobalMap"
+        assert parsed.database_name == ""
+
     def test_quoted_identifiers(self):
         """Quoted identifiers have quotes stripped."""
         parsed = parse_ddl_text('CREATE MULTISET TABLE "MyDB"."My Table" (Id INT);')
