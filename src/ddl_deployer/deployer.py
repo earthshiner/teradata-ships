@@ -136,11 +136,20 @@ def deploy_package(
         preflight_result, parsed_ddls = run_preflight(cursor, ddl_files)
         if not preflight_result.passed:
             logger.error("Pre-flight FAILED: %d errors.", preflight_result.errors)
-            return PackageDeployResult(
+            pkg_result = PackageDeployResult(
                 deployment_id="preflight_failed", manifest_path="",
                 total=len(ddl_files), failed=preflight_result.errors,
                 preflight_result=preflight_result, dry_run=dry_run,
             )
+            # Generate report even on preflight failure so the
+            # DBA can see what went wrong in a readable format.
+            try:
+                report_path = generate_report(pkg_result, package_dir)
+                pkg_result.report_path = report_path
+                logger.info("Report: %s", report_path)
+            except Exception as e:
+                logger.warning("Report generation failed (non-fatal): %s", e)
+            return pkg_result
     else:
         parsed_ddls = []
         for f in ddl_files:
@@ -624,6 +633,14 @@ def _dispatch_deploy(
         ObjectDeployResult with outcome.
     """
     try:
+        logger.info(
+            "Deploying: %s %s [%s → %s]",
+            parsed.object_type.value,
+            parsed.qualified_name,
+            parsed.deploy_intent.value if parsed.deploy_intent else "N/A",
+            parsed.strategy.value if parsed.strategy else "N/A",
+        )
+
         if parsed.strategy == DeployStrategy.IDEMPOTENT_DEPLOY:
             result = _deploy_table(cursor, parsed, dry_run)
         elif parsed.strategy == DeployStrategy.CREATE_ONLY:
@@ -647,6 +664,25 @@ def _dispatch_deploy(
 
         # Set deploy_intent on the result
         result.deploy_intent = parsed.deploy_intent
+
+        if result.state == DeployState.COMPLETED:
+            logger.info(
+                "  ✓ %s %s — %s",
+                parsed.object_type.value, parsed.qualified_name,
+                result.message or "completed",
+            )
+        elif result.state == DeployState.SKIPPED:
+            logger.info(
+                "  ○ %s %s — %s",
+                parsed.object_type.value, parsed.qualified_name,
+                result.message or "skipped",
+            )
+        elif result.state == DeployState.FAILED:
+            logger.error(
+                "  ✗ %s %s — %s",
+                parsed.object_type.value, parsed.qualified_name,
+                result.error or result.message or "failed",
+            )
 
         manifest.update_state(
             parsed.qualified_name,
@@ -837,6 +873,10 @@ def _deploy_direct_execute(
     qn = parsed.qualified_name
 
     if dry_run:
+        logger.info(
+            "[DRY RUN] DIRECT_EXECUTE: %s %s",
+            obj_type.value, qn,
+        )
         return ObjectDeployResult(
             database_name=db, object_name=obj,
             object_type=obj_type, state=DeployState.COMPLETED,
@@ -844,6 +884,10 @@ def _deploy_direct_execute(
             dry_run=True,
         )
 
+    logger.info(
+        "DIRECT_EXECUTE: Executing %s %s...",
+        obj_type.value, qn,
+    )
     _execute_ddl(cursor, parsed.ddl_text)
 
     return ObjectDeployResult(
@@ -880,6 +924,11 @@ def _deploy_skip_if_exists(
     qn = parsed.qualified_name
 
     if dry_run:
+        logger.info(
+            "[DRY RUN] SKIP_IF_EXISTS: %s %s — "
+            "would check existence then create if missing.",
+            obj_type.value, obj,
+        )
         return ObjectDeployResult(
             database_name=db, object_name=obj,
             object_type=obj_type, state=DeployState.COMPLETED,
@@ -1396,9 +1445,28 @@ def _count_rows(cursor, database_name: str, table_name: str) -> int:
 
 
 def _execute_ddl(cursor, ddl_text: str):
-    """Execute a DDL statement (strips trailing semicolons)."""
+    """
+    Execute a DDL statement (strips trailing semicolons).
+
+    Logs the first 200 characters of the SQL for traceability.
+    On failure, logs the full SQL for diagnosis.
+    """
     clean = ddl_text.strip().rstrip(';').strip()
-    cursor.execute(clean)
+
+    # Log a preview (not the full DDL, which can be very long)
+    preview = clean[:200] + ("..." if len(clean) > 200 else "")
+    logger.debug("Executing SQL: %s", preview)
+
+    try:
+        cursor.execute(clean)
+    except Exception as e:
+        logger.error(
+            "SQL execution failed.\n"
+            "  Error:  %s\n"
+            "  SQL:    %s",
+            e, clean,
+        )
+        raise
 
 
 def _rename_table(cursor, database_name: str, old_name: str, new_name: str):

@@ -66,20 +66,52 @@ def run_preflight(
     object_counts: Dict[str, int] = {}
 
     # -- Phase 1: Parse all DDL files --
+    # Track which databases are being created in this package
+    # so we don't fail preflight for databases that don't exist yet.
+    databases_being_created: Set[str] = set()
+
     for ddl_file in ddl_files:
         try:
             parsed = parse_ddl_file(ddl_file)
             parsed_ddls.append(parsed)
-            databases.add(parsed.database_name)
+
+            # Skip system-scope and DCL objects from database checks.
+            # They don't have a real database qualifier.
+            _SKIP_DB_CHECK_TYPES = {
+                ObjectType.MAP, ObjectType.ROLE, ObjectType.PROFILE,
+                ObjectType.AUTHORIZATION, ObjectType.FOREIGN_SERVER,
+                ObjectType.GRANT, ObjectType.REVOKE,
+            }
+
+            if parsed.object_type not in _SKIP_DB_CHECK_TYPES:
+                if parsed.database_name:
+                    databases.add(parsed.database_name)
+
+            # Track CREATE DATABASE objects — these will be created
+            # by this package, so they won't exist during preflight.
+            if parsed.object_type == ObjectType.DATABASE:
+                databases_being_created.add(parsed.object_name)
+                logger.debug(
+                    "Database '%s' will be created by this package.",
+                    parsed.object_name,
+                )
 
             # Count by object type
             type_key = parsed.object_type.value
             object_counts[type_key] = object_counts.get(type_key, 0) + 1
 
+            logger.debug(
+                "Parsed: %s → %s %s [%s]",
+                os.path.basename(ddl_file),
+                parsed.object_type.value,
+                parsed.qualified_name,
+                parsed.deploy_intent.value if parsed.deploy_intent else "N/A",
+            )
+
             checks.append(PreflightCheck(
                 check_name="ddl_parse",
                 passed=True,
-                database=parsed.database_name,
+                database=parsed.database_name or "(system)",
                 message=(
                     f"Parsed {os.path.basename(ddl_file)}: "
                     f"{parsed.object_type.value} {parsed.qualified_name}"
@@ -109,8 +141,33 @@ def run_preflight(
             ))
 
     # -- Phase 2: Check databases exist --
+    # Skip databases that will be created by this package.
     for db_name in sorted(databases):
+        if not db_name:
+            continue  # System-scope objects have no database
+
+        if db_name in databases_being_created:
+            logger.info(
+                "Database '%s' is being created by this package — "
+                "skipping existence check.",
+                db_name,
+            )
+            checks.append(PreflightCheck(
+                check_name="database_exists",
+                passed=True,
+                database=db_name,
+                message=(
+                    f"Database '{db_name}' will be created by this package."
+                ),
+                severity="INFO",
+            ))
+            continue
+
         exists = _database_exists(cursor, db_name)
+        logger.info(
+            "Database '%s' %s.",
+            db_name, "exists" if exists else "does NOT exist",
+        )
         checks.append(PreflightCheck(
             check_name="database_exists",
             passed=exists,
@@ -123,18 +180,42 @@ def run_preflight(
         ))
 
     # -- Phase 3: Check access rights per database --
-    # Determine which rights are needed per database
+    # Determine which rights are needed per database.
+    # Skip databases being created (rights won't exist yet) and
+    # empty database names (system-scope objects).
     db_required_rights = _collect_required_rights(parsed_ddls)
 
     for db_name, rights in sorted(db_required_rights.items()):
+        if not db_name:
+            continue
+        if db_name in databases_being_created:
+            logger.info(
+                "Database '%s' is being created — "
+                "skipping access rights check.",
+                db_name,
+            )
+            checks.append(PreflightCheck(
+                check_name="access_rights",
+                passed=True,
+                database=db_name,
+                message=(
+                    f"Access rights for '{db_name}' will be "
+                    f"established after creation."
+                ),
+                severity="INFO",
+            ))
+            continue
         right_checks = _check_access_rights(cursor, db_name, rights)
         checks.extend(right_checks)
 
     # -- Phase 4: Check perm space per database --
-    # Only check databases that actually need tables/JIs (space-consuming objects)
+    # Only check databases that actually need tables/JIs
+    # (space-consuming objects). Skip databases being created.
     space_databases = {
         p.database_name for p in parsed_ddls
         if p.object_type in (ObjectType.TABLE, ObjectType.JOIN_INDEX, ObjectType.HASH_INDEX)
+        and p.database_name
+        and p.database_name not in databases_being_created
     }
 
     for db_name in sorted(space_databases):
@@ -214,6 +295,17 @@ def _collect_required_rights(
 
     for parsed in parsed_ddls:
         db = parsed.database_name
+
+        # Skip system-scope objects and DCL — they don't have
+        # a target database to check rights on.
+        if not db or parsed.object_type in (
+            ObjectType.MAP, ObjectType.ROLE, ObjectType.PROFILE,
+            ObjectType.AUTHORIZATION, ObjectType.FOREIGN_SERVER,
+            ObjectType.GRANT, ObjectType.REVOKE,
+            ObjectType.DATABASE, ObjectType.USER,
+        ):
+            continue
+
         if db not in db_rights:
             db_rights[db] = set()
 
