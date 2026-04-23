@@ -25,6 +25,8 @@ schema checks, but does not execute any DDL/DML.
 import glob
 import logging
 import os
+import re
+import threading
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -50,6 +52,53 @@ from ddl_deployer.report import generate_report
 from ddl_deployer.schema_comparator import compare_schemas, get_column_metadata
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------
+# Error message formatting
+# ---------------------------------------------------------------
+
+# Matches the start of the Go stack trace appended by teradatasql.
+# Everything from this point onwards is driver internals — useful
+# in log files but not in user-facing output (HTML reports, CLI).
+_GO_STACK_RE = re.compile(
+    r'\s*\bat\s+gosqldriver/.*',
+    re.DOTALL,
+)
+
+
+def _clean_db_error(raw: str) -> str:
+    """
+    Strip the Go stack trace from teradatasql error messages.
+
+    The teradatasql driver appends a full Go call stack to every
+    database error, which is useful for driver debugging but
+    alarming in user-facing output.  This function returns only
+    the Teradata error portion:
+
+        Before:
+            [Error 3707] Syntax error, expected something like
+            a 'COLLATION' keyword between the 'SQL' keyword and
+            the word 'INLINE'. at gosqldriver/teradatasql.MakeError
+            ErrorUtil.go:100 at gosqldriver/teradatasql.formatError
+            ErrorUtil.go:106 at ...
+
+        After:
+            [Error 3707] Syntax error, expected something like
+            a 'COLLATION' keyword between the 'SQL' keyword and
+            the word 'INLINE'.
+
+    The full unmodified error is still written to the log file
+    via logger.error() / logger.exception().
+
+    Args:
+        raw: The raw exception string from teradatasql.
+
+    Returns:
+        The Teradata error message without the Go stack trace.
+    """
+    cleaned = _GO_STACK_RE.sub('', raw).strip()
+    return cleaned if cleaned else raw
 
 
 # ---------------------------------------------------------------
@@ -165,6 +214,56 @@ def deploy_package(
             DEPLOY_ORDER.get(p.object_type, 99), p.qualified_name,
         ))
 
+    # -- Deployer privilege check --
+    # Verifies the deploying user has CREATE + DROP rights on
+    # each target database for the object types in the package.
+    # Databases being created by this package are skipped
+    # (automatic creator rights).
+    if not dry_run and not skip_preflight:
+        from ddl_deployer.privilege_check import check_deployer_privileges
+
+        created_databases = {
+            p.qualified_name
+            for p in parsed_ddls
+            if p.object_type == ObjectType.DATABASE
+        }
+
+        priv_result = check_deployer_privileges(
+            cursor=cursor,
+            parsed_ddls=parsed_ddls,
+            created_databases=created_databases,
+            package_name=getattr(preflight_result, 'package_name', ''),
+            environment=getattr(preflight_result, 'environment', ''),
+        )
+
+        if not priv_result.passed:
+            logger.error(
+                "Deployer privilege check FAILED.\n\n"
+                "The deploying user '%s' is missing privileges on "
+                "%d database(s).\n"
+                "Run the following as System Administrator before "
+                "deploying:\n\n%s",
+                priv_result.user,
+                len(priv_result.missing),
+                priv_result.script,
+            )
+            pkg_result = PackageDeployResult(
+                deployment_id="privilege_check_failed",
+                manifest_path="",
+                total=len(parsed_ddls),
+                failed=len(priv_result.missing),
+                preflight_result=preflight_result,
+                dry_run=dry_run,
+            )
+            try:
+                report_path = generate_report(pkg_result, package_dir)
+                pkg_result.report_path = report_path
+            except Exception as e:
+                logger.warning(
+                    "Report generation failed (non-fatal): %s", e,
+                )
+            return pkg_result
+
     # -- Build lookups --
     parsed_by_path = {p.file_path: p for p in parsed_ddls}
     file_wave_map = {}
@@ -175,6 +274,22 @@ def deploy_package(
 
     # -- Initialise manifest with wave numbers --
     manifest = DeploymentManifest(package_dir)
+
+    # -- Verify stale COMPLETED entries against database --
+    # If a prior deployment marked objects as COMPLETED but the
+    # database was subsequently dropped or cleaned, the manifest
+    # would block re-deployment. This check resets any COMPLETED
+    # object that no longer exists in the database to PENDING.
+    # Skipped in dry-run mode (no live database connection).
+    if not dry_run:
+        checker = _build_redeploy_checker(manifest)
+        reset_names = manifest.prepare_for_redeploy(checker, cursor)
+        if reset_names:
+            logger.info(
+                "Reset %d stale manifest entries — will re-deploy.",
+                len(reset_names),
+            )
+
     for parsed in parsed_ddls:
         intent_str = parsed.deploy_intent.value if parsed.deploy_intent else None
         manifest.register_object(
@@ -347,7 +462,16 @@ def _execute_waves_sequential(cursor, waves, parsed_by_path, manifest,
 
 def _execute_waves_parallel(cursor, waves, parsed_by_path, manifest,
                             num_streams, connect_fn, stop_on_failure):
-    """Execute waves in parallel across multiple streams."""
+    """
+    Execute waves in parallel across multiple streams.
+
+    System and DCL operations (GRANT, DATABASE, ROLE, USER,
+    PROFILE) are serialised through a single lock to prevent
+    Teradata deadlocks (Error 2631) and concurrent change
+    conflicts (Error 3598) on system catalogue tables.  DDL
+    operations (TABLE, VIEW, MACRO, PROCEDURE, FUNCTION,
+    TRIGGER, INDEX) remain fully parallel.
+    """
     import time
     from ddl_deployer.models import WaveSummary
     from ddl_deployer.wave_executor import WaveExecutor
@@ -356,6 +480,16 @@ def _execute_waves_parallel(cursor, waves, parsed_by_path, manifest,
         raise ValueError(
             "connect_fn required for parallel deployment (num_streams > 1)."
         )
+
+    # Object types that must run one-at-a-time to avoid deadlocks
+    # on Teradata system catalogue tables.  These are infrastructure
+    # and access-control operations — they're sub-second each, so
+    # serialising has negligible impact on total deployment time.
+    _SERIALISE_TYPES = frozenset({
+        ObjectType.GRANT, ObjectType.DATABASE, ObjectType.USER,
+        ObjectType.ROLE, ObjectType.PROFILE,
+    })
+    _dcl_lock = threading.Lock()
 
     # Build the deploy function for each stream
     def deploy_fn(stream_cursor, file_path):
@@ -367,7 +501,18 @@ def _execute_waves_parallel(cursor, waves, parsed_by_path, manifest,
         if state in (DeployState.COMPLETED, DeployState.SKIPPED,
                      DeployState.ROLLED_BACK):
             return {"file": file_path, "state": state.value}
-        result = _dispatch_deploy(stream_cursor, parsed, manifest, False)
+
+        # Serialise system/DCL to prevent deadlocks
+        if parsed.object_type in _SERIALISE_TYPES:
+            with _dcl_lock:
+                result = _dispatch_deploy(
+                    stream_cursor, parsed, manifest, False,
+                )
+        else:
+            result = _dispatch_deploy(
+                stream_cursor, parsed, manifest, False,
+            )
+
         return {"file": file_path, "state": result.state.value,
                 "result": result}
 
@@ -611,10 +756,16 @@ def deploy_single(cursor, ddl_text: str, dry_run: bool = False) -> ObjectDeployR
 # ---------------------------------------------------------------
 
 # Object types where EXPLAIN is not applicable.
-# Currently empty — Teradata supports EXPLAIN for all DDL types
-# including CREATE DATABASE, CREATE ROLE, GRANT, and CALL SQLJ.
-# Add types here if specific exclusions are needed in future.
-_EXPLAIN_SKIP_TYPES = set()
+# PROCEDURE: Teradata cannot EXPLAIN multi-statement procedure
+# bodies (REPLACE PROCEDURE ... BEGIN ... END).  EXPLAIN only
+# validates single SQL statements — procedure bodies contain
+# multiple statements separated by semicolons, which the
+# EXPLAIN parser rejects with Error 3706 "Invalid SQL Statement".
+# Functions, views, tables, triggers, macros, and all other
+# DDL types support EXPLAIN normally.
+_EXPLAIN_SKIP_TYPES = {
+    ObjectType.PROCEDURE,
+}
 
 
 def explain_package(
@@ -669,7 +820,7 @@ def explain_package(
                 ext = os.path.splitext(f)[1].lower()
                 if ext in ('.tbl', '.viw', '.spl', '.mcr', '.fnc', '.trg',
                             '.jix', '.idx', '.dcl', '.db', '.rol', '.prf',
-                            '.map', '.auth', '.fsvr', '.sto', '.jcl',
+                            '.map', '.auth', '.fsvr', '.sto', '.jar',
                             '.dml', '.sql'):
                     ddl_files.append(os.path.join(root, f))
 
@@ -834,11 +985,13 @@ def explain_package(
                     continue
 
             # Genuine failure — not an expected error
+            clean_msg = _clean_db_error(err_msg)
             logger.error(
                 "  ✗ FAIL: %s %s [%s] — %s",
                 parsed.object_type.value, parsed.qualified_name,
-                basename, err_msg[:200],
+                basename, clean_msg,
             )
+            logger.debug("Full error detail: %s", err_msg)
             results.append(ObjectDeployResult(
                 database_name=parsed.database_name,
                 object_name=parsed.object_name,
@@ -846,8 +999,8 @@ def explain_package(
                 state=DeployState.FAILED,
                 ddl_file=basename,
                 deploy_intent=parsed.deploy_intent,
-                error=err_msg,
-                message=f"EXPLAIN failed: {err_msg[:200]}",
+                error=clean_msg,
+                message=f"EXPLAIN failed: {clean_msg}",
             ))
             failed += 1
 
@@ -1023,8 +1176,9 @@ def _dispatch_deploy(
 
     except Exception as e:
         logger.exception("Deployment failed for %s", parsed.qualified_name)
+        clean_err = _clean_db_error(str(e))
         manifest.update_state(
-            parsed.qualified_name, DeployState.FAILED, error=str(e)
+            parsed.qualified_name, DeployState.FAILED, error=clean_err
         )
         return ObjectDeployResult(
             database_name=parsed.database_name,
@@ -1032,8 +1186,8 @@ def _dispatch_deploy(
             object_type=parsed.object_type,
             state=DeployState.FAILED,
             deploy_intent=parsed.deploy_intent,
-            error=str(e),
-            message=f"Deployment failed: {e}",
+            error=clean_err,
+            message=f"Deployment failed: {clean_err}",
         )
 
 
@@ -1154,10 +1308,11 @@ def _deploy_table(
     try:
         cursor.execute(migration_sql)
     except Exception as e:
+        logger.debug("Migration error detail: %s", e)
         return ObjectDeployResult(
             database_name=db, object_name=tbl,
             object_type=ObjectType.TABLE, state=DeployState.FAILED,
-            backup_table=backup_name, error=str(e),
+            backup_table=backup_name, error=_clean_db_error(str(e)),
             message=f"Migration failed for {qn}. Backup preserved.",
             warnings=compatibility.warnings,
         )
@@ -1584,15 +1739,16 @@ def _rollback_single(
 
     except Exception as e:
         logger.exception("Rollback failed for %s", qualified_name)
+        clean_err = _clean_db_error(str(e))
         manifest.update_state(
             qualified_name, DeployState.FAILED,
-            error=f"Rollback failed: {e}"
+            error=f"Rollback failed: {clean_err}"
         )
         return ObjectDeployResult(
             database_name=db, object_name=obj,
             object_type=obj_type, state=DeployState.FAILED,
-            error=str(e),
-            message=f"Rollback failed for {qualified_name}: {e}",
+            error=clean_err,
+            message=f"Rollback failed for {qualified_name}: {clean_err}",
         )
 
 
@@ -1746,6 +1902,85 @@ def _capture_existing_definition(
 # Internal — Database operations
 # ---------------------------------------------------------------
 
+
+def _build_redeploy_checker(manifest):
+    """
+    Build an existence-checking closure for prepare_for_redeploy().
+
+    Returns a function(cursor, qualified_name) → bool that
+    inspects the manifest record's object_type to determine
+    the correct existence query:
+
+      - GRANT:  Always returns False (idempotent — safe to re-apply).
+      - DATABASE, ROLE, PROFILE, USER:  Uses SYSTEM_EXISTENCE_QUERIES.
+      - TABLE, VIEW, MACRO, PROCEDURE, FUNCTION, TRIGGER,
+        JOIN_INDEX, HASH_INDEX:  Uses DBC.TablesV via TABLE_KIND_MAP.
+      - INDEX:  Uses DBC.IndicesV via _index_exists().
+      - Unknown:  Returns True (safe default — do not reset).
+
+    Args:
+        manifest: The DeploymentManifest to look up object_type
+                  for each qualified_name.
+
+    Returns:
+        Callable[[cursor, str], bool] suitable for
+        manifest.prepare_for_redeploy().
+    """
+    def checker(cursor, qualified_name):
+        record = manifest.get_record(qualified_name)
+        if record is None:
+            return False
+
+        obj_type_str = record.get("object_type")
+        if obj_type_str is None:
+            # No type recorded — cannot verify, safe default
+            return True
+
+        try:
+            obj_type = ObjectType(obj_type_str)
+        except ValueError:
+            return True  # Unknown type — safe default
+
+        # Grants are idempotent (DIRECT_EXECUTE handles Error 5612
+        # for databases/users; grants have no duplicate error).
+        # Always re-apply.
+        if obj_type == ObjectType.GRANT:
+            return False
+
+        # System-scope objects: ROLE, DATABASE, USER, PROFILE, etc.
+        existence_query = SYSTEM_EXISTENCE_QUERIES.get(obj_type)
+        if existence_query:
+            # System objects use unqualified names
+            obj_name = (
+                qualified_name.split(".", 1)[-1]
+                if "." in qualified_name
+                else qualified_name
+            )
+            try:
+                cursor.execute(existence_query.format(name=obj_name))
+                return cursor.fetchone() is not None
+            except Exception:
+                return True  # Check failed — safe default
+
+        # Secondary indexes: DBC.IndicesV (no TableKind)
+        if obj_type == ObjectType.INDEX and "." in qualified_name:
+            db_name, obj_name = qualified_name.split(".", 1)
+            return _index_exists(cursor, db_name, obj_name)
+
+        # Database-qualified objects: DBC.TablesV
+        if "." in qualified_name:
+            db_name, obj_name = qualified_name.split(".", 1)
+            table_kind = TABLE_KIND_MAP.get(obj_type)
+            if table_kind:
+                return _object_exists(cursor, db_name, obj_name,
+                                      table_kind)
+
+        # Fallback — cannot determine, assume exists
+        return True
+
+    return checker
+
+
 def _object_exists(cursor, database_name: str, object_name: str,
                    table_kind: str) -> bool:
     """Check if an object exists in DBC.TablesV by TableKind."""
@@ -1800,23 +2035,77 @@ def _execute_ddl(cursor, ddl_text: str):
 
     Logs the first 200 characters of the SQL for traceability.
     On failure, logs the full SQL for diagnosis.
+
+    Transient lock errors are retried up to 3 times with
+    exponential backoff:
+
+      - Error 3598: "Concurrent change conflict on database —
+        try again." Database-level DDL lock contention between
+        parallel streams.  Backoff: 0.5s, 1s, 2s.
+
+      - Error 2631: "Transaction ABORTed due to deadlock."
+        Classic RDBMS deadlock from parallel GRANT/DDL on the
+        same database.  Backoff: 2s, 4s, 8s (longer — deadlocks
+        need more time to clear).
     """
+    import time
+
     clean = ddl_text.strip().rstrip(';').strip()
 
     # Log a preview (not the full DDL, which can be very long)
     preview = clean[:200] + ("..." if len(clean) > 200 else "")
     logger.debug("Executing SQL: %s", preview)
 
-    try:
-        cursor.execute(clean)
-    except Exception as e:
-        logger.error(
-            "SQL execution failed.\n"
-            "  Error:  %s\n"
-            "  SQL:    %s",
-            e, clean,
-        )
-        raise
+    # Retryable Teradata errors — code → (label, base_delay_secs)
+    _RETRYABLE = {
+        "3598": ("concurrent change conflict", 0.5),
+        "2631": ("deadlock", 2.0),
+    }
+
+    max_retries = 3
+    for attempt in range(max_retries + 1):
+        try:
+            cursor.execute(clean)
+            if attempt > 0:
+                logger.info(
+                    "SQL succeeded on retry %d.", attempt,
+                )
+            return
+        except Exception as e:
+            err_str = str(e)
+
+            # Check for retryable errors
+            if attempt < max_retries:
+                for code, (label, base_delay) in _RETRYABLE.items():
+                    if code in err_str:
+                        delay = base_delay * (2 ** attempt)
+                        logger.warning(
+                            "Error %s (%s) — retry %d/%d "
+                            "in %.1fs.",
+                            code, label,
+                            attempt + 1, max_retries, delay,
+                        )
+                        time.sleep(delay)
+                        break
+                else:
+                    # No retryable error matched — fall through
+                    pass
+
+                # If we matched a retryable error, continue the loop
+                if any(code in err_str for code in _RETRYABLE):
+                    continue
+
+            # Non-retryable error, or final retry exhausted
+            clean_err = _clean_db_error(err_str)
+            logger.error(
+                "SQL execution failed.\n"
+                "  Error:  %s\n"
+                "  SQL:    %s",
+                clean_err, clean,
+            )
+            # Full Go stack trace at DEBUG level only (for driver bugs)
+            logger.debug("Full driver error: %s", e)
+            raise
 
 
 def _rename_table(cursor, database_name: str, old_name: str, new_name: str):

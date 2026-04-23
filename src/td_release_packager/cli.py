@@ -3,13 +3,18 @@ cli.py — Command-line interface for the Teradata Release Packager.
 
 Commands:
     scaffold   Create a new project from template.
-    build      Build a release package for a target environment.
+    harvest    Import raw DDL files into a project.
+    inspect    Check DDL against Coding Discipline.
+    package    Build a release package for a target environment.
     scan       Scan source files and report all tokens found.
+    analyze    Analyse DDL dependencies, generate waves, export graph.
 
 Usage:
     python -m td_release_packager scaffold --name MortgagePlatform --output /projects
     python -m td_release_packager build --source . --env DEV --name create_objects --properties config/properties/DEV.properties
     python -m td_release_packager scan --source .
+    python -m td_release_packager analyze --source . --graph ./output/
+    python -m td_release_packager analyze --source . --graph . --formats dot,json,openlineage
 """
 
 import argparse
@@ -33,6 +38,18 @@ from td_release_packager.token_engine import (
     validate_tokens,
 )
 from td_release_packager.validate import validate_directory, read_inspect_config
+
+logger = logging.getLogger(__name__)
+
+# -- Graph format registry (name → file extension) ---------------
+_GRAPH_FORMATS = {
+    "dot": ".gv",
+    "mermaid": ".mmd",
+    "json": ".json",
+    "csv": ".csv",
+    "openlineage": ".openlineage.json",
+}
+_ALL_FORMATS = ",".join(_GRAPH_FORMATS.keys())
 
 
 def main():
@@ -139,6 +156,7 @@ def _cmd_ingest(args):
             project_dir=args.project,
             detect_tokens=True,
             apply_tokens=apply_tokens,
+            force=args.force,
         )
 
         print(f"\n{'=' * 64}")
@@ -146,8 +164,14 @@ def _cmd_ingest(args):
         print(f"{'=' * 64}")
         print(f"  Source:           {args.source}")
         print(f"  Project:          {args.project}")
+        if args.force:
+            print(f"  Mode:             FORCE (overwrite existing)")
         print(f"  Files scanned:    {result.total_files}")
         print(f"  Classified:       {result.classified}")
+        if result.overwritten:
+            print(f"  Overwritten:      {result.overwritten}")
+        if result.skipped_existing:
+            print(f"  Skipped (exist):  {result.skipped_existing}")
         print(f"  Unclassified:     {result.unclassified}")
         print(f"  MULTISET inject:  {result.multiset_injected}")
 
@@ -458,8 +482,18 @@ def _cmd_scan(args):
     print()
 
 
+# ---------------------------------------------------------------
+# analyze command — dependency analysis + graph export
+# ---------------------------------------------------------------
+
 def _cmd_analyze(args):
-    """Analyse DDL dependencies and generate wave ordering."""
+    """
+    Analyse DDL dependencies and generate wave ordering.
+
+    Optionally exports the dependency graph in one or more
+    portable formats (DOT, Mermaid, JSON, CSV, OpenLineage)
+    when --graph is specified.
+    """
     from td_release_packager.analyser import analyse_project, format_summary
 
     source_dir = args.source
@@ -479,7 +513,7 @@ def _cmd_analyze(args):
         print()
         return
 
-    # Write _waves.txt
+    # -- Write _waves.txt -----------------------------------------
     if args.output:
         waves_path = args.output
     else:
@@ -497,7 +531,95 @@ def _cmd_analyze(args):
     if result.cycles:
         print(f"\n  ⚠ {len(result.cycles)} cycle(s) detected — review before deploying")
 
+    # -- Export graph (if requested) -------------------------------
+    if args.graph:
+        _export_graph(result, args)
+
     print(f"{'=' * 64}\n")
+
+
+def _export_graph(result, args):
+    """
+    Export the dependency graph in the requested formats.
+
+    Called by _cmd_analyze when --graph is specified.  Imports
+    individual export functions from graph_export and dispatches
+    based on --formats.
+
+    Args:
+        result: The AnalysisResult from analyse_project.
+        args:   Parsed CLI arguments containing graph, formats,
+                namespace, project_name, and base_name.
+    """
+    from td_release_packager.graph_export import (
+        export_dot,
+        export_mermaid,
+        export_json,
+        export_csv,
+        export_openlineage,
+    )
+
+    output_dir = args.graph
+    os.makedirs(output_dir, exist_ok=True)
+
+    # -- Parse requested formats ----------------------------------
+    requested = {
+        f.strip().lower()
+        for f in args.formats.split(',')
+    }
+
+    # Validate format names
+    unknown = requested - set(_GRAPH_FORMATS.keys())
+    if unknown:
+        print(
+            f"  ✗ Unknown graph format(s): "
+            f"{', '.join(sorted(unknown))}\n"
+            f"    Available: {_ALL_FORMATS}",
+        )
+        return
+
+    # -- Dispatch to export functions -----------------------------
+    # Map format name to its export function.
+    # OpenLineage is handled separately (extra parameters).
+    exporters = {
+        "dot":     export_dot,
+        "mermaid": export_mermaid,
+        "json":    export_json,
+        "csv":     export_csv,
+    }
+
+    base = args.base_name
+    written = []
+
+    for fmt in sorted(requested):
+        ext = _GRAPH_FORMATS[fmt]
+        filepath = os.path.join(output_dir, f"{base}{ext}")
+
+        if fmt == "openlineage":
+            # OpenLineage needs namespace and project name
+            content = export_openlineage(
+                result,
+                namespace=args.namespace,
+                project_name=args.project_name,
+            )
+        else:
+            content = exporters[fmt](result)
+
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+        written.append((fmt, filepath))
+        logger.info("Exported %s → %s", fmt, filepath)
+
+    # -- Print export summary -------------------------------------
+    count = len(written)
+    print(
+        f"\n  Graph exported "
+        f"({count} format{'s' if count != 1 else ''}):"
+    )
+    for fmt, filepath in written:
+        size_kb = os.path.getsize(filepath) / 1024
+        print(f"    ✓ {fmt:<14s} → {filepath} ({size_kb:.1f} KB)")
 
 
 # ---------------------------------------------------------------
@@ -559,6 +681,12 @@ def _build_parser():
                          "E.g. 'DEV01_STD={{STD_DATABASE}},DEV01_SEM={{SEM_DATABASE}}'")
     ig.add_argument("--no-detect-tokens", action="store_true",
                     help="Skip hardcoded name detection.")
+    ig.add_argument("--force", action="store_true",
+                    help="Overwrite existing files in the payload. "
+                         "Use when re-harvesting after editing source "
+                         "DDL. Warns if overwriting tokenised files "
+                         "with non-tokenised content — pass the same "
+                         "--token-map to preserve tokenisation.")
     # -- inspect --
     vl = subs.add_parser("inspect",
                          help="[I] Inspect — check DDL against Coding Discipline.")
@@ -615,13 +743,36 @@ def _build_parser():
 
     # -- analyze --
     az = subs.add_parser("analyze",
-                         help="Analyse DDL dependencies and generate wave ordering.")
+                         help="Analyse DDL dependencies, generate waves, "
+                              "and export dependency graph.")
     az.add_argument("--source", required=True,
                     help="Project directory to analyse.")
     az.add_argument("--output",
-                    help="Output path for _waves.txt (default: <source>/_waves.txt).")
+                    help="Output path for _waves.txt "
+                         "(default: <source>/_waves.txt).")
     az.add_argument("--overwrite", action="store_true",
                     help="Overwrite existing _waves.txt.")
+    az.add_argument("--graph",
+                    metavar="OUTPUT_DIR",
+                    help="Export dependency graph to OUTPUT_DIR in one or "
+                         "more formats.  Creates the directory if needed.")
+    az.add_argument("--formats",
+                    default=_ALL_FORMATS,
+                    help=f"Comma-separated graph export formats "
+                         f"(default: {_ALL_FORMATS}).")
+    az.add_argument("--base-name",
+                    default="ships_dependencies",
+                    help="Base filename for exported graph files "
+                         "(default: ships_dependencies).")
+    az.add_argument("--namespace",
+                    default="teradata://ships-analysis",
+                    help="OpenLineage dataset namespace URI.  For a live "
+                         "system use teradata://hostname:1025 "
+                         "(default: teradata://ships-analysis).")
+    az.add_argument("--project-name",
+                    default="ships-project",
+                    help="OpenLineage job namespace / project name "
+                         "(default: ships-project).")
 
     return parser
 
