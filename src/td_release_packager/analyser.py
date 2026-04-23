@@ -189,33 +189,297 @@ def _extract_body(ddl_text: str, object_type: str) -> str:
 
 
 # ---------------------------------------------------------------
-# Qualified name scanner
+# Structural-anchor reference scanner
 # ---------------------------------------------------------------
+#
+# Instead of scanning for ALL db.obj patterns (which picks up
+# column aliases like c.Cust_Id as false positives), this scanner
+# only looks for object references in structural positions:
+#
+#   Sources:    FROM, JOIN (all variants)
+#   Targets:    INSERT INTO, UPDATE, DELETE, MERGE INTO, USING
+#   DDL refs:   trigger event ON, FK REFERENCES,
+#               CREATE INDEX ON, RENAME TABLE, DROP object,
+#               COMMENT ON
+#   SPL refs:   CALL (procedure), EXEC[UTE] (macro),
+#               COLLECT STATISTICS ON
+#   Access:     LOCKING ... FOR
+#
+# 19 structural anchors total.
+#
+# Teradata SQL abbreviations (SEL, INS, UPD, DEL) are included.
+# Unqualified names are captured and flagged — they are valid
+# but violate Teradata best practice (db_qualifier rule).
 
-# Matches DB.ObjectName patterns — two-part qualified names.
-# Avoids matching inside keywords like CREATE, REPLACE, etc.
-_QUALIFIED_REF_RE = re.compile(
-    r'(?:'
-    r'\{\{([A-Za-z_]\w*)\}\}'    # Group 1: {{TOKEN}} database prefix
-    r'|'
-    r'\b([A-Za-z_]\w*)'          # Group 2: literal database prefix
-    r')'
-    r'\s*\.\s*'
-    r'([A-Za-z_]\w*)\b'          # Group 3: object name
-)
+# -- Name fragments (supports {{TOKEN}} placeholders) -----------
 
-# Keywords and noise that look like qualified names but aren't
-_IGNORE_PREFIXES = {
+# Single identifier: regular name or {{TOKEN}} with optional suffix
+_IDENT = r'(?:[A-Za-z_]\w*|\{\{[A-Za-z_]\w*\}\}\w*)'
+
+# Qualified name: db.obj  (two identifiers joined by a dot)
+_QNAME = _IDENT + r'\.' + _IDENT
+
+# Any name: qualified or unqualified (qualified tried first)
+_NAME = rf'(?:{_QNAME}|{_IDENT})'
+
+# -- System databases (references to these are never dependencies)
+
+_SYSTEM_DATABASES = frozenset({
     'DBC', 'SYSLIB', 'SYSUDTLIB', 'SYSUIF', 'TD_SYSFNLIB',
     'TD_SYSXML', 'SQLJ', 'SYSSPATIAL', 'DBCMNGR',
-    'DEFAULT', 'CHARACTER', 'FORMAT', 'CHECKSUM',
-    'NO', 'WITH', 'ON', 'PRIMARY', 'UNIQUE', 'PARTITION',
-}
+})
 
-_IGNORE_SUFFIXES = {
-    'FALLBACK', 'LOG', 'JOURNAL', 'MERGEBLOCKRATIO',
-    'BLOCKCOMPRESSION', 'DATABLOCKSIZE', 'FREESPACE',
-}
+# -- Guard: exclude function/EXTRACT usage of FROM -------------
+# EXTRACT(YEAR FROM col), TRIM(BOTH ' ' FROM col), etc.
+# Each lookbehind is fixed-width as required by Python re.
+_NOT_FUNCTION_FROM = (
+    r'(?<!YEAR\s)'
+    r'(?<!MONTH\s)'
+    r'(?<!DAY\s)'
+    r'(?<!HOUR\s)'
+    r'(?<!MINUTE\s)'
+    r'(?<!SECOND\s)'
+    r'(?<!BOTH\s)'
+    r'(?<!LEADING\s)'
+    r'(?<!TRAILING\s)'
+)
+
+# -- Guard: exclude DELETE FROM (handled by target regex) -------
+_NOT_DML_FROM = (
+    r'(?<!DELETE\s)'
+    r'(?<!DEL\s)'
+)
+
+# -- FROM keyword (guarded against function and DML usage) ------
+_FROM_KEYWORD_RE = re.compile(
+    rf'(?i){_NOT_FUNCTION_FROM}{_NOT_DML_FROM}\bFROM\b',
+)
+
+# -- FROM clause terminators ------------------------------------
+# Keywords that end a FROM clause (so we can bound the clause
+# and scan for comma-separated qualified names within it).
+_FROM_TERM_RE = re.compile(
+    r'\b(?:'
+    r'WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|'
+    r'UNION(?:\s+ALL)?|INTERSECT|EXCEPT|MINUS|'
+    r'QUALIFY|SAMPLE|WINDOW|'
+    r'(?:INNER\s+)?JOIN|'
+    r'(?:LEFT|RIGHT|FULL)\s+(?:OUTER\s+)?JOIN|'
+    r'CROSS\s+JOIN|NATURAL\s+JOIN|'
+    r'WHEN\s+(?:MATCHED|NOT)'
+    r')\b|;',
+    re.IGNORECASE,
+)
+
+# -- JOIN variants (single table after JOIN) --------------------
+_JOIN_RE = re.compile(
+    rf'''(?ix)
+    (?:
+        (?:INNER\s+)?JOIN
+      | LEFT\s+(?:OUTER\s+)?JOIN
+      | RIGHT\s+(?:OUTER\s+)?JOIN
+      | CROSS\s+JOIN
+      | FULL\s+(?:OUTER\s+)?JOIN
+      | NATURAL\s+JOIN
+    )
+    \s+
+    ({_NAME})                       # Group 1: object reference
+    ''',
+)
+
+# -- DML target anchors (Teradata abbreviations included) -------
+_TARGET_INSERT_RE = re.compile(rf'(?ix)\bINS(?:ERT)?\s+INTO\s+({_NAME})')
+_TARGET_UPDATE_RE = re.compile(rf'(?ix)\bUPD(?:ATE)?\s+({_NAME})')
+_TARGET_DELETE_RE = re.compile(rf'(?ix)\bDEL(?:ETE)?\s+(?:FROM\s+)?({_NAME})')
+_TARGET_MERGE_RE = re.compile(rf'(?ix)\bMERGE\s+INTO\s+({_NAME})')
+
+# -- MERGE USING source table -----------------------------------
+# Matches: USING db.table (direct table reference in MERGE).
+# When USING is followed by a subquery, the FROM inside the
+# subquery is handled by _FROM_KEYWORD_RE independently.
+_MERGE_USING_RE = re.compile(rf'(?ix)\bUSING\s+({_NAME})')
+
+# -- Trigger event table ----------------------------------------
+# Matches INSERT/UPDATE/DELETE ON db.table in trigger bodies.
+# The header extractor strips everything up to AFTER/BEFORE,
+# leaving "INSERT ON db.table ..." in the body.
+_TRIGGER_EVENT_ON_RE = re.compile(
+    rf'(?ix)\b(?:INSERT|UPDATE|DELETE)\s+ON\s+({_NAME})',
+)
+
+# -- Foreign key REFERENCES ------------------------------------
+_FK_REFERENCES_RE = re.compile(rf'(?ix)\bREFERENCES\s+({_NAME})')
+
+# -- COLLECT STATISTICS ON -------------------------------------
+# Catches:  COLLECT [SUMMARY] STATISTICS ... ON db.table
+# The COLUMN/INDEX clauses between STATISTICS and ON are
+# consumed by non-greedy .*? — safe because whitespace is
+# already normalised to single spaces (no newlines).
+_COLLECT_STATS_ON_RE = re.compile(
+    rf'(?ix)\bCOLLECT\s+(?:SUMMARY\s+)?STATISTICS\b.*?\bON\s+({_NAME})',
+)
+
+# -- CALL (procedure invocation) -------------------------------
+# Catches:  CALL db.procedure  |  CALL db.procedure(args)
+# The optional parenthesised arg list is NOT captured — we
+# only need the qualified name.
+_CALL_RE = re.compile(rf'(?ix)\bCALL\s+({_NAME})')
+
+# -- EXEC / EXECUTE (macro invocation) -------------------------
+# Teradata: EXEC executes a macro, CALL invokes a procedure.
+# EXECUTE IMMEDIATE is SPL dynamic SQL — the string argument
+# is not a static reference, so we exclude it via negative
+# lookahead.
+_EXEC_RE = re.compile(
+    rf'(?ix)\bEXEC(?:UTE)?\s+(?!IMMEDIATE\b)({_NAME})',
+)
+
+# -- LOCKING ... FOR -------------------------------------------
+# Catches:  LOCKING [TABLE] db.table FOR {ACCESS|READ|WRITE|EXCLUSIVE}
+# Excludes LOCKING ROW/DATABASE — ROW is not an object name
+# (unqualified → skipped by _classify_ref), DATABASE is a
+# session scope keyword not a table reference.
+_LOCKING_RE = re.compile(
+    rf'(?ix)\bLOCKING\s+(?:TABLE\s+)?({_NAME})\s+FOR\b',
+)
+
+# -- CREATE INDEX ON parent table ------------------------------
+# Catches:  CREATE [UNIQUE] [JOIN|HASH] INDEX ... ON db.table
+# The index name and optional column list sit between INDEX
+# and ON — consumed by non-greedy .*? (safe post-whitespace
+# normalisation).  Covers join indexes, hash indexes, and
+# secondary indexes.
+_INDEX_ON_RE = re.compile(
+    rf'(?ix)\bCREATE\s+(?:UNIQUE\s+)?(?:JOIN\s+|HASH\s+)?INDEX\b'
+    rf'.*?\bON\s+({_NAME})',
+)
+
+# -- RENAME TABLE (migration scripts) -------------------------
+# Catches:  RENAME TABLE db.old TO db.new
+#           RENAME TABLE db.old AS db.new
+# Both old and new names are captured via two separate groups.
+_RENAME_TABLE_RE = re.compile(
+    rf'(?ix)\bRENAME\s+TABLE\s+({_NAME})\s+(?:TO|AS)\s+({_NAME})',
+)
+
+# -- DROP object (in SPL bodies) -------------------------------
+# Catches:  DROP TABLE|VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER
+#           DROP JOIN INDEX|HASH INDEX|INDEX
+# Only relevant inside procedure/function bodies that perform
+# cleanup before recreation.
+_DROP_OBJECT_RE = re.compile(
+    rf'(?ix)\bDROP\s+'
+    rf'(?:TABLE|VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER|'
+    rf'JOIN\s+INDEX|HASH\s+INDEX|INDEX)\s+'
+    rf'({_NAME})',
+)
+
+# -- COMMENT ON (documentation DDL) ----------------------------
+# Catches:  COMMENT ON TABLE db.table IS '...'
+#           COMMENT ON COLUMN db.table.col IS '...'
+# For COLUMN the three-part name (db.table.col) matches the
+# _QNAME portion (db.table) — the .col suffix is discarded
+# because _QNAME only captures two segments.
+_COMMENT_ON_RE = re.compile(
+    rf'(?ix)\bCOMMENT\s+ON\s+(?:TABLE|COLUMN)\s+({_NAME})',
+)
+
+
+def _extract_from_refs(body: str) -> List[str]:
+    """
+    Extract table references from all FROM clauses in the DDL body.
+
+    Uses two complementary strategies:
+      1. Direct match — the first name immediately after each FROM
+         keyword (catches both qualified and unqualified names).
+      2. Clause scan — all qualified names (db.obj) found anywhere
+         within the FROM clause, up to the next structural keyword.
+         This catches comma-separated tables like:
+             FROM db.T1 t1, db.T2 t2, db.T3
+
+    The combination ensures comma-separated qualified names are
+    captured, and unqualified first-tables are flagged for the
+    inspector's db_qualifier rule.
+
+    Args:
+        body: The DDL body text (already noise-stripped).
+
+    Returns:
+        List of name strings found (may contain duplicates;
+        caller collects into a set).
+    """
+    refs = []
+
+    for m in _FROM_KEYWORD_RE.finditer(body):
+        start = m.end()
+
+        # Strategy 1: first name directly after FROM
+        first_m = re.match(rf'(?i)\s+({_NAME})', body[start:])
+        if first_m:
+            refs.append(first_m.group(1).strip())
+
+        # Strategy 2: bound the FROM clause, then scan for all
+        # qualified names (db.obj) within it.  Qualified names
+        # in a FROM clause are always table references — column
+        # aliases (c.Cust_Id) appear in SELECT/WHERE, not FROM.
+        term_m = _FROM_TERM_RE.search(body[start:])
+        clause_end = start + term_m.start() if term_m else len(body)
+        from_clause = body[start:clause_end]
+
+        for qm in re.finditer(rf'(?i){_QNAME}', from_clause):
+            refs.append(qm.group(0).strip())
+
+    return refs
+
+
+def _classify_ref(
+    ref: str,
+    own_qualified: str,
+    known_databases: Set[str],
+) -> Optional[Tuple[str, str]]:
+    """
+    Classify a single reference as internal, external, or skip.
+
+    Args:
+        ref:              The raw name string (qualified or unqualified).
+        own_qualified:    The owning object's qualified name.
+        known_databases:  Upper-cased database names in the package.
+
+    Returns:
+        ('internal', qualified_name), ('external', qualified_name),
+        or None if the reference should be skipped (system DB,
+        self-reference, or unresolvable unqualified name).
+    """
+    # Split into database and object parts
+    if '.' in ref:
+        parts = ref.split('.', 1)
+        db_part = parts[0].strip()
+        obj_part = parts[1].strip()
+    else:
+        # Unqualified — no database prefix.
+        # Cannot resolve to a dependency without a DATABASE
+        # context.  Log for the inspector but don't add an edge.
+        logger.debug("Unqualified reference: %s", ref)
+        return None
+
+    # Skip system databases
+    db_upper = db_part.upper()
+    # Strip {{}} for system-DB comparison on tokenised names
+    db_bare = db_upper.lstrip('{').rstrip('}')
+    if db_bare in _SYSTEM_DATABASES:
+        return None
+
+    qualified = f"{db_part}.{obj_part}"
+
+    # Skip self-references
+    if qualified.upper() == own_qualified.upper():
+        return None
+
+    # Classify: known database → internal, otherwise → external
+    if db_upper in known_databases:
+        return ('internal', qualified)
+    else:
+        return ('external', qualified)
 
 
 def _scan_references(
@@ -225,12 +489,30 @@ def _scan_references(
     known_databases: Set[str],
 ) -> Tuple[Set[str], Set[str]]:
     """
-    Scan DDL body for qualified DB.ObjectName references.
+    Scan DDL body for object references using structural anchors.
 
-    Only considers references where the database prefix matches
-    a known database in the package, or is long enough to be a
-    plausible database name (>2 chars). This filters out table
-    aliases like c.Cust_Id, o.Order_Amt, n.Msg.
+    Only matches references that appear after SQL keywords where
+    object names are expected.  This eliminates false positives
+    from column aliases (c.Cust_Id), DDL noise (NO.FALLBACK),
+    and other dot-separated tokens that are not object references.
+
+    19 structural anchors:
+
+      Sources:    FROM, JOIN (all variants)
+      Targets:    INSERT INTO, UPDATE, DELETE, MERGE INTO, USING
+      DDL refs:   trigger event ON, FK REFERENCES,
+                  CREATE INDEX ON, RENAME TABLE, DROP object,
+                  COMMENT ON
+      SPL refs:   CALL (procedure), EXEC[UTE] (macro),
+                  COLLECT STATISTICS ON
+      Access:     LOCKING ... FOR
+
+    Teradata SQL abbreviations (SEL, INS, UPD, DEL) are recognised.
+    EXTRACT/TRIM function usage of FROM is excluded via negative
+    lookbehinds.
+
+    For FROM clauses, comma-separated table lists are handled by
+    scanning for all qualified names within the clause boundary.
 
     Args:
         ddl_text:         Raw DDL content.
@@ -250,39 +532,86 @@ def _scan_references(
     # Extract body (skip the header for tables/views/macros)
     body = _extract_body(clean, object_type)
 
+    # Normalise whitespace.  The noise stripper preserves string
+    # length by replacing comments and literals with spaces, which
+    # can create multi-space gaps (e.g. TRIM(BOTH ' ' FROM col)
+    # becomes TRIM(BOTH     FROM col).  The fixed-width lookbehinds
+    # on _FROM_KEYWORD_RE require exactly one space between guard
+    # words and FROM, so we collapse all whitespace runs to single
+    # spaces before scanning.
+    body = re.sub(r'\s+', ' ', body)
+
+    # -- Collect all raw references from structural anchors --
+    raw_refs = []
+
+    # FROM clauses (with comma-separated list support)
+    raw_refs.extend(_extract_from_refs(body))
+
+    # JOIN variants
+    for m in _JOIN_RE.finditer(body):
+        raw_refs.append(m.group(1).strip())
+
+    # DML targets (Teradata abbreviations: INS, UPD, DEL)
+    for regex in (_TARGET_INSERT_RE, _TARGET_UPDATE_RE,
+                  _TARGET_DELETE_RE, _TARGET_MERGE_RE):
+        for m in regex.finditer(body):
+            raw_refs.append(m.group(1).strip())
+
+    # MERGE USING source table
+    for m in _MERGE_USING_RE.finditer(body):
+        raw_refs.append(m.group(1).strip())
+
+    # Trigger event table (INSERT/UPDATE/DELETE ON db.table)
+    for m in _TRIGGER_EVENT_ON_RE.finditer(body):
+        raw_refs.append(m.group(1).strip())
+
+    # Foreign key REFERENCES
+    for m in _FK_REFERENCES_RE.finditer(body):
+        raw_refs.append(m.group(1).strip())
+
+    # COLLECT [SUMMARY] STATISTICS ... ON db.table
+    for m in _COLLECT_STATS_ON_RE.finditer(body):
+        raw_refs.append(m.group(1).strip())
+
+    # CALL db.procedure
+    for m in _CALL_RE.finditer(body):
+        raw_refs.append(m.group(1).strip())
+
+    # EXEC[UTE] db.macro (not EXECUTE IMMEDIATE)
+    for m in _EXEC_RE.finditer(body):
+        raw_refs.append(m.group(1).strip())
+
+    # LOCKING [TABLE] db.table FOR {mode}
+    for m in _LOCKING_RE.finditer(body):
+        raw_refs.append(m.group(1).strip())
+
+    # CREATE [UNIQUE] [JOIN|HASH] INDEX ... ON db.table
+    for m in _INDEX_ON_RE.finditer(body):
+        raw_refs.append(m.group(1).strip())
+
+    # RENAME TABLE db.old TO|AS db.new (both names)
+    for m in _RENAME_TABLE_RE.finditer(body):
+        raw_refs.append(m.group(1).strip())
+        raw_refs.append(m.group(2).strip())
+
+    # DROP TABLE|VIEW|... db.name (in SPL bodies)
+    for m in _DROP_OBJECT_RE.finditer(body):
+        raw_refs.append(m.group(1).strip())
+
+    # COMMENT ON TABLE|COLUMN db.name
+    for m in _COMMENT_ON_RE.finditer(body):
+        raw_refs.append(m.group(1).strip())
+
+    # -- Classify each reference --
     internal = set()
     external = set()
 
-    for match in _QUALIFIED_REF_RE.finditer(body):
-        # Group 1: {{TOKEN}} prefix, Group 2: literal prefix
-        token_db = match.group(1)
-        literal_db = match.group(2)
-        obj_part = match.group(3)
-
-        # Reconstruct the database part as it appeared in the DDL
-        if token_db:
-            db_part = "{{" + token_db + "}}"
-        else:
-            db_part = literal_db
-
-        # Skip system databases and DDL noise words
-        if db_part.upper() in _IGNORE_PREFIXES:
+    for ref in raw_refs:
+        result = _classify_ref(ref, own_qualified, known_databases)
+        if result is None:
             continue
-        if obj_part.upper() in _IGNORE_SUFFIXES:
-            continue
-
-        qualified = f"{db_part}.{obj_part}"
-
-        # Skip self-references
-        if qualified.upper() == own_qualified.upper():
-            continue
-
-        # Only references to known databases in this package
-        # are real dependencies for wave ordering. Everything
-        # else is flagged as a potential external reference.
-        # Table aliases (c.Cust_Id, cust.Name) will appear here
-        # as false positives — the developer can review them.
-        if db_part.upper() in known_databases:
+        category, qualified = result
+        if category == 'internal':
             internal.add(qualified)
         else:
             external.add(qualified)

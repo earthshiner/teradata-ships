@@ -23,10 +23,13 @@ src/
         test_token_engine.py   ← Token interpolation, properties files
         test_ingest.py         ← DDL classification, harvest pipeline
         test_validate.py       ← Inspector / linter rules, --strict mode
-        test_analyser.py       ← Dependency graph, topological sort, cycles
+        test_analyser.py       ← Dependency graph, structural anchors, topological sort, cycles
+        test_graph_export.py   ← Graph export (DOT, Mermaid, JSON, CSV, OpenLineage)
+        test_new_anchors.py    ← 8 new structural anchors (COLLECT STATS, CALL, EXEC, etc.)
         test_ddl_parser.py     ← Deployer's parser, intent detection
         test_build_counter.py  ← Build number management
-        test_deployer_models.py ← State machine, strategy mappings
+        test_builder.py        ← Filename resolution, co-artefact handling
+        test_deployer_models.py ← State machine, strategy mappings, scope mapping
 ```
 
 All commands below assume your working directory is `src/`.
@@ -50,9 +53,9 @@ Expected output when all tests pass:
 tests/test_analyser.py::TestStripNoise::test_line_comment_removed PASSED [  0%]
 tests/test_analyser.py::TestStripNoise::test_block_comment_removed PASSED [  0%]
 ...
-tests/test_validate.py::TestValidateDirectory::test_strict_mode_catches_create_view PASSED [100%]
+tests/test_new_anchors.py::TestAnchorInteractions::test_system_db_refs_excluded PASSED [100%]
 
-============================= 274 passed in 1.08s ==============================
+============================= 474 passed in 2.90s ==============================
 ```
 
 ## Running a Subset of Tests
@@ -166,7 +169,7 @@ python -m pytest tests/ --lf -v
 
 | Argument | What it does |
 |----------|-------------|
-| `--lf`   | **Last failed.** Re-runs only the tests that failed in the previous run. Pytest stores this state in `.pytest_cache/`. Ideal for the fix-and-retest cycle — avoids re-running 270+ passing tests while you're working on a fix. |
+| `--lf`   | **Last failed.** Re-runs only the tests that failed in the previous run. Pytest stores this state in `.pytest_cache/`. Ideal for the fix-and-retest cycle — avoids re-running 470+ passing tests while you're working on a fix. |
 
 ### Run failed tests first, then the rest
 
@@ -180,28 +183,33 @@ python -m pytest tests/ --ff -v
 
 ## Test Coverage
 
-### What is currently covered (274 tests)
+### What is currently covered
 
 | Module | Tests | Key areas |
 |--------|------:|-----------|
-| `test_token_engine.py` | 27 | Properties parsing, `{{TOKEN}}` resolution, circular refs, scanning, validation, substitution |
-| `test_ingest.py` | 39 | DDL classification (all 15 types), name extraction, MULTISET injection, REPLACE VIEW, token candidates, file discovery, ingest pipeline |
-| `test_validate.py` | 28 | All 10 linter rules, `--strict` mode, directory validation |
-| `test_analyser.py` | 31 | Noise stripping, body extraction, reference scanning, cycle detection, topological sort, `_waves.txt` generation, full analysis |
-| `test_ddl_parser.py` | 41 | Object type detection (all types), deploy intent, strategy derivation, MULTISET injection, name splitting, SPECIFIC function names |
+| `test_token_engine.py` | 48 | Properties parsing, `{{TOKEN}}` resolution, circular refs, scanning, validation, substitution, token map I/O |
+| `test_ingest.py` | 64 | DDL classification (all types), name extraction, MULTISET injection, REPLACE VIEW, token candidates, file discovery, ingest pipeline |
+| `test_validate.py` | 60 | All linter rules, `--strict` mode, directory validation, configurable rules, inspect.conf I/O |
+| `test_analyser.py` | 53 | Noise stripping, body extraction, structural-anchor reference scanning (11 original anchors), cycle detection, topological sort, `_waves.txt` generation, full analysis |
+| `test_graph_export.py` | 51 | DOT, Mermaid, JSON, CSV, OpenLineage export. Edge direction, format validation, Gephi compatibility, NDJSON structure |
+| `test_new_anchors.py` | 35 | 8 new structural anchors: COLLECT STATISTICS ON, CALL, EXEC/EXECUTE, LOCKING FOR, CREATE INDEX ON, RENAME TABLE, DROP object, COMMENT ON. Cross-anchor interactions, tokenised names, system DB exclusion |
+| `test_ddl_parser.py` | 75 | Object type detection (all types), deploy intent, strategy derivation, MULTISET injection, name splitting, SPECIFIC function names |
 | `test_build_counter.py` | 16 | Read, increment, atomic write, reset, `--no-increment` promotion |
-| `test_deployer_models.py` | 33 | State machine transitions, strategy mapping, SHOW commands, deploy ordering, result properties |
+| `test_builder.py` | 19 | Filename resolution across all object types, tokenised names, co-artefacts |
+| `test_deployer_models.py` | 53 | State machine transitions, strategy mapping, scope mapping, SHOW commands, deploy ordering, result properties |
+| **Total** | **474** | |
 
 ### What is not yet covered
 
 | Module | Reason | Approach needed |
 |--------|--------|----------------|
-| `builder.py` | Heavy file I/O, archive creation | Mock filesystem, `tmp_path` fixtures |
 | `deployer.py` | Requires Teradata connection | Mock `teradatasql` cursor and connection |
 | `scaffolder.py` | File/directory creation | `tmp_path` fixtures, verify generated structure |
 | `wave_executor.py` | Concurrent execution, DB connection | Mock cursor, threading assertions |
 | `report.py` | HTML/text output generation | Snapshot testing or string assertions |
 | `preflight.py` | DBC system view queries | Mock cursor returning test data |
+| `privilege_check.py` | DBC.AllRightsV queries | Mock cursor, script generation assertions |
+| `manifest.py` | Thread safety, file I/O | `tmp_path` fixtures, concurrent write tests |
 
 ## Recommended Workflow
 

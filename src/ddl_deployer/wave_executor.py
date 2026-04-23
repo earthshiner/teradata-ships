@@ -149,6 +149,7 @@ class WaveExecutor:
         waves: List[List[str]],
         deploy_fn: Callable[[Any, str], dict],
         on_complete: Optional[Callable[[str, dict], None]] = None,
+        prior_completed: Optional[List[dict]] = None,
     ) -> "WaveExecutionResult":
         """
         Execute all waves with parallel streams.
@@ -164,10 +165,15 @@ class WaveExecutor:
         skipped.
 
         Args:
-            waves:       List of waves, each a list of file paths.
-            deploy_fn:   Function(cursor, file_path) → result dict.
-            on_complete: Optional callback(file_path, result) called
-                         after each object completes.
+            waves:            List of waves, each a list of file paths.
+            deploy_fn:        Function(cursor, file_path) → result dict.
+            on_complete:      Optional callback(file_path, result) called
+                              after each object completes.
+            prior_completed:  Optional list of manifest records for objects
+                              that were COMPLETED in a prior run and not
+                              re-deployed. Passed through to the result
+                              so the report can distinguish 'nothing new
+                              to deploy' from 'nothing was processed'.
 
         Returns:
             WaveExecutionResult with per-wave and per-object outcomes.
@@ -252,6 +258,7 @@ class WaveExecutor:
             skipped=sum(w.skipped for w in wave_results),
             waves=wave_results,
             object_results=all_results,
+            prior_completed=prior_completed or [],
         )
 
     def _execute_single_wave(
@@ -474,7 +481,17 @@ class WaveResult:
 
 
 class WaveExecutionResult:
-    """Aggregate outcome of all waves."""
+    """
+    Aggregate outcome of all waves.
+
+    Attributes:
+        prior_completed: List of manifest records for objects that
+            were COMPLETED in a prior deployment run and not
+            re-deployed in this run. Enables the report to
+            distinguish 'nothing new to deploy' (all objects
+            validly completed from a previous run) from 'nothing
+            was processed' (a genuine problem).
+    """
 
     def __init__(
         self,
@@ -485,6 +502,7 @@ class WaveExecutionResult:
         skipped: int = 0,
         waves: List[WaveResult] = None,
         object_results: List[dict] = None,
+        prior_completed: List[dict] = None,
     ):
         self.total_waves = total_waves
         self.total_objects = total_objects
@@ -493,8 +511,21 @@ class WaveExecutionResult:
         self.skipped = skipped
         self.waves = waves or []
         self.object_results = object_results or []
+        self.prior_completed = prior_completed or []
 
     @property
     def success(self) -> bool:
         """True if all objects across all waves completed."""
         return self.failed == 0 and self.skipped == 0
+
+    @property
+    def is_noop_redeploy(self) -> bool:
+        """
+        True if this run deployed nothing new but has prior
+        completed objects — i.e. a re-run of an already-deployed
+        package where all objects still exist in the database.
+        """
+        return (
+            self.total_objects == 0
+            and len(self.prior_completed) > 0
+        )

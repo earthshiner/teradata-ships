@@ -19,6 +19,8 @@ from td_release_packager.analyser import (
     _strip_noise,
     _extract_body,
     _scan_references,
+    _extract_from_refs,
+    _classify_ref,
     _classify,
     _extract_name,
     _detect_cycles,
@@ -104,21 +106,23 @@ class TestExtractBody:
 
 
 # ---------------------------------------------------------------
-# _scan_references — Qualified reference scanning
+# _scan_references — Structural-anchor reference scanning
 # ---------------------------------------------------------------
 
 class TestScanReferences:
-    """Tests for scanning DB.Object references in DDL body."""
+    """Tests for scanning DB.Object references using structural anchors."""
+
+    # -- Core behaviour (preserved from original suite) ----------
 
     def test_internal_reference_found(self):
-        """Reference to a known database is classified as internal."""
+        """Reference to a known database after FROM is classified as internal."""
         ddl = "SELECT * FROM MyDB.Source WHERE 1=1;"
         known_dbs = {"MYDB"}
         internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
         assert "MyDB.Source" in internal
 
     def test_external_reference_detected(self):
-        """Reference to an unknown database is classified as external."""
+        """Reference to an unknown database after FROM is classified as external."""
         ddl = "SELECT * FROM OtherDB.Source WHERE 1=1;"
         known_dbs = {"MYDB"}
         internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
@@ -132,14 +136,15 @@ class TestScanReferences:
         assert "MyDB.V" not in internal
 
     def test_short_alias_filtered(self):
-        """Table aliases don't appear as internal dependencies."""
+        """Column-qualified aliases (c.Cust_Id) are not detected as references."""
         ddl = "SELECT c.Cust_Id, o.Order_Id FROM MyDB.Customer c, MyDB.Orders o;"
         known_dbs = {"MYDB"}
         internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
-        # Aliases must NOT appear as internal dependencies
-        # (they may appear as external noise — that's acceptable)
+        # Aliases must NOT appear as references
         assert not any(ref.startswith("c.") for ref in internal)
         assert not any(ref.startswith("o.") for ref in internal)
+        assert not any(ref.startswith("c.") for ref in external)
+        assert not any(ref.startswith("o.") for ref in external)
         # But the real references must be found
         assert "MyDB.Customer" in internal
         assert "MyDB.Orders" in internal
@@ -153,11 +158,12 @@ class TestScanReferences:
         assert "DBC.TablesV" not in external
 
     def test_ddl_noise_filtered(self):
-        """DDL noise words (NO.FALLBACK, CHARACTER.SET) are filtered."""
+        """DDL noise words (NO.FALLBACK, CHARACTER.SET) are not detected."""
         ddl = "NO.FALLBACK, CHARACTER.SET DEFAULT"
         known_dbs = {"MYDB"}
         internal, external = _scan_references(ddl, "TABLE", "MyDB.T", known_dbs)
         assert len(internal) == 0
+        assert len(external) == 0
 
     def test_comment_references_excluded(self):
         """References inside comments are not detected."""
@@ -169,6 +175,237 @@ class TestScanReferences:
         internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
         assert "MyDB.OldTable" not in internal
         assert "MyDB.NewTable" in internal
+
+    # -- FROM clause: comma-separated table lists ----------------
+
+    def test_from_comma_separated_qualified(self):
+        """Comma-separated qualified names in FROM clause are all found."""
+        ddl = (
+            "SELECT t1.Id, t2.Name, t3.Val\n"
+            "FROM MyDB.Table1 t1, MyDB.Table2 t2, MyDB.Table3 t3\n"
+            "WHERE t1.Id = t2.Id;\n"
+        )
+        known_dbs = {"MYDB"}
+        internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
+        assert "MyDB.Table1" in internal
+        assert "MyDB.Table2" in internal
+        assert "MyDB.Table3" in internal
+
+    def test_from_with_as_alias(self):
+        """FROM with explicit AS aliases still captures the table name."""
+        ddl = "SELECT * FROM MyDB.Customer AS c WHERE c.Active = 1;"
+        known_dbs = {"MYDB"}
+        internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
+        assert "MyDB.Customer" in internal
+
+    # -- JOIN variants -------------------------------------------
+
+    def test_inner_join(self):
+        """INNER JOIN table reference is detected."""
+        ddl = (
+            "SELECT * FROM MyDB.Orders o\n"
+            "INNER JOIN MyDB.Customer c ON o.Cust_Id = c.Cust_Id;\n"
+        )
+        known_dbs = {"MYDB"}
+        internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
+        assert "MyDB.Orders" in internal
+        assert "MyDB.Customer" in internal
+
+    def test_left_join_without_outer(self):
+        """Plain LEFT JOIN (without OUTER) is detected."""
+        ddl = (
+            "SELECT * FROM MyDB.Orders o\n"
+            "LEFT JOIN MyDB.Returns r ON o.Id = r.Order_Id;\n"
+        )
+        known_dbs = {"MYDB"}
+        internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
+        assert "MyDB.Returns" in internal
+
+    def test_left_outer_join(self):
+        """LEFT OUTER JOIN is detected."""
+        ddl = (
+            "SELECT * FROM MyDB.Orders o\n"
+            "LEFT OUTER JOIN MyDB.Returns r ON o.Id = r.Order_Id;\n"
+        )
+        known_dbs = {"MYDB"}
+        internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
+        assert "MyDB.Returns" in internal
+
+    def test_right_join(self):
+        """RIGHT JOIN is detected."""
+        ddl = (
+            "SELECT * FROM MyDB.T1\n"
+            "RIGHT JOIN MyDB.T2 ON MyDB.T1.Id = MyDB.T2.Id;\n"
+        )
+        known_dbs = {"MYDB"}
+        internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
+        assert "MyDB.T2" in internal
+
+    def test_cross_join(self):
+        """CROSS JOIN is detected."""
+        ddl = (
+            "SELECT * FROM MyDB.Dates d\n"
+            "CROSS JOIN MyDB.Products p;\n"
+        )
+        known_dbs = {"MYDB"}
+        internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
+        assert "MyDB.Dates" in internal
+        assert "MyDB.Products" in internal
+
+    def test_full_outer_join(self):
+        """FULL OUTER JOIN is detected."""
+        ddl = (
+            "SELECT * FROM MyDB.T1\n"
+            "FULL OUTER JOIN MyDB.T2 ON MyDB.T1.Id = MyDB.T2.Id;\n"
+        )
+        known_dbs = {"MYDB"}
+        internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
+        assert "MyDB.T2" in internal
+
+    # -- DML targets ---------------------------------------------
+
+    def test_insert_into(self):
+        """INSERT INTO target table is detected."""
+        ddl = "INSERT INTO MyDB.AuditLog (Id, Msg) VALUES (1, 'test');"
+        known_dbs = {"MYDB"}
+        internal, external = _scan_references(ddl, "PROCEDURE", "MyDB.P", known_dbs)
+        assert "MyDB.AuditLog" in internal
+
+    def test_ins_into_abbreviation(self):
+        """Teradata INS INTO abbreviation is detected."""
+        ddl = "INS INTO MyDB.AuditLog (Id) VALUES (1);"
+        known_dbs = {"MYDB"}
+        internal, external = _scan_references(ddl, "PROCEDURE", "MyDB.P", known_dbs)
+        assert "MyDB.AuditLog" in internal
+
+    def test_update_target(self):
+        """UPDATE target table is detected."""
+        ddl = "UPDATE MyDB.Customer SET Name = 'test' WHERE Id = 1;"
+        known_dbs = {"MYDB"}
+        internal, external = _scan_references(ddl, "PROCEDURE", "MyDB.P", known_dbs)
+        assert "MyDB.Customer" in internal
+
+    def test_upd_abbreviation(self):
+        """Teradata UPD abbreviation is detected."""
+        ddl = "UPD MyDB.Customer SET Name = 'test' WHERE Id = 1;"
+        known_dbs = {"MYDB"}
+        internal, external = _scan_references(ddl, "PROCEDURE", "MyDB.P", known_dbs)
+        assert "MyDB.Customer" in internal
+
+    def test_delete_from_target(self):
+        """DELETE FROM target table is detected."""
+        ddl = "DELETE FROM MyDB.TempData WHERE Created < DATE - 30;"
+        known_dbs = {"MYDB"}
+        internal, external = _scan_references(ddl, "PROCEDURE", "MyDB.P", known_dbs)
+        assert "MyDB.TempData" in internal
+
+    def test_del_abbreviation(self):
+        """Teradata DEL abbreviation (without FROM) is detected."""
+        ddl = "DEL MyDB.TempData WHERE Created < DATE - 30;"
+        known_dbs = {"MYDB"}
+        internal, external = _scan_references(ddl, "PROCEDURE", "MyDB.P", known_dbs)
+        assert "MyDB.TempData" in internal
+
+    def test_merge_into(self):
+        """MERGE INTO target table is detected."""
+        ddl = (
+            "MERGE INTO MyDB.Target t\n"
+            "USING MyDB.Source s ON t.Id = s.Id\n"
+            "WHEN MATCHED THEN UPDATE SET t.Val = s.Val;\n"
+        )
+        known_dbs = {"MYDB"}
+        internal, external = _scan_references(ddl, "PROCEDURE", "MyDB.P", known_dbs)
+        assert "MyDB.Target" in internal
+        assert "MyDB.Source" in internal
+
+    # -- Function-FROM exclusion (EXTRACT, TRIM) -----------------
+
+    def test_extract_year_from_not_matched(self):
+        """EXTRACT(YEAR FROM col) does not produce a false reference."""
+        ddl = (
+            "SELECT EXTRACT(YEAR FROM hire_date)\n"
+            "FROM MyDB.Employee;\n"
+        )
+        known_dbs = {"MYDB"}
+        internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
+        # hire_date is not a table reference
+        assert not any("hire_date" in ref for ref in internal)
+        assert not any("hire_date" in ref for ref in external)
+        # The real table is found
+        assert "MyDB.Employee" in internal
+
+    def test_extract_month_from_not_matched(self):
+        """EXTRACT(MONTH FROM col) does not produce a false reference."""
+        ddl = (
+            "SELECT EXTRACT(MONTH FROM order_date)\n"
+            "FROM MyDB.Orders;\n"
+        )
+        known_dbs = {"MYDB"}
+        internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
+        assert not any("order_date" in ref for ref in internal)
+        assert "MyDB.Orders" in internal
+
+    def test_trim_from_not_matched(self):
+        """TRIM(BOTH ' ' FROM col) does not produce a false reference."""
+        ddl = (
+            "SELECT TRIM(BOTH ' ' FROM cust_name)\n"
+            "FROM MyDB.Customer;\n"
+        )
+        known_dbs = {"MYDB"}
+        internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
+        assert not any("cust_name" in ref for ref in internal)
+        assert "MyDB.Customer" in internal
+
+    # -- Trigger event table ------------------------------------
+
+    def test_trigger_on_table(self):
+        """Trigger event table (AFTER INSERT ON db.table) is detected."""
+        ddl = (
+            "REPLACE TRIGGER MyDB.trg_Audit\n"
+            "AFTER INSERT ON MyDB.Customer\n"
+            "REFERENCING NEW AS NewRow\n"
+            "FOR EACH ROW\n"
+            "(\n"
+            "    INSERT INTO MyDB.AuditLog VALUES (NewRow.Cust_Id);\n"
+            ");\n"
+        )
+        known_dbs = {"MYDB"}
+        internal, external = _scan_references(ddl, "TRIGGER", "MyDB.trg_Audit", known_dbs)
+        assert "MyDB.Customer" in internal
+        assert "MyDB.AuditLog" in internal
+
+    # -- FK REFERENCES ------------------------------------------
+
+    def test_fk_reference(self):
+        """REFERENCES constraint table is detected."""
+        ddl = (
+            "CREATE MULTISET TABLE MyDB.Orders (\n"
+            "     Order_Id INTEGER NOT NULL\n"
+            "    ,Cust_Id INTEGER REFERENCES MyDB.Customer(Cust_Id)\n"
+            ") PRIMARY INDEX (Order_Id);\n"
+        )
+        known_dbs = {"MYDB"}
+        internal, external = _scan_references(ddl, "TABLE", "MyDB.Orders", known_dbs)
+        assert "MyDB.Customer" in internal
+
+    # -- Token support ------------------------------------------
+
+    def test_token_database_reference(self):
+        """{{TOKEN}}.Object references are detected."""
+        ddl = "SELECT * FROM {{STD_DB}}.Customer;"
+        known_dbs = {"{{STD_DB}}"}
+        internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
+        assert "{{STD_DB}}.Customer" in internal
+
+    # -- Delete vs From interaction -----------------------------
+
+    def test_delete_from_not_double_counted(self):
+        """DELETE FROM does not produce both a source and a target."""
+        ddl = "DELETE FROM MyDB.TempData WHERE 1=1;"
+        known_dbs = {"MYDB"}
+        internal, external = _scan_references(ddl, "PROCEDURE", "MyDB.P", known_dbs)
+        # Should appear exactly once (as a target)
+        assert "MyDB.TempData" in internal
 
 
 # ---------------------------------------------------------------

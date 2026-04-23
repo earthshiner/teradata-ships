@@ -32,8 +32,10 @@ Manifest structure:
 import json
 import logging
 import os
+import tempfile
+import threading
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from ddl_deployer.models import DeployState
 
@@ -71,6 +73,7 @@ class DeploymentManifest:
                             loading an existing manifest.
         """
         self.path = os.path.join(package_dir, MANIFEST_FILENAME)
+        self._lock = threading.Lock()
 
         if os.path.exists(self.path):
             self._load()
@@ -102,43 +105,65 @@ class DeploymentManifest:
 
     def _save(self):
         """
-        Persist the manifest to disc.
+        Persist the manifest to disc (thread-safe).
 
-        Uses write-to-temp-then-rename for atomicity. Includes a
-        retry loop for Windows, where antivirus scanners and file
-        indexers can briefly lock newly-created files.
+        Uses a unique temporary file per call (via mkstemp in the
+        same directory) then os.replace for atomicity. This avoids
+        the thread collision where parallel streams all write to
+        the same '.tmp' path — one thread's os.replace consumes
+        another thread's temp file.
+
+        Callers must hold self._lock before calling _save().
         """
-        self.data["updated_at"] = _now_iso()
-        tmp_path = self.path + ".tmp"
-
-        with open(tmp_path, 'w', encoding='utf-8') as f:
-            json.dump(self.data, f, indent=2, ensure_ascii=False)
-            f.flush()
-            os.fsync(f.fileno())
-
-        # Atomic replace — with retry for Windows file locking
         import stat
         import time
 
-        for attempt in range(5):
+        self.data["updated_at"] = _now_iso()
+        manifest_dir = os.path.dirname(self.path)
+
+        # Create a unique temp file in the same directory so
+        # os.replace is a same-filesystem atomic rename.
+        fd, tmp_path = tempfile.mkstemp(
+            suffix=".tmp", prefix=".manifest_",
+            dir=manifest_dir,
+        )
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                json.dump(self.data, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+
+            # Atomic replace — with retry for Windows file locking
+            for attempt in range(5):
+                try:
+                    os.replace(tmp_path, self.path)
+                    break
+                except OSError:
+                    if attempt < 4:
+                        if os.path.exists(self.path):
+                            try:
+                                os.chmod(self.path,
+                                         stat.S_IWRITE | stat.S_IREAD)
+                            except Exception:
+                                pass
+                        time.sleep(0.1 * (attempt + 1))
+                    else:
+                        # Final attempt: remove target then rename
+                        if os.path.exists(self.path):
+                            try:
+                                os.chmod(self.path,
+                                         stat.S_IWRITE | stat.S_IREAD)
+                                os.remove(self.path)
+                            except Exception:
+                                pass
+                        os.rename(tmp_path, self.path)
+        except Exception:
+            # Clean up the unique temp file on any failure
             try:
-                os.replace(tmp_path, self.path)
-                break
-            except PermissionError:
-                if attempt < 4:
-                    # Clear read-only on target if it exists
-                    if os.path.exists(self.path):
-                        try:
-                            os.chmod(self.path, stat.S_IWRITE | stat.S_IREAD)
-                        except Exception:
-                            pass
-                    time.sleep(0.1 * (attempt + 1))
-                else:
-                    # Final attempt: remove target then rename
-                    if os.path.exists(self.path):
-                        os.chmod(self.path, stat.S_IWRITE | stat.S_IREAD)
-                        os.remove(self.path)
-                    os.rename(tmp_path, self.path)
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
         logger.debug("Manifest saved: %s", self.path)
 
@@ -149,6 +174,14 @@ class DeploymentManifest:
         """
         Register an object in the manifest as PENDING.
 
+        If the object already exists in the manifest:
+          - PENDING or FAILED: update metadata (wave, intent, type)
+            to allow re-processing without requiring a manifest reset.
+          - COMPLETED: skip with an informational log. The caller
+            should use prepare_for_redeploy() beforehand if stale
+            COMPLETED entries need clearing.
+          - Other states: warn and skip (in-progress or rolled back).
+
         Args:
             qualified_name: Fully qualified 'Database.Object' identifier.
             ddl_file:       Filename of the DDL file.
@@ -156,31 +189,57 @@ class DeploymentManifest:
             deploy_intent:  DeployIntent value string.
             object_type:    ObjectType value string (TABLE, VIEW, etc.).
         """
-        if qualified_name not in self.data["objects"]:
-            self.data["objects"][qualified_name] = {
-                "ddl_file": ddl_file,
-                "object_type": object_type,
-                "state": DeployState.PENDING.value,
-                "wave_number": wave_number,
-                "deploy_intent": deploy_intent,
-                "prior_existed": None,
-                "rollback_file": None,
-                "backup_table": None,
-                "rows_migrated": 0,
-                "started_at": None,
-                "completed_at": None,
-                "error": None,
-                "blockers": [],
-                "warnings": [],
-            }
-            self._save()
-        else:
-            existing_file = self.data["objects"][qualified_name].get("ddl_file", "?")
-            logger.warning(
-                "Duplicate qualified name '%s' — file '%s' collides "
-                "with existing '%s'. Second file will be skipped.",
-                qualified_name, ddl_file, existing_file,
-            )
+        with self._lock:
+            if qualified_name not in self.data["objects"]:
+                self.data["objects"][qualified_name] = {
+                    "ddl_file": ddl_file,
+                    "object_type": object_type,
+                    "state": DeployState.PENDING.value,
+                    "wave_number": wave_number,
+                    "deploy_intent": deploy_intent,
+                    "prior_existed": None,
+                    "rollback_file": None,
+                    "backup_table": None,
+                    "rows_migrated": 0,
+                    "started_at": None,
+                    "completed_at": None,
+                    "error": None,
+                    "blockers": [],
+                    "warnings": [],
+                }
+                self._save()
+                return
+
+            # Object already in manifest — behaviour depends on state
+            existing = self.data["objects"][qualified_name]
+            existing_state = existing.get("state")
+
+            if existing_state in (DeployState.PENDING.value,
+                                  DeployState.FAILED.value):
+                existing["ddl_file"] = ddl_file
+                existing["wave_number"] = wave_number
+                existing["deploy_intent"] = deploy_intent
+                existing["object_type"] = object_type
+                self._save()
+                logger.debug(
+                    "Re-registered %s object '%s' (file: '%s').",
+                    existing_state, qualified_name, ddl_file,
+                )
+            elif existing_state == DeployState.COMPLETED.value:
+                logger.info(
+                    "Object '%s' already COMPLETED in manifest — "
+                    "skipping. Use prepare_for_redeploy() to reset "
+                    "stale entries.",
+                    qualified_name,
+                )
+            else:
+                existing_file = existing.get("ddl_file", "?")
+                logger.warning(
+                    "Object '%s' exists in state %s (file '%s'). "
+                    "Cannot re-register as PENDING from file '%s'.",
+                    qualified_name, existing_state,
+                    existing_file, ddl_file,
+                )
 
     def update_state(
         self,
@@ -197,7 +256,8 @@ class DeploymentManifest:
         """
         Transition a table to a new deployment state.
 
-        Updates the manifest record and persists to disc immediately.
+        Thread-safe: acquires the manifest lock to protect both
+        the in-memory dict mutation and the disc write.
 
         Args:
             qualified_name: Fully qualified 'Database.Table' identifier.
@@ -208,39 +268,41 @@ class DeploymentManifest:
             blockers:       Compatibility blockers (for SKIPPED state).
             warnings:       Non-fatal warnings.
         """
-        record = self.data["objects"].get(qualified_name)
-        if record is None:
-            raise KeyError(
-                f"Table '{qualified_name}' is not registered in the manifest."
-            )
+        with self._lock:
+            record = self.data["objects"].get(qualified_name)
+            if record is None:
+                raise KeyError(
+                    f"Table '{qualified_name}' is not registered "
+                    f"in the manifest."
+                )
 
-        record["state"] = state.value
+            record["state"] = state.value
 
-        # Update optional fields only if provided
-        if backup_table is not None:
-            record["backup_table"] = backup_table
-        if rows_migrated is not None:
-            record["rows_migrated"] = rows_migrated
-        if error is not None:
-            record["error"] = error
-        if blockers is not None:
-            record["blockers"] = blockers
-        if warnings is not None:
-            record["warnings"] = warnings
-        if prior_existed is not None:
-            record["prior_existed"] = prior_existed
-        if rollback_file is not None:
-            record["rollback_file"] = rollback_file
+            # Update optional fields only if provided
+            if backup_table is not None:
+                record["backup_table"] = backup_table
+            if rows_migrated is not None:
+                record["rows_migrated"] = rows_migrated
+            if error is not None:
+                record["error"] = error
+            if blockers is not None:
+                record["blockers"] = blockers
+            if warnings is not None:
+                record["warnings"] = warnings
+            if prior_existed is not None:
+                record["prior_existed"] = prior_existed
+            if rollback_file is not None:
+                record["rollback_file"] = rollback_file
 
-        # Timestamp management
-        if record["started_at"] is None:
-            record["started_at"] = _now_iso()
+            # Timestamp management
+            if record["started_at"] is None:
+                record["started_at"] = _now_iso()
 
-        if state in (DeployState.COMPLETED, DeployState.SKIPPED,
-                     DeployState.FAILED, DeployState.ROLLED_BACK):
-            record["completed_at"] = _now_iso()
+            if state in (DeployState.COMPLETED, DeployState.SKIPPED,
+                         DeployState.FAILED, DeployState.ROLLED_BACK):
+                record["completed_at"] = _now_iso()
 
-        self._save()
+            self._save()
 
         logger.info(
             "State transition: %s → %s",
@@ -304,6 +366,134 @@ class DeploymentManifest:
             if record["state"] in resumable_states
         ]
 
+    def reset_to_pending(self, qualified_name: str):
+        """
+        Reset a single object back to PENDING for re-deployment.
+
+        Clears all deployment artefacts (timestamps, errors, backup
+        references) so the object is treated as a fresh deployment
+        target. The ddl_file, wave_number, deploy_intent, and
+        object_type are preserved.
+
+        Args:
+            qualified_name: Fully qualified 'Database.Object' identifier.
+
+        Raises:
+            KeyError: If the object is not registered in the manifest.
+        """
+        with self._lock:
+            record = self.data["objects"].get(qualified_name)
+            if record is None:
+                raise KeyError(
+                    f"Object '{qualified_name}' is not registered "
+                    f"in the manifest."
+                )
+
+            previous_state = record["state"]
+            record["state"] = DeployState.PENDING.value
+            record["prior_existed"] = None
+            record["rollback_file"] = None
+            record["backup_table"] = None
+            record["rows_migrated"] = 0
+            record["started_at"] = None
+            record["completed_at"] = None
+            record["error"] = None
+            record["blockers"] = []
+            record["warnings"] = []
+
+            self._save()
+
+        logger.info(
+            "Reset '%s' from %s → PENDING for re-deployment.",
+            qualified_name, previous_state,
+        )
+
+    def prepare_for_redeploy(
+        self,
+        verify_exists_fn: Callable[[Any, str], bool],
+        cursor: Any,
+    ) -> List[str]:
+        """
+        Verify COMPLETED objects against the database and reset
+        any that no longer exist.
+
+        This is the primary defence against the "manifest says
+        COMPLETED but the database was dropped" scenario. Call
+        this after loading a manifest and before registering
+        objects for a new deployment run.
+
+        Args:
+            verify_exists_fn: Function(cursor, qualified_name) → bool.
+                              Returns True if the object exists in the
+                              database, False otherwise.
+            cursor:           Database cursor for existence checks.
+
+        Returns:
+            List of qualified names that were reset to PENDING.
+        """
+        completed = self.get_tables_in_state(DeployState.COMPLETED)
+        if not completed:
+            return []
+
+        logger.info(
+            "Verifying %d COMPLETED objects against database...",
+            len(completed),
+        )
+
+        reset_names = []
+        for qname in completed:
+            try:
+                exists = verify_exists_fn(cursor, qname)
+            except Exception as e:
+                logger.warning(
+                    "Existence check failed for '%s': %s — "
+                    "leaving as COMPLETED (safe default).",
+                    qname, e,
+                )
+                continue
+
+            if not exists:
+                self.reset_to_pending(qname)
+                reset_names.append(qname)
+                logger.warning(
+                    "Object '%s' marked COMPLETED in manifest but "
+                    "not found in database — reset to PENDING.",
+                    qname,
+                )
+
+        if reset_names:
+            logger.info(
+                "Reset %d stale COMPLETED objects to PENDING.",
+                len(reset_names),
+            )
+        else:
+            logger.info(
+                "All %d COMPLETED objects verified — still exist "
+                "in database.", len(completed),
+            )
+
+        return reset_names
+
+    def get_prior_completed(self) -> List[Dict[str, Any]]:
+        """
+        Return manifest records for objects that were COMPLETED
+        in a prior run and not reset.
+
+        Used by the report to distinguish 'nothing new to deploy'
+        (all objects still validly COMPLETED) from 'nothing was
+        processed' (a genuine failure).
+
+        Returns:
+            List of (qualified_name, record) tuples for objects
+            in COMPLETED state that have a completed_at timestamp.
+        """
+        return [
+            {"qualified_name": name, **record}
+            for name, record in self.data["objects"].items()
+            if (record["state"] == DeployState.COMPLETED.value
+                and record.get("completed_at") is not None)
+        ]
+
     def get_rollback_candidates(self) -> list:
         """
         List tables that can be rolled back.
@@ -337,8 +527,9 @@ class DeploymentManifest:
             status: One of 'IN_PROGRESS', 'COMPLETED', 'FAILED',
                     'ROLLED_BACK', 'PARTIALLY_COMPLETED'.
         """
-        self.data["status"] = status
-        self._save()
+        with self._lock:
+            self.data["status"] = status
+            self._save()
 
     def summary(self) -> Dict[str, int]:
         """

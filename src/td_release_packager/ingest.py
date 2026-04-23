@@ -49,7 +49,7 @@ _TYPE_TO_EXT = {
     "USER": ".usr",
     "GRANT": ".dcl",
     "REVOKE": ".dcl",
-    "JAR": ".jcl",
+    "JAR": ".jar",
     "SCRIPT_TABLE_OPERATOR": ".sto",
     # System-scoped objects
     "MAP": ".map",
@@ -174,6 +174,8 @@ class IngestResult:
     total_files: int = 0
     classified: int = 0
     unclassified: int = 0
+    overwritten: int = 0
+    skipped_existing: int = 0
     token_candidates: Dict[str, List[str]] = field(default_factory=dict)
     files_placed: List[Tuple[str, str, str]] = field(default_factory=list)
     multiset_injected: int = 0
@@ -188,6 +190,7 @@ def ingest_directory(
     detect_tokens: bool = True,
     apply_tokens: Optional[Dict[str, str]] = None,
     file_patterns: List[str] = None,
+    force: bool = False,
 ) -> IngestResult:
     """
     Ingest raw DDL files from a source directory into a project.
@@ -207,6 +210,11 @@ def ingest_directory(
                         during ingest (e.g. {'DEV01_STD': '{{STD_DATABASE}}'}).
         file_patterns:  Glob patterns to scan (default: common SQL
                         extensions). Pass None to scan all files.
+        force:          If True, overwrite existing files in the
+                        payload.  Warns if overwriting a tokenised
+                        file with non-tokenised content (i.e. a
+                        previous harvest applied a token-map but
+                        this one did not).
 
     Returns:
         IngestResult with per-file outcomes and token candidates.
@@ -303,13 +311,40 @@ def ingest_directory(
 
             dest_path = os.path.join(dest_dir, dest_name)
 
-            # -- Handle duplicates --
+            # -- Handle existing files --------------------------------
             if os.path.exists(dest_path):
-                result.warnings.append(
-                    f"Duplicate: {dest_name} already exists — "
-                    f"source '{os.path.basename(src_path)}' skipped."
-                )
-                continue
+                if not force:
+                    # Default: skip, warn, count
+                    result.skipped_existing += 1
+                    result.warnings.append(
+                        f"Exists: {dest_name} — skipped "
+                        f"(source: {os.path.basename(src_path)}). "
+                        f"Use --force to overwrite."
+                    )
+                    continue
+                else:
+                    # Force mode: overwrite, but check for
+                    # tokenisation regression first.
+                    existing_content = _read_file(dest_path)
+                    if existing_content is not None:
+                        existing_has_tokens = bool(
+                            _TOKEN_RE.search(existing_content)
+                        )
+                        new_has_tokens = bool(
+                            _TOKEN_RE.search(content)
+                        )
+                        if existing_has_tokens and not new_has_tokens:
+                            result.warnings.append(
+                                f"Token regression: {dest_name} "
+                                f"contains {{{{TOKENS}}}} but the "
+                                f"replacement does not. Apply "
+                                f"--token-map to preserve "
+                                f"tokenisation."
+                            )
+                    result.overwritten += 1
+                    logger.info(
+                        "Overwriting: %s (--force)", dest_name,
+                    )
 
             # -- Write normalised content --
             with open(dest_path, 'w', encoding='utf-8') as f:
@@ -338,8 +373,10 @@ def ingest_directory(
 
     logger.info(
         "Ingest complete: %d classified, %d unclassified, "
+        "%d overwritten, %d skipped (existing), "
         "%d MULTISET injected",
         result.classified, result.unclassified,
+        result.overwritten, result.skipped_existing,
         result.multiset_injected,
     )
 
@@ -366,7 +403,7 @@ def _discover_files(source_dir: str, file_patterns: List[str] = None) -> List[st
             '.sql', '.tbl', '.viw', '.spl', '.mcr', '.fnc',
             '.trg', '.jix', '.idx', '.db', '.ddl', '.dcl', '.dml',
             '.map', '.rol', '.prf', '.auth', '.fsvr',
-            '.sto', '.jcl', '.usr',
+            '.sto', '.jar', '.usr',
             '.c', '.h',
         ]
 

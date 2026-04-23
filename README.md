@@ -29,11 +29,19 @@ python -m td_release_packager harvest \
     --project ./projects/MyProject \
     --token-map config/token_map.conf
 
+# Re-harvest with --force to overwrite existing files
+python -m td_release_packager harvest \
+    --source /raw/ddl/ \
+    --project ./projects/MyProject \
+    --token-map config/token_map.conf \
+    --force
+
 # Inspect against the Coding Discipline
 python -m td_release_packager inspect --source ./projects/MyProject
 
-# Analyse dependencies
-python -m td_release_packager analyze --source ./projects/MyProject
+# Analyse dependencies and generate graphs
+python -m td_release_packager analyze --source ./projects/MyProject \
+    --graph --formats dot,mermaid,json,csv,openlineage
 
 # Package for an environment
 python -m td_release_packager package \
@@ -42,9 +50,10 @@ python -m td_release_packager package \
     --properties config/properties/DEV.properties \
     --output releases/
 
-# Ship (deploy)
-python deploy.py --dry-run
-python deploy.py --host myserver --user dbc --streams 4
+# Ship (deploy) — three modes, run in order
+python deploy.py --dry-run                                          # 1. No database — validates pipeline, parsing, wave ordering
+python deploy.py --host myserver --user dbc --streams 4 --explain   # 2. Connects — EXPLAIN validates SQL against live catalogue
+python deploy.py --host myserver --user dbc --streams 4             # 3. Connects — executes DDL for real
 ```
 
 ## Architecture
@@ -60,11 +69,12 @@ SHIPS consists of two Python packages:
 
 ```
 [S] Scaffold  →  Create project structure, properties files, inspect.conf
-[H] Harvest   →  Import raw DDL, classify, tokenise, normalise
-    Analyse   →  Build dependency graph, generate wave ordering
+[H] Harvest   →  Import raw DDL, classify, tokenise, normalise (--force to overwrite)
+    Analyse   →  Build dependency graph, generate wave ordering, export graphs
 [I] Inspect   →  Lint against configurable Coding Discipline rules
 [P] Package   →  Resolve tokens, resolve filenames, archive
-[S] Ship      →  Pre-flight checks, wave-parallel deployment, rollback
+[S] Ship      →  Pre-flight checks, privilege verification, wave-parallel deployment,
+                  rollback, report
 ```
 
 ### Deployment Scope
@@ -91,6 +101,70 @@ The DDL verb IS the deployment intent. SHIPS does not second-guess the developer
 | `CREATE DATABASE` | DIRECT_EXECUTE | Execute as-is |
 | `CREATE MAP` | SKIP_IF_EXISTS | Check existence → skip if present |
 
+### Deployment Modes
+
+The deployer supports three modes, designed to be run in sequence. Each mode catches a different class of problem, and each produces an HTML report.
+
+**Dry-run** (`--dry-run`) runs the entire deployment pipeline with no database connection. It parses every DDL file, classifies objects, determines deploy intent and strategy, builds wave ordering, and runs preflight validation — then produces a report showing exactly what *would* happen. No SQL is sent to Teradata. Use this as a first pass after harvest or package to answer: *"is this package well-formed?"*
+
+**Explain** (`--explain`) connects to the database and sends each DDL statement wrapped in Teradata's `EXPLAIN`. The database parses the SQL against the live catalogue — validating syntax, resolving object names, checking column types, and verifying permissions — without executing anything or modifying the database. Use this as a pre-deployment gate to answer: *"will this SQL actually work when I run it for real?"*
+
+**Deploy** (default, no flag) connects and executes. Wave-parallel across multiple streams, with manifest restartability, rollback capture, and a full HTML report.
+
+| | Dry-run | Explain | Deploy |
+|---|---|---|---|
+| Database connection | No | Yes | Yes |
+| Validates | Pipeline, parsing, classification, wave ordering, preflight rules | SQL syntax, object resolution, permissions, catalogue state | Everything — then executes |
+| Catches | Wrong extensions, missing tokens, duplicate objects, wave cycles | Permission errors, missing parent objects, syntax errors, type mismatches | Runtime errors (locks, space, concurrency) |
+| Modifies database | No | No | Yes |
+| Typical use | After harvest/package | Before production deploy | Production deploy |
+
+```bash
+# Recommended workflow
+python deploy.py --dry-run                                          # Pipeline validation
+python deploy.py --host myserver --user dbc --streams 4 --explain   # Database validation
+python deploy.py --host myserver --user dbc --streams 4             # Execute
+```
+
+### Dependency Analysis
+
+The analyser uses 19 structural-anchor regexes to detect object references only in SQL positions where object names are expected, eliminating false positives from column aliases and DDL noise.
+
+| Category | Anchors |
+|---|---|
+| Sources | FROM, JOIN (all variants) |
+| Targets | INSERT INTO, UPDATE, DELETE, MERGE INTO, USING |
+| DDL refs | Trigger event ON, FK REFERENCES, CREATE INDEX ON, RENAME TABLE, DROP object, COMMENT ON |
+| SPL refs | CALL (procedure), EXEC/EXECUTE (macro), COLLECT STATISTICS ON |
+| Access | LOCKING ... FOR |
+
+Teradata SQL abbreviations (SEL, INS, UPD, DEL) are recognised. Dependencies feed the topological sort which generates `_waves.txt` for parallel deployment.
+
+### Graph Export
+
+Five portable export formats for the dependency graph:
+
+| Format | Extension | Consumers |
+|---|---|---|
+| DOT | `.gv` | Graphviz, Gephi, yEd, vis.js |
+| Mermaid | `.mmd` | GitHub markdown, Confluence, VS Code |
+| JSON | `.json` | D3, vis.js, cytoscape.js, Graph Discipline |
+| CSV | `.csv` | Excel, Neo4j, Gephi, pandas |
+| OpenLineage | `.openlineage.json` | Marquez, DataHub, Atlan, GCP Lineage |
+
+Edge direction in all formats: deployment flow (dependency → dependent). `TABLE → VIEW`, not `VIEW → TABLE`.
+
+### Deployment Resilience
+
+The deployer is designed for production reliability:
+
+- **Manifest restartability** — state persisted after every transition; resume from exact failure point.
+- **Manifest verification** — COMPLETED objects verified against the live database before re-deployment. Stale entries (e.g. after a DROP DATABASE) are automatically reset to PENDING.
+- **Thread-safe manifest I/O** — unique temporary files per write with `threading.Lock` on all mutating operations. Safe under 6+ parallel streams on Windows and Linux.
+- **DCL serialisation** — GRANT, DATABASE, USER, ROLE, and PROFILE operations are serialised to prevent Teradata deadlocks (Error 2631) on system catalogue tables. DDL remains fully parallel.
+- **Transient error retry** — Error 3598 (concurrent change conflict) and Error 2631 (deadlock) are retried with exponential backoff as a safety net for external contention.
+- **Privilege pre-flight** — verifies deployer user has CREATE + DROP rights on all target databases. Generates a prerequisite GRANT script with compound keywords (TABLE, VIEW, MACRO, PROCEDURE, FUNCTION, TRIGGER) if any are missing.
+
 ### Supported Object Types
 
 | Type | Extension | Scope |
@@ -107,7 +181,7 @@ The DDL verb IS the deployment intent. SHIPS does not second-guess the developer
 | Database | `.db` | Environment |
 | User | `.usr` | Environment |
 | Grant / Revoke | `.dcl` | Environment |
-| JAR | `.jcl` | Environment |
+| JAR | `.jar` | Environment |
 | Script Table Operator | `.sto` | Environment |
 | Map | `.map` | System |
 | Role | `.rol` | System |
@@ -136,9 +210,9 @@ See [tests/README.md](src/tests/README.md) for the full test guide including arg
 ```
 teradata-deployment-agent/
     src/
-        td_release_packager/    ← Packager pipeline (28 modules)
-        ddl_deployer/           ← Deployment engine (14 modules)
-        tests/                  ← Test suite (368 tests)
+        td_release_packager/    ← Packager pipeline
+        ddl_deployer/           ← Deployment engine
+        tests/                  ← Test suite
     docs/
         INSTALLATION.md
         USER_GUIDE.md
