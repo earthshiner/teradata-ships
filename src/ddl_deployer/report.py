@@ -248,12 +248,25 @@ def _html_action_items(result):
                 f'</div>'
             )
         elif obj.state == DeployState.SKIPPED:
-            detail = "; ".join(obj.blockers) if obj.blockers else "Incompatible schema"
+            # Build detail from the actual result, not a hardcoded template.
+            # Blockers (schema incompatibility) take priority if present,
+            # then the deployer's message, then a generic fallback.
+            if obj.blockers:
+                detail = "; ".join(obj.blockers)
+            elif obj.message:
+                detail = obj.message
+            else:
+                detail = "Skipped (no further detail)"
+
+            # Backup line only for objects that actually have one
+            backup_note = ""
+            if obj.backup_table:
+                backup_note = f" Backup preserved as {obj.backup_table}."
+
             items.append(
                 f'<div class="action-item warn">'
                 f'<strong>SKIPPED:</strong> {_display_name(obj)} '
-                f'({obj.object_type.value}) — {detail}. '
-                f'Backup preserved as {obj.backup_table}.'
+                f'({obj.object_type.value}) — {detail}.{backup_note}'
                 f'</div>'
             )
 
