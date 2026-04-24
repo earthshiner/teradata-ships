@@ -31,6 +31,82 @@ logger = logging.getLogger(__name__)
 # Allows alphanumeric, underscores, and hyphens in names.
 _TOKEN_RE = re.compile(r'\{\{([A-Za-z_][A-Za-z0-9_-]*)\}\}')
 
+# Characters that should never appear in a resolved token value
+# (Teradata identifiers: alphanumeric, underscores, and {{}} for
+# unresolved internal references only).
+_INVALID_VALUE_CHARS = re.compile(r'[=;()\[\]{}]')
+
+
+def _validate_property_values(
+    tokens: Dict[str, str],
+    properties_path: str = "",
+    phase: str = "raw",
+) -> List[str]:
+    """
+    Validate property values for common errors.
+
+    Checks performed:
+      - Value contains '=' — almost certainly two properties
+        lines merged onto one (e.g. VIW_DATABASE=STD_DATABASE=...).
+      - Value contains characters invalid in Teradata identifiers
+        (semicolons, parentheses, brackets).
+      - Key contains lowercase — convention is UPPERCASE_WITH_UNDERSCORES.
+
+    Args:
+        tokens:          Dictionary of token_name → value.
+        properties_path: Path to properties file (for error messages).
+        phase:           'raw' (before resolution) or 'resolved'.
+
+    Returns:
+        List of error messages. Empty if all valid.
+    """
+    errors = []
+
+    for name, value in tokens.items():
+        # -- Merged lines: value contains '=' --
+        # A valid token value is a database name, object name, or
+        # environment prefix — none of which contain '='. If the
+        # value has '=', someone likely merged two lines:
+        #   VIW_DATABASE=STD_DATABASE={{ENV_PREFIX}}_SHIPS_VIW
+        if '=' in value:
+            # Extract the suspicious prefix before the '='
+            prefix = value.split('=', 1)[0].strip()
+            errors.append(
+                f"Token '{name}': value contains '=' — likely "
+                f"two properties lines merged. "
+                f"Found '{prefix}=' in value '{value}'. "
+                f"Check {properties_path} for a missing line break."
+            )
+
+        # -- Invalid characters in resolved values --
+        if phase == "resolved":
+            invalid = _INVALID_VALUE_CHARS.findall(value)
+            if invalid:
+                chars = ", ".join(repr(c) for c in set(invalid))
+                errors.append(
+                    f"Token '{name}': resolved value contains "
+                    f"invalid characters ({chars}): '{value}'"
+                )
+
+            # Unresolved {{TOKEN}} references after resolution
+            remaining = _TOKEN_RE.findall(value)
+            if remaining:
+                refs = ", ".join(f"{{{{{r}}}}}" for r in remaining)
+                errors.append(
+                    f"Token '{name}': value still contains "
+                    f"unresolved references after resolution: {refs}"
+                )
+
+    # -- Key naming convention (warning, not error) --
+    for name in tokens:
+        if name != name.upper():
+            logger.warning(
+                "Token '%s': convention is UPPERCASE_WITH_UNDERSCORES.",
+                name,
+            )
+
+    return errors
+
 
 def read_properties(properties_path: str) -> Dict[str, str]:
     """
@@ -101,8 +177,34 @@ def read_properties(properties_path: str) -> Dict[str, str]:
         len(tokens), properties_path
     )
 
+    # Validate raw values (before resolution) — catches merged lines
+    raw_errors = _validate_property_values(
+        tokens, properties_path, phase="raw",
+    )
+    if raw_errors:
+        error_list = "\n  ".join(raw_errors)
+        raise ValueError(
+            f"Properties file has {len(raw_errors)} error(s):\n"
+            f"  {error_list}\n\n"
+            f"File: {properties_path}"
+        )
+
     # Resolve internal references: {{TOKEN}} within values
     tokens = _resolve_internal_references(tokens)
+
+    # Validate resolved values — catches invalid characters
+    # and unresolved references
+    resolved_errors = _validate_property_values(
+        tokens, properties_path, phase="resolved",
+    )
+    if resolved_errors:
+        error_list = "\n  ".join(resolved_errors)
+        raise ValueError(
+            f"Properties file has {len(resolved_errors)} error(s) "
+            f"after token resolution:\n"
+            f"  {error_list}\n\n"
+            f"File: {properties_path}"
+        )
 
     return tokens
 
