@@ -23,6 +23,7 @@ Package naming:
 """
 
 import glob
+import hashlib
 import json
 import logging
 import os
@@ -244,7 +245,12 @@ def build_package(config: BuildConfig) -> Tuple[str, BuildManifest]:
 
     # -- Phase 12: Archive --
     archive_path = _archive_package(pkg_dir, config.archive_format)
+
+    # -- Phase 13: Generate SHA-256 checksum sidecar --
+    checksum_path = _generate_checksum(archive_path)
+
     logger.info("Package built: %s", archive_path)
+    logger.info("Checksum:      %s", checksum_path)
 
     return (archive_path, manifest)
 
@@ -1122,3 +1128,47 @@ def _archive_package(pkg_dir: str, archive_format: str) -> str:
     logger.info("Archived and cleaned up: %s", archive_path)
 
     return archive_path
+
+
+def _generate_checksum(archive_path: str) -> str:
+    """
+    Generate a SHA-256 checksum sidecar file for the package archive.
+
+    Writes a `.sha256` file alongside the archive in the standard
+    format used by sha256sum(1):
+
+        <hex_digest>  <filename>
+
+    The DBA verifies the package with a single command:
+
+        sha256sum -c DEV_SHIPS_TEST_BUILD_0008.zip.sha256
+        # DEV_SHIPS_TEST_BUILD_0008.zip: OK
+
+    Args:
+        archive_path: Path to the .zip or .tar.gz archive.
+
+    Returns:
+        Path to the generated .sha256 file.
+    """
+    sha256 = hashlib.sha256()
+
+    with open(archive_path, 'rb') as f:
+        while True:
+            chunk = f.read(65536)  # 64 KB chunks
+            if not chunk:
+                break
+            sha256.update(chunk)
+
+    digest = sha256.hexdigest()
+    archive_name = os.path.basename(archive_path)
+
+    # Standard sha256sum format: two-space separator, filename
+    checksum_path = archive_path + ".sha256"
+    with open(checksum_path, 'w', encoding='utf-8') as f:
+        f.write(f"{digest}  {archive_name}\n")
+
+    logger.info(
+        "SHA-256: %s  %s", digest[:16] + "...", archive_name,
+    )
+
+    return checksum_path
