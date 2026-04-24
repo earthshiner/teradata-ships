@@ -353,6 +353,7 @@ def deploy_package(
         dry_run=dry_run,
         num_streams=num_streams,
         wave_summaries=wave_summaries,
+        prior_completed=manifest.get_prior_completed(),
     )
 
     if dry_run:
@@ -628,6 +629,7 @@ def resume_package(
         rolled_back=summary.get(DeployState.ROLLED_BACK.value, 0),
         results=results,
         dry_run=dry_run,
+        prior_completed=manifest.get_prior_completed(),
     )
 
     if pkg_result.success:
@@ -820,7 +822,7 @@ def explain_package(
                 ext = os.path.splitext(f)[1].lower()
                 if ext in ('.tbl', '.viw', '.spl', '.mcr', '.fnc', '.trg',
                             '.jix', '.idx', '.dcl', '.db', '.rol', '.prf',
-                            '.map', '.auth', '.fsvr', '.sto', '.jar',
+                            '.map', '.auth', '.fsvr', '.sto', '.jcl',
                             '.dml', '.sql'):
                     ddl_files.append(os.path.join(root, f))
 

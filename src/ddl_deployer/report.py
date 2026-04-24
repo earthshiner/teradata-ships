@@ -461,6 +461,18 @@ def _html_object_results(result):
         )
 
     if not rows:
+        # Check for noop re-run — all objects were completed in a prior
+        # deployment and verified as still existing in the database.
+        prior = getattr(result, 'prior_completed', [])
+        if prior:
+            prior_count = len(prior)
+            return (
+                f'<h2>Object Results</h2>'
+                f'<div class="no-actions">'
+                f'All {prior_count} object{"s" if prior_count != 1 else ""} '
+                f'were deployed in a previous run and verified as still '
+                f'present in the database. Nothing new to deploy.</div>'
+            )
         return '<h2>Object Results</h2><p style="color:#6C757D">No objects were processed.</p>'
 
     wave_header = '<th style="width:50px">Wave</th>' if has_waves else ''
