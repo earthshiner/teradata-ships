@@ -374,6 +374,18 @@ def _copy_payload(
                 # Resolve filename from the resolved DDL content
                 resolved_filename = _resolve_filename(filename, resolved_content)
 
+                # If the filename still contains tokens (e.g.
+                # {{SEM_DATABASE}}.db or GRANT files like
+                # ships_test_reader_on_{{SEM_DATABASE}}.dcl),
+                # resolve them using the same token values.
+                # This covers DATABASE, USER, PROFILE, GRANT, and
+                # any other types not handled by the qualified-name
+                # regex in _resolve_filename().
+                if '{{' in resolved_filename:
+                    resolved_filename, _ = substitute_tokens(
+                        resolved_filename, token_values,
+                    )
+
                 # Track the mapping (for _waves.txt transformation)
                 if resolved_filename != filename:
                     filename_map[filename] = resolved_filename
