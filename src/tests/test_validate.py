@@ -4,7 +4,7 @@ test_validate.py — Tests for the SHIPS inspector / linter (validate module).
 Covers:
     - Database qualifier check
     - SET/MULTISET check for tables
-    - Deploy intent check (CREATE vs REPLACE) and --strict mode
+    - Deploy intent check (REPLACE prohibited — CREATE required)
     - One-object-per-file check
     - Eponymous file naming check
     - File extension check
@@ -105,7 +105,7 @@ class TestCheckMultiset:
 
     def test_non_table_not_checked(self):
         """Views and other types are not checked for SET/MULTISET."""
-        issues = _check_multiset("test.viw", "REPLACE VIEW MyDB.V AS SELECT 1;")
+        issues = _check_multiset("test.viw", "CREATE VIEW MyDB.V AS SELECT 1;")
         assert issues == []
 
 
@@ -114,93 +114,123 @@ class TestCheckMultiset:
 # ---------------------------------------------------------------
 
 class TestCheckDeployIntent:
-    """Tests for idempotent deployment intent detection."""
+    """Tests for CREATE-not-REPLACE enforcement."""
 
-    def test_replace_view_passes(self):
-        """REPLACE VIEW passes in both normal and strict mode."""
+    def test_replace_view_rejected(self):
+        """REPLACE VIEW produces ERROR."""
         ddl = "REPLACE VIEW MyDB.V AS SELECT 1;"
-        assert _check_deploy_intent("v.viw", ddl, strict=False) == []
-        assert _check_deploy_intent("v.viw", ddl, strict=True) == []
-
-    def test_create_view_warning(self):
-        """CREATE VIEW produces WARNING (config/strict controls final severity)."""
-        ddl = "CREATE VIEW MyDB.V AS SELECT 1;"
         issues = _check_deploy_intent("v.viw", ddl)
         assert len(issues) == 1
-        assert issues[0].severity == "WARNING"
+        assert issues[0].rule == "deploy_intent"
+        assert issues[0].severity == "ERROR"
+        assert "DROP-and-CREATE" in issues[0].message
 
-    def test_create_view_error_via_strict(self):
-        """CREATE VIEW becomes ERROR when strict mode is applied via config."""
-        ddl_dir = self._write_ddl_file(
-            "CREATE VIEW {{DB}}.V AS SELECT 1;", ".viw"
-        )
-        result = validate_directory(str(ddl_dir), strict=True)
-        deploy_issues = [i for i in result.issues if i.rule == "deploy_intent"]
-        assert len(deploy_issues) == 1
-        assert deploy_issues[0].severity == "ERROR"
+    def test_create_view_passes(self):
+        """CREATE VIEW produces no deploy_intent issue."""
+        ddl = "CREATE VIEW MyDB.V AS SELECT 1;"
+        assert _check_deploy_intent("v.viw", ddl) == []
 
-    @staticmethod
-    def _write_ddl_file(content, ext, _counter=[0]):
-        """Helper to create a temp DDL file for integration tests."""
-        import tempfile
-        _counter[0] += 1
-        d = tempfile.mkdtemp()
-        ddl_dir = os.path.join(d, "DDL", "views")
-        os.makedirs(ddl_dir, exist_ok=True)
-        fpath = os.path.join(ddl_dir, f"test_{_counter[0]}{ext}")
-        with open(fpath, 'w', encoding='utf-8') as f:
-            f.write(content)
-        return d
-
-    def test_replace_procedure_passes(self):
-        """REPLACE PROCEDURE passes."""
+    def test_replace_procedure_rejected(self):
+        """REPLACE PROCEDURE produces ERROR."""
         ddl = "REPLACE PROCEDURE MyDB.sp_X() BEGIN END;"
-        assert _check_deploy_intent("x.spl", ddl, strict=True) == []
-
-    def test_create_procedure_warning(self):
-        """CREATE PROCEDURE produces WARNING (strict/config controls final severity)."""
-        ddl = "CREATE PROCEDURE MyDB.sp_X() BEGIN END;"
         issues = _check_deploy_intent("x.spl", ddl)
         assert len(issues) == 1
-        assert issues[0].severity == "WARNING"
+        assert issues[0].severity == "ERROR"
 
-    def test_replace_trigger_passes(self):
-        """REPLACE TRIGGER passes — the bug fix that was added."""
+    def test_create_procedure_passes(self):
+        """CREATE PROCEDURE produces no deploy_intent issue."""
+        ddl = "CREATE PROCEDURE MyDB.sp_X() BEGIN END;"
+        assert _check_deploy_intent("x.spl", ddl) == []
+
+    def test_replace_trigger_rejected(self):
+        """REPLACE TRIGGER produces ERROR."""
         ddl = "REPLACE TRIGGER MyDB.trg_X AFTER INSERT ON MyDB.T FOR EACH ROW (SELECT 1;);"
-        assert _check_deploy_intent("x.trg", ddl, strict=True) == []
-
-    def test_create_trigger_warning(self):
-        """CREATE TRIGGER produces WARNING (strict/config controls final severity)."""
-        ddl = "CREATE TRIGGER MyDB.trg_X AFTER INSERT ON MyDB.T FOR EACH ROW (SELECT 1;);"
         issues = _check_deploy_intent("x.trg", ddl)
         assert len(issues) == 1
-        assert issues[0].severity == "WARNING"
+        assert issues[0].severity == "ERROR"
 
-    def test_replace_function_passes(self):
-        """REPLACE FUNCTION passes."""
+    def test_create_trigger_passes(self):
+        """CREATE TRIGGER produces no deploy_intent issue."""
+        ddl = "CREATE TRIGGER MyDB.trg_X AFTER INSERT ON MyDB.T FOR EACH ROW (SELECT 1;);"
+        assert _check_deploy_intent("x.trg", ddl) == []
+
+    def test_replace_function_rejected(self):
+        """REPLACE FUNCTION produces ERROR."""
         ddl = "REPLACE FUNCTION MyDB.fn_X(p INT) RETURNS INT RETURN p;"
-        assert _check_deploy_intent("x.fnc", ddl, strict=True) == []
+        issues = _check_deploy_intent("x.fnc", ddl)
+        assert len(issues) == 1
+        assert issues[0].severity == "ERROR"
 
-    def test_replace_specific_function_passes(self):
-        """REPLACE SPECIFIC FUNCTION passes."""
+    def test_create_function_passes(self):
+        """CREATE FUNCTION produces no deploy_intent issue."""
+        ddl = "CREATE FUNCTION MyDB.fn_X(p INT) RETURNS INT RETURN p;"
+        assert _check_deploy_intent("x.fnc", ddl) == []
+
+    def test_replace_specific_function_rejected(self):
+        """REPLACE SPECIFIC FUNCTION produces ERROR."""
         ddl = "REPLACE SPECIFIC FUNCTION MyDB.fn_X_Int RETURNS INT RETURN 1;"
-        assert _check_deploy_intent("x.fnc", ddl, strict=True) == []
+        issues = _check_deploy_intent("x.fnc", ddl)
+        assert len(issues) == 1
+        assert issues[0].severity == "ERROR"
 
-    def test_create_join_index_info(self):
-        """CREATE JOIN INDEX produces INFO (no REPLACE alternative exists)."""
+    def test_create_specific_function_passes(self):
+        """CREATE SPECIFIC FUNCTION produces no deploy_intent issue."""
+        ddl = "CREATE SPECIFIC FUNCTION MyDB.fn_X_Int RETURNS INT RETURN 1;"
+        assert _check_deploy_intent("x.fnc", ddl) == []
+
+    def test_replace_macro_rejected(self):
+        """REPLACE MACRO produces ERROR."""
+        ddl = "REPLACE MACRO MyDB.mc_X AS (SELECT 1;);"
+        issues = _check_deploy_intent("x.mcr", ddl)
+        assert len(issues) == 1
+        assert issues[0].severity == "ERROR"
+
+    def test_create_macro_passes(self):
+        """CREATE MACRO produces no deploy_intent issue."""
+        ddl = "CREATE MACRO MyDB.mc_X AS (SELECT 1;);"
+        assert _check_deploy_intent("x.mcr", ddl) == []
+
+    def test_create_join_index_passes(self):
+        """CREATE JOIN INDEX has no REPLACE form — should not trigger."""
         ddl = "CREATE JOIN INDEX MyDB.JI_X AS SELECT * FROM MyDB.T;"
-        issues = _check_deploy_intent("x.jix", ddl, strict=True)
-        # JI should produce INFO, not ERROR
-        if issues:
-            assert issues[0].severity == "INFO"
+        assert _check_deploy_intent("x.jix", ddl) == []
 
     def test_create_table_not_checked(self):
-        """Tables are NOT checked for REPLACE (they use IDEMPOTENT_DEPLOY)."""
+        """Tables have no REPLACE form — should not trigger."""
         ddl = "CREATE MULTISET TABLE MyDB.T (Id INT);"
-        issues = _check_deploy_intent("t.tbl", ddl, strict=True)
-        # Tables should produce no deploy_intent issue
-        deploy_issues = [i for i in issues if i.rule == "deploy_intent"]
-        assert deploy_issues == []
+        assert _check_deploy_intent("t.tbl", ddl) == []
+
+    def test_replace_case_insensitive(self):
+        """Detection is case-insensitive."""
+        for verb in ["replace", "Replace", "REPLACE"]:
+            ddl = f"{verb} VIEW MyDB.V AS SELECT 1;"
+            issues = _check_deploy_intent("v.viw", ddl)
+            assert len(issues) == 1, f"Failed for verb: {verb}"
+
+    def test_replace_with_leading_whitespace(self):
+        """Leading whitespace before REPLACE is still detected."""
+        ddl = "   REPLACE VIEW MyDB.V AS SELECT 1;"
+        issues = _check_deploy_intent("v.viw", ddl)
+        assert len(issues) == 1
+
+    def test_replace_in_line_comment_not_flagged(self):
+        """REPLACE in a comment is not flagged (line starts with --)."""
+        ddl = (
+            "-- was REPLACE VIEW\n"
+            "CREATE VIEW MyDB.V AS SELECT 1;"
+        )
+        assert _check_deploy_intent("v.viw", ddl) == []
+
+    def test_replace_inside_procedure_body_flagged(self):
+        """REPLACE on an inner line of a procedure body IS flagged."""
+        ddl = (
+            "CREATE PROCEDURE MyDB.sp_X()\n"
+            "BEGIN\n"
+            "  REPLACE VIEW MyDB.temp_v AS SELECT 1;\n"
+            "END;"
+        )
+        issues = _check_deploy_intent("x.spl", ddl)
+        assert len(issues) == 1
 
 
 # ---------------------------------------------------------------
@@ -229,12 +259,12 @@ class TestCheckOneObject:
     def test_procedure_with_inner_statements_allowed(self):
         """Procedure with inner DML (INSERT, SELECT) under threshold is OK."""
         ddl = (
-            "REPLACE PROCEDURE MyDB.sp_X()\n"
+            "CREATE PROCEDURE MyDB.sp_X()\n"
             "BEGIN\n"
             "    INSERT INTO MyDB.Log VALUES (1);\n"
             "END;\n"
         )
-        # 2 matches (REPLACE + INSERT) — under the >2 threshold
+        # 2 matches (CREATE + INSERT) — under the >2 threshold
         issues = _check_one_object("x.spl", ddl)
         assert issues == []
 
@@ -294,7 +324,7 @@ class TestCheckExtension:
     def test_view_extension(self, tmp_path):
         """View should use .viw extension."""
         f = tmp_path / "test.sql"
-        f.write_text("REPLACE VIEW MyDB.V AS SELECT 1;", encoding="utf-8")
+        f.write_text("CREATE VIEW MyDB.V AS SELECT 1;", encoding="utf-8")
         issues = _check_extension("test.sql", f.read_text(), str(f))
         assert len(issues) == 1
         assert ".viw" in issues[0].message
@@ -315,7 +345,7 @@ class TestCheckTypeSuffixes:
 
     def test_view_suffix_flagged(self):
         """_V suffix on object name is flagged as ERROR."""
-        ddl = "REPLACE VIEW MyDB.Customer_V AS SELECT 1;"
+        ddl = "CREATE VIEW MyDB.Customer_V AS SELECT 1;"
         issues = _check_type_suffixes("v.viw", ddl)
         assert len(issues) == 1
         assert issues[0].severity == "ERROR"
@@ -328,7 +358,7 @@ class TestCheckTypeSuffixes:
 
     def test_sp_suffix_flagged(self):
         """_SP suffix on object name is flagged."""
-        ddl = "REPLACE PROCEDURE MyDB.DoStuff_SP() BEGIN END;"
+        ddl = "CREATE PROCEDURE MyDB.DoStuff_SP() BEGIN END;"
         issues = _check_type_suffixes("p.spl", ddl)
         assert len(issues) == 1
 
@@ -461,19 +491,33 @@ class TestValidateDirectory:
         assert result.files_scanned == 1
         assert result.errors == 0
 
-    def test_strict_mode_catches_create_view(self, tmp_path):
-        """Strict mode catches CREATE VIEW as an error."""
+    def test_strict_mode_catches_replace_view(self, tmp_path):
+        """REPLACE VIEW is caught as an error (default severity)."""
         ddl_dir = tmp_path / "DDL" / "views"
         ddl_dir.mkdir(parents=True)
         (ddl_dir / "MyDB.V.viw").write_text(
+            "REPLACE VIEW {{DB}}.V AS SELECT 1;",
+            encoding="utf-8",
+        )
+
+        result = validate_directory(str(tmp_path))
+
+        assert result.errors > 0
+        assert not result.passed
+
+    def test_create_view_passes_all_checks(self, tmp_path):
+        """CREATE VIEW produces no deploy_intent issue."""
+        ddl_dir = tmp_path / "DDL" / "views"
+        ddl_dir.mkdir(parents=True)
+        (ddl_dir / "{{DB}}.V.viw").write_text(
             "CREATE VIEW {{DB}}.V AS SELECT 1;",
             encoding="utf-8",
         )
 
-        result = validate_directory(str(tmp_path), strict=True)
+        result = validate_directory(str(tmp_path))
 
-        assert result.errors > 0
-        assert not result.passed
+        deploy_issues = [i for i in result.issues if i.rule == "deploy_intent"]
+        assert deploy_issues == []
 
 
 # ---------------------------------------------------------------
@@ -633,18 +677,19 @@ class TestRuleConfigIntegration:
 
     def test_warning_promoted_to_error_in_strict(self, tmp_path):
         """WARNING rules become ERROR in strict mode."""
-        ddl_dir = tmp_path / "DDL" / "views"
+        ddl_dir = tmp_path / "DDL" / "tables"
         ddl_dir.mkdir(parents=True)
-        (ddl_dir / "MyDB.V.viw").write_text(
-            "CREATE VIEW {{DB}}.V AS SELECT 1;",
+        # Missing SET/MULTISET — default severity is WARNING
+        (ddl_dir / "{{DB}}.T.tbl").write_text(
+            "CREATE TABLE {{DB}}.T (Id INTEGER);",
             encoding="utf-8",
         )
 
         result = validate_directory(str(tmp_path), strict=True)
 
-        deploy_issues = [i for i in result.issues if i.rule == "deploy_intent"]
-        assert len(deploy_issues) == 1
-        assert deploy_issues[0].severity == "ERROR"
+        multiset_issues = [i for i in result.issues if i.rule == "set_multiset"]
+        assert len(multiset_issues) == 1
+        assert multiset_issues[0].severity == "ERROR"
 
     def test_off_rule_stays_off_in_strict(self, tmp_path):
         """OFF rules remain off even in strict mode."""
