@@ -33,8 +33,9 @@ _TOKEN_RE = re.compile(r'\{\{([A-Za-z_][A-Za-z0-9_-]*)\}\}')
 
 # Characters that should never appear in a resolved token value
 # (Teradata identifiers: alphanumeric, underscores, and {{}} for
-# unresolved internal references only).
-_INVALID_VALUE_CHARS = re.compile(r'[=;()\[\]{}]')
+# unresolved internal references only. Parentheses and brackets
+# are also invalid in token values.)
+_INVALID_VALUE_CHARS = re.compile(r'[()\[\]{}]')
 
 
 def _validate_property_values(
@@ -46,10 +47,12 @@ def _validate_property_values(
     Validate property values for common errors.
 
     Checks performed:
-      - Value contains '=' — almost certainly two properties
-        lines merged onto one (e.g. VIW_DATABASE=STD_DATABASE=...).
+      - Value contains '=' with an UPPERCASE prefix — almost
+        certainly two properties lines merged onto one
+        (e.g. VIW_DATABASE=STD_DATABASE=...). Values with
+        lowercase prefixes (e.g. connection strings) are allowed.
       - Value contains characters invalid in Teradata identifiers
-        (semicolons, parentheses, brackets).
+        (parentheses, brackets, braces).
       - Key contains lowercase — convention is UPPERCASE_WITH_UNDERSCORES.
 
     Args:
@@ -64,19 +67,23 @@ def _validate_property_values(
 
     for name, value in tokens.items():
         # -- Merged lines: value contains '=' --
-        # A valid token value is a database name, object name, or
-        # environment prefix — none of which contain '='. If the
-        # value has '=', someone likely merged two lines:
+        # A genuine merged line looks like:
         #   VIW_DATABASE=STD_DATABASE={{ENV_PREFIX}}_SHIPS_VIW
+        # where the prefix before '=' in the value is another
+        # UPPERCASE_TOKEN_NAME. Connection strings and other
+        # legitimate values (e.g. host=myserver;port=1025) have
+        # lowercase prefixes and should NOT be flagged.
         if '=' in value:
-            # Extract the suspicious prefix before the '='
             prefix = value.split('=', 1)[0].strip()
-            errors.append(
-                f"Token '{name}': value contains '=' — likely "
-                f"two properties lines merged. "
-                f"Found '{prefix}=' in value '{value}'. "
-                f"Check {properties_path} for a missing line break."
-            )
+            # Only flag if the prefix looks like a token name:
+            # all uppercase, underscores, digits — e.g. STD_DATABASE
+            if prefix and re.fullmatch(r'[A-Z][A-Z0-9_]*', prefix):
+                errors.append(
+                    f"Token '{name}': value contains '=' — likely "
+                    f"two properties lines merged. "
+                    f"Found '{prefix}=' in value '{value}'. "
+                    f"Check {properties_path} for a missing line break."
+                )
 
         # -- Invalid characters in resolved values --
         if phase == "resolved":
