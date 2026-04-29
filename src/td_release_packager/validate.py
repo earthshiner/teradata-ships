@@ -12,7 +12,7 @@ engineering discipline rules:
     6. Eponymous file naming (filename matches DDL content)
     7. No type suffixes on object names (_V, _T, VW_, SP_, etc.)
     8. {{TOKENS}} used (not hardcoded database names)
-    9. Views use REPLACE VIEW (not CREATE VIEW)
+    9. CREATE required (REPLACE prohibited — deployer owns idempotency)
    10. Correct file extension per object type
 
 Each rule's severity is configurable via inspect.conf:
@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_RULES: Dict[str, str] = {
     "db_qualifier": "ERROR",
     "set_multiset": "WARNING",
-    "deploy_intent": "WARNING",
+    "deploy_intent": "ERROR",
     "one_object": "WARNING",
     "eponymous": "WARNING",
     "extension": "WARNING",
@@ -148,6 +148,8 @@ def generate_default_config() -> str:
         "# Structural rules",
         f"db_qualifier={DEFAULT_RULES['db_qualifier']}",
         f"set_multiset={DEFAULT_RULES['set_multiset']}",
+        "# deploy_intent: REPLACE is prohibited — use CREATE.",
+        "# The deployer owns idempotency via DROP+CREATE with rollback.",
         f"deploy_intent={DEFAULT_RULES['deploy_intent']}",
         f"one_object={DEFAULT_RULES['one_object']}",
         f"eponymous={DEFAULT_RULES['eponymous']}",
@@ -242,12 +244,17 @@ _HAS_SET_MULTISET_RE = re.compile(
     r'CREATE\s+(?:MULTISET|SET)\s+', re.I,
 )
 
-# -- REPLACE VIEW detection --
-_HAS_REPLACE_VIEW_RE = re.compile(
-    r'REPLACE\s+VIEW', re.I,
-)
-_CREATE_VIEW_ONLY_RE = re.compile(
-    r'CREATE\s+VIEW\b', re.I,
+# -- REPLACE detection (prohibited — deployer owns idempotency) --
+# Matches REPLACE as a leading DDL verb for any replaceable type.
+# Teradata syntax: REPLACE VIEW, REPLACE PROCEDURE, REPLACE MACRO,
+#                  REPLACE FUNCTION, REPLACE SPECIFIC FUNCTION,
+#                  REPLACE TRIGGER.
+# CREATE is the required verb — the deployer handles existence
+# checking, DROP, backup (via SHOW), and rollback.
+_LEADING_REPLACE_RE = re.compile(
+    r"^\s*REPLACE\s+"
+    r"(?:VIEW|PROCEDURE|MACRO|TRIGGER|(?:SPECIFIC\s+)?FUNCTION)\b",
+    re.IGNORECASE | re.MULTILINE,
 )
 
 # -- Token detection --
@@ -440,74 +447,45 @@ def _check_multiset(rel_path: str, content: str) -> List[ValidationIssue]:
 
 def _check_deploy_intent(rel_path: str, content: str, strict: bool = False) -> List[ValidationIssue]:
     """
-    Check the deploy intent implied by the DDL verb.
+    Enforce CREATE over REPLACE for all replaceable object types.
 
-    The developer's choice of CREATE vs REPLACE is their deployment
-    intent. This check reports the implications:
+    REPLACE is idempotent but provides no rollback path — the
+    previous definition is silently overwritten with no backup.
+    CREATE forces the deployer to explicitly handle existence:
 
-    - CREATE without REPLACE → object must not exist (CREATE_ONLY).
-      Not idempotent — deployment fails if re-run.
-    - REPLACE → object is overwritten (REPLACE_WITH_BACKUP).
-      Idempotent — safe to re-run.
+        1. Capture existing DDL via SHOW (rollback artefact)
+        2. DROP the existing object
+        3. CREATE the new definition
+        4. On failure → re-CREATE from the captured backup
 
-    Severity is set to WARNING here; the config system (and --strict)
-    remap it as needed. Tables are excluded — they use the
-    IDEMPOTENT_DEPLOY strategy regardless of verb.
+    This gives autonomous agents (and humans) a clean rollback
+    to the pre-package state.
+
+    The deployer owns idempotency — not the developer's DDL verb.
+
+    Args:
+        rel_path: Relative path of the DDL file being checked.
+        content:  Raw DDL file content.
+        strict:   Not used for this rule (always ERROR by default),
+                  kept for interface consistency.
+
+    Returns:
+        List of ValidationIssue — one issue if REPLACE is found,
+        empty list if the file uses CREATE (correct).
     """
-    issues = []
-
-    # Only check replaceable object types (not tables — they have
-    # their own idempotent strategy)
-    replaceable_patterns = [
-        (re.compile(r'REPLACE\s+VIEW', re.I), "VIEW", True),
-        (re.compile(r'CREATE\s+VIEW\b', re.I), "VIEW", False),
-        (re.compile(r'REPLACE\s+MACRO\b', re.I), "MACRO", True),
-        (re.compile(r'CREATE\s+MACRO\b', re.I), "MACRO", False),
-        (re.compile(r'REPLACE\s+PROCEDURE\b', re.I), "PROCEDURE", True),
-        (re.compile(r'CREATE\s+PROCEDURE\b', re.I), "PROCEDURE", False),
-        (re.compile(r'REPLACE\s+(?:SPECIFIC\s+)?FUNCTION', re.I), "FUNCTION", True),
-        (re.compile(r'CREATE\s+(?:SPECIFIC\s+)?FUNCTION\b', re.I), "FUNCTION", False),
-        (re.compile(r'REPLACE\s+TRIGGER\b', re.I), "TRIGGER", True),
-        (re.compile(r'CREATE\s+TRIGGER\b', re.I), "TRIGGER", False),
-    ]
-
-    for pattern, obj_type, is_replace in replaceable_patterns:
-        if pattern.search(content):
-            if is_replace:
-                # Idempotent — good. No issue.
-                return []
-            else:
-                # CREATE without REPLACE — deployment intent is CREATE_ONLY
-                issues.append(ValidationIssue(
-                    file=rel_path, rule="deploy_intent", severity="WARNING",
-                    message=(
-                        f"Uses CREATE {obj_type} (not REPLACE). "
-                        f"Deployment will fail if the {obj_type.lower()} already exists. "
-                        f"This is valid if the object is genuinely new. "
-                        f"Use REPLACE {obj_type} for idempotent (re-runnable) deployment."
-                    ),
-                ))
-                return issues
-
-    # Check DROP_AND_CREATE types (JIs, indexes) — these have no
-    # REPLACE alternative and are always destructive.
-    drop_create_patterns = [
-        (re.compile(r'CREATE\s+JOIN\s+INDEX\b', re.I), "JOIN INDEX"),
-        (re.compile(r'CREATE\s+(?:UNIQUE\s+)?INDEX\b', re.I), "INDEX"),
-    ]
-
-    for pattern, obj_type in drop_create_patterns:
-        if pattern.search(content):
-            issues.append(ValidationIssue(
-                file=rel_path, rule="deploy_intent", severity="INFO",
-                message=(
-                    f"{obj_type} uses DROP_AND_CREATE strategy. "
-                    f"Existing definition will be captured via SHOW before replacement."
-                ),
-            ))
-            return issues
-
-    return issues
+    if _LEADING_REPLACE_RE.search(content):
+        return [ValidationIssue(
+            file=rel_path,
+            rule="deploy_intent",
+            severity="ERROR",
+            message=(
+                "Uses REPLACE — use CREATE instead. "
+                "The deployer handles idempotency via "
+                "DROP-and-CREATE with automatic rollback. "
+                "REPLACE overwrites silently with no backup."
+            ),
+        )]
+    return []
 
 
 def _check_one_object(rel_path: str, content: str) -> List[ValidationIssue]:

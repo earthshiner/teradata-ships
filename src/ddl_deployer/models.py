@@ -496,6 +496,7 @@ class PackageDeployResult:
     report_path: Optional[str] = None
     num_streams: int = 1
     wave_summaries: List[WaveSummary] = field(default_factory=list)
+    prior_completed: list = field(default_factory=list)
 
     @property
     def success(self) -> bool:
@@ -506,3 +507,15 @@ class PackageDeployResult:
     def is_wave_parallel(self) -> bool:
         """True if this deployment used wave-parallel execution."""
         return len(self.wave_summaries) > 0
+
+    @property
+    def is_noop_redeploy(self) -> bool:
+        """
+        True if this run deployed nothing new but has prior
+        completed objects — i.e. a re-run of an already-deployed
+        package where all objects still exist in the database.
+        """
+        return (
+            len(self.results) == 0
+            and len(self.prior_completed) > 0
+        )
