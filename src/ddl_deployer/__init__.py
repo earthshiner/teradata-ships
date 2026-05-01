@@ -2,17 +2,21 @@
 ddl_deployer — Idempotent Teradata DDL Deployment with Restartability
 =====================================================================
 
-Deploys all Teradata DDL object types idempotently:
+Deploys all Teradata DDL object types idempotently via
+DROP-and-CREATE with pre-flight snapshot for rollback:
 
     Tables        — Backup, create, schema compare, data migration.
     Join Indexes  — DROP if exists, CREATE.
     Hash Indexes  — DROP if exists, CREATE.
     Sec. Indexes  — DROP INDEX if exists, CREATE INDEX.
     Triggers      — DROP if exists, CREATE.
-    Views         — REPLACE VIEW (inherently idempotent).
-    Macros        — REPLACE MACRO (inherently idempotent).
-    Procedures    — REPLACE PROCEDURE (inherently idempotent).
-    Functions     — REPLACE FUNCTION (inherently idempotent).
+    Views         — DROP if exists, CREATE (snapshot for rollback).
+    Macros        — DROP if exists, CREATE (snapshot for rollback).
+    Procedures    — DROP if exists, CREATE (snapshot for rollback).
+    Functions     — DROP if exists, CREATE (snapshot for rollback).
+
+The deployer owns idempotency — DDL files use CREATE, never REPLACE.
+REPLACE provides no rollback path (silently overwrites without backup).
 
 Mandatory pre-flight validation checks permissions, perm space,
 and database existence before any DDL is executed.
@@ -40,3 +44,22 @@ from ddl_deployer.deployer import (
     resume_package,
     rollback_package,
 )
+
+__all__ = [
+    # models
+    "ObjectType",
+    "DeployStrategy",
+    "DeployState",
+    "ColumnInfo",
+    "CompatibilityResult",
+    "PreflightCheck",
+    "PreflightResult",
+    "ParsedDDL",
+    "ObjectDeployResult",
+    "PackageDeployResult",
+    # deployer
+    "deploy_single",
+    "deploy_package",
+    "resume_package",
+    "rollback_package",
+]

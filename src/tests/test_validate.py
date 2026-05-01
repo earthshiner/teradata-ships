@@ -15,7 +15,6 @@ Covers:
     - Full directory validation
 """
 
-import os
 import pytest
 
 from td_release_packager.validate import (
@@ -33,13 +32,13 @@ from td_release_packager.validate import (
     read_inspect_config,
     generate_default_config,
     DEFAULT_RULES,
-    ValidationIssue,
 )
 
 
 # ---------------------------------------------------------------
 # _check_db_qualifier
 # ---------------------------------------------------------------
+
 
 class TestCheckDbQualifier:
     """Tests for database qualifier presence."""
@@ -84,6 +83,7 @@ class TestCheckDbQualifier:
 # _check_multiset
 # ---------------------------------------------------------------
 
+
 class TestCheckMultiset:
     """Tests for SET/MULTISET presence on tables."""
 
@@ -112,6 +112,7 @@ class TestCheckMultiset:
 # ---------------------------------------------------------------
 # _check_deploy_intent (strict mode)
 # ---------------------------------------------------------------
+
 
 class TestCheckDeployIntent:
     """Tests for CREATE-not-REPLACE enforcement."""
@@ -151,7 +152,9 @@ class TestCheckDeployIntent:
 
     def test_create_trigger_passes(self):
         """CREATE TRIGGER produces no deploy_intent issue."""
-        ddl = "CREATE TRIGGER MyDB.trg_X AFTER INSERT ON MyDB.T FOR EACH ROW (SELECT 1;);"
+        ddl = (
+            "CREATE TRIGGER MyDB.trg_X AFTER INSERT ON MyDB.T FOR EACH ROW (SELECT 1;);"
+        )
         assert _check_deploy_intent("x.trg", ddl) == []
 
     def test_replace_function_rejected(self):
@@ -215,10 +218,7 @@ class TestCheckDeployIntent:
 
     def test_replace_in_line_comment_not_flagged(self):
         """REPLACE in a comment is not flagged (line starts with --)."""
-        ddl = (
-            "-- was REPLACE VIEW\n"
-            "CREATE VIEW MyDB.V AS SELECT 1;"
-        )
+        ddl = "-- was REPLACE VIEW\nCREATE VIEW MyDB.V AS SELECT 1;"
         assert _check_deploy_intent("v.viw", ddl) == []
 
     def test_replace_inside_procedure_body_flagged(self):
@@ -236,6 +236,7 @@ class TestCheckDeployIntent:
 # ---------------------------------------------------------------
 # _check_one_object
 # ---------------------------------------------------------------
+
 
 class TestCheckOneObject:
     """Tests for single-object-per-file rule."""
@@ -273,6 +274,7 @@ class TestCheckOneObject:
 # _check_eponymous
 # ---------------------------------------------------------------
 
+
 class TestCheckEponymous:
     """Tests for filename-matches-DDL-content rule."""
 
@@ -302,6 +304,7 @@ class TestCheckEponymous:
 # ---------------------------------------------------------------
 # _check_extension
 # ---------------------------------------------------------------
+
 
 class TestCheckExtension:
     """Tests for correct file extension per object type."""
@@ -333,6 +336,7 @@ class TestCheckExtension:
 # ---------------------------------------------------------------
 # _check_type_suffixes
 # ---------------------------------------------------------------
+
 
 class TestCheckTypeSuffixes:
     """Tests for forbidden type suffix/prefix detection."""
@@ -366,6 +370,7 @@ class TestCheckTypeSuffixes:
 # ---------------------------------------------------------------
 # _check_hardcoded_names
 # ---------------------------------------------------------------
+
 
 class TestCheckHardcodedNames:
     """Tests for hardcoded database name detection."""
@@ -406,6 +411,7 @@ class TestCheckHardcodedNames:
 # _check_keyword_case
 # ---------------------------------------------------------------
 
+
 class TestCheckKeywordCase:
     """Tests for SQL keyword case checking."""
 
@@ -432,6 +438,7 @@ class TestCheckKeywordCase:
 # ---------------------------------------------------------------
 # _check_leading_commas
 # ---------------------------------------------------------------
+
 
 class TestCheckLeadingCommas:
     """Tests for leading vs trailing comma convention."""
@@ -468,6 +475,7 @@ class TestCheckLeadingCommas:
 # ---------------------------------------------------------------
 # validate_directory (integration)
 # ---------------------------------------------------------------
+
 
 class TestValidateDirectory:
     """Integration tests for full directory validation."""
@@ -524,6 +532,7 @@ class TestValidateDirectory:
 # read_inspect_config
 # ---------------------------------------------------------------
 
+
 class TestReadInspectConfig:
     """Tests for reading inspect.conf configuration files."""
 
@@ -531,8 +540,7 @@ class TestReadInspectConfig:
         """Key=value pairs are read and merged with defaults."""
         conf = tmp_path / "inspect.conf"
         conf.write_text(
-            "leading_commas=OFF\n"
-            "keyword_case=OFF\n",
+            "leading_commas=OFF\nkeyword_case=OFF\n",
             encoding="utf-8",
         )
 
@@ -540,18 +548,17 @@ class TestReadInspectConfig:
 
         assert rules["leading_commas"] == "OFF"
         assert rules["keyword_case"] == "OFF"
-        # Defaults preserved for unmentioned rules
-        assert rules["db_qualifier"] == "ERROR"
-        assert rules["type_suffix"] == "ERROR"
+        # Defaults preserved for unmentioned rules — verified
+        # against DEFAULT_RULES so the test does not duplicate the
+        # default-severity spec.
+        assert rules["db_qualifier"] == DEFAULT_RULES["db_qualifier"]
+        assert rules["type_suffix"] == DEFAULT_RULES["type_suffix"]
 
     def test_comments_and_blanks_skipped(self, tmp_path):
         """Lines starting with '#' and blank lines are ignored."""
         conf = tmp_path / "inspect.conf"
         conf.write_text(
-            "# This is a comment\n"
-            "\n"
-            "leading_commas=OFF\n"
-            "  \n",
+            "# This is a comment\n\nleading_commas=OFF\n  \n",
             encoding="utf-8",
         )
 
@@ -563,9 +570,7 @@ class TestReadInspectConfig:
         """Severity values are case-insensitive (normalised to uppercase)."""
         conf = tmp_path / "inspect.conf"
         conf.write_text(
-            "leading_commas=off\n"
-            "keyword_case=Warning\n"
-            "type_suffix=error\n",
+            "leading_commas=off\nkeyword_case=Warning\ntype_suffix=error\n",
             encoding="utf-8",
         )
 
@@ -605,19 +610,65 @@ class TestReadInspectConfig:
         with pytest.raises(FileNotFoundError):
             read_inspect_config(str(tmp_path / "missing.conf"))
 
-    def test_all_defaults_present(self):
-        """DEFAULT_RULES contains all 10 expected rule names."""
-        expected = {
-            "db_qualifier", "set_multiset", "deploy_intent",
-            "one_object", "eponymous", "extension", "type_suffix",
-            "hardcoded_name", "keyword_case", "leading_commas",
+    def test_default_config_includes_every_default_rule(self):
+        """Every rule in DEFAULT_RULES must appear as a key in the
+        generated inspect.conf. Catches rules that are registered
+        but never exposed to users for configuration.
+
+        This test never needs updating when new rules are added —
+        DEFAULT_RULES is the source of truth and the test derives
+        from it.
+        """
+        content = generate_default_config()
+        missing = [rule for rule in DEFAULT_RULES if f"{rule}=" not in content]
+        assert not missing, (
+            f"Rules registered in DEFAULT_RULES but missing from "
+            f"generate_default_config() output: {missing}"
+        )
+
+    def test_default_config_only_references_registered_rules(self):
+        """Every rule key in the generated inspect.conf must exist in
+        DEFAULT_RULES. Catches typos and stale entries in the template.
+
+        Pairs with the test above — together they enforce a bidirectional
+        consistency between DEFAULT_RULES and the inspect.conf template,
+        without either side hard-coding a rule list.
+        """
+        content = generate_default_config()
+        unregistered = []
+        for line in content.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if "=" not in stripped:
+                continue
+            rule_name = stripped.split("=", 1)[0].strip()
+            if rule_name not in DEFAULT_RULES:
+                unregistered.append(rule_name)
+        assert not unregistered, (
+            f"Rules in generate_default_config() output but not "
+            f"in DEFAULT_RULES: {unregistered}"
+        )
+
+    def test_all_default_severities_are_valid(self):
+        """Every default severity in DEFAULT_RULES is one of the
+        recognised values. Catches typos like 'WARN' or 'WARMING'."""
+        valid_severities = {"ERROR", "WARNING", "OFF"}
+        invalid = {
+            rule: sev
+            for rule, sev in DEFAULT_RULES.items()
+            if sev not in valid_severities
         }
-        assert set(DEFAULT_RULES.keys()) == expected
+        assert not invalid, (
+            f"Rules in DEFAULT_RULES with invalid severities "
+            f"(must be one of {sorted(valid_severities)}): {invalid}"
+        )
 
 
 # ---------------------------------------------------------------
 # generate_default_config
 # ---------------------------------------------------------------
+
 
 class TestGenerateDefaultConfig:
     """Tests for default inspect.conf generation."""
@@ -628,11 +679,24 @@ class TestGenerateDefaultConfig:
         for rule_name in DEFAULT_RULES:
             assert rule_name in content
 
-    def test_contains_severity_values(self):
-        """Generated config contains the default severity values."""
+    def test_each_rule_line_has_correct_default_severity(self):
+        """For each registered rule, the generated config has a line
+        ``rule_name=DEFAULT_SEVERITY``. Stronger than just checking
+        that severity strings appear somewhere — pins down that each
+        rule's specific default is what the template emits.
+
+        Derives from DEFAULT_RULES so it never needs updating when
+        rules are added.
+        """
         content = generate_default_config()
-        assert "ERROR" in content
-        assert "WARNING" in content
+        wrong = []
+        for rule, severity in DEFAULT_RULES.items():
+            expected_line = f"{rule}={severity}"
+            if expected_line not in content:
+                wrong.append((rule, severity))
+        assert not wrong, (
+            f"Rules whose generated config line does not match DEFAULT_RULES: {wrong}"
+        )
 
     def test_roundtrip(self, tmp_path):
         """Generated config can be read back and matches defaults."""
@@ -648,6 +712,7 @@ class TestGenerateDefaultConfig:
 # ---------------------------------------------------------------
 # Rule config integration (OFF / severity override / strict)
 # ---------------------------------------------------------------
+
 
 class TestRuleConfigIntegration:
     """Integration tests for configurable rule severity."""

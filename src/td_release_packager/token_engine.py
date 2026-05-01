@@ -29,13 +29,13 @@ logger = logging.getLogger(__name__)
 # -- Regex for {{TOKENNAME}} --
 # Captures the token name between doubled curly braces.
 # Allows alphanumeric, underscores, and hyphens in names.
-_TOKEN_RE = re.compile(r'\{\{([A-Za-z_][A-Za-z0-9_-]*)\}\}')
+_TOKEN_RE = re.compile(r"\{\{([A-Za-z_][A-Za-z0-9_-]*)\}\}")
 
 # Characters that should never appear in a resolved token value
 # (Teradata identifiers: alphanumeric, underscores, and {{}} for
 # unresolved internal references only. Parentheses and brackets
 # are also invalid in token values.)
-_INVALID_VALUE_CHARS = re.compile(r'[()\[\]{}]')
+_INVALID_VALUE_CHARS = re.compile(r"[()\[\]{}]")
 
 
 def _validate_property_values(
@@ -73,11 +73,11 @@ def _validate_property_values(
         # UPPERCASE_TOKEN_NAME. Connection strings and other
         # legitimate values (e.g. host=myserver;port=1025) have
         # lowercase prefixes and should NOT be flagged.
-        if '=' in value:
-            prefix = value.split('=', 1)[0].strip()
+        if "=" in value:
+            prefix = value.split("=", 1)[0].strip()
             # Only flag if the prefix looks like a token name:
             # all uppercase, underscores, digits — e.g. STD_DATABASE
-            if prefix and re.fullmatch(r'[A-Z][A-Z0-9_]*', prefix):
+            if prefix and re.fullmatch(r"[A-Z][A-Z0-9_]*", prefix):
                 errors.append(
                     f"Token '{name}': value contains '=' — likely "
                     f"two properties lines merged. "
@@ -138,35 +138,31 @@ def read_properties(properties_path: str) -> Dict[str, str]:
         FileNotFoundError: If the properties file does not exist.
     """
     if not os.path.exists(properties_path):
-        raise FileNotFoundError(
-            f"Properties file not found: {properties_path}"
-        )
+        raise FileNotFoundError(f"Properties file not found: {properties_path}")
 
     tokens = {}
-    with open(properties_path, 'r', encoding='utf-8') as f:
+    with open(properties_path, "r", encoding="utf-8") as f:
         for lineno, line in enumerate(f, 1):
             stripped = line.strip()
 
             # Skip empty lines and comments
-            if not stripped or stripped.startswith('#'):
+            if not stripped or stripped.startswith("#"):
                 continue
 
             # Split on first '=' only (values may contain '=')
-            if '=' not in stripped:
+            if "=" not in stripped:
                 logger.warning(
-                    "Properties line %d: no '=' found, skipping: %s",
-                    lineno, stripped
+                    "Properties line %d: no '=' found, skipping: %s", lineno, stripped
                 )
                 continue
 
-            name, value = stripped.split('=', 1)
+            name, value = stripped.split("=", 1)
             name = name.strip()
             value = value.strip()
 
             if not name:
                 logger.warning(
-                    "Properties line %d: empty token name, skipping.",
-                    lineno
+                    "Properties line %d: empty token name, skipping.", lineno
                 )
                 continue
 
@@ -174,19 +170,19 @@ def read_properties(properties_path: str) -> Dict[str, str]:
                 logger.warning(
                     "Properties line %d: duplicate token '%s' — "
                     "overriding previous value.",
-                    lineno, name
+                    lineno,
+                    name,
                 )
 
             tokens[name] = value
 
-    logger.info(
-        "Read %d tokens from %s",
-        len(tokens), properties_path
-    )
+    logger.info("Read %d tokens from %s", len(tokens), properties_path)
 
     # Validate raw values (before resolution) — catches merged lines
     raw_errors = _validate_property_values(
-        tokens, properties_path, phase="raw",
+        tokens,
+        properties_path,
+        phase="raw",
     )
     if raw_errors:
         error_list = "\n  ".join(raw_errors)
@@ -202,7 +198,9 @@ def read_properties(properties_path: str) -> Dict[str, str]:
     # Validate resolved values — catches invalid characters
     # and unresolved references
     resolved_errors = _validate_property_values(
-        tokens, properties_path, phase="resolved",
+        tokens,
+        properties_path,
+        phase="resolved",
     )
     if resolved_errors:
         error_list = "\n  ".join(resolved_errors)
@@ -246,7 +244,7 @@ def _resolve_internal_references(
         substitutions = 0
 
         for name, value in resolved.items():
-            if '{{' not in value:
+            if "{{" not in value:
                 continue
 
             def replacer(match):
@@ -269,7 +267,9 @@ def _resolve_internal_references(
         for name, value in resolved.items():
             remaining = _TOKEN_RE.findall(value)
             if remaining:
-                unresolved.append(f"  {name}: references {{{{{', '.join(remaining)}}}}}")
+                unresolved.append(
+                    f"  {name}: references {{{{{', '.join(remaining)}}}}}"
+                )
         if unresolved:
             raise ValueError(
                 f"Circular or unresolvable token references "
@@ -281,7 +281,9 @@ def _resolve_internal_references(
         if tokens[name] != resolved[name]:
             logger.debug(
                 "Resolved %s: %s → %s",
-                name, tokens[name], resolved[name],
+                name,
+                tokens[name],
+                resolved[name],
             )
 
     return resolved
@@ -297,7 +299,7 @@ def scan_tokens_in_file(file_path: str) -> Set[str]:
     Returns:
         Set of token names (without the {{ }} delimiters).
     """
-    with open(file_path, 'r', encoding='utf-8') as f:
+    with open(file_path, "r", encoding="utf-8") as f:
         content = f.read()
     return set(_TOKEN_RE.findall(content))
 
@@ -318,12 +320,12 @@ def scan_tokens_in_directory(directory: str) -> Dict[str, Set[str]]:
     results = {}
     for root, dirs, files in os.walk(directory):
         # Skip hidden directories
-        dirs[:] = [d for d in dirs if not d.startswith('.')]
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
         for filename in files:
             # Skip hidden files, underscore-prefixed files, sample files
-            if filename.startswith('.') or filename.startswith('_'):
+            if filename.startswith(".") or filename.startswith("_"):
                 continue
-            if filename.endswith('.sample'):
+            if filename.endswith(".sample"):
                 continue
             file_path = os.path.join(root, filename)
             try:
@@ -334,6 +336,182 @@ def scan_tokens_in_directory(directory: str) -> Dict[str, Set[str]]:
                 # Skip binary files or unreadable files
                 pass
     return results
+
+
+# ---------------------------------------------------------------
+# Malformed token detection
+# ---------------------------------------------------------------
+#
+# A well-formed token matches _TOKEN_RE:
+#   {{[A-Za-z_][A-Za-z0-9_-]*}}
+#
+# Anything else with double braces is malformed and will silently
+# pass through token substitution unsubstituted, ending up in the
+# deployed SQL where the Teradata driver rejects it as an
+# "Unrecognized escape syntax" error. Common malformed forms:
+#
+#   {{ DBC_DATABASE }}       — whitespace inside braces
+#   {{DBC_DATABASE\n}}       — newline inside (line wrapping)
+#   {{{{DBC_DATABASE}}_X}}   — substring-replace ran twice over an
+#                               already-tokenised file
+#   {{DBC_DATABASE           — missing closing braces
+#   DBC_DATABASE}}           — missing opening braces
+#
+# These need to be caught BEFORE packaging so the developer can fix
+# the source file rather than discover the corruption at deploy time.
+
+
+def find_malformed_tokens(content: str) -> List[Dict]:
+    """
+    Find malformed ``{{...}}`` markers in a piece of content.
+
+    Strategy: replace every well-formed token with a same-length run
+    of underscores so positions are preserved, then any remaining
+    ``{{`` or ``}}`` pair in the result must be malformed (orphan
+    braces or a brace-pair with invalid contents). Each finding
+    is reported with line, column, and the surrounding line so the
+    DBA can locate and fix it without grep.
+
+    Args:
+        content: File content to inspect.
+
+    Returns:
+        List of issue dicts with keys:
+            line          — 1-based line number
+            column        — 1-based column on that line
+            marker        — the offending '{{' or '}}'
+            line_content  — full text of the line, for context
+    """
+
+    # Mask out well-formed tokens — same length so positions in
+    # the original content are still recoverable.
+    def _mask(m):
+        return "_" * len(m.group(0))
+
+    stripped = _TOKEN_RE.sub(_mask, content)
+
+    issues = []
+    for m in re.finditer(r"\{\{|\}\}", stripped):
+        pos = m.start()
+        # 1-based line/col derived from the ORIGINAL content
+        line_num = content.count("\n", 0, pos) + 1
+        line_start = content.rfind("\n", 0, pos) + 1
+        col = pos - line_start + 1
+        line_end = content.find("\n", pos)
+        if line_end == -1:
+            line_end = len(content)
+        line_content = content[line_start:line_end].rstrip("\r")
+        issues.append(
+            {
+                "line": line_num,
+                "column": col,
+                "marker": m.group(0),
+                "line_content": line_content,
+            }
+        )
+
+    return issues
+
+
+def scan_malformed_tokens_in_directory(
+    directory: str,
+) -> Dict[str, List[Dict]]:
+    """
+    Scan a directory tree for files containing malformed tokens.
+
+    Mirrors :func:`scan_tokens_in_directory` — same skip rules for
+    hidden/underscore-prefixed/sample files. Used by the build flow
+    as a hard-fail check before packaging.
+
+    Args:
+        directory: Root directory to scan.
+
+    Returns:
+        Dictionary of ``file_path → list of issue dicts``. Files
+        with no malformed tokens are omitted, so an empty result
+        means the tree is clean.
+    """
+    results: Dict[str, List[Dict]] = {}
+    for root, dirs, files in os.walk(directory):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        for filename in files:
+            if filename.startswith(".") or filename.startswith("_"):
+                continue
+            if filename.endswith(".sample"):
+                continue
+            file_path = os.path.join(root, filename)
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except (UnicodeDecodeError, PermissionError):
+                continue
+            issues = find_malformed_tokens(content)
+            if issues:
+                results[file_path] = issues
+    return results
+
+
+def format_malformed_tokens_report(
+    findings: Dict[str, List[Dict]],
+) -> str:
+    """
+    Render a malformed-tokens report as a printable string.
+
+    The report leads with a short summary and per-file groupings
+    so the DBA can fix the source files without further searching.
+    A common-cause hint is appended because by far the most likely
+    explanation is a re-run of ``ingest --token-map`` against an
+    already-tokenised file (substring-replace footgun: the
+    harvester sees ``DBC`` inside an existing ``{{DBC_DATABASE}}``
+    token and re-substitutes, producing ``{{{{DBC_DATABASE}}...``).
+
+    Args:
+        findings: Map of file_path → list of issue dicts as returned
+                  by :func:`scan_malformed_tokens_in_directory`.
+
+    Returns:
+        Multi-line string, ready to print or include in an exception.
+    """
+    if not findings:
+        return ""
+
+    file_count = len(findings)
+    issue_count = sum(len(v) for v in findings.values())
+
+    lines = [
+        "=" * 64,
+        "  Malformed tokens detected",
+        "=" * 64,
+        f"  Found {issue_count} malformed token marker(s) in {file_count} file(s).",
+        "",
+        "  These will silently pass through token substitution and",
+        "  appear LITERALLY in the deployed SQL, where the Teradata",
+        "  driver rejects them as 'Unrecognized escape syntax'.",
+        "",
+    ]
+
+    for file_path in sorted(findings):
+        lines.append(f"  {file_path}")
+        for issue in findings[file_path]:
+            lines.append(
+                f"    line {issue['line']}, col {issue['column']}: "
+                f"orphan '{issue['marker']}' marker"
+            )
+            # Indent the offending line for context
+            lines.append(f"      | {issue['line_content']}")
+        lines.append("")
+
+    lines.append("  Common cause: 'ingest --token-map' re-applied to an")
+    lines.append("  already-tokenised file. The substring-replace sees 'DBC'")
+    lines.append("  (or similar) inside an existing '{{DBC_DATABASE}}' token")
+    lines.append("  and re-substitutes, corrupting the brace structure.")
+    lines.append("")
+    lines.append("  Fix: hand-edit the affected files to restore well-formed")
+    lines.append("  '{{TOKEN_NAME}}' markers, or restore from version control")
+    lines.append("  before re-running ingest.")
+    lines.append("=" * 64)
+
+    return "\n".join(lines)
 
 
 def validate_tokens(
@@ -368,16 +546,13 @@ def validate_tokens(
 
     # Add file locations for undefined tokens
     for token in sorted(undefined):
-        files = [
-            f for f, tokens in token_usage.items()
-            if token in tokens
-        ]
+        files = [f for f, tokens in token_usage.items() if token in tokens]
         for fpath in files:
             errors.append(f"  → used in: {fpath}")
 
     # Tokens defined but never used — warning
     # Exclude reserved metadata properties (not deployment tokens)
-    _RESERVED_PROPERTIES = {'SHIPS_ENV', 'SHIPS_PROJECT', 'ENV_PREFIX'}
+    _RESERVED_PROPERTIES = {"SHIPS_ENV", "SHIPS_PROJECT", "ENV_PREFIX"}
     unused = defined - all_referenced - _RESERVED_PROPERTIES
     warnings = [
         f"Token '{{{{{t}}}}}' is defined in properties but never referenced."
@@ -411,10 +586,7 @@ def substitute_tokens(
         nonlocal count
         token_name = match.group(1)
         if token_name not in token_values:
-            raise KeyError(
-                f"Undefined token '{{{{{token_name}}}}}' — "
-                f"not found in properties file."
-            )
+            raise KeyError(token_name)
         count += 1
         return token_values[token_name]
 
@@ -440,20 +612,17 @@ def substitute_file(
     Returns:
         Count of substitutions made.
     """
-    with open(source_path, 'r', encoding='utf-8') as f:
+    with open(source_path, "r", encoding="utf-8") as f:
         content = f.read()
 
     resolved, count = substitute_tokens(content, token_values)
 
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-    with open(dest_path, 'w', encoding='utf-8') as f:
+    with open(dest_path, "w", encoding="utf-8") as f:
         f.write(resolved)
 
     if count > 0:
-        logger.debug(
-            "Substituted %d tokens in %s → %s",
-            count, source_path, dest_path
-        )
+        logger.debug("Substituted %d tokens in %s → %s", count, source_path, dest_path)
 
     return count
 
@@ -464,11 +633,25 @@ def substitute_file(
 
 # System databases that should never be tokenised
 _SYSTEM_DBS = {
-    'DBC', 'SYSUDTLIB', 'SYSLIB', 'SYSJDBC', 'SYSBAR',
-    'SYSTEMFE', 'SYSSPATIAL', 'TD_SYSFNLIB',
-    'TD_SYSXML', 'TDSTATS', 'TDWM', 'TD_SYSGPL',
-    'ALL', 'DEFAULT', 'PUBLIC', 'EXTUSER',
-    'SQLJ', 'SYSUIF', 'DBCMNGR',
+    "DBC",
+    "SYSUDTLIB",
+    "SYSLIB",
+    "SYSJDBC",
+    "SYSBAR",
+    "SYSTEMFE",
+    "SYSSPATIAL",
+    "TD_SYSFNLIB",
+    "TD_SYSXML",
+    "TDSTATS",
+    "TDWM",
+    "TD_SYSGPL",
+    "ALL",
+    "DEFAULT",
+    "PUBLIC",
+    "EXTUSER",
+    "SQLJ",
+    "SYSUIF",
+    "DBCMNGR",
 }
 
 
@@ -494,9 +677,9 @@ def derive_token_name(db_name: str, env_prefix: str) -> str:
     """
     # Case-insensitive prefix match
     if db_name.upper().startswith(env_prefix.upper()):
-        suffix = db_name[len(env_prefix):]
+        suffix = db_name[len(env_prefix) :]
         # Strip leading underscore/separator
-        suffix = suffix.lstrip('_')
+        suffix = suffix.lstrip("_")
         if suffix:
             return suffix
     # Prefix didn't match or nothing remained — use full name
@@ -562,14 +745,14 @@ def write_token_map(
     """
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
-    with open(path, 'w', encoding='utf-8') as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.write("# token_map.conf — Literal database name → {{TOKEN}} mapping\n")
         f.write("#\n")
         f.write(f"# Generated by SHIPS harvest with --env-prefix {env_prefix}\n")
         f.write("#\n")
         f.write("# Review and edit token names if needed, then re-harvest with:\n")
-        f.write(f"#   python -m td_release_packager harvest \\\n")
-        f.write(f"#       --source <source> --project <project> \\\n")
+        f.write("#   python -m td_release_packager harvest \\\n")
+        f.write("#       --source <source> --project <project> \\\n")
         f.write(f"#       --token-map {path}\n")
         f.write("#\n")
         f.write("# Format: LITERAL_DB_NAME={{TOKEN_NAME}}\n")
@@ -583,10 +766,7 @@ def write_token_map(
             f.write(f"# {ref_count} references across {file_count} files\n")
             f.write(f"{literal}={token}\n\n")
 
-    logger.info(
-        "Token map written: %s (%d mappings)",
-        path, len(token_map)
-    )
+    logger.info("Token map written: %s (%d mappings)", path, len(token_map))
 
 
 def read_token_map(path: str) -> Dict[str, str]:
@@ -610,28 +790,27 @@ def read_token_map(path: str) -> Dict[str, str]:
         FileNotFoundError: If the file does not exist.
     """
     if not os.path.exists(path):
-        raise FileNotFoundError(
-            f"Token map file not found: {path}"
-        )
+        raise FileNotFoundError(f"Token map file not found: {path}")
 
     token_map = {}
 
-    with open(path, 'r', encoding='utf-8') as f:
+    with open(path, "r", encoding="utf-8") as f:
         for lineno, line in enumerate(f, 1):
             stripped = line.strip()
 
             # Skip empty lines and comments
-            if not stripped or stripped.startswith('#'):
+            if not stripped or stripped.startswith("#"):
                 continue
 
-            if '=' not in stripped:
+            if "=" not in stripped:
                 logger.warning(
                     "token_map.conf line %d: no '=' found, skipping: %s",
-                    lineno, stripped
+                    lineno,
+                    stripped,
                 )
                 continue
 
-            literal, token = stripped.split('=', 1)
+            literal, token = stripped.split("=", 1)
             literal = literal.strip()
             token = token.strip()
 
@@ -639,19 +818,17 @@ def read_token_map(path: str) -> Dict[str, str]:
                 continue
 
             # Validate token format
-            if not (token.startswith('{{') and token.endswith('}}')):
+            if not (token.startswith("{{") and token.endswith("}}")):
                 logger.warning(
                     "token_map.conf line %d: value '%s' is not a "
                     "{{TOKEN}} placeholder — skipping.",
-                    lineno, token
+                    lineno,
+                    token,
                 )
                 continue
 
             token_map[literal] = token
 
-    logger.info(
-        "Token map loaded: %s (%d mappings)",
-        path, len(token_map)
-    )
+    logger.info("Token map loaded: %s (%d mappings)", path, len(token_map))
 
     return token_map

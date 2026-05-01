@@ -11,12 +11,9 @@ Covers:
     - PackageDeployResult properties
 """
 
-import pytest
-
 from ddl_deployer.models import (
     ObjectType,
     DeployStrategy,
-    DeployIntent,
     DeployState,
     DeployScope,
     VALID_NEXT_STATES,
@@ -28,13 +25,13 @@ from ddl_deployer.models import (
     SYSTEM_EXISTENCE_QUERIES,
     PackageDeployResult,
     WaveSummary,
-    ParsedDDL,
 )
 
 
 # ---------------------------------------------------------------
 # DeployState — State machine transitions
 # ---------------------------------------------------------------
+
 
 class TestDeployStateTransitions:
     """Tests for the deployment state machine."""
@@ -109,6 +106,7 @@ class TestDeployStateTransitions:
 # STRATEGY_MAP — ObjectType → DeployStrategy
 # ---------------------------------------------------------------
 
+
 class TestStrategyMap:
     """Tests for object type to strategy mapping."""
 
@@ -174,7 +172,10 @@ class TestStrategyMap:
 
     def test_sto_is_replace_in_place(self):
         """SCRIPT_TABLE_OPERATOR → REPLACE_IN_PLACE."""
-        assert STRATEGY_MAP[ObjectType.SCRIPT_TABLE_OPERATOR] == DeployStrategy.REPLACE_IN_PLACE
+        assert (
+            STRATEGY_MAP[ObjectType.SCRIPT_TABLE_OPERATOR]
+            == DeployStrategy.REPLACE_IN_PLACE
+        )
 
     def test_all_object_types_mapped(self):
         """Every ObjectType (except UNKNOWN) has a strategy mapping."""
@@ -189,14 +190,18 @@ class TestStrategyMap:
 # SCOPE_MAP — ObjectType → DeployScope
 # ---------------------------------------------------------------
 
+
 class TestScopeMap:
     """Tests for object type to deployment scope mapping."""
 
     def test_system_scope_objects(self):
         """System-scope objects are correctly mapped."""
         system_types = [
-            ObjectType.MAP, ObjectType.ROLE, ObjectType.PROFILE,
-            ObjectType.AUTHORIZATION, ObjectType.FOREIGN_SERVER,
+            ObjectType.MAP,
+            ObjectType.ROLE,
+            ObjectType.PROFILE,
+            ObjectType.AUTHORIZATION,
+            ObjectType.FOREIGN_SERVER,
         ]
         for obj_type in system_types:
             assert SCOPE_MAP[obj_type] == DeployScope.SYSTEM, (
@@ -206,8 +211,11 @@ class TestScopeMap:
     def test_environment_scope_objects(self):
         """Environment-scope objects are correctly mapped."""
         env_types = [
-            ObjectType.TABLE, ObjectType.VIEW, ObjectType.DATABASE,
-            ObjectType.GRANT, ObjectType.JAR,
+            ObjectType.TABLE,
+            ObjectType.VIEW,
+            ObjectType.DATABASE,
+            ObjectType.GRANT,
+            ObjectType.JAR,
             ObjectType.SCRIPT_TABLE_OPERATOR,
         ]
         for obj_type in env_types:
@@ -227,6 +235,7 @@ class TestScopeMap:
 # ---------------------------------------------------------------
 # SHOW_COMMAND_MAP
 # ---------------------------------------------------------------
+
 
 class TestShowCommandMap:
     """Tests for SHOW command mapping used for backup capture."""
@@ -249,13 +258,16 @@ class TestShowCommandMap:
 
     def test_jar_table_kind(self):
         """JAR uses TableKind 'D' for existence checks."""
-        assert TABLE_KIND_MAP[ObjectType.JAR] == 'D'
+        assert TABLE_KIND_MAP[ObjectType.JAR] == "D"
 
     def test_system_existence_queries_complete(self):
         """All system-scope types have existence check queries."""
         system_types = [
-            ObjectType.MAP, ObjectType.ROLE, ObjectType.PROFILE,
-            ObjectType.AUTHORIZATION, ObjectType.FOREIGN_SERVER,
+            ObjectType.MAP,
+            ObjectType.ROLE,
+            ObjectType.PROFILE,
+            ObjectType.AUTHORIZATION,
+            ObjectType.FOREIGN_SERVER,
         ]
         for obj_type in system_types:
             assert obj_type in SYSTEM_EXISTENCE_QUERIES, (
@@ -266,6 +278,7 @@ class TestShowCommandMap:
 # ---------------------------------------------------------------
 # DEPLOY_ORDER
 # ---------------------------------------------------------------
+
 
 class TestDeployOrder:
     """Tests for deployment ordering."""
@@ -278,11 +291,15 @@ class TestDeployOrder:
 
     def test_authorization_before_databases(self):
         """Authorisations deploy before databases."""
-        assert DEPLOY_ORDER[ObjectType.AUTHORIZATION] < DEPLOY_ORDER[ObjectType.DATABASE]
+        assert (
+            DEPLOY_ORDER[ObjectType.AUTHORIZATION] < DEPLOY_ORDER[ObjectType.DATABASE]
+        )
 
     def test_foreign_server_before_databases(self):
         """Foreign servers deploy before databases."""
-        assert DEPLOY_ORDER[ObjectType.FOREIGN_SERVER] < DEPLOY_ORDER[ObjectType.DATABASE]
+        assert (
+            DEPLOY_ORDER[ObjectType.FOREIGN_SERVER] < DEPLOY_ORDER[ObjectType.DATABASE]
+        )
 
     def test_databases_before_tables(self):
         """Databases deploy before tables."""
@@ -319,37 +336,50 @@ class TestDeployOrder:
 # PackageDeployResult properties
 # ---------------------------------------------------------------
 
+
 class TestPackageDeployResult:
     """Tests for aggregate deployment result properties."""
 
     def test_success_when_no_failures(self):
         """success is True when failed == 0 and rolled_back == 0."""
         result = PackageDeployResult(
-            deployment_id="test-001", manifest_path="/tmp/manifest.json",
-            total=5, completed=4, skipped=1, failed=0, rolled_back=0,
+            deployment_id="test-001",
+            manifest_path="/tmp/manifest.json",
+            total=5,
+            completed=4,
+            skipped=1,
+            failed=0,
+            rolled_back=0,
         )
         assert result.success is True
 
     def test_failure_when_objects_failed(self):
         """success is False when any objects failed."""
         result = PackageDeployResult(
-            deployment_id="test-002", manifest_path="/tmp/manifest.json",
-            total=5, completed=3, failed=2,
+            deployment_id="test-002",
+            manifest_path="/tmp/manifest.json",
+            total=5,
+            completed=3,
+            failed=2,
         )
         assert result.success is False
 
     def test_failure_when_rolled_back(self):
         """success is False when any objects were rolled back."""
         result = PackageDeployResult(
-            deployment_id="test-003", manifest_path="/tmp/manifest.json",
-            total=5, completed=4, rolled_back=1,
+            deployment_id="test-003",
+            manifest_path="/tmp/manifest.json",
+            total=5,
+            completed=4,
+            rolled_back=1,
         )
         assert result.success is False
 
     def test_wave_parallel_flag(self):
         """is_wave_parallel is True when wave_summaries is non-empty."""
         result = PackageDeployResult(
-            deployment_id="test-004", manifest_path="/tmp/manifest.json",
+            deployment_id="test-004",
+            manifest_path="/tmp/manifest.json",
             wave_summaries=[WaveSummary(wave_number=1, total=3)],
         )
         assert result.is_wave_parallel is True
@@ -357,6 +387,7 @@ class TestPackageDeployResult:
     def test_not_wave_parallel_when_empty(self):
         """is_wave_parallel is False when wave_summaries is empty."""
         result = PackageDeployResult(
-            deployment_id="test-005", manifest_path="/tmp/manifest.json",
+            deployment_id="test-005",
+            manifest_path="/tmp/manifest.json",
         )
         assert result.is_wave_parallel is False

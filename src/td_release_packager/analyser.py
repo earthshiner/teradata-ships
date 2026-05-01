@@ -35,7 +35,7 @@ Handles:
 import logging
 import os
 import re
-from collections import defaultdict, deque
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------
 # Data models
 # ---------------------------------------------------------------
+
 
 @dataclass
 class IndexedObject:
@@ -103,9 +104,9 @@ class AnalysisResult:
 
 # Matches:  -- line comments, /* block comments */, 'string literals'
 _NOISE_RE = re.compile(
-    r"--[^\n]*"                # -- line comment
-    r"|/\*.*?\*/"              # /* block comment */
-    r"|'(?:[^']|'')*'",        # 'string literal' (doubled quotes)
+    r"--[^\n]*"  # -- line comment
+    r"|/\*.*?\*/"  # /* block comment */
+    r"|'(?:[^']|'')*'",  # 'string literal' (doubled quotes)
     re.DOTALL,
 )
 
@@ -117,7 +118,7 @@ def _strip_noise(ddl_text: str) -> str:
     Replaces matched regions with spaces (preserving length)
     so that positional analysis remains valid.
     """
-    return _NOISE_RE.sub(lambda m: ' ' * len(m.group(0)), ddl_text)
+    return _NOISE_RE.sub(lambda m: " " * len(m.group(0)), ddl_text)
 
 
 # ---------------------------------------------------------------
@@ -128,42 +129,42 @@ def _strip_noise(ddl_text: str) -> str:
 # and the start of the body (where references live).
 _HEADER_END_PATTERNS = {
     "TABLE": re.compile(
-        r'(?:CREATE|REPLACE)\s+(?:MULTISET\s+|SET\s+)?'
-        r'(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?'
-        r'(?:TRACE\s+)?'
-        r'TABLE\s+'
+        r"(?:CREATE|REPLACE)\s+(?:MULTISET\s+|SET\s+)?"
+        r"(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?"
+        r"(?:TRACE\s+)?"
+        r"TABLE\s+"
         r'(?:"[^"]+"|[A-Za-z_]\w*)(?:\.(?:"[^"]+"|[A-Za-z_]\w*))?'
-        r'\s*[\s,(\n]',
+        r"\s*[\s,(\n]",
         re.IGNORECASE,
     ),
     "VIEW": re.compile(
-        r'(?:CREATE|REPLACE)\s+VIEW\s+'
+        r"(?:CREATE|REPLACE)\s+VIEW\s+"
         r'(?:"[^"]+"|[A-Za-z_]\w*)(?:\.(?:"[^"]+"|[A-Za-z_]\w*))?'
-        r'\s+AS\b',
+        r"\s+AS\b",
         re.IGNORECASE,
     ),
     "MACRO": re.compile(
-        r'(?:CREATE|REPLACE)\s+MACRO\s+'
+        r"(?:CREATE|REPLACE)\s+MACRO\s+"
         r'(?:"[^"]+"|[A-Za-z_]\w*)(?:\.(?:"[^"]+"|[A-Za-z_]\w*))?'
-        r'\s+AS\b',
+        r"\s+AS\b",
         re.IGNORECASE,
     ),
     "FUNCTION": re.compile(
-        r'(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\s+'
+        r"(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\s+"
         r'(?:"[^"]+"|[A-Za-z_]\w*)(?:\.(?:"[^"]+"|[A-Za-z_]\w*))?'
-        r'.*?RETURNS\b',
+        r".*?RETURNS\b",
         re.IGNORECASE | re.DOTALL,
     ),
     "PROCEDURE": re.compile(
-        r'(?:CREATE|REPLACE)\s+PROCEDURE\s+'
+        r"(?:CREATE|REPLACE)\s+PROCEDURE\s+"
         r'(?:"[^"]+"|[A-Za-z_]\w*)(?:\.(?:"[^"]+"|[A-Za-z_]\w*))?'
-        r'\s*\([^)]*\)',          # Skip parameter list
+        r"\s*\([^)]*\)",  # Skip parameter list
         re.IGNORECASE | re.DOTALL,
     ),
     "TRIGGER": re.compile(
-        r'(?:CREATE|REPLACE)\s+TRIGGER\s+'
+        r"(?:CREATE|REPLACE)\s+TRIGGER\s+"
         r'(?:"[^"]+"|[A-Za-z_]\w*)(?:\.(?:"[^"]+"|[A-Za-z_]\w*))?'
-        r'\s+(?:AFTER|BEFORE|INSTEAD\s+OF)\b',
+        r"\s+(?:AFTER|BEFORE|INSTEAD\s+OF)\b",
         re.IGNORECASE,
     ),
 }
@@ -182,7 +183,7 @@ def _extract_body(ddl_text: str, object_type: str) -> str:
     if pattern:
         match = pattern.search(ddl_text)
         if match:
-            return ddl_text[match.end():]
+            return ddl_text[match.end() :]
     # For procedures, functions, triggers — scan the whole body
     # (the header itself may contain ON db.table for triggers)
     return ddl_text
@@ -214,66 +215,75 @@ def _extract_body(ddl_text: str, object_type: str) -> str:
 # -- Name fragments (supports {{TOKEN}} placeholders) -----------
 
 # Single identifier: regular name or {{TOKEN}} with optional suffix
-_IDENT = r'(?:[A-Za-z_]\w*|\{\{[A-Za-z_]\w*\}\}\w*)'
+_IDENT = r"(?:[A-Za-z_]\w*|\{\{[A-Za-z_]\w*\}\}\w*)"
 
 # Qualified name: db.obj  (two identifiers joined by a dot)
-_QNAME = _IDENT + r'\.' + _IDENT
+_QNAME = _IDENT + r"\." + _IDENT
 
 # Any name: qualified or unqualified (qualified tried first)
-_NAME = rf'(?:{_QNAME}|{_IDENT})'
+_NAME = rf"(?:{_QNAME}|{_IDENT})"
 
 # -- System databases (references to these are never dependencies)
 
-_SYSTEM_DATABASES = frozenset({
-    'DBC', 'SYSLIB', 'SYSUDTLIB', 'SYSUIF', 'TD_SYSFNLIB',
-    'TD_SYSXML', 'SQLJ', 'SYSSPATIAL', 'DBCMNGR',
-})
+_SYSTEM_DATABASES = frozenset(
+    {
+        "DBC",
+        "SYSLIB",
+        "SYSUDTLIB",
+        "SYSUIF",
+        "TD_SYSFNLIB",
+        "TD_SYSXML",
+        "SQLJ",
+        "SYSSPATIAL",
+        "DBCMNGR",
+    }
+)
 
 # -- Guard: exclude function/EXTRACT usage of FROM -------------
 # EXTRACT(YEAR FROM col), TRIM(BOTH ' ' FROM col), etc.
 # Each lookbehind is fixed-width as required by Python re.
 _NOT_FUNCTION_FROM = (
-    r'(?<!YEAR\s)'
-    r'(?<!MONTH\s)'
-    r'(?<!DAY\s)'
-    r'(?<!HOUR\s)'
-    r'(?<!MINUTE\s)'
-    r'(?<!SECOND\s)'
-    r'(?<!BOTH\s)'
-    r'(?<!LEADING\s)'
-    r'(?<!TRAILING\s)'
+    r"(?<!YEAR\s)"
+    r"(?<!MONTH\s)"
+    r"(?<!DAY\s)"
+    r"(?<!HOUR\s)"
+    r"(?<!MINUTE\s)"
+    r"(?<!SECOND\s)"
+    r"(?<!BOTH\s)"
+    r"(?<!LEADING\s)"
+    r"(?<!TRAILING\s)"
 )
 
 # -- Guard: exclude DELETE FROM (handled by target regex) -------
 _NOT_DML_FROM = (
-    r'(?<!DELETE\s)'
-    r'(?<!DEL\s)'
+    r"(?<!DELETE\s)"
+    r"(?<!DEL\s)"
 )
 
 # -- FROM keyword (guarded against function and DML usage) ------
 _FROM_KEYWORD_RE = re.compile(
-    rf'(?i){_NOT_FUNCTION_FROM}{_NOT_DML_FROM}\bFROM\b',
+    rf"(?i){_NOT_FUNCTION_FROM}{_NOT_DML_FROM}\bFROM\b",
 )
 
 # -- FROM clause terminators ------------------------------------
 # Keywords that end a FROM clause (so we can bound the clause
 # and scan for comma-separated qualified names within it).
 _FROM_TERM_RE = re.compile(
-    r'\b(?:'
-    r'WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|'
-    r'UNION(?:\s+ALL)?|INTERSECT|EXCEPT|MINUS|'
-    r'QUALIFY|SAMPLE|WINDOW|'
-    r'(?:INNER\s+)?JOIN|'
-    r'(?:LEFT|RIGHT|FULL)\s+(?:OUTER\s+)?JOIN|'
-    r'CROSS\s+JOIN|NATURAL\s+JOIN|'
-    r'WHEN\s+(?:MATCHED|NOT)'
-    r')\b|;',
+    r"\b(?:"
+    r"WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|"
+    r"UNION(?:\s+ALL)?|INTERSECT|EXCEPT|MINUS|"
+    r"QUALIFY|SAMPLE|WINDOW|"
+    r"(?:INNER\s+)?JOIN|"
+    r"(?:LEFT|RIGHT|FULL)\s+(?:OUTER\s+)?JOIN|"
+    r"CROSS\s+JOIN|NATURAL\s+JOIN|"
+    r"WHEN\s+(?:MATCHED|NOT)"
+    r")\b|;",
     re.IGNORECASE,
 )
 
 # -- JOIN variants (single table after JOIN) --------------------
 _JOIN_RE = re.compile(
-    rf'''(?ix)
+    rf"""(?ix)
     (?:
         (?:INNER\s+)?JOIN
       | LEFT\s+(?:OUTER\s+)?JOIN
@@ -284,31 +294,31 @@ _JOIN_RE = re.compile(
     )
     \s+
     ({_NAME})                       # Group 1: object reference
-    ''',
+    """,
 )
 
 # -- DML target anchors (Teradata abbreviations included) -------
-_TARGET_INSERT_RE = re.compile(rf'(?ix)\bINS(?:ERT)?\s+INTO\s+({_NAME})')
-_TARGET_UPDATE_RE = re.compile(rf'(?ix)\bUPD(?:ATE)?\s+({_NAME})')
-_TARGET_DELETE_RE = re.compile(rf'(?ix)\bDEL(?:ETE)?\s+(?:FROM\s+)?({_NAME})')
-_TARGET_MERGE_RE = re.compile(rf'(?ix)\bMERGE\s+INTO\s+({_NAME})')
+_TARGET_INSERT_RE = re.compile(rf"(?ix)\bINS(?:ERT)?\s+INTO\s+({_NAME})")
+_TARGET_UPDATE_RE = re.compile(rf"(?ix)\bUPD(?:ATE)?\s+({_NAME})")
+_TARGET_DELETE_RE = re.compile(rf"(?ix)\bDEL(?:ETE)?\s+(?:FROM\s+)?({_NAME})")
+_TARGET_MERGE_RE = re.compile(rf"(?ix)\bMERGE\s+INTO\s+({_NAME})")
 
 # -- MERGE USING source table -----------------------------------
 # Matches: USING db.table (direct table reference in MERGE).
 # When USING is followed by a subquery, the FROM inside the
 # subquery is handled by _FROM_KEYWORD_RE independently.
-_MERGE_USING_RE = re.compile(rf'(?ix)\bUSING\s+({_NAME})')
+_MERGE_USING_RE = re.compile(rf"(?ix)\bUSING\s+({_NAME})")
 
 # -- Trigger event table ----------------------------------------
 # Matches INSERT/UPDATE/DELETE ON db.table in trigger bodies.
 # The header extractor strips everything up to AFTER/BEFORE,
 # leaving "INSERT ON db.table ..." in the body.
 _TRIGGER_EVENT_ON_RE = re.compile(
-    rf'(?ix)\b(?:INSERT|UPDATE|DELETE)\s+ON\s+({_NAME})',
+    rf"(?ix)\b(?:INSERT|UPDATE|DELETE)\s+ON\s+({_NAME})",
 )
 
 # -- Foreign key REFERENCES ------------------------------------
-_FK_REFERENCES_RE = re.compile(rf'(?ix)\bREFERENCES\s+({_NAME})')
+_FK_REFERENCES_RE = re.compile(rf"(?ix)\bREFERENCES\s+({_NAME})")
 
 # -- COLLECT STATISTICS ON -------------------------------------
 # Catches:  COLLECT [SUMMARY] STATISTICS ... ON db.table
@@ -316,14 +326,14 @@ _FK_REFERENCES_RE = re.compile(rf'(?ix)\bREFERENCES\s+({_NAME})')
 # consumed by non-greedy .*? — safe because whitespace is
 # already normalised to single spaces (no newlines).
 _COLLECT_STATS_ON_RE = re.compile(
-    rf'(?ix)\bCOLLECT\s+(?:SUMMARY\s+)?STATISTICS\b.*?\bON\s+({_NAME})',
+    rf"(?ix)\bCOLLECT\s+(?:SUMMARY\s+)?STATISTICS\b.*?\bON\s+({_NAME})",
 )
 
 # -- CALL (procedure invocation) -------------------------------
 # Catches:  CALL db.procedure  |  CALL db.procedure(args)
 # The optional parenthesised arg list is NOT captured — we
 # only need the qualified name.
-_CALL_RE = re.compile(rf'(?ix)\bCALL\s+({_NAME})')
+_CALL_RE = re.compile(rf"(?ix)\bCALL\s+({_NAME})")
 
 # -- EXEC / EXECUTE (macro invocation) -------------------------
 # Teradata: EXEC executes a macro, CALL invokes a procedure.
@@ -331,7 +341,7 @@ _CALL_RE = re.compile(rf'(?ix)\bCALL\s+({_NAME})')
 # is not a static reference, so we exclude it via negative
 # lookahead.
 _EXEC_RE = re.compile(
-    rf'(?ix)\bEXEC(?:UTE)?\s+(?!IMMEDIATE\b)({_NAME})',
+    rf"(?ix)\bEXEC(?:UTE)?\s+(?!IMMEDIATE\b)({_NAME})",
 )
 
 # -- LOCKING ... FOR -------------------------------------------
@@ -340,7 +350,7 @@ _EXEC_RE = re.compile(
 # (unqualified → skipped by _classify_ref), DATABASE is a
 # session scope keyword not a table reference.
 _LOCKING_RE = re.compile(
-    rf'(?ix)\bLOCKING\s+(?:TABLE\s+)?({_NAME})\s+FOR\b',
+    rf"(?ix)\bLOCKING\s+(?:TABLE\s+)?({_NAME})\s+FOR\b",
 )
 
 # -- CREATE INDEX ON parent table ------------------------------
@@ -350,8 +360,8 @@ _LOCKING_RE = re.compile(
 # normalisation).  Covers join indexes, hash indexes, and
 # secondary indexes.
 _INDEX_ON_RE = re.compile(
-    rf'(?ix)\bCREATE\s+(?:UNIQUE\s+)?(?:JOIN\s+|HASH\s+)?INDEX\b'
-    rf'.*?\bON\s+({_NAME})',
+    rf"(?ix)\bCREATE\s+(?:UNIQUE\s+)?(?:JOIN\s+|HASH\s+)?INDEX\b"
+    rf".*?\bON\s+({_NAME})",
 )
 
 # -- RENAME TABLE (migration scripts) -------------------------
@@ -359,7 +369,7 @@ _INDEX_ON_RE = re.compile(
 #           RENAME TABLE db.old AS db.new
 # Both old and new names are captured via two separate groups.
 _RENAME_TABLE_RE = re.compile(
-    rf'(?ix)\bRENAME\s+TABLE\s+({_NAME})\s+(?:TO|AS)\s+({_NAME})',
+    rf"(?ix)\bRENAME\s+TABLE\s+({_NAME})\s+(?:TO|AS)\s+({_NAME})",
 )
 
 # -- DROP object (in SPL bodies) -------------------------------
@@ -368,10 +378,10 @@ _RENAME_TABLE_RE = re.compile(
 # Only relevant inside procedure/function bodies that perform
 # cleanup before recreation.
 _DROP_OBJECT_RE = re.compile(
-    rf'(?ix)\bDROP\s+'
-    rf'(?:TABLE|VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER|'
-    rf'JOIN\s+INDEX|HASH\s+INDEX|INDEX)\s+'
-    rf'({_NAME})',
+    rf"(?ix)\bDROP\s+"
+    rf"(?:TABLE|VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER|"
+    rf"JOIN\s+INDEX|HASH\s+INDEX|INDEX)\s+"
+    rf"({_NAME})",
 )
 
 # -- COMMENT ON (documentation DDL) ----------------------------
@@ -381,7 +391,7 @@ _DROP_OBJECT_RE = re.compile(
 # _QNAME portion (db.table) — the .col suffix is discarded
 # because _QNAME only captures two segments.
 _COMMENT_ON_RE = re.compile(
-    rf'(?ix)\bCOMMENT\s+ON\s+(?:TABLE|COLUMN)\s+({_NAME})',
+    rf"(?ix)\bCOMMENT\s+ON\s+(?:TABLE|COLUMN)\s+({_NAME})",
 )
 
 
@@ -414,7 +424,7 @@ def _extract_from_refs(body: str) -> List[str]:
         start = m.end()
 
         # Strategy 1: first name directly after FROM
-        first_m = re.match(rf'(?i)\s+({_NAME})', body[start:])
+        first_m = re.match(rf"(?i)\s+({_NAME})", body[start:])
         if first_m:
             refs.append(first_m.group(1).strip())
 
@@ -426,7 +436,7 @@ def _extract_from_refs(body: str) -> List[str]:
         clause_end = start + term_m.start() if term_m else len(body)
         from_clause = body[start:clause_end]
 
-        for qm in re.finditer(rf'(?i){_QNAME}', from_clause):
+        for qm in re.finditer(rf"(?i){_QNAME}", from_clause):
             refs.append(qm.group(0).strip())
 
     return refs
@@ -451,8 +461,8 @@ def _classify_ref(
         self-reference, or unresolvable unqualified name).
     """
     # Split into database and object parts
-    if '.' in ref:
-        parts = ref.split('.', 1)
+    if "." in ref:
+        parts = ref.split(".", 1)
         db_part = parts[0].strip()
         obj_part = parts[1].strip()
     else:
@@ -465,7 +475,7 @@ def _classify_ref(
     # Skip system databases
     db_upper = db_part.upper()
     # Strip {{}} for system-DB comparison on tokenised names
-    db_bare = db_upper.lstrip('{').rstrip('}')
+    db_bare = db_upper.lstrip("{").rstrip("}")
     if db_bare in _SYSTEM_DATABASES:
         return None
 
@@ -477,9 +487,9 @@ def _classify_ref(
 
     # Classify: known database → internal, otherwise → external
     if db_upper in known_databases:
-        return ('internal', qualified)
+        return ("internal", qualified)
     else:
-        return ('external', qualified)
+        return ("external", qualified)
 
 
 def _scan_references(
@@ -539,7 +549,7 @@ def _scan_references(
     # on _FROM_KEYWORD_RE require exactly one space between guard
     # words and FROM, so we collapse all whitespace runs to single
     # spaces before scanning.
-    body = re.sub(r'\s+', ' ', body)
+    body = re.sub(r"\s+", " ", body)
 
     # -- Collect all raw references from structural anchors --
     raw_refs = []
@@ -552,8 +562,12 @@ def _scan_references(
         raw_refs.append(m.group(1).strip())
 
     # DML targets (Teradata abbreviations: INS, UPD, DEL)
-    for regex in (_TARGET_INSERT_RE, _TARGET_UPDATE_RE,
-                  _TARGET_DELETE_RE, _TARGET_MERGE_RE):
+    for regex in (
+        _TARGET_INSERT_RE,
+        _TARGET_UPDATE_RE,
+        _TARGET_DELETE_RE,
+        _TARGET_MERGE_RE,
+    ):
         for m in regex.finditer(body):
             raw_refs.append(m.group(1).strip())
 
@@ -611,7 +625,7 @@ def _scan_references(
         if result is None:
             continue
         category, qualified = result
-        if category == 'internal':
+        if category == "internal":
             internal.add(qualified)
         else:
             external.add(qualified)
@@ -625,45 +639,57 @@ def _scan_references(
 
 # Classification patterns (same as ingest.py)
 _CLASSIFY_PATTERNS = [
-    (re.compile(r'CREATE\s+JOIN\s+INDEX\b', re.I), "JOIN_INDEX"),
-    (re.compile(r'CREATE\s+HASH\s+INDEX\b', re.I), "HASH_INDEX"),
-    (re.compile(r'CREATE\s+(?:UNIQUE\s+)?INDEX\b', re.I), "INDEX"),
-    (re.compile(r'(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b.*?TABLE\s+OPERATOR', re.I | re.DOTALL), "SCRIPT_TABLE_OPERATOR"),
-    (re.compile(r'(?:CREATE|REPLACE)\s+(?:MULTISET|SET)?\s*(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?(?:TRACE\s+)?TABLE\b', re.I), "TABLE"),
-    (re.compile(r'(?:CREATE|REPLACE)\s+VIEW\b', re.I), "VIEW"),
-    (re.compile(r'(?:CREATE|REPLACE)\s+MACRO\b', re.I), "MACRO"),
-    (re.compile(r'(?:CREATE|REPLACE)\s+PROCEDURE\b', re.I), "PROCEDURE"),
-    (re.compile(r'(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b', re.I), "FUNCTION"),
-    (re.compile(r'(?:CREATE|REPLACE)\s+TRIGGER\b', re.I), "TRIGGER"),
+    (re.compile(r"CREATE\s+JOIN\s+INDEX\b", re.I), "JOIN_INDEX"),
+    (re.compile(r"CREATE\s+HASH\s+INDEX\b", re.I), "HASH_INDEX"),
+    (re.compile(r"CREATE\s+(?:UNIQUE\s+)?INDEX\b", re.I), "INDEX"),
+    (
+        re.compile(
+            r"(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b.*?TABLE\s+OPERATOR",
+            re.I | re.DOTALL,
+        ),
+        "SCRIPT_TABLE_OPERATOR",
+    ),
+    (
+        re.compile(
+            r"(?:CREATE|REPLACE)\s+(?:MULTISET|SET)?\s*(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?(?:TRACE\s+)?TABLE\b",
+            re.I,
+        ),
+        "TABLE",
+    ),
+    (re.compile(r"(?:CREATE|REPLACE)\s+VIEW\b", re.I), "VIEW"),
+    (re.compile(r"(?:CREATE|REPLACE)\s+MACRO\b", re.I), "MACRO"),
+    (re.compile(r"(?:CREATE|REPLACE)\s+PROCEDURE\b", re.I), "PROCEDURE"),
+    (re.compile(r"(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b", re.I), "FUNCTION"),
+    (re.compile(r"(?:CREATE|REPLACE)\s+TRIGGER\b", re.I), "TRIGGER"),
 ]
 
 # Qualified name extraction
 # A name fragment: either a regular identifier, a quoted identifier,
 # or a {{TOKEN}} placeholder.
 _NAME_FRAG = r'(?:"[^"]+"|[A-Za-z_]\w*|\{\{[A-Za-z_]\w*\}\})'
-_QUAL_NAME = _NAME_FRAG + r'(?:\.' + _NAME_FRAG + r')?'
+_QUAL_NAME = _NAME_FRAG + r"(?:\." + _NAME_FRAG + r")?"
 
 _QUALIFIED_NAME_RE = re.compile(
-    r'(?:CREATE|REPLACE)\s+(?:MULTISET\s+|SET\s+)?'
-    r'(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?'
-    r'(?:TRACE\s+)?'
-    r'(?:SPECIFIC\s+)?'
-    r'(?:TABLE|VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER|'
-    r'JOIN\s+INDEX|HASH\s+INDEX)\s+'
-    r'(' + _QUAL_NAME + r')',
+    r"(?:CREATE|REPLACE)\s+(?:MULTISET\s+|SET\s+)?"
+    r"(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?"
+    r"(?:TRACE\s+)?"
+    r"(?:SPECIFIC\s+)?"
+    r"(?:TABLE|VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER|"
+    r"JOIN\s+INDEX|HASH\s+INDEX)\s+"
+    r"(" + _QUAL_NAME + r")",
     re.IGNORECASE,
 )
 
 # Base function name (from header, not SPECIFIC clause)
 _FUNCTION_HEADER_RE = re.compile(
-    r'(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\s+'
-    r'(' + _QUAL_NAME + r')',
+    r"(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\s+"
+    r"(" + _QUAL_NAME + r")",
     re.IGNORECASE,
 )
 
 # SPECIFIC clause inside function body
 _SPECIFIC_RE = re.compile(
-    r'SPECIFIC\s+(' + _QUAL_NAME + r')',
+    r"SPECIFIC\s+(" + _QUAL_NAME + r")",
     re.IGNORECASE,
 )
 
@@ -681,8 +707,8 @@ def _extract_name(content: str) -> Tuple[Optional[str], Optional[str]]:
     match = _QUALIFIED_NAME_RE.search(content)
     if not match:
         return (None, None)
-    qualified = match.group(1).replace('"', '')
-    parts = qualified.split('.')
+    qualified = match.group(1).replace('"', "")
+    parts = qualified.split(".")
     if len(parts) == 2:
         return (parts[0].strip(), parts[1].strip())
     return (None, parts[0].strip() if parts else None)
@@ -699,12 +725,13 @@ def _extract_function_base_name(content: str) -> Optional[str]:
     match = _FUNCTION_HEADER_RE.search(content)
     if not match:
         return None
-    return match.group(1).replace('"', '')
+    return match.group(1).replace('"', "")
 
 
 # ---------------------------------------------------------------
 # Core analysis
 # ---------------------------------------------------------------
+
 
 def analyse_project(project_dir: str) -> AnalysisResult:
     """
@@ -733,7 +760,7 @@ def analyse_project(project_dir: str) -> AnalysisResult:
 
     # -- Phase 1: Build object index --
     for file_path in ddl_files:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
 
         obj_type = _classify(content)
@@ -750,8 +777,8 @@ def analyse_project(project_dir: str) -> AnalysisResult:
             base_fn = f"{db_name}.{obj_name}"  # Base function name
             specific_match = _SPECIFIC_RE.search(content)
             if specific_match:
-                specific_qual = specific_match.group(1).replace('"', '')
-                parts = specific_qual.split('.')
+                specific_qual = specific_match.group(1).replace('"', "")
+                parts = specific_qual.split(".")
                 # Use the specific name as the object name
                 obj_name = parts[-1].strip()
 
@@ -781,7 +808,7 @@ def analyse_project(project_dir: str) -> AnalysisResult:
     # Build known database names (for alias filtering)
     known_databases = set()
     for qn in result.objects:
-        db_part = qn.split('.')[0]
+        db_part = qn.split(".")[0]
         known_databases.add(db_part.upper())
 
     # Build a reverse lookup: upper-cased name → set of qualified names
@@ -800,7 +827,10 @@ def analyse_project(project_dir: str) -> AnalysisResult:
     # -- Phase 3: Scan references and build edges --
     for qn, obj in result.objects.items():
         internal_refs, ext_refs = _scan_references(
-            obj.ddl_text, obj.object_type, qn, known_databases,
+            obj.ddl_text,
+            obj.object_type,
+            qn,
+            known_databases,
         )
 
         for ref in internal_refs:
@@ -835,12 +865,15 @@ def analyse_project(project_dir: str) -> AnalysisResult:
         )
 
     result.waves = _topological_sort(
-        result.dependencies, result.objects,
+        result.dependencies,
+        result.objects,
     )
 
     # -- Phase 6: Generate _waves.txt --
     result.waves_file_content = _generate_waves_txt(
-        result.waves, result.objects, project_dir,
+        result.waves,
+        result.objects,
+        project_dir,
     )
 
     return result
@@ -849,6 +882,7 @@ def analyse_project(project_dir: str) -> AnalysisResult:
 # ---------------------------------------------------------------
 # Cycle detection (DFS-based)
 # ---------------------------------------------------------------
+
 
 def _detect_cycles(
     dependencies: Dict[str, Set[str]],
@@ -891,6 +925,7 @@ def _detect_cycles(
 # ---------------------------------------------------------------
 # Topological sort (Kahn's algorithm → layers)
 # ---------------------------------------------------------------
+
 
 def _topological_sort(
     dependencies: Dict[str, Set[str]],
@@ -940,7 +975,8 @@ def _topological_sort(
     while remaining:
         # Find all nodes with in-degree 0 (no unresolved dependencies)
         wave = [
-            n for n in remaining
+            n
+            for n in remaining
             if all(d not in remaining for d in dependencies.get(n, set()))
         ]
 
@@ -957,14 +993,22 @@ def _topological_sort(
         # Sort within wave for deterministic output:
         # Tables first, then indexes, then views/macros/procs, then triggers
         type_order = {
-            "TABLE": 0, "JOIN_INDEX": 1, "HASH_INDEX": 1,
-            "INDEX": 1, "FUNCTION": 2, "MACRO": 2,
-            "VIEW": 3, "PROCEDURE": 3, "TRIGGER": 4,
+            "TABLE": 0,
+            "JOIN_INDEX": 1,
+            "HASH_INDEX": 1,
+            "INDEX": 1,
+            "FUNCTION": 2,
+            "MACRO": 2,
+            "VIEW": 3,
+            "PROCEDURE": 3,
+            "TRIGGER": 4,
         }
-        wave.sort(key=lambda n: (
-            type_order.get(objects[n].object_type, 99),
-            n,
-        ))
+        wave.sort(
+            key=lambda n: (
+                type_order.get(objects[n].object_type, 99),
+                n,
+            )
+        )
 
         waves.append(wave)
         remaining -= set(wave)
@@ -975,6 +1019,7 @@ def _topological_sort(
 # ---------------------------------------------------------------
 # _waves.txt generator
 # ---------------------------------------------------------------
+
 
 def _generate_waves_txt(
     waves: List[List[str]],
@@ -1037,14 +1082,15 @@ def _generate_waves_txt(
 # File discovery helpers
 # ---------------------------------------------------------------
 
+
 def _find_payload(project_dir: str) -> Optional[str]:
     """Locate the payload directory in a SHIPS project."""
-    for candidate in ['payload/database', 'payload']:
+    for candidate in ["payload/database", "payload"]:
         path = os.path.join(project_dir, candidate)
         if os.path.isdir(path):
             return path
     # Fallback: if the project_dir itself contains DDL subdirs
-    for subdir in ['DDL', 'tables', 'views']:
+    for subdir in ["DDL", "tables", "views"]:
         if os.path.isdir(os.path.join(project_dir, subdir)):
             return project_dir
     return None
@@ -1053,15 +1099,24 @@ def _find_payload(project_dir: str) -> Optional[str]:
 def _collect_ddl_files(payload_dir: str) -> List[str]:
     """Collect all DDL files from the payload directory."""
     extensions = {
-        '.tbl', '.viw', '.spl', '.mcr', '.fnc',
-        '.trg', '.jix', '.idx', '.sql', '.ddl',
-        '.sto', '.jcl',
+        ".tbl",
+        ".viw",
+        ".spl",
+        ".mcr",
+        ".fnc",
+        ".trg",
+        ".jix",
+        ".idx",
+        ".sql",
+        ".ddl",
+        ".sto",
+        ".jcl",
     }
     files = []
     for root, dirs, filenames in os.walk(payload_dir):
         dirs.sort()
         for f in sorted(filenames):
-            if f.startswith('.') or f.startswith('_'):
+            if f.startswith(".") or f.startswith("_"):
                 continue
             ext = os.path.splitext(f)[1].lower()
             if ext in extensions:
@@ -1072,6 +1127,7 @@ def _collect_ddl_files(payload_dir: str) -> List[str]:
 # ---------------------------------------------------------------
 # CLI-friendly summary
 # ---------------------------------------------------------------
+
 
 def format_summary(result: AnalysisResult) -> str:
     """
@@ -1099,7 +1155,7 @@ def format_summary(result: AnalysisResult) -> str:
     if result.cycles:
         lines.append(f"  ⚠ Cycles detected:   {len(result.cycles)}")
     else:
-        lines.append(f"  Cycles:              None")
+        lines.append("  Cycles:              None")
 
     # Function groups
     overloaded = {k: v for k, v in result.function_groups.items() if len(v) > 1}
@@ -1117,9 +1173,7 @@ def format_summary(result: AnalysisResult) -> str:
             if qn in result.objects:
                 type_counts[result.objects[qn].object_type] += 1
 
-        type_str = ", ".join(
-            f"{c} {t}" for t, c in sorted(type_counts.items())
-        )
+        type_str = ", ".join(f"{c} {t}" for t, c in sorted(type_counts.items()))
         lines.append(f"  Wave {i + 1}: {len(wave)} objects ({type_str})")
         for qn in wave:
             deps = result.dependencies.get(qn, set())

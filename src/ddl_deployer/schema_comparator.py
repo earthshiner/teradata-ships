@@ -24,15 +24,17 @@ logger = logging.getLogger(__name__)
 
 # -- Teradata type codes that share a numeric family (safe to widen) --
 # Within a family, migration is safe if the new length >= old length.
-_NUMERIC_FAMILY = {'I1', 'I2', 'I', 'I8', 'F', 'D'}     # Integer/float family
-_STRING_FAMILY = {'CF', 'CV', 'UC', 'UV', 'LF', 'LV'}    # Char/varchar/clob family
-_DATETIME_FAMILY = {'DA', 'TS', 'TZ', 'SZ', 'AT', 'TI'}  # Date/time family
-_BYTE_FAMILY = {'BF', 'BV', 'BO'}                         # Byte/varbyte/blob family
+_NUMERIC_FAMILY = {"I1", "I2", "I", "I8", "F", "D"}  # Integer/float family
+_STRING_FAMILY = {"CF", "CV", "UC", "UV", "LF", "LV"}  # Char/varchar/clob family
+_DATETIME_FAMILY = {"DA", "TS", "TZ", "SZ", "AT", "TI"}  # Date/time family
+_BYTE_FAMILY = {"BF", "BV", "BO"}  # Byte/varbyte/blob family
 
 _TYPE_FAMILIES = [_NUMERIC_FAMILY, _STRING_FAMILY, _DATETIME_FAMILY, _BYTE_FAMILY]
 
 
-def get_column_metadata(cursor, database_name: str, table_name: str) -> List[ColumnInfo]:
+def get_column_metadata(
+    cursor, database_name: str, table_name: str
+) -> List[ColumnInfo]:
     """
     Retrieve column metadata from DBC.ColumnsV for a given table.
 
@@ -72,18 +74,19 @@ def get_column_metadata(cursor, database_name: str, table_name: str) -> List[Col
 
     columns = []
     for row in rows:
-        columns.append(ColumnInfo(
-            name=row[0],
-            column_type=row[1],
-            column_length=row[2],
-            nullable=bool(row[3]),
-            default_value=row[4] if row[4] else None,
-            column_id=row[5],
-        ))
+        columns.append(
+            ColumnInfo(
+                name=row[0],
+                column_type=row[1],
+                column_length=row[2],
+                nullable=bool(row[3]),
+                default_value=row[4] if row[4] else None,
+                column_id=row[5],
+            )
+        )
 
     logger.debug(
-        "Retrieved %d columns for %s.%s",
-        len(columns), database_name, table_name
+        "Retrieved %d columns for %s.%s", len(columns), database_name, table_name
     )
     return columns
 
@@ -123,16 +126,21 @@ def compare_schemas(
         old_col = old_by_name[name]
         new_col = new_by_name[name]
 
-        if old_col.column_type == new_col.column_type and old_col.column_length == new_col.column_length:
+        if (
+            old_col.column_type == new_col.column_type
+            and old_col.column_length == new_col.column_length
+        ):
             common_columns.append(name)
         else:
-            changed_columns.append({
-                'name': name,
-                'old_type': old_col.column_type,
-                'old_length': old_col.column_length,
-                'new_type': new_col.column_type,
-                'new_length': new_col.column_length,
-            })
+            changed_columns.append(
+                {
+                    "name": name,
+                    "old_type": old_col.column_type,
+                    "old_length": old_col.column_length,
+                    "new_type": new_col.column_type,
+                    "new_length": new_col.column_length,
+                }
+            )
 
     # -- Assess blockers and warnings --
     blockers = []
@@ -150,11 +158,11 @@ def compare_schemas(
 
     # Check changed columns for compatibility
     for change in changed_columns:
-        name = change['name']
-        old_type = change['old_type']
-        new_type = change['new_type']
-        old_len = change['old_length']
-        new_len = change['new_length']
+        name = change["name"]
+        old_type = change["old_type"]
+        new_type = change["new_type"]
+        old_len = change["old_length"]
+        new_len = change["new_length"]
 
         if old_type == new_type:
             # Same type, check length
@@ -196,8 +204,7 @@ def compare_schemas(
 
     # Migratable columns = unchanged + changed-but-not-blocked
     migratable_columns = common_columns + [
-        c['name'] for c in changed_columns
-        if c['name'] not in blocked_column_names
+        c["name"] for c in changed_columns if c["name"] not in blocked_column_names
     ]
 
     return CompatibilityResult(

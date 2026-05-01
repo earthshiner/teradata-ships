@@ -79,7 +79,8 @@ class DeploymentManifest:
             self._load()
             logger.info(
                 "Loaded existing manifest: %s (deployment: %s)",
-                self.path, self.data.get("deployment_id")
+                self.path,
+                self.data.get("deployment_id"),
             )
         else:
             if deployment_id is None:
@@ -99,7 +100,7 @@ class DeploymentManifest:
 
     def _load(self):
         """Load the manifest from disc."""
-        with open(self.path, 'r', encoding='utf-8') as f:
+        with open(self.path, "r", encoding="utf-8") as f:
             self.data = json.load(f)
         self.deployment_id = self.data["deployment_id"]
 
@@ -124,11 +125,12 @@ class DeploymentManifest:
         # Create a unique temp file in the same directory so
         # os.replace is a same-filesystem atomic rename.
         fd, tmp_path = tempfile.mkstemp(
-            suffix=".tmp", prefix=".manifest_",
+            suffix=".tmp",
+            prefix=".manifest_",
             dir=manifest_dir,
         )
         try:
-            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(self.data, f, indent=2, ensure_ascii=False)
                 f.flush()
                 os.fsync(f.fileno())
@@ -142,8 +144,7 @@ class DeploymentManifest:
                     if attempt < 4:
                         if os.path.exists(self.path):
                             try:
-                                os.chmod(self.path,
-                                         stat.S_IWRITE | stat.S_IREAD)
+                                os.chmod(self.path, stat.S_IWRITE | stat.S_IREAD)
                             except Exception:
                                 pass
                         time.sleep(0.1 * (attempt + 1))
@@ -151,8 +152,7 @@ class DeploymentManifest:
                         # Final attempt: remove target then rename
                         if os.path.exists(self.path):
                             try:
-                                os.chmod(self.path,
-                                         stat.S_IWRITE | stat.S_IREAD)
+                                os.chmod(self.path, stat.S_IWRITE | stat.S_IREAD)
                                 os.remove(self.path)
                             except Exception:
                                 pass
@@ -167,10 +167,14 @@ class DeploymentManifest:
 
         logger.debug("Manifest saved: %s", self.path)
 
-    def register_object(self, qualified_name: str, ddl_file: str,
-                       wave_number: Optional[int] = None,
-                       deploy_intent: Optional[str] = None,
-                       object_type: Optional[str] = None):
+    def register_object(
+        self,
+        qualified_name: str,
+        ddl_file: str,
+        wave_number: Optional[int] = None,
+        deploy_intent: Optional[str] = None,
+        object_type: Optional[str] = None,
+    ):
         """
         Register an object in the manifest as PENDING.
 
@@ -214,8 +218,7 @@ class DeploymentManifest:
             existing = self.data["objects"][qualified_name]
             existing_state = existing.get("state")
 
-            if existing_state in (DeployState.PENDING.value,
-                                  DeployState.FAILED.value):
+            if existing_state in (DeployState.PENDING.value, DeployState.FAILED.value):
                 existing["ddl_file"] = ddl_file
                 existing["wave_number"] = wave_number
                 existing["deploy_intent"] = deploy_intent
@@ -223,7 +226,9 @@ class DeploymentManifest:
                 self._save()
                 logger.debug(
                     "Re-registered %s object '%s' (file: '%s').",
-                    existing_state, qualified_name, ddl_file,
+                    existing_state,
+                    qualified_name,
+                    ddl_file,
                 )
             elif existing_state == DeployState.COMPLETED.value:
                 logger.info(
@@ -237,8 +242,10 @@ class DeploymentManifest:
                 logger.warning(
                     "Object '%s' exists in state %s (file '%s'). "
                     "Cannot re-register as PENDING from file '%s'.",
-                    qualified_name, existing_state,
-                    existing_file, ddl_file,
+                    qualified_name,
+                    existing_state,
+                    existing_file,
+                    ddl_file,
                 )
 
     def update_state(
@@ -272,8 +279,7 @@ class DeploymentManifest:
             record = self.data["objects"].get(qualified_name)
             if record is None:
                 raise KeyError(
-                    f"Table '{qualified_name}' is not registered "
-                    f"in the manifest."
+                    f"Table '{qualified_name}' is not registered in the manifest."
                 )
 
             record["state"] = state.value
@@ -298,16 +304,17 @@ class DeploymentManifest:
             if record["started_at"] is None:
                 record["started_at"] = _now_iso()
 
-            if state in (DeployState.COMPLETED, DeployState.SKIPPED,
-                         DeployState.FAILED, DeployState.ROLLED_BACK):
+            if state in (
+                DeployState.COMPLETED,
+                DeployState.SKIPPED,
+                DeployState.FAILED,
+                DeployState.ROLLED_BACK,
+            ):
                 record["completed_at"] = _now_iso()
 
             self._save()
 
-        logger.info(
-            "State transition: %s → %s",
-            qualified_name, state.value
-        )
+        logger.info("State transition: %s → %s", qualified_name, state.value)
 
     def get_state(self, qualified_name: str) -> DeployState:
         """
@@ -347,7 +354,8 @@ class DeploymentManifest:
             List of qualified table names.
         """
         return [
-            name for name, record in self.data["objects"].items()
+            name
+            for name, record in self.data["objects"].items()
             if record["state"] == state.value
         ]
 
@@ -362,7 +370,8 @@ class DeploymentManifest:
         """
         resumable_states = {DeployState.PENDING.value, DeployState.FAILED.value}
         return [
-            name for name, record in self.data["objects"].items()
+            name
+            for name, record in self.data["objects"].items()
             if record["state"] in resumable_states
         ]
 
@@ -385,8 +394,7 @@ class DeploymentManifest:
             record = self.data["objects"].get(qualified_name)
             if record is None:
                 raise KeyError(
-                    f"Object '{qualified_name}' is not registered "
-                    f"in the manifest."
+                    f"Object '{qualified_name}' is not registered in the manifest."
                 )
 
             previous_state = record["state"]
@@ -405,7 +413,8 @@ class DeploymentManifest:
 
         logger.info(
             "Reset '%s' from %s → PENDING for re-deployment.",
-            qualified_name, previous_state,
+            qualified_name,
+            previous_state,
         )
 
     def prepare_for_redeploy(
@@ -448,7 +457,8 @@ class DeploymentManifest:
                 logger.warning(
                     "Existence check failed for '%s': %s — "
                     "leaving as COMPLETED (safe default).",
-                    qname, e,
+                    qname,
+                    e,
                 )
                 continue
 
@@ -468,8 +478,8 @@ class DeploymentManifest:
             )
         else:
             logger.info(
-                "All %d COMPLETED objects verified — still exist "
-                "in database.", len(completed),
+                "All %d COMPLETED objects verified — still exist in database.",
+                len(completed),
             )
 
         return reset_names
@@ -490,8 +500,10 @@ class DeploymentManifest:
         return [
             {"qualified_name": name, **record}
             for name, record in self.data["objects"].items()
-            if (record["state"] == DeployState.COMPLETED.value
-                and record.get("completed_at") is not None)
+            if (
+                record["state"] == DeployState.COMPLETED.value
+                and record.get("completed_at") is not None
+            )
         ]
 
     def get_rollback_candidates(self) -> list:
@@ -513,7 +525,8 @@ class DeploymentManifest:
             DeployState.COMPLETED.value,
         }
         candidates = [
-            name for name, record in self.data["objects"].items()
+            name
+            for name, record in self.data["objects"].items()
             if record["state"] in rollback_states
         ]
         # Reverse order — unwind most recent first

@@ -12,17 +12,10 @@ Covers:
     - Full analyse_project integration
 """
 
-import os
-import pytest
-
 from td_release_packager.analyser import (
     _strip_noise,
     _extract_body,
     _scan_references,
-    _extract_from_refs,
-    _classify_ref,
-    _classify,
-    _extract_name,
     _detect_cycles,
     _topological_sort,
     _generate_waves_txt,
@@ -34,6 +27,7 @@ from td_release_packager.analyser import (
 # ---------------------------------------------------------------
 # _strip_noise — Comment and literal removal
 # ---------------------------------------------------------------
+
 
 class TestStripNoise:
     """Tests for removing comments and string literals from DDL."""
@@ -75,6 +69,7 @@ class TestStripNoise:
 # _extract_body — Header extraction
 # ---------------------------------------------------------------
 
+
 class TestExtractBody:
     """Tests for extracting DDL body (where dependencies live)."""
 
@@ -108,6 +103,7 @@ class TestExtractBody:
 # ---------------------------------------------------------------
 # _scan_references — Structural-anchor reference scanning
 # ---------------------------------------------------------------
+
 
 class TestScanReferences:
     """Tests for scanning DB.Object references using structural anchors."""
@@ -233,20 +229,14 @@ class TestScanReferences:
 
     def test_right_join(self):
         """RIGHT JOIN is detected."""
-        ddl = (
-            "SELECT * FROM MyDB.T1\n"
-            "RIGHT JOIN MyDB.T2 ON MyDB.T1.Id = MyDB.T2.Id;\n"
-        )
+        ddl = "SELECT * FROM MyDB.T1\nRIGHT JOIN MyDB.T2 ON MyDB.T1.Id = MyDB.T2.Id;\n"
         known_dbs = {"MYDB"}
         internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
         assert "MyDB.T2" in internal
 
     def test_cross_join(self):
         """CROSS JOIN is detected."""
-        ddl = (
-            "SELECT * FROM MyDB.Dates d\n"
-            "CROSS JOIN MyDB.Products p;\n"
-        )
+        ddl = "SELECT * FROM MyDB.Dates d\nCROSS JOIN MyDB.Products p;\n"
         known_dbs = {"MYDB"}
         internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
         assert "MyDB.Dates" in internal
@@ -322,10 +312,7 @@ class TestScanReferences:
 
     def test_extract_year_from_not_matched(self):
         """EXTRACT(YEAR FROM col) does not produce a false reference."""
-        ddl = (
-            "SELECT EXTRACT(YEAR FROM hire_date)\n"
-            "FROM MyDB.Employee;\n"
-        )
+        ddl = "SELECT EXTRACT(YEAR FROM hire_date)\nFROM MyDB.Employee;\n"
         known_dbs = {"MYDB"}
         internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
         # hire_date is not a table reference
@@ -336,10 +323,7 @@ class TestScanReferences:
 
     def test_extract_month_from_not_matched(self):
         """EXTRACT(MONTH FROM col) does not produce a false reference."""
-        ddl = (
-            "SELECT EXTRACT(MONTH FROM order_date)\n"
-            "FROM MyDB.Orders;\n"
-        )
+        ddl = "SELECT EXTRACT(MONTH FROM order_date)\nFROM MyDB.Orders;\n"
         known_dbs = {"MYDB"}
         internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
         assert not any("order_date" in ref for ref in internal)
@@ -347,10 +331,7 @@ class TestScanReferences:
 
     def test_trim_from_not_matched(self):
         """TRIM(BOTH ' ' FROM col) does not produce a false reference."""
-        ddl = (
-            "SELECT TRIM(BOTH ' ' FROM cust_name)\n"
-            "FROM MyDB.Customer;\n"
-        )
+        ddl = "SELECT TRIM(BOTH ' ' FROM cust_name)\nFROM MyDB.Customer;\n"
         known_dbs = {"MYDB"}
         internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
         assert not any("cust_name" in ref for ref in internal)
@@ -370,7 +351,9 @@ class TestScanReferences:
             ");\n"
         )
         known_dbs = {"MYDB"}
-        internal, external = _scan_references(ddl, "TRIGGER", "MyDB.trg_Audit", known_dbs)
+        internal, external = _scan_references(
+            ddl, "TRIGGER", "MyDB.trg_Audit", known_dbs
+        )
         assert "MyDB.Customer" in internal
         assert "MyDB.AuditLog" in internal
 
@@ -411,6 +394,7 @@ class TestScanReferences:
 # ---------------------------------------------------------------
 # _detect_cycles
 # ---------------------------------------------------------------
+
 
 class TestDetectCycles:
     """Tests for cycle detection in the dependency graph."""
@@ -456,6 +440,7 @@ class TestDetectCycles:
 # ---------------------------------------------------------------
 # _topological_sort
 # ---------------------------------------------------------------
+
 
 class TestTopologicalSort:
     """Tests for wave-based topological sorting."""
@@ -550,6 +535,7 @@ class TestTopologicalSort:
 # _generate_waves_txt
 # ---------------------------------------------------------------
 
+
 class TestGenerateWavesTxt:
     """Tests for _waves.txt content generation."""
 
@@ -583,6 +569,7 @@ class TestGenerateWavesTxt:
 # analyse_project (integration)
 # ---------------------------------------------------------------
 
+
 class TestAnalyseProject:
     """Integration tests for the full dependency analysis pipeline."""
 
@@ -615,8 +602,7 @@ class TestAnalyseProject:
             encoding="utf-8",
         )
         (views_dir / "MyDB.ActiveCust.viw").write_text(
-            "REPLACE VIEW MyDB.ActiveCust AS\n"
-            "SELECT Id FROM MyDB.Customer;",
+            "REPLACE VIEW MyDB.ActiveCust AS\nSELECT Id FROM MyDB.Customer;",
             encoding="utf-8",
         )
 
@@ -633,8 +619,7 @@ class TestAnalyseProject:
         views_dir = tmp_project / "payload" / "database" / "DDL" / "views"
 
         (views_dir / "MyDB.V.viw").write_text(
-            "REPLACE VIEW MyDB.V AS\n"
-            "SELECT * FROM ExternalDB.SomeTable;",
+            "REPLACE VIEW MyDB.V AS\nSELECT * FROM ExternalDB.SomeTable;",
             encoding="utf-8",
         )
 

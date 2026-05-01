@@ -1,14 +1,19 @@
 """
 deployer.py — Core deployment orchestration.
 
-Handles all Teradata DDL object types via three deployment strategies:
+Handles all Teradata DDL object types via deployment strategies:
 
-    IDEMPOTENT_DEPLOY  — Tables: backup, create, schema compare,
-                         conditional data migration.
+    IDEMPOTENT_DEPLOY  — Tables: backup via RENAME, create, schema
+                         compare, conditional data migration.
     DROP_AND_CREATE    — Join indexes, hash indexes, secondary
-                         indexes, triggers: DROP if exists, CREATE.
-    REPLACE_IN_PLACE   — Views, macros, procedures, functions:
-                         execute as-is (REPLACE keyword is idempotent).
+                         indexes, triggers: capture existing via
+                         SHOW, DROP, CREATE.
+    CREATE_ONLY        — Views, macros, procedures, functions with
+                         CREATE verb: capture existing via SHOW,
+                         DROP, CREATE. Deployer owns idempotency.
+    REPLACE_IN_PLACE   — Views, macros, procedures, functions with
+                         REPLACE verb: capture existing via SHOW,
+                         execute as-is (REPLACE is idempotent).
 
 All deployments follow this sequence:
     1. Pre-flight validation (mandatory) — parse DDL, check
@@ -34,7 +39,6 @@ from ddl_deployer.ddl_parser import parse_ddl_file, parse_index_parent_table
 from ddl_deployer.manifest import DeploymentManifest
 from ddl_deployer.migration_builder import build_migration_sql
 from ddl_deployer.models import (
-    DeployIntent,
     DeployState,
     DeployStrategy,
     ObjectDeployResult,
@@ -43,7 +47,6 @@ from ddl_deployer.models import (
     ParsedDDL,
     DEPLOY_ORDER,
     SHOW_COMMAND_MAP,
-    STRATEGY_MAP,
     SYSTEM_EXISTENCE_QUERIES,
     TABLE_KIND_MAP,
 )
@@ -62,7 +65,7 @@ logger = logging.getLogger(__name__)
 # Everything from this point onwards is driver internals — useful
 # in log files but not in user-facing output (HTML reports, CLI).
 _GO_STACK_RE = re.compile(
-    r'\s*\bat\s+gosqldriver/.*',
+    r"\s*\bat\s+gosqldriver/.*",
     re.DOTALL,
 )
 
@@ -89,7 +92,7 @@ def _clean_db_error(raw: str) -> str:
             the word 'INLINE'.
 
     The full unmodified error is still written to the log file
-    via logger.error() / logger.exception().
+    via logger.debug() with exc_info=True.
 
     Args:
         raw: The raw exception string from teradatasql.
@@ -97,13 +100,14 @@ def _clean_db_error(raw: str) -> str:
     Returns:
         The Teradata error message without the Go stack trace.
     """
-    cleaned = _GO_STACK_RE.sub('', raw).strip()
+    cleaned = _GO_STACK_RE.sub("", raw).strip()
     return cleaned if cleaned else raw
 
 
 # ---------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------
+
 
 def deploy_package(
     cursor,
@@ -147,7 +151,6 @@ def deploy_package(
         PackageDeployResult with per-object outcomes, wave summaries,
         and report path.
     """
-    from ddl_deployer.models import WaveSummary
 
     # -- Determine file list --
     if waves is not None:
@@ -155,7 +158,9 @@ def deploy_package(
         preserve_order = True
         logger.info(
             "Wave-parallel mode: %d waves, %d objects, %d streams",
-            len(waves), len(ddl_files), num_streams
+            len(waves),
+            len(ddl_files),
+            num_streams,
         )
     elif ordered_files is not None:
         ddl_files = ordered_files
@@ -163,9 +168,22 @@ def deploy_package(
         logger.info("Using %d pre-ordered DDL files", len(ddl_files))
     else:
         if file_patterns is None:
-            file_patterns = ['*.tbl', '*.jix', '*.idx', '*.viw', '*.spl',
-                             '*.mcr', '*.fnc', '*.trg', '*.db', '*.dcl',
-                             '*.usr', '*.rol', '*.prf', '*.sql']
+            file_patterns = [
+                "*.tbl",
+                "*.jix",
+                "*.idx",
+                "*.viw",
+                "*.spl",
+                "*.mcr",
+                "*.fnc",
+                "*.trg",
+                "*.db",
+                "*.dcl",
+                "*.usr",
+                "*.rol",
+                "*.prf",
+                "*.sql",
+            ]
         ddl_files = []
         for pattern in file_patterns:
             ddl_files.extend(sorted(glob.glob(os.path.join(package_dir, pattern))))
@@ -186,9 +204,12 @@ def deploy_package(
         if not preflight_result.passed:
             logger.error("Pre-flight FAILED: %d errors.", preflight_result.errors)
             pkg_result = PackageDeployResult(
-                deployment_id="preflight_failed", manifest_path="",
-                total=len(ddl_files), failed=preflight_result.errors,
-                preflight_result=preflight_result, dry_run=dry_run,
+                deployment_id="preflight_failed",
+                manifest_path="",
+                total=len(ddl_files),
+                failed=preflight_result.errors,
+                preflight_result=preflight_result,
+                dry_run=dry_run,
             )
             # Generate report even on preflight failure so the
             # DBA can see what went wrong in a readable format.
@@ -210,9 +231,12 @@ def deploy_package(
 
     # -- Order (skip if pre-ordered) --
     if not preserve_order:
-        parsed_ddls.sort(key=lambda p: (
-            DEPLOY_ORDER.get(p.object_type, 99), p.qualified_name,
-        ))
+        parsed_ddls.sort(
+            key=lambda p: (
+                DEPLOY_ORDER.get(p.object_type, 99),
+                p.qualified_name,
+            )
+        )
 
     # -- Deployer privilege check --
     # Verifies the deploying user has CREATE + DROP rights on
@@ -232,8 +256,8 @@ def deploy_package(
             cursor=cursor,
             parsed_ddls=parsed_ddls,
             created_databases=created_databases,
-            package_name=getattr(preflight_result, 'package_name', ''),
-            environment=getattr(preflight_result, 'environment', ''),
+            package_name=getattr(preflight_result, "package_name", ""),
+            environment=getattr(preflight_result, "environment", ""),
         )
 
         if not priv_result.passed:
@@ -260,7 +284,8 @@ def deploy_package(
                 pkg_result.report_path = report_path
             except Exception as e:
                 logger.warning(
-                    "Report generation failed (non-fatal): %s", e,
+                    "Report generation failed (non-fatal): %s",
+                    e,
                 )
             return pkg_result
 
@@ -307,32 +332,48 @@ def deploy_package(
         skip_qn = f"SKIPPED.{skip_name}"
         manifest.register_object(skip_qn, skip_name, deploy_intent="SKIPPED")
         manifest.update_state(
-            skip_qn, DeployState.SKIPPED,
+            skip_qn,
+            DeployState.SKIPPED,
             error=skip_reason,
         )
-        skipped_results.append(ObjectDeployResult(
-            database_name="SKIPPED",
-            object_name=skip_name,
-            object_type=ObjectType.UNKNOWN,
-            state=DeployState.SKIPPED,
-            error=skip_reason,
-            message=f"Could not classify: {skip_reason}",
-        ))
+        skipped_results.append(
+            ObjectDeployResult(
+                database_name="SKIPPED",
+                object_name=skip_name,
+                object_type=ObjectType.UNKNOWN,
+                state=DeployState.SKIPPED,
+                error=skip_reason,
+                message=f"Could not classify: {skip_reason}",
+            )
+        )
 
     # -- Execute --
     if waves is not None and num_streams > 1 and not dry_run:
         results, wave_summaries = _execute_waves_parallel(
-            cursor, waves, parsed_by_path, manifest,
-            num_streams, connect_fn, stop_on_failure,
+            cursor,
+            waves,
+            parsed_by_path,
+            manifest,
+            num_streams,
+            connect_fn,
+            stop_on_failure,
         )
     elif waves is not None:
         results, wave_summaries = _execute_waves_sequential(
-            cursor, waves, parsed_by_path, manifest,
-            stop_on_failure, dry_run,
+            cursor,
+            waves,
+            parsed_by_path,
+            manifest,
+            stop_on_failure,
+            dry_run,
         )
     else:
         results = _execute_sequential(
-            cursor, parsed_ddls, manifest, stop_on_failure, dry_run,
+            cursor,
+            parsed_ddls,
+            manifest,
+            stop_on_failure,
+            dry_run,
         )
         wave_summaries = []
 
@@ -377,13 +418,17 @@ def deploy_package(
 # Internal — Execution modes
 # ---------------------------------------------------------------
 
+
 def _execute_sequential(cursor, parsed_ddls, manifest, stop_on_failure, dry_run):
     """Execute objects sequentially (no waves)."""
     results = []
     for parsed in parsed_ddls:
         state = manifest.get_state(parsed.qualified_name)
-        if state in (DeployState.COMPLETED, DeployState.SKIPPED,
-                     DeployState.ROLLED_BACK):
+        if state in (
+            DeployState.COMPLETED,
+            DeployState.SKIPPED,
+            DeployState.ROLLED_BACK,
+        ):
             continue
         result = _dispatch_deploy(cursor, parsed, manifest, dry_run)
         results.append(result)
@@ -393,8 +438,9 @@ def _execute_sequential(cursor, parsed_ddls, manifest, stop_on_failure, dry_run)
     return results
 
 
-def _execute_waves_sequential(cursor, waves, parsed_by_path, manifest,
-                              stop_on_failure, dry_run):
+def _execute_waves_sequential(
+    cursor, waves, parsed_by_path, manifest, stop_on_failure, dry_run
+):
     """Execute waves sequentially (1 stream or dry-run), tracking wave numbers."""
     import time
     from ddl_deployer.models import WaveSummary
@@ -407,15 +453,18 @@ def _execute_waves_sequential(cursor, waves, parsed_by_path, manifest,
         wave_num = wave_idx + 1
 
         if failed:
-            ws = WaveSummary(wave_number=wave_num, total=len(wave_files),
-                             skipped=len(wave_files))
+            ws = WaveSummary(
+                wave_number=wave_num, total=len(wave_files), skipped=len(wave_files)
+            )
             wave_summaries.append(ws)
             for fpath in wave_files:
                 parsed = parsed_by_path.get(fpath)
                 if parsed:
-                    manifest.update_state(parsed.qualified_name,
-                                          DeployState.SKIPPED,
-                                          error="Skipped — previous wave failed.")
+                    manifest.update_state(
+                        parsed.qualified_name,
+                        DeployState.SKIPPED,
+                        error="Skipped — previous wave failed.",
+                    )
             continue
 
         wave_start = time.monotonic()
@@ -426,8 +475,11 @@ def _execute_waves_sequential(cursor, waves, parsed_by_path, manifest,
             if not parsed:
                 continue
             state = manifest.get_state(parsed.qualified_name)
-            if state in (DeployState.COMPLETED, DeployState.SKIPPED,
-                         DeployState.ROLLED_BACK):
+            if state in (
+                DeployState.COMPLETED,
+                DeployState.SKIPPED,
+                DeployState.ROLLED_BACK,
+            ):
                 continue
             if failed:
                 w_skipped += 1
@@ -445,24 +497,37 @@ def _execute_waves_sequential(cursor, waves, parsed_by_path, manifest,
                 w_completed += 1
 
         duration = int((time.monotonic() - wave_start) * 1000)
-        wave_summaries.append(WaveSummary(
-            wave_number=wave_num, total=len(wave_files),
-            completed=w_completed, failed=w_failed, skipped=w_skipped,
-            duration_ms=duration,
-        ))
+        wave_summaries.append(
+            WaveSummary(
+                wave_number=wave_num,
+                total=len(wave_files),
+                completed=w_completed,
+                failed=w_failed,
+                skipped=w_skipped,
+                duration_ms=duration,
+            )
+        )
 
         if w_failed > 0:
             logger.error("Wave %d: %d failure(s)", wave_num, w_failed)
             failed = True
 
-        logger.info("Wave %d/%d: %d ok, %d failed, %d skipped (%d ms)",
-                     wave_num, len(waves), w_completed, w_failed, w_skipped, duration)
+        logger.info(
+            "Wave %d/%d: %d ok, %d failed, %d skipped (%d ms)",
+            wave_num,
+            len(waves),
+            w_completed,
+            w_failed,
+            w_skipped,
+            duration,
+        )
 
     return results, wave_summaries
 
 
-def _execute_waves_parallel(cursor, waves, parsed_by_path, manifest,
-                            num_streams, connect_fn, stop_on_failure):
+def _execute_waves_parallel(
+    cursor, waves, parsed_by_path, manifest, num_streams, connect_fn, stop_on_failure
+):
     """
     Execute waves in parallel across multiple streams.
 
@@ -473,7 +538,6 @@ def _execute_waves_parallel(cursor, waves, parsed_by_path, manifest,
     operations (TABLE, VIEW, MACRO, PROCEDURE, FUNCTION,
     TRIGGER, INDEX) remain fully parallel.
     """
-    import time
     from ddl_deployer.models import WaveSummary
     from ddl_deployer.wave_executor import WaveExecutor
 
@@ -486,38 +550,55 @@ def _execute_waves_parallel(cursor, waves, parsed_by_path, manifest,
     # on Teradata system catalogue tables.  These are infrastructure
     # and access-control operations — they're sub-second each, so
     # serialising has negligible impact on total deployment time.
-    _SERIALISE_TYPES = frozenset({
-        ObjectType.GRANT, ObjectType.DATABASE, ObjectType.USER,
-        ObjectType.ROLE, ObjectType.PROFILE,
-    })
+    _SERIALISE_TYPES = frozenset(
+        {
+            ObjectType.GRANT,
+            ObjectType.DATABASE,
+            ObjectType.USER,
+            ObjectType.ROLE,
+            ObjectType.PROFILE,
+        }
+    )
     _dcl_lock = threading.Lock()
 
     # Build the deploy function for each stream
     def deploy_fn(stream_cursor, file_path):
         parsed = parsed_by_path.get(file_path)
         if not parsed:
-            return {"file": file_path, "state": "FAILED",
-                    "error": f"No parsed DDL for {file_path}"}
+            return {
+                "file": file_path,
+                "state": "FAILED",
+                "error": f"No parsed DDL for {file_path}",
+            }
         state = manifest.get_state(parsed.qualified_name)
-        if state in (DeployState.COMPLETED, DeployState.SKIPPED,
-                     DeployState.ROLLED_BACK):
+        if state in (
+            DeployState.COMPLETED,
+            DeployState.SKIPPED,
+            DeployState.ROLLED_BACK,
+        ):
             return {"file": file_path, "state": state.value}
 
         # Serialise system/DCL to prevent deadlocks
         if parsed.object_type in _SERIALISE_TYPES:
             with _dcl_lock:
                 result = _dispatch_deploy(
-                    stream_cursor, parsed, manifest, False,
+                    stream_cursor,
+                    parsed,
+                    manifest,
+                    False,
                 )
         else:
             result = _dispatch_deploy(
-                stream_cursor, parsed, manifest, False,
+                stream_cursor,
+                parsed,
+                manifest,
+                False,
             )
 
-        return {"file": file_path, "state": result.state.value,
-                "result": result}
+        return {"file": file_path, "state": result.state.value, "result": result}
 
     all_results = []
+
     def on_complete(file_path, wave_result):
         if "result" in wave_result and wave_result["result"] is not None:
             all_results.append(wave_result["result"])
@@ -535,9 +616,12 @@ def _execute_waves_parallel(cursor, waves, parsed_by_path, manifest,
     # Build wave summaries
     wave_summaries = [
         WaveSummary(
-            wave_number=w.wave_number, total=w.total,
-            completed=w.completed, failed=w.failed,
-            skipped=w.skipped, duration_ms=w.duration_ms,
+            wave_number=w.wave_number,
+            total=w.total,
+            completed=w.completed,
+            failed=w.failed,
+            skipped=w.skipped,
+            duration_ms=w.duration_ms,
         )
         for w in exec_result.waves
     ]
@@ -554,6 +638,7 @@ def _execute_waves_parallel(cursor, waves, parsed_by_path, manifest,
                 break
 
     return all_results, wave_summaries
+
 
 def resume_package(
     cursor,
@@ -589,6 +674,23 @@ def resume_package(
     manifest.set_package_status("IN_PROGRESS")
 
     resumable = manifest.get_pending_or_failed()
+
+    # Reset cascade-skipped objects — these were never attempted,
+    # they were only skipped because a prior wave failed. On resume,
+    # they should be retried now that the user has (presumably)
+    # fixed the root cause.
+    for qn in list(manifest.data.get("objects", {}).keys()):
+        record = manifest.get_record(qn)
+        if not record:
+            continue
+        state = record.get("state")
+        error = record.get("error", "")
+        if state == DeployState.SKIPPED.value and "previous wave" in error:
+            manifest.update_state(qn, DeployState.PENDING)
+            logger.info("  Reset cascade-skipped: %s → PENDING", qn)
+            if qn not in resumable:
+                resumable.append(qn)
+
     logger.info("Resuming — %d objects to process", len(resumable))
 
     results = []
@@ -599,8 +701,9 @@ def resume_package(
         if not os.path.exists(ddl_file):
             logger.error("DDL file missing for %s: %s", qualified_name, ddl_file)
             manifest.update_state(
-                qualified_name, DeployState.FAILED,
-                error=f"DDL file not found: {ddl_file}"
+                qualified_name,
+                DeployState.FAILED,
+                error=f"DDL file not found: {ddl_file}",
             )
             continue
 
@@ -724,9 +827,8 @@ def deploy_single(cursor, ddl_text: str, dry_run: bool = False) -> ObjectDeployR
     Returns:
         ObjectDeployResult with deployment outcome.
     """
-    parsed = parse_ddl_file.__wrapped__(ddl_text) if hasattr(parse_ddl_file, '__wrapped__') else None
-    # Use parse_ddl_text for inline DDL
     from ddl_deployer.ddl_parser import parse_ddl_text
+
     parsed = parse_ddl_text(ddl_text)
 
     strategy = parsed.strategy
@@ -734,13 +836,13 @@ def deploy_single(cursor, ddl_text: str, dry_run: bool = False) -> ObjectDeployR
     if strategy == DeployStrategy.IDEMPOTENT_DEPLOY:
         return _deploy_table(cursor, parsed, dry_run)
     elif strategy == DeployStrategy.DROP_AND_CREATE:
-        return _deploy_drop_and_create(cursor, parsed, dry_run)
+        return _deploy_drop_and_create(cursor, parsed, None, dry_run)
     elif strategy == DeployStrategy.REPLACE_IN_PLACE:
-        return _deploy_replace_in_place(cursor, parsed, dry_run)
+        return _deploy_replace_in_place(cursor, parsed, None, dry_run)
     elif strategy == DeployStrategy.DIRECT_EXECUTE:
         return _deploy_direct_execute(cursor, parsed, dry_run)
     elif strategy == DeployStrategy.CREATE_ONLY:
-        return _deploy_create_only(cursor, parsed, dry_run)
+        return _deploy_create_only(cursor, parsed, None, dry_run)
     elif strategy == DeployStrategy.SKIP_IF_EXISTS:
         return _deploy_skip_if_exists(cursor, parsed, dry_run)
     else:
@@ -817,13 +919,30 @@ def explain_package(
         for root, dirs, filenames in os.walk(package_dir):
             dirs.sort()
             for f in sorted(filenames):
-                if f.startswith('.') or f.startswith('_'):
+                if f.startswith(".") or f.startswith("_"):
                     continue
                 ext = os.path.splitext(f)[1].lower()
-                if ext in ('.tbl', '.viw', '.spl', '.mcr', '.fnc', '.trg',
-                            '.jix', '.idx', '.dcl', '.db', '.rol', '.prf',
-                            '.map', '.auth', '.fsvr', '.sto', '.jcl',
-                            '.dml', '.sql'):
+                if ext in (
+                    ".tbl",
+                    ".viw",
+                    ".spl",
+                    ".mcr",
+                    ".fnc",
+                    ".trg",
+                    ".jix",
+                    ".idx",
+                    ".dcl",
+                    ".db",
+                    ".rol",
+                    ".prf",
+                    ".map",
+                    ".auth",
+                    ".fsvr",
+                    ".sto",
+                    ".jcl",
+                    ".dml",
+                    ".sql",
+                ):
                     ddl_files.append(os.path.join(root, f))
 
     logger.info("Files to validate: %d", len(ddl_files))
@@ -849,14 +968,13 @@ def explain_package(
                 package_objects.add(parsed.object_name.upper())
 
         except (ValueError, FileNotFoundError) as e:
-            logger.error(
-                "  ✗ PARSE FAILED: %s — %s", basename, e
-            )
+            logger.error("  ✗ PARSE FAILED: %s — %s", basename, e)
             parsed_files.append((ddl_file, None))
 
     logger.info(
         "Package object index: %d names from %d files",
-        len(package_objects), len(parsed_files),
+        len(package_objects),
+        len(parsed_files),
     )
     logger.debug("  Index: %s", sorted(package_objects)[:20])
 
@@ -872,14 +990,17 @@ def explain_package(
 
         # Handle parse failures from Phase 1
         if parsed is None:
-            results.append(ObjectDeployResult(
-                database_name="UNKNOWN", object_name=basename,
-                object_type=ObjectType.UNKNOWN,
-                state=DeployState.FAILED,
-                ddl_file=basename,
-                error=f"Parse error",
-                message=f"Could not parse file.",
-            ))
+            results.append(
+                ObjectDeployResult(
+                    database_name="UNKNOWN",
+                    object_name=basename,
+                    object_type=ObjectType.UNKNOWN,
+                    state=DeployState.FAILED,
+                    ddl_file=basename,
+                    error="Parse error",
+                    message="Could not parse file.",
+                )
+            )
             failed += 1
             continue
 
@@ -887,25 +1008,29 @@ def explain_package(
         if parsed.object_type in _EXPLAIN_SKIP_TYPES:
             logger.info(
                 "  ○ NOT APPLICABLE: %s %s [%s]",
-                parsed.object_type.value, parsed.qualified_name, basename,
+                parsed.object_type.value,
+                parsed.qualified_name,
+                basename,
             )
-            results.append(ObjectDeployResult(
-                database_name=parsed.database_name,
-                object_name=parsed.object_name,
-                object_type=parsed.object_type,
-                state=DeployState.SKIPPED,
-                ddl_file=basename,
-                deploy_intent=parsed.deploy_intent,
-                message=(
-                    f"EXPLAIN not applicable to "
-                    f"{parsed.object_type.value} — skipped."
-                ),
-            ))
+            results.append(
+                ObjectDeployResult(
+                    database_name=parsed.database_name,
+                    object_name=parsed.object_name,
+                    object_type=parsed.object_type,
+                    state=DeployState.SKIPPED,
+                    ddl_file=basename,
+                    deploy_intent=parsed.deploy_intent,
+                    message=(
+                        f"EXPLAIN not applicable to "
+                        f"{parsed.object_type.value} — skipped."
+                    ),
+                )
+            )
             skipped += 1
             continue
 
         # -- Run EXPLAIN --
-        ddl_text = parsed.ddl_text.strip().rstrip(';').strip()
+        ddl_text = parsed.ddl_text.strip().rstrip(";").strip()
         explain_sql = f"EXPLAIN {ddl_text}"
 
         try:
@@ -918,20 +1043,24 @@ def explain_package(
 
             logger.info(
                 "  ✓ PASS: %s %s [%s]",
-                parsed.object_type.value, parsed.qualified_name, basename,
+                parsed.object_type.value,
+                parsed.qualified_name,
+                basename,
             )
             if plan_preview:
                 logger.debug("    Plan: %s...", plan_preview)
 
-            results.append(ObjectDeployResult(
-                database_name=parsed.database_name,
-                object_name=parsed.object_name,
-                object_type=parsed.object_type,
-                state=DeployState.COMPLETED,
-                ddl_file=basename,
-                deploy_intent=parsed.deploy_intent,
-                message=f"EXPLAIN passed — SQL is valid.",
-            ))
+            results.append(
+                ObjectDeployResult(
+                    database_name=parsed.database_name,
+                    object_name=parsed.object_name,
+                    object_type=parsed.object_type,
+                    state=DeployState.COMPLETED,
+                    ddl_file=basename,
+                    deploy_intent=parsed.deploy_intent,
+                    message="EXPLAIN passed — SQL is valid.",
+                )
+            )
             passed += 1
 
         except Exception as e:
@@ -944,18 +1073,21 @@ def explain_package(
             if "5612" in err_msg or "3803" in err_msg:
                 logger.info(
                     "  ✓ PASS: %s %s [%s] (already exists — SQL is valid)",
-                    parsed.object_type.value, parsed.qualified_name,
+                    parsed.object_type.value,
+                    parsed.qualified_name,
                     basename,
                 )
-                results.append(ObjectDeployResult(
-                    database_name=parsed.database_name,
-                    object_name=parsed.object_name,
-                    object_type=parsed.object_type,
-                    state=DeployState.COMPLETED,
-                    ddl_file=basename,
-                    deploy_intent=parsed.deploy_intent,
-                    message=f"EXPLAIN passed — SQL is valid (object already exists).",
-                ))
+                results.append(
+                    ObjectDeployResult(
+                        database_name=parsed.database_name,
+                        object_name=parsed.object_name,
+                        object_type=parsed.object_type,
+                        state=DeployState.COMPLETED,
+                        ddl_file=basename,
+                        deploy_intent=parsed.deploy_intent,
+                        message="EXPLAIN passed — SQL is valid (object already exists).",
+                    )
+                )
                 passed += 1
                 continue
 
@@ -967,21 +1099,24 @@ def explain_package(
                     logger.info(
                         "  ✓ PASS: %s %s [%s] "
                         "(references object created by this package)",
-                        parsed.object_type.value, parsed.qualified_name,
+                        parsed.object_type.value,
+                        parsed.qualified_name,
                         basename,
                     )
-                    results.append(ObjectDeployResult(
-                        database_name=parsed.database_name,
-                        object_name=parsed.object_name,
-                        object_type=parsed.object_type,
-                        state=DeployState.COMPLETED,
-                        ddl_file=basename,
-                        deploy_intent=parsed.deploy_intent,
-                        message=(
-                            f"EXPLAIN passed — references object being "
-                            f"created by this package."
-                        ),
-                    ))
+                    results.append(
+                        ObjectDeployResult(
+                            database_name=parsed.database_name,
+                            object_name=parsed.object_name,
+                            object_type=parsed.object_type,
+                            state=DeployState.COMPLETED,
+                            ddl_file=basename,
+                            deploy_intent=parsed.deploy_intent,
+                            message=(
+                                "EXPLAIN passed — references object being "
+                                "created by this package."
+                            ),
+                        )
+                    )
                     dep_pass += 1
                     passed += 1
                     continue
@@ -990,20 +1125,24 @@ def explain_package(
             clean_msg = _clean_db_error(err_msg)
             logger.error(
                 "  ✗ FAIL: %s %s [%s] — %s",
-                parsed.object_type.value, parsed.qualified_name,
-                basename, clean_msg,
+                parsed.object_type.value,
+                parsed.qualified_name,
+                basename,
+                clean_msg,
             )
             logger.debug("Full error detail: %s", err_msg)
-            results.append(ObjectDeployResult(
-                database_name=parsed.database_name,
-                object_name=parsed.object_name,
-                object_type=parsed.object_type,
-                state=DeployState.FAILED,
-                ddl_file=basename,
-                deploy_intent=parsed.deploy_intent,
-                error=clean_msg,
-                message=f"EXPLAIN failed: {clean_msg}",
-            ))
+            results.append(
+                ObjectDeployResult(
+                    database_name=parsed.database_name,
+                    object_name=parsed.object_name,
+                    object_type=parsed.object_type,
+                    state=DeployState.FAILED,
+                    ddl_file=basename,
+                    deploy_intent=parsed.deploy_intent,
+                    error=clean_msg,
+                    message=f"EXPLAIN failed: {clean_msg}",
+                )
+            )
             failed += 1
 
     # -- Build result --
@@ -1059,6 +1198,7 @@ def _is_package_dependency(error_msg: str, package_objects: set) -> bool:
         True if the missing object is in this package.
     """
     import re
+
     # Extract object name from error message
     # Pattern: Object 'name' or Object "name"
     match = re.search(r"[Oo]bject\s+['\"]([^'\"]+)['\"]", error_msg)
@@ -1072,8 +1212,8 @@ def _is_package_dependency(error_msg: str, package_objects: set) -> bool:
         return True
 
     # Check just the object part (after the dot)
-    if '.' in missing:
-        parts = missing.split('.')
+    if "." in missing:
+        parts = missing.split(".")
         if any(p in package_objects for p in parts):
             return True
 
@@ -1083,6 +1223,7 @@ def _is_package_dependency(error_msg: str, package_objects: set) -> bool:
 # ---------------------------------------------------------------
 # Internal — Strategy dispatch
 # ---------------------------------------------------------------
+
 
 def _dispatch_deploy(
     cursor,
@@ -1119,7 +1260,7 @@ def _dispatch_deploy(
         if parsed.strategy == DeployStrategy.IDEMPOTENT_DEPLOY:
             result = _deploy_table(cursor, parsed, dry_run)
         elif parsed.strategy == DeployStrategy.CREATE_ONLY:
-            result = _deploy_create_only(cursor, parsed, dry_run)
+            result = _deploy_create_only(cursor, parsed, manifest, dry_run)
         elif parsed.strategy == DeployStrategy.DROP_AND_CREATE:
             result = _deploy_drop_and_create(cursor, parsed, manifest, dry_run)
         elif parsed.strategy == DeployStrategy.REPLACE_IN_PLACE:
@@ -1137,28 +1278,39 @@ def _dispatch_deploy(
                 error=f"No strategy for {parsed.object_type.value}",
             )
 
-        # Set deploy_intent and source file on the result
+        # Set deploy_intent and source file on the result.
+        # Include the parent directory for context (e.g.
+        # "databases/MortgagePlatform_Domain_V.db" rather than
+        # just "MortgagePlatform_Domain_V.db").
         result.deploy_intent = parsed.deploy_intent
-        result.ddl_file = os.path.basename(parsed.file_path) if parsed.file_path else None
+        if parsed.file_path:
+            parent = os.path.basename(os.path.dirname(parsed.file_path))
+            fname = os.path.basename(parsed.file_path)
+            result.ddl_file = os.path.join(parent, fname) if parent else fname
+        else:
+            result.ddl_file = None
 
         if result.state == DeployState.COMPLETED:
             logger.info(
                 "  ✓ %s %s — %s [%s]",
-                parsed.object_type.value, parsed.qualified_name,
+                parsed.object_type.value,
+                parsed.qualified_name,
                 result.message or "completed",
                 os.path.basename(parsed.file_path) if parsed.file_path else "",
             )
         elif result.state == DeployState.SKIPPED:
             logger.info(
                 "  ○ %s %s — %s [%s]",
-                parsed.object_type.value, parsed.qualified_name,
+                parsed.object_type.value,
+                parsed.qualified_name,
                 result.message or "skipped",
                 os.path.basename(parsed.file_path) if parsed.file_path else "",
             )
         elif result.state == DeployState.FAILED:
             logger.error(
                 "  ✗ %s %s — %s [%s]",
-                parsed.object_type.value, parsed.qualified_name,
+                parsed.object_type.value,
+                parsed.qualified_name,
                 result.error or result.message or "failed",
                 os.path.basename(parsed.file_path) if parsed.file_path else "",
             )
@@ -1177,12 +1329,33 @@ def _dispatch_deploy(
         return result
 
     except Exception as e:
-        logger.exception("Deployment failed for %s", parsed.qualified_name)
         clean_err = _clean_db_error(str(e))
+        # Full traceback to the log file for diagnosis
+        logger.debug(
+            "Deployment failed for %s — full traceback:",
+            parsed.qualified_name,
+            exc_info=True,
+        )
+        # Resolve source file for both console and result
+        if parsed.file_path:
+            parent = os.path.basename(os.path.dirname(parsed.file_path))
+            fname = os.path.basename(parsed.file_path)
+            source_file = os.path.join(parent, fname) if parent else fname
+        else:
+            source_file = None
+
+        # Clean one-liner to the console
+        logger.error(
+            "  ✗ FAILED: %s (%s) — %s  [%s]",
+            parsed.qualified_name,
+            parsed.object_type.value,
+            clean_err,
+            source_file or "unknown",
+        )
         manifest.update_state(
             parsed.qualified_name, DeployState.FAILED, error=clean_err
         )
-        return ObjectDeployResult(
+        result = ObjectDeployResult(
             database_name=parsed.database_name,
             object_name=parsed.object_name,
             object_type=parsed.object_type,
@@ -1191,11 +1364,14 @@ def _dispatch_deploy(
             error=clean_err,
             message=f"Deployment failed: {clean_err}",
         )
+        result.ddl_file = source_file
+        return result
 
 
 # ---------------------------------------------------------------
 # Strategy: IDEMPOTENT_DEPLOY (tables)
 # ---------------------------------------------------------------
+
 
 def _deploy_table(
     cursor,
@@ -1213,20 +1389,24 @@ def _deploy_table(
     qn = parsed.qualified_name
 
     # -- Check existence --
-    exists = _object_exists(cursor, db, tbl, 'T')
+    exists = _object_exists(cursor, db, tbl, "T")
 
     if not exists:
         if dry_run:
             return ObjectDeployResult(
-                database_name=db, object_name=tbl,
-                object_type=ObjectType.TABLE, state=DeployState.COMPLETED,
+                database_name=db,
+                object_name=tbl,
+                object_type=ObjectType.TABLE,
+                state=DeployState.COMPLETED,
                 message=f"[DRY RUN] Would CREATE {qn} (does not exist).",
                 dry_run=True,
             )
         _execute_ddl(cursor, parsed.ddl_text)
         return ObjectDeployResult(
-            database_name=db, object_name=tbl,
-            object_type=ObjectType.TABLE, state=DeployState.COMPLETED,
+            database_name=db,
+            object_name=tbl,
+            object_type=ObjectType.TABLE,
+            state=DeployState.COMPLETED,
             message=f"Created {qn} (did not previously exist).",
         )
 
@@ -1236,16 +1416,20 @@ def _deploy_table(
     if not has_data:
         if dry_run:
             return ObjectDeployResult(
-                database_name=db, object_name=tbl,
-                object_type=ObjectType.TABLE, state=DeployState.COMPLETED,
+                database_name=db,
+                object_name=tbl,
+                object_type=ObjectType.TABLE,
+                state=DeployState.COMPLETED,
                 message=f"[DRY RUN] Would DROP and recreate {qn} (exists, empty).",
                 dry_run=True,
             )
         _drop_object(cursor, db, tbl, ObjectType.TABLE)
         _execute_ddl(cursor, parsed.ddl_text)
         return ObjectDeployResult(
-            database_name=db, object_name=tbl,
-            object_type=ObjectType.TABLE, state=DeployState.COMPLETED,
+            database_name=db,
+            object_name=tbl,
+            object_type=ObjectType.TABLE,
+            state=DeployState.COMPLETED,
             message=f"Replaced empty table {qn}.",
         )
 
@@ -1257,8 +1441,10 @@ def _deploy_table(
         # Simulate by comparing DDL columns — we can't create the
         # new table to query its schema, so report what we know.
         return ObjectDeployResult(
-            database_name=db, object_name=tbl,
-            object_type=ObjectType.TABLE, state=DeployState.COMPLETED,
+            database_name=db,
+            object_name=tbl,
+            object_type=ObjectType.TABLE,
+            state=DeployState.COMPLETED,
             backup_table=backup_name,
             message=(
                 f"[DRY RUN] Would RENAME {qn} → {backup_name}, "
@@ -1276,7 +1462,7 @@ def _deploy_table(
     # Create new table
     try:
         _execute_ddl(cursor, parsed.ddl_text)
-    except Exception as e:
+    except Exception:
         # DDL failed — roll back the rename
         logger.error("DDL creation failed for %s — rolling back.", qn)
         try:
@@ -1291,8 +1477,10 @@ def _deploy_table(
 
     if not compatibility.can_migrate:
         return ObjectDeployResult(
-            database_name=db, object_name=tbl,
-            object_type=ObjectType.TABLE, state=DeployState.SKIPPED,
+            database_name=db,
+            object_name=tbl,
+            object_type=ObjectType.TABLE,
+            state=DeployState.SKIPPED,
             backup_table=backup_name,
             message=(
                 f"Created {qn} but cannot migrate data. "
@@ -1312,9 +1500,12 @@ def _deploy_table(
     except Exception as e:
         logger.debug("Migration error detail: %s", e)
         return ObjectDeployResult(
-            database_name=db, object_name=tbl,
-            object_type=ObjectType.TABLE, state=DeployState.FAILED,
-            backup_table=backup_name, error=_clean_db_error(str(e)),
+            database_name=db,
+            object_name=tbl,
+            object_type=ObjectType.TABLE,
+            state=DeployState.FAILED,
+            backup_table=backup_name,
+            error=_clean_db_error(str(e)),
             message=f"Migration failed for {qn}. Backup preserved.",
             warnings=compatibility.warnings,
         )
@@ -1322,12 +1513,13 @@ def _deploy_table(
     row_count = _count_rows(cursor, db, tbl)
 
     return ObjectDeployResult(
-        database_name=db, object_name=tbl,
-        object_type=ObjectType.TABLE, state=DeployState.COMPLETED,
-        backup_table=backup_name, rows_migrated=row_count,
-        message=(
-            f"Deployed {qn} — migrated {row_count:,} rows from {backup_name}."
-        ),
+        database_name=db,
+        object_name=tbl,
+        object_type=ObjectType.TABLE,
+        state=DeployState.COMPLETED,
+        backup_table=backup_name,
+        rows_migrated=row_count,
+        message=(f"Deployed {qn} — migrated {row_count:,} rows from {backup_name}."),
         warnings=compatibility.warnings,
     )
 
@@ -1335,6 +1527,7 @@ def _deploy_table(
 # ---------------------------------------------------------------
 # Strategy: DIRECT_EXECUTE (databases, users, profiles, roles, DCL)
 # ---------------------------------------------------------------
+
 
 def _deploy_direct_execute(
     cursor,
@@ -1361,18 +1554,22 @@ def _deploy_direct_execute(
     if dry_run:
         logger.info(
             "[DRY RUN] DIRECT_EXECUTE: %s %s",
-            obj_type.value, qn,
+            obj_type.value,
+            qn,
         )
         return ObjectDeployResult(
-            database_name=db, object_name=obj,
-            object_type=obj_type, state=DeployState.COMPLETED,
+            database_name=db,
+            object_name=obj,
+            object_type=obj_type,
+            state=DeployState.COMPLETED,
             message=f"[DRY RUN] Would execute {obj_type.value}: {qn}",
             dry_run=True,
         )
 
     logger.info(
         "DIRECT_EXECUTE: Executing %s %s...",
-        obj_type.value, qn,
+        obj_type.value,
+        qn,
     )
 
     try:
@@ -1382,15 +1579,19 @@ def _deploy_direct_execute(
         # Teradata Error 5612: "already exists" — for DATABASE
         # and USER, treat as a successful skip on re-deploy.
         if "5612" in err_str and obj_type in (
-            ObjectType.DATABASE, ObjectType.USER,
+            ObjectType.DATABASE,
+            ObjectType.USER,
         ):
             logger.info(
                 "DIRECT_EXECUTE: %s %s already exists — skipping.",
-                obj_type.value, qn,
+                obj_type.value,
+                qn,
             )
             return ObjectDeployResult(
-                database_name=db, object_name=obj,
-                object_type=obj_type, state=DeployState.SKIPPED,
+                database_name=db,
+                object_name=obj,
+                object_type=obj_type,
+                state=DeployState.SKIPPED,
                 prior_existed=True,
                 message=f"{obj_type.value} {qn} already exists — skipped.",
             )
@@ -1398,8 +1599,10 @@ def _deploy_direct_execute(
         raise
 
     return ObjectDeployResult(
-        database_name=db, object_name=obj,
-        object_type=obj_type, state=DeployState.COMPLETED,
+        database_name=db,
+        object_name=obj,
+        object_type=obj_type,
+        state=DeployState.COMPLETED,
         message=f"Executed {obj_type.value}: {qn}",
     )
 
@@ -1408,6 +1611,7 @@ def _deploy_direct_execute(
 # Strategy: SKIP_IF_EXISTS (system-scope: maps, roles, profiles,
 #           authorisations, foreign servers)
 # ---------------------------------------------------------------
+
 
 def _deploy_skip_if_exists(
     cursor,
@@ -1428,19 +1632,21 @@ def _deploy_skip_if_exists(
     db = parsed.database_name
     obj = parsed.object_name
     obj_type = parsed.object_type
-    qn = parsed.qualified_name
 
     if dry_run:
         logger.info(
             "[DRY RUN] SKIP_IF_EXISTS: %s %s — "
             "would check existence then create if missing.",
-            obj_type.value, obj,
+            obj_type.value,
+            obj,
         )
         return ObjectDeployResult(
-            database_name=db, object_name=obj,
-            object_type=obj_type, state=DeployState.COMPLETED,
+            database_name=db,
+            object_name=obj,
+            object_type=obj_type,
+            state=DeployState.COMPLETED,
             message=f"[DRY RUN] Would create {obj_type.value}: {obj} "
-                    f"(skip if already exists)",
+            f"(skip if already exists)",
             dry_run=True,
         )
 
@@ -1456,19 +1662,23 @@ def _deploy_skip_if_exists(
             exists = row is not None
         except Exception as e:
             logger.warning(
-                "Existence check failed for %s %s: %s — "
-                "proceeding with CREATE.",
-                obj_type.value, obj, e,
+                "Existence check failed for %s %s: %s — proceeding with CREATE.",
+                obj_type.value,
+                obj,
+                e,
             )
 
     if exists:
         logger.info(
             "SKIP_IF_EXISTS: %s %s already exists — skipping.",
-            obj_type.value, obj,
+            obj_type.value,
+            obj,
         )
         return ObjectDeployResult(
-            database_name=db, object_name=obj,
-            object_type=obj_type, state=DeployState.SKIPPED,
+            database_name=db,
+            object_name=obj,
+            object_type=obj_type,
+            state=DeployState.SKIPPED,
             prior_existed=True,
             message=f"{obj_type.value} {obj} already exists — skipped.",
         )
@@ -1478,32 +1688,55 @@ def _deploy_skip_if_exists(
 
     logger.info(
         "SKIP_IF_EXISTS: Created %s %s.",
-        obj_type.value, obj,
+        obj_type.value,
+        obj,
     )
 
     return ObjectDeployResult(
-        database_name=db, object_name=obj,
-        object_type=obj_type, state=DeployState.COMPLETED,
+        database_name=db,
+        object_name=obj,
+        object_type=obj_type,
+        state=DeployState.COMPLETED,
         prior_existed=False,
         message=f"Created {obj_type.value}: {obj}",
     )
 
 
 # ---------------------------------------------------------------
-# Strategy: CREATE_ONLY (developer wrote CREATE, not REPLACE)
+# Strategy: CREATE_ONLY (deployer owns idempotency)
 # ---------------------------------------------------------------
+
 
 def _deploy_create_only(
     cursor,
     parsed: ParsedDDL,
+    manifest: Optional[DeploymentManifest],
     dry_run: bool,
 ) -> ObjectDeployResult:
     """
-    Deploy an object with CREATE semantics — fail if it already exists.
+    Deploy an object that uses CREATE (not REPLACE).
 
-    The developer wrote CREATE (not REPLACE), indicating this object
-    is expected to be new. If it already exists, that is an error —
-    something is wrong and the developer needs to know.
+    The deployer owns idempotency — the developer's DDL verb is
+    always CREATE. When the object already exists, the deployer:
+
+        1. Captures the existing definition via SHOW (rollback file).
+        2. DROPs the existing object.
+        3. CREATEs the new definition.
+        4. On failure — the rollback file is available for
+           package-level rollback to restore the prior state.
+
+    When the object does not exist, a straightforward CREATE is
+    executed.
+
+    Args:
+        cursor:    Active database cursor.
+        parsed:    Parsed DDL metadata.
+        manifest:  Deployment manifest for rollback file paths.
+                   May be None when called from deploy_single().
+        dry_run:   If True, simulate without executing.
+
+    Returns:
+        ObjectDeployResult with outcome.
     """
     db = parsed.database_name
     obj = parsed.object_name
@@ -1515,46 +1748,52 @@ def _deploy_create_only(
     exists = _object_exists(cursor, db, obj, table_kind) if table_kind else False
 
     if dry_run:
-        if exists:
-            return ObjectDeployResult(
-                database_name=db, object_name=obj,
-                object_type=obj_type, state=DeployState.FAILED,
-                prior_existed=True,
-                message=(
-                    f"[DRY RUN] {obj_type.value} {qn} already exists. "
-                    f"CREATE_ONLY intent would fail."
-                ),
-                error=f"{qn} already exists (CREATE_ONLY intent).",
-                dry_run=True,
-            )
+        action = "DROP and CREATE (backup existing)" if exists else "CREATE"
         return ObjectDeployResult(
-            database_name=db, object_name=obj,
-            object_type=obj_type, state=DeployState.COMPLETED,
-            prior_existed=False,
-            message=f"[DRY RUN] Would CREATE {obj_type.value} {qn}.",
+            database_name=db,
+            object_name=obj,
+            object_type=obj_type,
+            state=DeployState.COMPLETED,
+            prior_existed=exists,
+            message=f"[DRY RUN] Would {action} {obj_type.value} {qn}.",
             dry_run=True,
         )
 
+    # -- Capture existing definition before DROP --
+    rollback_file = None
     if exists:
-        return ObjectDeployResult(
-            database_name=db, object_name=obj,
-            object_type=obj_type, state=DeployState.FAILED,
-            prior_existed=True,
-            error=(
-                f"{obj_type.value} {qn} already exists. "
-                f"Developer intent is CREATE_ONLY (used CREATE, not REPLACE). "
-                f"If this object should be replaced, change the DDL verb to REPLACE."
-            ),
+        package_dir = (
+            os.path.dirname(manifest.path)
+            if manifest and hasattr(manifest, "path")
+            else None
+        )
+        if package_dir:
+            rollback_file = _capture_existing_definition(
+                cursor, db, obj, obj_type, package_dir
+            )
+        _drop_object(cursor, db, obj, obj_type, parsed.ddl_text)
+        logger.info(
+            "Dropped existing %s %s (rollback saved to %s)",
+            obj_type.value,
+            qn,
+            rollback_file or "N/A",
         )
 
     # -- Create --
     _execute_ddl(cursor, parsed.ddl_text)
 
+    msg = f"{'Replaced' if exists else 'Created'} {obj_type.value} {qn}."
+    if rollback_file:
+        msg += f" Rollback saved: {os.path.basename(rollback_file)}"
+
     return ObjectDeployResult(
-        database_name=db, object_name=obj,
-        object_type=obj_type, state=DeployState.COMPLETED,
-        prior_existed=False,
-        message=f"Created {obj_type.value} {qn} (new object).",
+        database_name=db,
+        object_name=obj,
+        object_type=obj_type,
+        state=DeployState.COMPLETED,
+        prior_existed=exists,
+        rollback_file=rollback_file,
+        message=msg,
     )
 
 
@@ -1562,10 +1801,11 @@ def _deploy_create_only(
 # Strategy: DROP_AND_CREATE (join/hash indexes, sec. indexes, triggers)
 # ---------------------------------------------------------------
 
+
 def _deploy_drop_and_create(
     cursor,
     parsed: ParsedDDL,
-    manifest: DeploymentManifest,
+    manifest: Optional[DeploymentManifest],
     dry_run: bool,
 ) -> ObjectDeployResult:
     """
@@ -1573,6 +1813,16 @@ def _deploy_drop_and_create(
 
     Before dropping, the existing definition is captured via SHOW
     and saved to the _rollback/ directory for rollback support.
+
+    Args:
+        cursor:    Active database cursor.
+        parsed:    Parsed DDL metadata.
+        manifest:  Deployment manifest for rollback file paths.
+                   May be None when called from deploy_single().
+        dry_run:   If True, simulate without executing.
+
+    Returns:
+        ObjectDeployResult with outcome.
     """
     db = parsed.database_name
     obj = parsed.object_name
@@ -1589,8 +1839,10 @@ def _deploy_drop_and_create(
     if dry_run:
         action = "DROP and CREATE" if exists else "CREATE"
         return ObjectDeployResult(
-            database_name=db, object_name=obj,
-            object_type=obj_type, state=DeployState.COMPLETED,
+            database_name=db,
+            object_name=obj,
+            object_type=obj_type,
+            state=DeployState.COMPLETED,
             prior_existed=exists,
             message=f"[DRY RUN] Would {action} {obj_type.value} {qn}.",
             dry_run=True,
@@ -1599,11 +1851,22 @@ def _deploy_drop_and_create(
     # -- Capture existing definition before DROP --
     rollback_file = None
     if exists:
-        rollback_file = _capture_existing_definition(
-            cursor, db, obj, obj_type, os.path.dirname(manifest.path)
+        package_dir = (
+            os.path.dirname(manifest.path)
+            if manifest and hasattr(manifest, "path")
+            else None
         )
+        if package_dir:
+            rollback_file = _capture_existing_definition(
+                cursor, db, obj, obj_type, package_dir
+            )
         _drop_object(cursor, db, obj, obj_type, parsed.ddl_text)
-        logger.info("Dropped existing %s %s (saved to %s)", obj_type.value, qn, rollback_file or "N/A")
+        logger.info(
+            "Dropped existing %s %s (saved to %s)",
+            obj_type.value,
+            qn,
+            rollback_file or "N/A",
+        )
 
     # -- Create --
     _execute_ddl(cursor, parsed.ddl_text)
@@ -1613,8 +1876,10 @@ def _deploy_drop_and_create(
         msg += f" Rollback saved: {os.path.basename(rollback_file)}"
 
     return ObjectDeployResult(
-        database_name=db, object_name=obj,
-        object_type=obj_type, state=DeployState.COMPLETED,
+        database_name=db,
+        object_name=obj,
+        object_type=obj_type,
+        state=DeployState.COMPLETED,
         prior_existed=exists,
         rollback_file=rollback_file,
         message=msg,
@@ -1625,10 +1890,11 @@ def _deploy_drop_and_create(
 # Strategy: REPLACE_IN_PLACE (views, macros, procedures, functions)
 # ---------------------------------------------------------------
 
+
 def _deploy_replace_in_place(
     cursor,
     parsed: ParsedDDL,
-    manifest: DeploymentManifest,
+    manifest: Optional[DeploymentManifest],
     dry_run: bool,
 ) -> ObjectDeployResult:
     """
@@ -1637,6 +1903,16 @@ def _deploy_replace_in_place(
     Before replacing, if the object already exists, its current
     definition is captured via SHOW and saved to the _rollback/
     directory. The REPLACE keyword then handles the actual deployment.
+
+    Args:
+        cursor:    Active database cursor.
+        parsed:    Parsed DDL metadata.
+        manifest:  Deployment manifest for rollback file paths.
+                   May be None when called from deploy_single().
+        dry_run:   If True, simulate without executing.
+
+    Returns:
+        ObjectDeployResult with outcome.
     """
     db = parsed.database_name
     obj = parsed.object_name
@@ -1650,8 +1926,10 @@ def _deploy_replace_in_place(
     if dry_run:
         action = "REPLACE" if exists else "CREATE (via REPLACE)"
         return ObjectDeployResult(
-            database_name=db, object_name=obj,
-            object_type=obj_type, state=DeployState.COMPLETED,
+            database_name=db,
+            object_name=obj,
+            object_type=obj_type,
+            state=DeployState.COMPLETED,
             prior_existed=exists,
             message=f"[DRY RUN] Would {action} {obj_type.value} {qn}.",
             dry_run=True,
@@ -1660,9 +1938,15 @@ def _deploy_replace_in_place(
     # -- Capture existing definition before REPLACE --
     rollback_file = None
     if exists:
-        rollback_file = _capture_existing_definition(
-            cursor, db, obj, obj_type, os.path.dirname(manifest.path)
+        package_dir = (
+            os.path.dirname(manifest.path)
+            if manifest and hasattr(manifest, "path")
+            else None
         )
+        if package_dir:
+            rollback_file = _capture_existing_definition(
+                cursor, db, obj, obj_type, package_dir
+            )
 
     # -- Execute REPLACE --
     _execute_ddl(cursor, parsed.ddl_text)
@@ -1672,8 +1956,10 @@ def _deploy_replace_in_place(
         msg += f" Rollback saved: {os.path.basename(rollback_file)}"
 
     return ObjectDeployResult(
-        database_name=db, object_name=obj,
-        object_type=obj_type, state=DeployState.COMPLETED,
+        database_name=db,
+        object_name=obj,
+        object_type=obj_type,
+        state=DeployState.COMPLETED,
         prior_existed=exists,
         rollback_file=rollback_file,
         message=msg,
@@ -1683,6 +1969,7 @@ def _deploy_replace_in_place(
 # ---------------------------------------------------------------
 # Internal — Rollback
 # ---------------------------------------------------------------
+
 
 def _rollback_single(
     cursor,
@@ -1694,61 +1981,105 @@ def _rollback_single(
     Roll back a single object deployment.
 
     For tables: drop new, rename backup to original.
-    For DROP_AND_CREATE objects: drop the newly created object.
-        Note: the previous version was already dropped and cannot
-        be restored — but the underlying table data is intact.
-    For REPLACE_IN_PLACE: cannot roll back (REPLACE overwrites).
+    For objects with a rollback file (CREATE_ONLY, DROP_AND_CREATE):
+        drop the newly created object, re-create from the saved
+        rollback file to restore the prior definition.
+    For REPLACE_IN_PLACE without rollback file: cannot roll back.
     """
     parts = qualified_name.split(".", 1)
     db, obj = parts[0], parts[1]
     record = manifest.get_record(qualified_name)
     backup_name = record.get("backup_table") if record else None
+    rollback_file = record.get("rollback_file") if record else None
     obj_type = ObjectType.TABLE  # Default assumption
 
     if parsed:
         obj_type = parsed.object_type
 
     try:
-        if STRATEGY_MAP.get(obj_type) == DeployStrategy.REPLACE_IN_PLACE:
-            manifest.update_state(qualified_name, DeployState.ROLLED_BACK)
-            return ObjectDeployResult(
-                database_name=db, object_name=obj,
-                object_type=obj_type, state=DeployState.ROLLED_BACK,
-                message=(
-                    f"Cannot roll back REPLACE {obj_type.value} {qualified_name} — "
-                    f"previous version was overwritten in place."
-                ),
-                warnings=["REPLACE objects cannot be rolled back."],
-            )
-
+        # Tables use the RENAME-based rollback path
         if obj_type == ObjectType.TABLE:
-            return _rollback_table(cursor, db, obj, backup_name, qualified_name, manifest)
-        else:
-            # DROP_AND_CREATE objects: just drop the new one
-            if _object_exists(cursor, db, obj, TABLE_KIND_MAP.get(obj_type)):
-                _drop_object(cursor, db, obj, obj_type,
-                             parsed.ddl_text if parsed else None)
-                message = f"Rolled back {qualified_name} — dropped {obj_type.value}."
-            else:
-                message = f"No action for {qualified_name} — object does not exist."
+            return _rollback_table(
+                cursor, db, obj, backup_name, qualified_name, manifest
+            )
+
+        # Non-table objects: check for a rollback file first
+        if rollback_file and os.path.exists(rollback_file):
+            # Drop the newly created object
+            table_kind = TABLE_KIND_MAP.get(obj_type)
+            if _object_exists(cursor, db, obj, table_kind):
+                _drop_object(
+                    cursor,
+                    db,
+                    obj,
+                    obj_type,
+                    parsed.ddl_text if parsed else None,
+                )
+
+            # Re-create from the saved rollback definition
+            with open(rollback_file, "r", encoding="utf-8") as f:
+                rollback_ddl = f.read()
+            _execute_ddl(cursor, rollback_ddl)
 
             manifest.update_state(qualified_name, DeployState.ROLLED_BACK)
             return ObjectDeployResult(
-                database_name=db, object_name=obj,
-                object_type=obj_type, state=DeployState.ROLLED_BACK,
-                message=message,
+                database_name=db,
+                object_name=obj,
+                object_type=obj_type,
+                state=DeployState.ROLLED_BACK,
+                message=(
+                    f"Rolled back {qualified_name} — restored "
+                    f"from {os.path.basename(rollback_file)}."
+                ),
             )
+
+        # No rollback file — can only drop the new object
+        if _object_exists(cursor, db, obj, TABLE_KIND_MAP.get(obj_type)):
+            _drop_object(
+                cursor,
+                db,
+                obj,
+                obj_type,
+                parsed.ddl_text if parsed else None,
+            )
+            message = (
+                f"Rolled back {qualified_name} — dropped "
+                f"{obj_type.value}. No prior definition to restore."
+            )
+        else:
+            message = f"No action for {qualified_name} — object does not exist."
+
+        manifest.update_state(qualified_name, DeployState.ROLLED_BACK)
+        return ObjectDeployResult(
+            database_name=db,
+            object_name=obj,
+            object_type=obj_type,
+            state=DeployState.ROLLED_BACK,
+            message=message,
+        )
 
     except Exception as e:
-        logger.exception("Rollback failed for %s", qualified_name)
         clean_err = _clean_db_error(str(e))
+        # Full traceback to the log file for diagnosis
+        logger.debug(
+            "Rollback failed for %s — full traceback:",
+            qualified_name,
+            exc_info=True,
+        )
+        # Clean one-liner to the console
+        logger.error(
+            "  ✗ ROLLBACK FAILED: %s — %s",
+            qualified_name,
+            clean_err,
+        )
         manifest.update_state(
-            qualified_name, DeployState.FAILED,
-            error=f"Rollback failed: {clean_err}"
+            qualified_name, DeployState.FAILED, error=f"Rollback failed: {clean_err}"
         )
         return ObjectDeployResult(
-            database_name=db, object_name=obj,
-            object_type=obj_type, state=DeployState.FAILED,
+            database_name=db,
+            object_name=obj,
+            object_type=obj_type,
+            state=DeployState.FAILED,
             error=clean_err,
             message=f"Rollback failed for {qualified_name}: {clean_err}",
         )
@@ -1756,9 +2087,9 @@ def _rollback_single(
 
 def _rollback_table(cursor, db, tbl, backup_name, qualified_name, manifest):
     """Roll back a table: drop new, rename backup to original."""
-    original_exists = _object_exists(cursor, db, tbl, 'T')
+    original_exists = _object_exists(cursor, db, tbl, "T")
     backup_exists = (
-        _object_exists(cursor, db, backup_name, 'T') if backup_name else False
+        _object_exists(cursor, db, backup_name, "T") if backup_name else False
     )
 
     if original_exists and backup_exists:
@@ -1776,8 +2107,10 @@ def _rollback_table(cursor, db, tbl, backup_name, qualified_name, manifest):
 
     manifest.update_state(qualified_name, DeployState.ROLLED_BACK)
     return ObjectDeployResult(
-        database_name=db, object_name=tbl,
-        object_type=ObjectType.TABLE, state=DeployState.ROLLED_BACK,
+        database_name=db,
+        object_name=tbl,
+        object_type=ObjectType.TABLE,
+        state=DeployState.ROLLED_BACK,
         message=message,
     )
 
@@ -1788,29 +2121,33 @@ def _reconcile_table_state(cursor, qualified_name, record, manifest):
     db, tbl = parts[0], parts[1]
     backup_name = record.get("backup_table")
 
-    original_exists = _object_exists(cursor, db, tbl, 'T')
+    original_exists = _object_exists(cursor, db, tbl, "T")
     backup_exists = (
-        _object_exists(cursor, db, backup_name, 'T') if backup_name else False
+        _object_exists(cursor, db, backup_name, "T") if backup_name else False
     )
 
     if original_exists and backup_exists:
-        manifest.update_state(qualified_name, DeployState.CREATED,
-                              backup_table=backup_name)
+        manifest.update_state(
+            qualified_name, DeployState.CREATED, backup_table=backup_name
+        )
     elif not original_exists and backup_exists:
-        manifest.update_state(qualified_name, DeployState.BACKED_UP,
-                              backup_table=backup_name)
+        manifest.update_state(
+            qualified_name, DeployState.BACKED_UP, backup_table=backup_name
+        )
     elif original_exists and not backup_exists:
         manifest.update_state(qualified_name, DeployState.PENDING)
     else:
         manifest.update_state(
-            qualified_name, DeployState.FAILED,
-            error="Neither original nor backup exists."
+            qualified_name,
+            DeployState.FAILED,
+            error="Neither original nor backup exists.",
         )
 
 
 # ---------------------------------------------------------------
 # Internal — Rollback capture (SHOW-based backup)
 # ---------------------------------------------------------------
+
 
 def _capture_existing_definition(
     cursor,
@@ -1872,30 +2209,37 @@ def _capture_existing_definition(
 
         # Use the appropriate extension
         from ddl_deployer.models import ObjectType as OT
+
         ext_map = {
-            OT.VIEW: ".viw", OT.MACRO: ".mcr",
-            OT.PROCEDURE: ".spl", OT.FUNCTION: ".fnc",
-            OT.TRIGGER: ".trg", OT.JOIN_INDEX: ".jix",
-            OT.HASH_INDEX: ".idx", OT.INDEX: ".idx",
+            OT.VIEW: ".viw",
+            OT.MACRO: ".mcr",
+            OT.PROCEDURE: ".spl",
+            OT.FUNCTION: ".fnc",
+            OT.TRIGGER: ".trg",
+            OT.JOIN_INDEX: ".jix",
+            OT.HASH_INDEX: ".idx",
+            OT.INDEX: ".idx",
             OT.TABLE: ".tbl",
         }
         ext = ext_map.get(object_type, ".sql")
         filename = f"{database_name}.{object_name}{ext}"
         rollback_path = os.path.join(rollback_dir, filename)
 
-        with open(rollback_path, 'w', encoding='utf-8') as f:
+        with open(rollback_path, "w", encoding="utf-8") as f:
             f.write(ddl_text)
 
         logger.info(
             "Captured rollback: %s → %s",
-            qualified, rollback_path,
+            qualified,
+            rollback_path,
         )
         return rollback_path
 
     except Exception as e:
         logger.warning(
             "Failed to capture rollback for %s (non-fatal): %s",
-            qualified, e,
+            qualified,
+            e,
         )
         return None
 
@@ -1928,6 +2272,7 @@ def _build_redeploy_checker(manifest):
         Callable[[cursor, str], bool] suitable for
         manifest.prepare_for_redeploy().
     """
+
     def checker(cursor, qualified_name):
         record = manifest.get_record(qualified_name)
         if record is None:
@@ -1974,8 +2319,7 @@ def _build_redeploy_checker(manifest):
             db_name, obj_name = qualified_name.split(".", 1)
             table_kind = TABLE_KIND_MAP.get(obj_type)
             if table_kind:
-                return _object_exists(cursor, db_name, obj_name,
-                                      table_kind)
+                return _object_exists(cursor, db_name, obj_name, table_kind)
 
         # Fallback — cannot determine, assume exists
         return True
@@ -1983,8 +2327,9 @@ def _build_redeploy_checker(manifest):
     return checker
 
 
-def _object_exists(cursor, database_name: str, object_name: str,
-                   table_kind: str) -> bool:
+def _object_exists(
+    cursor, database_name: str, object_name: str, table_kind: str
+) -> bool:
     """Check if an object exists in DBC.TablesV by TableKind."""
     if cursor is None:
         return False  # Dry-run without connection — assume not exists
@@ -1992,7 +2337,7 @@ def _object_exists(cursor, database_name: str, object_name: str,
         cursor.execute(
             "SELECT 1 FROM DBC.TablesV "
             "WHERE DatabaseName = ? AND TableName = ? AND TableKind = ?",
-            [database_name, object_name, table_kind]
+            [database_name, object_name, table_kind],
         )
         return cursor.fetchone() is not None
     except Exception:
@@ -2005,9 +2350,8 @@ def _index_exists(cursor, database_name: str, index_name: str) -> bool:
         return False  # Dry-run without connection — assume not exists
     try:
         cursor.execute(
-            "SELECT 1 FROM DBC.IndicesV "
-            "WHERE DatabaseName = ? AND IndexName = ?",
-            [database_name, index_name]
+            "SELECT 1 FROM DBC.IndicesV WHERE DatabaseName = ? AND IndexName = ?",
+            [database_name, index_name],
         )
         return cursor.fetchone() is not None
     except Exception:
@@ -2016,9 +2360,7 @@ def _index_exists(cursor, database_name: str, index_name: str) -> bool:
 
 def _table_has_data(cursor, database_name: str, table_name: str) -> bool:
     """Check if a table contains any rows (TOP 1 for efficiency)."""
-    cursor.execute(
-        f'SELECT TOP 1 1 FROM "{database_name}"."{table_name}"'
-    )
+    cursor.execute(f'SELECT TOP 1 1 FROM "{database_name}"."{table_name}"')
     return cursor.fetchone() is not None
 
 
@@ -2033,93 +2375,163 @@ def _count_rows(cursor, database_name: str, table_name: str) -> int:
 
 def _execute_ddl(cursor, ddl_text: str):
     """
-    Execute a DDL statement (strips trailing semicolons).
+    Execute one or more DDL statements.
 
-    Logs the first 200 characters of the SQL for traceability.
-    On failure, logs the full SQL for diagnosis.
+    Handles multi-statement content (e.g. .grt files with multiple
+    GRANT statements) by splitting on semicolons -- comment-safe, so
+    semicolons inside SQL comments don't cause false splits.
+
+    Each statement is executed individually. This avoids Teradata
+    Error 3932 ('Only an ET or null statement is legal after a DDL
+    Statement') which occurs when multiple DDL statements are sent
+    in a single execute() call in ANSI session mode.
 
     Transient lock errors are retried up to 3 times with
     exponential backoff:
 
-      - Error 3598: "Concurrent change conflict on database —
-        try again." Database-level DDL lock contention between
-        parallel streams.  Backoff: 0.5s, 1s, 2s.
+      - Error 3598: "Concurrent change conflict on database --
+        try again." Backoff: 0.5s, 1s, 2s.
 
       - Error 2631: "Transaction ABORTed due to deadlock."
-        Classic RDBMS deadlock from parallel GRANT/DDL on the
-        same database.  Backoff: 2s, 4s, 8s (longer — deadlocks
-        need more time to clear).
+        Backoff: 2s, 4s, 8s.
     """
+    import re
     import time
 
-    clean = ddl_text.strip().rstrip(';').strip()
+    # --- Split multi-statement content (comment-safe) ---
+    # Build a comment-free copy for semicolon detection,
+    # preserving character positions for mapping back.
+    stripped = ddl_text
 
-    # Log a preview (not the full DDL, which can be very long)
-    preview = clean[:200] + ("..." if len(clean) > 200 else "")
-    logger.debug("Executing SQL: %s", preview)
+    # Replace block comments with same-length whitespace
+    for match in re.finditer(r"/\*.*?\*/", stripped, flags=re.DOTALL):
+        stripped = (
+            stripped[: match.start()]
+            + " " * len(match.group())
+            + stripped[match.end() :]
+        )
 
-    # Retryable Teradata errors — code → (label, base_delay_secs)
+    # Replace single-line comments with same-length whitespace
+    for match in re.finditer(r"--[^\n]*", stripped):
+        stripped = (
+            stripped[: match.start()]
+            + " " * len(match.group())
+            + stripped[match.end() :]
+        )
+
+    # Find semicolon positions in the comment-free version
+    semi_positions = [i for i, c in enumerate(stripped) if c == ";"]
+
+    # Extract individual statements from original text
+    statements = []
+    start = 0
+    for pos in semi_positions:
+        chunk = ddl_text[start:pos].strip()
+        start = pos + 1
+        if chunk:
+            statements.append(chunk)
+
+    # Trailing content after last semicolon
+    trailing = ddl_text[start:].strip()
+    if trailing:
+        statements.append(trailing)
+
+    # Fallback: if no semicolons found, use the whole text
+    if not statements:
+        statements = [ddl_text.strip()]
+
+    # Filter out comment-only or whitespace-only chunks
+    clean_statements = []
+    for s in statements:
+        # Strip comments and check if anything remains
+        check = re.sub(r"/\*.*?\*/", "", s, flags=re.DOTALL)
+        check = re.sub(r"--[^\n]*", "", check).strip()
+        if check:
+            clean_statements.append(s)
+    statements = clean_statements
+
+    if not statements:
+        logger.debug("No executable statements found in DDL text.")
+        return
+
+    # --- Execute each statement individually ---
+    # Retryable Teradata errors -- code -> (label, base_delay_secs)
     _RETRYABLE = {
         "3598": ("concurrent change conflict", 0.5),
         "2631": ("deadlock", 2.0),
     }
 
-    max_retries = 3
-    for attempt in range(max_retries + 1):
-        try:
-            cursor.execute(clean)
-            if attempt > 0:
-                logger.info(
-                    "SQL succeeded on retry %d.", attempt,
+    for stmt in statements:
+        clean = stmt.strip().rstrip(";").strip()
+        if not clean:
+            continue
+
+        # Log a preview (not the full DDL, which can be very long)
+        preview = clean[:200] + ("..." if len(clean) > 200 else "")
+        logger.debug("Executing SQL: %s", preview)
+
+        max_retries = 3
+        for attempt in range(max_retries + 1):
+            try:
+                cursor.execute(clean)
+                if attempt > 0:
+                    logger.info(
+                        "SQL succeeded on retry %d.",
+                        attempt,
+                    )
+                break
+            except Exception as e:
+                err_str = str(e)
+
+                # Check for retryable errors
+                if attempt < max_retries:
+                    for code, (label, base_delay) in _RETRYABLE.items():
+                        if code in err_str:
+                            delay = base_delay * (2**attempt)
+                            logger.warning(
+                                "Error %s (%s) -- retry %d/%d in %.1fs.",
+                                code,
+                                label,
+                                attempt + 1,
+                                max_retries,
+                                delay,
+                            )
+                            time.sleep(delay)
+                            break
+                    else:
+                        # No retryable error matched
+                        pass
+
+                    # If we matched a retryable error, continue the loop
+                    if any(code in err_str for code in _RETRYABLE):
+                        continue
+
+                # Non-retryable error, or final retry exhausted
+                clean_err = _clean_db_error(err_str)
+                logger.error(
+                    "SQL execution failed.\n  Error:  %s\n  SQL:    %s",
+                    clean_err,
+                    clean,
                 )
-            return
-        except Exception as e:
-            err_str = str(e)
-
-            # Check for retryable errors
-            if attempt < max_retries:
-                for code, (label, base_delay) in _RETRYABLE.items():
-                    if code in err_str:
-                        delay = base_delay * (2 ** attempt)
-                        logger.warning(
-                            "Error %s (%s) — retry %d/%d "
-                            "in %.1fs.",
-                            code, label,
-                            attempt + 1, max_retries, delay,
-                        )
-                        time.sleep(delay)
-                        break
-                else:
-                    # No retryable error matched — fall through
-                    pass
-
-                # If we matched a retryable error, continue the loop
-                if any(code in err_str for code in _RETRYABLE):
-                    continue
-
-            # Non-retryable error, or final retry exhausted
-            clean_err = _clean_db_error(err_str)
-            logger.error(
-                "SQL execution failed.\n"
-                "  Error:  %s\n"
-                "  SQL:    %s",
-                clean_err, clean,
-            )
-            # Full Go stack trace at DEBUG level only (for driver bugs)
-            logger.debug("Full driver error: %s", e)
-            raise
+                # Full Go stack trace at DEBUG level only
+                logger.debug("Full driver error: %s", e)
+                raise
 
 
 def _rename_table(cursor, database_name: str, old_name: str, new_name: str):
     """Rename a table within the same database."""
     cursor.execute(
-        f'RENAME TABLE "{database_name}"."{old_name}" '
-        f'TO "{database_name}"."{new_name}"'
+        f'RENAME TABLE "{database_name}"."{old_name}" TO "{database_name}"."{new_name}"'
     )
 
 
-def _drop_object(cursor, database_name: str, object_name: str,
-                 object_type: ObjectType, ddl_text: str = None):
+def _drop_object(
+    cursor,
+    database_name: str,
+    object_name: str,
+    object_type: ObjectType,
+    ddl_text: str = None,
+):
     """
     Drop an object using the correct DROP syntax per type.
 
@@ -2146,14 +2558,11 @@ def _drop_object(cursor, database_name: str, object_name: str,
         # Secondary index: DROP INDEX name ON db.table
         parent = parse_index_parent_table(ddl_text)
         if parent and parent[0]:
-            drop_sql = (
-                f'DROP INDEX "{object_name}" '
-                f'ON "{parent[0]}"."{parent[1]}"'
-            )
+            drop_sql = f'DROP INDEX "{object_name}" ON "{parent[0]}"."{parent[1]}"'
         else:
-            drop_sql = drop_statements.get(ObjectType.TABLE, '')
+            drop_sql = drop_statements.get(ObjectType.TABLE, "")
     else:
-        drop_sql = drop_statements.get(object_type, '')
+        drop_sql = drop_statements.get(object_type, "")
 
     if drop_sql:
         cursor.execute(drop_sql)

@@ -30,7 +30,7 @@ Validation:
 
 import logging
 import os
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ def parse_waves_file(
     if not os.path.exists(waves_path):
         raise FileNotFoundError(f"Waves file not found: {waves_path}")
 
-    with open(waves_path, 'r', encoding='utf-8') as f:
+    with open(waves_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
 
     waves = []
@@ -71,7 +71,7 @@ def parse_waves_file(
         stripped = line.strip()
 
         # Skip comment lines
-        if stripped.startswith('#'):
+        if stripped.startswith("#"):
             continue
 
         # Blank line = wave boundary
@@ -84,10 +84,66 @@ def parse_waves_file(
         # Resolve to absolute path
         full_path = os.path.join(base_dir, stripped)
         if not os.path.exists(full_path):
-            raise FileNotFoundError(
-                f"Wave file line {lineno}: '{stripped}' not found "
-                f"(resolved: {full_path})"
-            )
+            # Build a helpful error with potential matches
+            target_dir = os.path.dirname(full_path)
+            filename = os.path.basename(stripped)
+            ext = os.path.splitext(filename)[1].lower()
+
+            # Extract the object name (part after first dot,
+            # before extension) for fuzzy matching
+            name_parts = os.path.splitext(filename)[0].split(".", 1)
+            obj_name = name_parts[1] if len(name_parts) == 2 else None
+
+            # Scan the target directory for potential matches
+            suggestions = []
+            if obj_name and os.path.isdir(target_dir):
+                for candidate in sorted(os.listdir(target_dir)):
+                    if candidate.startswith("_"):
+                        continue
+                    cand_ext = os.path.splitext(candidate)[1].lower()
+                    cand_parts = os.path.splitext(candidate)[0].split(".", 1)
+                    cand_obj = cand_parts[1] if len(cand_parts) == 2 else cand_parts[0]
+                    if cand_obj == obj_name and cand_ext == ext:
+                        suggestions.append(candidate)
+
+            # Build the error message
+            msg_parts = [
+                f"Wave file line {lineno}: '{stripped}' not found.",
+                f"  Resolved to: {full_path}",
+            ]
+            if suggestions:
+                msg_parts.append(
+                    "  The file may have been renamed during packaging. "
+                    "Possible matches:"
+                )
+                for s in suggestions:
+                    msg_parts.append(f"    → {s}")
+                msg_parts.append(
+                    "  Fix: update _waves.txt to use the resolved "
+                    "filename, or re-run the SHIPS analyser to "
+                    "regenerate it."
+                )
+            else:
+                msg_parts.append("  No similar files found in the target directory.")
+                if os.path.isdir(target_dir):
+                    existing = sorted(
+                        f
+                        for f in os.listdir(target_dir)
+                        if not f.startswith("_")
+                        and os.path.splitext(f)[1].lower() == ext
+                    )
+                    if existing:
+                        msg_parts.append(
+                            f"  {len(existing)} {ext} file(s) in "
+                            f"{os.path.basename(target_dir)}/:"
+                        )
+                        # Show first 10 to avoid wall of text
+                        for f in existing[:10]:
+                            msg_parts.append(f"    {f}")
+                        if len(existing) > 10:
+                            msg_parts.append(f"    ... and {len(existing) - 10} more")
+
+            raise FileNotFoundError("\n".join(msg_parts))
 
         # Duplicate check
         wave_num = len(waves)
@@ -111,7 +167,9 @@ def parse_waves_file(
     total_objects = sum(len(w) for w in waves)
     logger.info(
         "Parsed %d waves with %d total objects from %s",
-        len(waves), total_objects, waves_path
+        len(waves),
+        total_objects,
+        waves_path,
     )
 
     return waves
@@ -157,7 +215,10 @@ def validate_waves(waves: List[List[str]]) -> Tuple[List[str], List[str]]:
     total = sum(len(w) for w in waves)
     logger.info(
         "Wave validation: %d waves, %d objects, %d errors, %d warnings",
-        len(waves), total, len(errors), len(warnings)
+        len(waves),
+        total,
+        len(errors),
+        len(warnings),
     )
 
     return (errors, warnings)

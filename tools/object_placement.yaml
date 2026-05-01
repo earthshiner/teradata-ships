@@ -1,0 +1,127 @@
+# ================================================================
+# object_placement.yaml — Object Placement Strategy
+# ================================================================
+#
+# Defines how tables and views are separated across databases for
+# the SHIPS deployment pipeline. Read by:
+#
+#   - tools/migrate_view_references.py  (rewrites view DDL refs)
+#   - src/td_release_packager/validate.py  (rule 11 enforcement)
+#
+# Place this file in the project root, or pass its path via
+# --config on the CLI.
+
+
+# ----------------------------------------------------------------
+# Strategy
+# ----------------------------------------------------------------
+#
+# Pick ONE strategy:
+#
+#   separated   Pattern-based derivation (suffix, prefix, midfix)
+#   colocated   Tables and views share the same database
+#   mapped      Explicit database-to-database pairs
+#
+# Examples for each are below — keep one set of keys at the top
+# level, leave the others commented out.
+
+
+# -- Strategy: separated (pattern-based) --------------------------
+#
+# Derives the views database name from the tables database name
+# (and vice versa) by matching placeholder tokens in a pair of
+# patterns. The placeholder names are arbitrary — the engine just
+# extracts values from one pattern and substitutes into the other.
+#
+# Suffix convention:
+#   Tables in *_T databases, views in *_V databases.
+#
+#   strategy: separated
+#   database_pattern_tables: "{BASE}_T"
+#   database_pattern_views: "{BASE}_V"
+#   locking_views: true
+#
+#   D01_MP_DOM_T.Mortgage  →  D01_MP_DOM_V.Mortgage
+#
+#
+# Prefix convention:
+#   Tables in TBL_* databases, views in VW_* databases.
+#
+#   strategy: separated
+#   database_pattern_tables: "TBL_{BASE}"
+#   database_pattern_views: "VW_{BASE}"
+#   locking_views: true
+#
+#   TBL_MORTGAGE.Loan  →  VW_MORTGAGE.Loan
+#
+#
+# Midfix convention:
+#   Discriminator embedded in the middle of the database name.
+#
+#   strategy: separated
+#   database_pattern_tables: "{ENV}_DAT_{MODULE}"
+#   database_pattern_views: "{ENV}_ACC_{MODULE}"
+#   locking_views: true
+#
+#   PROD_DAT_MORTGAGE.Loan  →  PROD_ACC_MORTGAGE.Loan
+#
+#
+# Notes:
+#   - Every {PLACEHOLDER} in one pattern must appear in the other.
+#   - Placeholder names must be valid identifiers (letters, digits,
+#     underscores; must start with a letter or underscore).
+#   - Matching is case-insensitive (Teradata identifiers are CI).
+#   - The engine validates matched braces on load — mismatched or
+#     empty {} will produce a clear error message.
+
+
+# -- Strategy: colocated -------------------------------------------
+#
+# Tables and views share the same database. No database name
+# rewriting is needed. The locking_views flag controls whether
+# 1:1 dirty-read views exist (but in the same database as tables).
+#
+#   strategy: colocated
+#   locking_views: false
+
+
+# -- Strategy: mapped ----------------------------------------------
+#
+# Explicit database-to-database pairs. Use when there is no naming
+# convention to derive one from the other — or when the naming is
+# too irregular for a pattern.
+#
+# Each entry must have both tables_database and views_database.
+# Lookup is case-insensitive.
+#
+strategy: mapped
+locking_views: true
+database_map:
+  - tables_database: MortgagePlatform_Semantic
+    views_database: MortgagePlatform_Semantic_V
+  - tables_database: MortgagePlatform_Domain
+    views_database: MortgagePlatform_Domain_V
+  - tables_database: MortgagePlatform_Observability
+    views_database: MortgagePlatform_Observability_V
+  - tables_database: MortgagePlatform_Memory
+    views_database: MortgagePlatform_Memory_V
+  - tables_database: MortgagePlatform_Staging
+    views_database: MortgagePlatform_Staging_V
+  - tables_database: D01_MP_SEM_T
+    views_database: D01_MP_SEM_V
+  - tables_database: D01_MP_MEM_T
+    views_database: D01_MP_MEM_V
+  - tables_database: D01_MP_OBS_T
+    views_database: D01_MP_OBS_V
+  - tables_database: D01_MP_STG_T
+    views_database: D01_MP_STG_V
+  - tables_database: "{{DOM_DATABASE_T}}"
+    views_database: "{{DOM_DATABASE_V}}"
+  - tables_database: "{{SEM_DATABASE_T}}"
+    views_database: "{{SEM_DATABASE_V}}"
+  - tables_database: "{{MEM_DATABASE_T}}"
+    views_database: "{{MEM_DATABASE_V}}"
+  - tables_database: "{{OBS_DATABASE_T}}"
+    views_database: "{{OBS_DATABASE_V}}"
+  - tables_database: "{{STG_DATABASE_T}}"
+    views_database: "{{STG_DATABASE_V}}"

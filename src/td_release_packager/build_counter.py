@@ -44,7 +44,7 @@ def read_build_number(project_dir: str) -> int:
             f"or create the file manually with '0' as its content."
         )
 
-    with open(counter_path, 'r', encoding='utf-8') as f:
+    with open(counter_path, "r", encoding="utf-8") as f:
         content = f.read().strip()
 
     try:
@@ -77,10 +77,7 @@ def next_build_number(project_dir: str) -> int:
 
     _write_counter(project_dir, next_num)
 
-    logger.info(
-        "Build counter incremented: %d → %d",
-        current, next_num
-    )
+    logger.info("Build counter incremented: %d → %d", current, next_num)
 
     return next_num
 
@@ -99,7 +96,7 @@ def _write_counter(project_dir: str, value: int):
     counter_path = os.path.join(project_dir, COUNTER_FILENAME)
     tmp_path = counter_path + ".tmp"
 
-    with open(tmp_path, 'w', encoding='utf-8') as f:
+    with open(tmp_path, "w", encoding="utf-8") as f:
         f.write(f"{value}\n")
         f.flush()
         os.fsync(f.fileno())
@@ -109,6 +106,7 @@ def _write_counter(project_dir: str, value: int):
     except PermissionError:
         if os.path.exists(counter_path):
             import stat
+
             os.chmod(counter_path, stat.S_IWRITE)
             os.remove(counter_path)
         os.rename(tmp_path, counter_path)

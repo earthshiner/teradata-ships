@@ -31,10 +31,8 @@ from ddl_deployer.models import (
     ObjectType,
     DeployIntent,
     DeployStrategy,
-    DeployScope,
     ParsedDDL,
     STRATEGY_MAP,
-    SCOPE_MAP,
 )
 
 
@@ -262,8 +260,36 @@ _INJECT_MULTISET_RE = re.compile(
 
 
 # ---------------------------------------------------------------
+# Internal — Comment stripping (for classification only)
+# ---------------------------------------------------------------
+
+
+def _strip_sql_comments(text: str) -> str:
+    """
+    Remove SQL comments from text for safe regex classification.
+
+    Strips both block comments (/* ... */) and line comments (-- ...).
+    The result is used only for object type detection and deploy
+    intent classification — the original text (with comments) is
+    preserved for execution and storage.
+
+    Args:
+        text: Raw DDL text potentially containing comments.
+
+    Returns:
+        Text with all SQL comments removed.
+    """
+    # Remove block comments first (may span multiple lines)
+    stripped = re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
+    # Remove line comments
+    stripped = re.sub(r"--[^\n]*", " ", stripped)
+    return stripped
+
+
+# ---------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------
+
 
 def parse_ddl_file(file_path: str) -> ParsedDDL:
     """
@@ -283,7 +309,7 @@ def parse_ddl_file(file_path: str) -> ParsedDDL:
         FileNotFoundError: If the file does not exist.
         ValueError: If the DDL cannot be parsed or lacks a database qualifier.
     """
-    with open(file_path, 'r', encoding='utf-8') as f:
+    with open(file_path, "r", encoding="utf-8") as f:
         original_text = f.read()
 
     if not original_text.strip():
@@ -307,7 +333,13 @@ def parse_ddl_text(ddl_text: str, file_path: str = "<inline>") -> ParsedDDL:
         ValueError: If the DDL cannot be parsed or classified.
     """
     original_text = ddl_text
-    object_type, qualified_raw = _detect_object_type(ddl_text)
+
+    # Strip comments for classification — prevents false matches
+    # from DDL keywords in comments (e.g. "-- uses CREATE DATABASE IF").
+    # The original text (with comments) is preserved for execution.
+    clean_text = _strip_sql_comments(ddl_text)
+
+    object_type, qualified_raw = _detect_object_type(clean_text)
 
     if object_type == ObjectType.UNKNOWN:
         raise ValueError(
@@ -325,12 +357,18 @@ def parse_ddl_text(ddl_text: str, file_path: str = "<inline>") -> ParsedDDL:
     # names — no database qualifier required.
     _SINGLE_NAME_TYPES = {
         # System-scope
-        ObjectType.MAP, ObjectType.ROLE, ObjectType.PROFILE,
-        ObjectType.AUTHORIZATION, ObjectType.FOREIGN_SERVER,
+        ObjectType.MAP,
+        ObjectType.ROLE,
+        ObjectType.PROFILE,
+        ObjectType.AUTHORIZATION,
+        ObjectType.FOREIGN_SERVER,
         # Pre-requisites
-        ObjectType.DATABASE, ObjectType.USER,
+        ObjectType.DATABASE,
+        ObjectType.USER,
         # DCL and procedural
-        ObjectType.GRANT, ObjectType.REVOKE, ObjectType.JAR,
+        ObjectType.GRANT,
+        ObjectType.REVOKE,
+        ObjectType.JAR,
     }
 
     if db_name is None and object_type not in _SINGLE_NAME_TYPES:
@@ -344,10 +382,11 @@ def parse_ddl_text(ddl_text: str, file_path: str = "<inline>") -> ParsedDDL:
     if object_type == ObjectType.FUNCTION:
         specific_match = re.search(
             r'SPECIFIC\s+(?:"?[A-Za-z_]\w*"?\.)?("?[A-Za-z_]\w*"?)',
-            original_text, re.IGNORECASE,
+            clean_text,
+            re.IGNORECASE,
         )
         if specific_match:
-            obj_name = specific_match.group(1).replace('"', '')
+            obj_name = specific_match.group(1).replace('"', "")
 
     # -- Inject MULTISET for tables if not specified --
     multiset_injected = False
@@ -355,7 +394,7 @@ def parse_ddl_text(ddl_text: str, file_path: str = "<inline>") -> ParsedDDL:
         ddl_text, multiset_injected = _inject_multiset_if_missing(ddl_text)
 
     # -- Detect deploy intent from the DDL verb --
-    deploy_intent = _detect_deploy_intent(original_text, object_type)
+    deploy_intent = _detect_deploy_intent(clean_text, object_type)
 
     # -- Derive strategy from intent (overrides type-based default) --
     if deploy_intent == DeployIntent.DIRECT_EXECUTE:
@@ -426,28 +465,35 @@ def _detect_deploy_intent(ddl_text: str, object_type: ObjectType) -> DeployInten
         return DeployIntent.IDEMPOTENT_DEPLOY
 
     # System-scope objects — skip silently if already present
-    if object_type in (ObjectType.MAP, ObjectType.ROLE,
-                       ObjectType.PROFILE, ObjectType.AUTHORIZATION,
-                       ObjectType.FOREIGN_SERVER):
+    if object_type in (
+        ObjectType.MAP,
+        ObjectType.ROLE,
+        ObjectType.PROFILE,
+        ObjectType.AUTHORIZATION,
+        ObjectType.FOREIGN_SERVER,
+    ):
         return DeployIntent.SKIP_IF_EXISTS
 
     # Pre-requisites and DCL — execute as-is, no strategy
-    if object_type in (ObjectType.DATABASE, ObjectType.USER,
-                       ObjectType.GRANT, ObjectType.REVOKE,
-                       ObjectType.JAR):
+    if object_type in (
+        ObjectType.DATABASE,
+        ObjectType.USER,
+        ObjectType.GRANT,
+        ObjectType.REVOKE,
+        ObjectType.JAR,
+    ):
         return DeployIntent.DIRECT_EXECUTE
 
     # JIs, hash indexes, secondary indexes — always DROP_AND_CREATE
     # (Teradata has no REPLACE for these types)
-    if object_type in (ObjectType.JOIN_INDEX, ObjectType.HASH_INDEX,
-                       ObjectType.INDEX):
+    if object_type in (ObjectType.JOIN_INDEX, ObjectType.HASH_INDEX, ObjectType.INDEX):
         return DeployIntent.DROP_AND_CREATE
 
     # Replaceable types: check if developer used REPLACE or CREATE
     # Teradata supports REPLACE for views, macros, procedures,
     # functions, triggers, AND script table operators.
     _replace_re = re.compile(
-        r'REPLACE\s+(?:SPECIFIC\s+)?(?:VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER)',
+        r"REPLACE\s+(?:SPECIFIC\s+)?(?:VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER)",
         re.IGNORECASE,
     )
 
@@ -480,6 +526,7 @@ def parse_index_parent_table(ddl_text: str) -> Optional[Tuple[str, str]]:
 # ---------------------------------------------------------------
 # Internal — Object type detection
 # ---------------------------------------------------------------
+
 
 def _detect_object_type(ddl_text: str) -> Tuple[ObjectType, str]:
     """
@@ -527,15 +574,14 @@ def _detect_object_type(ddl_text: str) -> Tuple[ObjectType, str]:
             if obj_type == ObjectType.INDEX:
                 return (obj_type, _get_index_qualified_name(ddl_text, match))
             # GRANT/REVOKE/JAR don't have a standard qualified name
-            if obj_type in (ObjectType.GRANT, ObjectType.REVOKE,
-                            ObjectType.JAR):
+            if obj_type in (ObjectType.GRANT, ObjectType.REVOKE, ObjectType.JAR):
                 return (obj_type, obj_type.value)
             try:
                 return (obj_type, match.group(1))
             except IndexError:
                 return (obj_type, obj_type.value)
 
-    return (ObjectType.UNKNOWN, '')
+    return (ObjectType.UNKNOWN, "")
 
 
 def _get_index_qualified_name(ddl_text: str, idx_match) -> str:
@@ -564,6 +610,7 @@ def _get_index_qualified_name(ddl_text: str, idx_match) -> str:
 # Internal — MULTISET injection
 # ---------------------------------------------------------------
 
+
 def _inject_multiset_if_missing(ddl_text: str) -> Tuple[str, bool]:
     """
     Inject MULTISET into CREATE TABLE if neither SET nor MULTISET
@@ -584,7 +631,7 @@ def _inject_multiset_if_missing(ddl_text: str) -> Tuple[str, bool]:
         return (ddl_text, False)
 
     # Inject 'MULTISET ' between 'CREATE ' and 'TABLE' (or 'VOLATILE TABLE')
-    modified = _INJECT_MULTISET_RE.sub(r'\1MULTISET \2', ddl_text, count=1)
+    modified = _INJECT_MULTISET_RE.sub(r"\1MULTISET \2", ddl_text, count=1)
 
     if modified != ddl_text:
         return (modified, True)
@@ -595,6 +642,7 @@ def _inject_multiset_if_missing(ddl_text: str) -> Tuple[str, bool]:
 # ---------------------------------------------------------------
 # Internal — Name splitting (shared with v1)
 # ---------------------------------------------------------------
+
 
 def _split_qualified_name(qualified: str) -> Tuple[Optional[str], str]:
     """
@@ -622,13 +670,13 @@ def _split_dot_respecting_quotes(text: str) -> list:
         if char == '"':
             in_quotes = not in_quotes
             current.append(char)
-        elif char == '.' and not in_quotes:
-            parts.append(''.join(current))
+        elif char == "." and not in_quotes:
+            parts.append("".join(current))
             current = []
         else:
             current.append(char)
     if current:
-        parts.append(''.join(current))
+        parts.append("".join(current))
     return parts
 
 

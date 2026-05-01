@@ -33,6 +33,7 @@ from td_release_packager.token_engine import (
 # read_properties
 # ---------------------------------------------------------------
 
+
 class TestReadProperties:
     """Tests for reading and parsing .properties files."""
 
@@ -50,11 +51,7 @@ class TestReadProperties:
         """Lines starting with '#' and empty lines are ignored."""
         props = tmp_path / "test.properties"
         props.write_text(
-            "# This is a comment\n"
-            "\n"
-            "TOKEN=value\n"
-            "  \n"
-            "# Another comment\n",
+            "# This is a comment\n\nTOKEN=value\n  \n# Another comment\n",
             encoding="utf-8",
         )
 
@@ -116,6 +113,7 @@ class TestReadProperties:
 # ---------------------------------------------------------------
 # _resolve_internal_references
 # ---------------------------------------------------------------
+
 
 class TestResolveInternalReferences:
     """Tests for iterative {{TOKEN}} resolution within property values."""
@@ -205,6 +203,7 @@ class TestResolveInternalReferences:
 # scan_tokens_in_file / scan_tokens_in_directory
 # ---------------------------------------------------------------
 
+
 class TestTokenScanning:
     """Tests for discovering {{TOKEN}} references in files."""
 
@@ -212,8 +211,7 @@ class TestTokenScanning:
         """Tokens in a single file are discovered."""
         ddl = tmp_path / "test.tbl"
         ddl.write_text(
-            "CREATE TABLE {{STD_DATABASE}}.MyTable\n"
-            "( Col1 INTEGER );\n",
+            "CREATE TABLE {{STD_DATABASE}}.MyTable\n( Col1 INTEGER );\n",
             encoding="utf-8",
         )
 
@@ -269,6 +267,7 @@ class TestTokenScanning:
 # validate_tokens
 # ---------------------------------------------------------------
 
+
 class TestValidateTokens:
     """Tests for token validation (undefined and unused detection)."""
 
@@ -322,6 +321,7 @@ class TestValidateTokens:
 # substitute_tokens
 # ---------------------------------------------------------------
 
+
 class TestSubstituteTokens:
     """Tests for {{TOKEN}} replacement in content strings."""
 
@@ -368,6 +368,7 @@ class TestSubstituteTokens:
 # substitute_file
 # ---------------------------------------------------------------
 
+
 class TestSubstituteFile:
     """Tests for file-level token substitution."""
 
@@ -403,6 +404,7 @@ class TestSubstituteFile:
 # Integration: read_properties with internal references
 # ---------------------------------------------------------------
 
+
 class TestPropertiesIntegration:
     """End-to-end tests using the sample properties fixture."""
 
@@ -420,6 +422,7 @@ class TestPropertiesIntegration:
 # ---------------------------------------------------------------
 # derive_token_name
 # ---------------------------------------------------------------
+
 
 class TestDeriveTokenName:
     """Tests for deriving token names by stripping environment prefixes."""
@@ -456,6 +459,7 @@ class TestDeriveTokenName:
 # ---------------------------------------------------------------
 # generate_token_map
 # ---------------------------------------------------------------
+
 
 class TestGenerateTokenMap:
     """Tests for building literal → {{TOKEN}} mappings."""
@@ -516,6 +520,7 @@ class TestGenerateTokenMap:
 # write_token_map / read_token_map
 # ---------------------------------------------------------------
 
+
 class TestTokenMapIO:
     """Tests for writing and reading token_map.conf files."""
 
@@ -540,11 +545,7 @@ class TestTokenMapIO:
         """Comment lines and blank lines are skipped."""
         conf = tmp_path / "token_map.conf"
         conf.write_text(
-            "# This is a comment\n"
-            "\n"
-            "MY_DB={{MY_TOKEN}}\n"
-            "  \n"
-            "# Another comment\n",
+            "# This is a comment\n\nMY_DB={{MY_TOKEN}}\n  \n# Another comment\n",
             encoding="utf-8",
         )
 
@@ -556,8 +557,7 @@ class TestTokenMapIO:
         """Values without {{}} are skipped with a warning."""
         conf = tmp_path / "token_map.conf"
         conf.write_text(
-            "GOOD_DB={{GOOD_TOKEN}}\n"
-            "BAD_DB=plain_value\n",
+            "GOOD_DB={{GOOD_TOKEN}}\nBAD_DB=plain_value\n",
             encoding="utf-8",
         )
 

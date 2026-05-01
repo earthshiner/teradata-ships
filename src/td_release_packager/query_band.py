@@ -86,8 +86,7 @@ def set_session_query_band(
         extra:          Additional key=value pairs.
     """
     band = build_query_band(
-        build_number, package_name, environment,
-        phase, file_name, extra
+        build_number, package_name, environment, phase, file_name, extra
     )
 
     sql = f"SET QUERY_BAND = '{band}' FOR SESSION"
