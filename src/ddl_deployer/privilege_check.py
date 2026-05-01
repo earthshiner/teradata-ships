@@ -37,7 +37,7 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -53,45 +53,52 @@ logger = logging.getLogger(__name__)
 # Each set contains the CREATE + DROP codes needed for that
 # type's deployment strategy.
 _REQUIRED_RIGHTS: Dict[str, Set[str]] = {
-    "TABLE":       {"CT", "DT"},   # CREATE TABLE + DROP TABLE
-    "JOIN_INDEX":  {"CT", "DT"},   # Join indexes use TABLE rights
-    "HASH_INDEX":  {"CT", "DT"},   # Hash indexes use TABLE rights
-    "INDEX":       {"CT", "DT"},   # Secondary indexes use TABLE rights
-    "VIEW":        {"CV", "DV"},   # CREATE VIEW + DROP VIEW
-    "MACRO":       {"CM", "DM"},   # CREATE MACRO + DROP MACRO
-    "PROCEDURE":   {"PC", "PD"},   # CREATE PROCEDURE + DROP PROCEDURE
-    "FUNCTION":    {"CF", "DF"},   # CREATE FUNCTION + DROP FUNCTION
-    "TRIGGER":     {"CG", "DG"},   # CREATE TRIGGER + DROP TRIGGER
+    "TABLE": {"CT", "DT"},  # CREATE TABLE + DROP TABLE
+    "JOIN_INDEX": {"CT", "DT"},  # Join indexes use TABLE rights
+    "HASH_INDEX": {"CT", "DT"},  # Hash indexes use TABLE rights
+    "INDEX": {"CT", "DT"},  # Secondary indexes use TABLE rights
+    "VIEW": {"CV", "DV"},  # CREATE VIEW + DROP VIEW
+    "MACRO": {"CM", "DM"},  # CREATE MACRO + DROP MACRO
+    "PROCEDURE": {"PC", "PD"},  # CREATE PROCEDURE + DROP PROCEDURE
+    "FUNCTION": {"CF", "DF"},  # CREATE FUNCTION + DROP FUNCTION
+    "TRIGGER": {"CG", "DG"},  # CREATE TRIGGER + DROP TRIGGER
 }
 
 # Maps ObjectType → the compound GRANT keyword that grants the
 # required privileges (CREATE + DROP) in a single statement.
 _GRANT_KEYWORDS: Dict[str, str] = {
-    "TABLE":       "TABLE",
-    "JOIN_INDEX":  "TABLE",      # JIX/HIX/SI use TABLE privilege
-    "HASH_INDEX":  "TABLE",
-    "INDEX":       "TABLE",
-    "VIEW":        "VIEW",
-    "MACRO":       "MACRO",
-    "PROCEDURE":   "PROCEDURE",
-    "FUNCTION":    "FUNCTION",
-    "TRIGGER":     "TRIGGER",
+    "TABLE": "TABLE",
+    "JOIN_INDEX": "TABLE",  # JIX/HIX/SI use TABLE privilege
+    "HASH_INDEX": "TABLE",
+    "INDEX": "TABLE",
+    "VIEW": "VIEW",
+    "MACRO": "MACRO",
+    "PROCEDURE": "PROCEDURE",
+    "FUNCTION": "FUNCTION",
+    "TRIGGER": "TRIGGER",
 }
 
 # Human-readable labels for access right codes (for reporting)
 _RIGHT_LABELS: Dict[str, str] = {
-    "CT": "CREATE TABLE",    "DT": "DROP TABLE",
-    "CV": "CREATE VIEW",     "DV": "DROP VIEW",
-    "CM": "CREATE MACRO",    "DM": "DROP MACRO",
-    "PC": "CREATE PROCEDURE","PD": "DROP PROCEDURE",
-    "CF": "CREATE FUNCTION", "DF": "DROP FUNCTION",
-    "CG": "CREATE TRIGGER",  "DG": "DROP TRIGGER",
+    "CT": "CREATE TABLE",
+    "DT": "DROP TABLE",
+    "CV": "CREATE VIEW",
+    "DV": "DROP VIEW",
+    "CM": "CREATE MACRO",
+    "DM": "DROP MACRO",
+    "PC": "CREATE PROCEDURE",
+    "PD": "DROP PROCEDURE",
+    "CF": "CREATE FUNCTION",
+    "DF": "DROP FUNCTION",
+    "CG": "CREATE TRIGGER",
+    "DG": "DROP TRIGGER",
 }
 
 
 # ---------------------------------------------------------------
 # Result model
 # ---------------------------------------------------------------
+
 
 @dataclass
 class PrivilegeCheckResult:
@@ -119,6 +126,7 @@ class PrivilegeCheckResult:
 # ---------------------------------------------------------------
 # Core check
 # ---------------------------------------------------------------
+
 
 def check_deployer_privileges(
     cursor: Any,
@@ -164,25 +172,24 @@ def check_deployer_privileges(
     db_requirements: Dict[str, Set[str]] = defaultdict(set)
 
     # Also track object counts per database for the script comments
-    db_object_counts: Dict[str, Dict[str, int]] = defaultdict(
-        lambda: defaultdict(int)
-    )
+    db_object_counts: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
     created_upper = {db.upper() for db in created_databases}
 
     for parsed in parsed_ddls:
         db_name = parsed.database_name
-        obj_type = parsed.object_type.value if hasattr(
-            parsed.object_type, 'value'
-        ) else str(parsed.object_type)
+        obj_type = (
+            parsed.object_type.value
+            if hasattr(parsed.object_type, "value")
+            else str(parsed.object_type)
+        )
 
         if not db_name:
             continue
 
         # Skip system/DCL objects (GRANT, ROLE, DATABASE, USER, PROFILE)
         # — these don't require object-creation rights on a target DB.
-        if obj_type in ("GRANT", "ROLE", "DATABASE", "USER", "PROFILE",
-                        "UNKNOWN"):
+        if obj_type in ("GRANT", "ROLE", "DATABASE", "USER", "PROFILE", "UNKNOWN"):
             continue
 
         grant_kw = _GRANT_KEYWORDS.get(obj_type)
@@ -214,14 +221,14 @@ def check_deployer_privileges(
             # Find the object types that map to this keyword
             for obj_type, grant_kw in _GRANT_KEYWORDS.items():
                 if grant_kw == kw:
-                    needed_codes.update(_REQUIRED_RIGHTS.get(
-                        obj_type, set()
-                    ))
+                    needed_codes.update(_REQUIRED_RIGHTS.get(obj_type, set()))
                     break  # One match per keyword is sufficient
 
         # Query existing rights
         existing_codes = _get_user_rights(
-            cursor, db_name, result.user,
+            cursor,
+            db_name,
+            result.user,
         )
 
         # Compute delta
@@ -259,8 +266,7 @@ def check_deployer_privileges(
 
     if result.skipped_databases:
         logger.info(
-            "Skipped privilege check for %d database(s) created "
-            "by this package: %s",
+            "Skipped privilege check for %d database(s) created by this package: %s",
             len(result.skipped_databases),
             ", ".join(result.skipped_databases),
         )
@@ -292,20 +298,19 @@ def generate_full_prerequisite_script(
     """
     # Build requirements (same logic as check_deployer_privileges)
     db_requirements: Dict[str, Set[str]] = defaultdict(set)
-    db_object_counts: Dict[str, Dict[str, int]] = defaultdict(
-        lambda: defaultdict(int)
-    )
+    db_object_counts: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
 
     for parsed in parsed_ddls:
         db_name = parsed.database_name
-        obj_type = parsed.object_type.value if hasattr(
-            parsed.object_type, 'value'
-        ) else str(parsed.object_type)
+        obj_type = (
+            parsed.object_type.value
+            if hasattr(parsed.object_type, "value")
+            else str(parsed.object_type)
+        )
 
         if not db_name:
             continue
-        if obj_type in ("GRANT", "ROLE", "DATABASE", "USER",
-                        "PROFILE", "UNKNOWN"):
+        if obj_type in ("GRANT", "ROLE", "DATABASE", "USER", "PROFILE", "UNKNOWN"):
             continue
 
         grant_kw = _GRANT_KEYWORDS.get(obj_type)
@@ -326,6 +331,7 @@ def generate_full_prerequisite_script(
 # ---------------------------------------------------------------
 # Internal — database rights query
 # ---------------------------------------------------------------
+
 
 def _get_user_rights(
     cursor: Any,
@@ -366,7 +372,9 @@ def _get_user_rights(
         logger.warning(
             "Could not query rights for '%s' on '%s': %s — "
             "assuming no rights (will generate prerequisite script).",
-            user_name, database_name, e,
+            user_name,
+            database_name,
+            e,
         )
         return set()
 
@@ -377,7 +385,12 @@ def _get_user_rights(
 
 # Preferred ordering of GRANT keywords in the output
 _GRANT_ORDER = [
-    "TABLE", "VIEW", "MACRO", "PROCEDURE", "FUNCTION", "TRIGGER",
+    "TABLE",
+    "VIEW",
+    "MACRO",
+    "PROCEDURE",
+    "FUNCTION",
+    "TRIGGER",
 ]
 
 
@@ -416,13 +429,15 @@ def _generate_prerequisite_script(
         lines.append(pkg_line)
     if env_line:
         lines.append(env_line)
-    lines.extend([
-        f"-- Generated:   {now}",
-        "--",
-        "-- Run this as System Administrator before deploying.",
-        "-- ================================================================",
-        "",
-    ])
+    lines.extend(
+        [
+            f"-- Generated:   {now}",
+            "--",
+            "-- Run this as System Administrator before deploying.",
+            "-- ================================================================",
+            "",
+        ]
+    )
 
     # Determine which databases to include
     if missing_by_db is not None:
@@ -447,20 +462,14 @@ def _generate_prerequisite_script(
         comment = ", ".join(count_parts) if count_parts else "objects"
 
         # Order the GRANT keywords deterministically
-        ordered_kws = [
-            kw for kw in _GRANT_ORDER if kw in keywords
-        ]
+        ordered_kws = [kw for kw in _GRANT_ORDER if kw in keywords]
         # Include any keywords not in the preferred order
-        ordered_kws.extend(
-            sorted(kw for kw in keywords if kw not in _GRANT_ORDER)
-        )
+        ordered_kws.extend(sorted(kw for kw in keywords if kw not in _GRANT_ORDER))
 
         kw_str = ", ".join(ordered_kws)
 
         lines.append(f"-- {db_name}: {comment}")
-        lines.append(
-            f"GRANT {kw_str} ON {db_name} TO {user};"
-        )
+        lines.append(f"GRANT {kw_str} ON {db_name} TO {user};")
         lines.append("")
 
     return "\n".join(lines)

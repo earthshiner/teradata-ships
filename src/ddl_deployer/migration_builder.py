@@ -17,7 +17,7 @@ All generated SQL follows Teradata Engineering Discipline:
 """
 
 import logging
-from typing import Dict, List, Optional
+from typing import List
 
 from ddl_deployer.models import ColumnInfo, CompatibilityResult
 
@@ -61,7 +61,6 @@ def build_migration_sql(
         )
 
     # Build the column mapping: new_column_name → SELECT expression
-    new_col_by_name: Dict[str, ColumnInfo] = {c.name: c for c in new_columns}
     common_set = set(compatibility.common_columns)
     added_set = set(compatibility.added_columns)
 
@@ -84,9 +83,8 @@ def build_migration_sql(
         else:
             # Should not reach here if compatibility was assessed correctly
             logger.warning(
-                "Column '%s' not classified as common or added — "
-                "defaulting to NULL.",
-                col.name
+                "Column '%s' not classified as common or added — defaulting to NULL.",
+                col.name,
             )
             select_expressions.append(f"NULL AS {col.name}")
 

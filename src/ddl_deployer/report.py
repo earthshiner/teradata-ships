@@ -19,14 +19,15 @@ the manifest as .deploy_report_{deployment_id}.html.
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Tuple
 
 from ddl_deployer.models import (
     DeployState,
-    ObjectType,
     PackageDeployResult,
     PreflightResult,
 )
+from ddl_deployer.provenance import ProvenanceChain, ProvenanceDocument
+from ddl_deployer.provenance_renderer import PROVENANCE_CSS, render_chain
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ def _display_name(obj) -> str:
     if obj.database_name:
         return f"{obj.database_name}.{obj.object_name}"
     return obj.object_name or "(unknown)"
+
 
 # -- Teradata brand colours --
 _NAVY = "#00233C"
@@ -109,16 +111,98 @@ def generate_report(
     report_filename = f".deploy_report_{result.deployment_id}.html"
     report_path = os.path.join(output_dir, report_filename)
 
-    html = _build_html(result)
+    # Load provenance map if available (built by the builder).
+    # Maps resolved package paths → original project source paths.
+    provenance, prov_status = _load_provenance(output_dir)
 
-    with open(report_path, 'w', encoding='utf-8') as f:
+    html = _build_html(result, provenance, prov_status)
+
+    with open(report_path, "w", encoding="utf-8") as f:
         f.write(html)
 
     logger.info("Deployment report written: %s", report_path)
     return report_path
 
 
-def _build_html(result: PackageDeployResult) -> str:
+def _load_provenance(pkg_dir: str) -> Tuple[Optional[ProvenanceDocument], str]:
+    """
+    Load the v2 ProvenanceDocument from _provenance.json if it exists.
+
+    The provenance document records the full filename-transformation
+    chain (source → eponymous → token-resolved → package) for every
+    payload file. The report uses this to render a drill-down on
+    failed/skipped objects so the DBA can see exactly where in the
+    build pipeline each path was rewritten.
+
+    The deployer commonly writes its outputs (manifest, report) into
+    a ``logs/`` subdirectory whilst ``_provenance.json`` lives at the
+    package root, so this function walks UP from ``pkg_dir`` looking
+    for the file. Stops at filesystem root or after 5 levels — a
+    reasonable bound that avoids unbounded scans on deep mounts.
+    The first match wins, so when there's a provenance file at both
+    the package root and an ancestor, the closer (more specific) one
+    is used.
+
+    Args:
+        pkg_dir: Directory the deployer is using for its outputs.
+                 May be the package root, or a ``logs/`` subdirectory.
+
+    Returns:
+        ``(document, status_message)`` where:
+            document:        ProvenanceDocument if the file loaded
+                             successfully, else None.
+            status_message:  Empty string on success. Otherwise a
+                             human-readable explanation suitable for
+                             rendering in the report header so the DBA
+                             knows why drill-downs are absent.
+    """
+    candidate = os.path.abspath(pkg_dir)
+    for _ in range(6):  # current dir + up to 5 ancestors
+        provenance_path = os.path.join(candidate, "_provenance.json")
+        if os.path.exists(provenance_path):
+            try:
+                return ProvenanceDocument.load(provenance_path), ""
+            except ValueError as e:
+                # Version mismatch or schema error — log and degrade
+                # gracefully. Report will render without drill-down.
+                msg = str(e)
+                logger.warning(
+                    "Could not load %s (drill-down disabled): %s",
+                    provenance_path,
+                    msg,
+                )
+                return None, (
+                    f"_provenance.json at {provenance_path} could not "
+                    f"be loaded — drill-downs disabled. Reason: {msg}"
+                )
+            except Exception as e:
+                msg = str(e)
+                logger.warning("Could not parse %s: %s", provenance_path, msg)
+                return None, (
+                    f"_provenance.json at {provenance_path} could not "
+                    f"be parsed — drill-downs disabled. Reason: {msg}"
+                )
+
+        parent = os.path.dirname(candidate)
+        if parent == candidate:
+            break  # reached filesystem root
+        candidate = parent
+
+    # Not found in pkg_dir or any of its ancestors
+    return None, (
+        "_provenance.json not present in this package directory tree. "
+        "Drill-downs and source-edit hints are disabled. To enable: "
+        "rebuild the package with the current version of the builder, "
+        "and verify the report is being written within the package "
+        "directory tree."
+    )
+
+
+def _build_html(
+    result: PackageDeployResult,
+    provenance: Optional[ProvenanceDocument] = None,
+    provenance_status: str = "",
+) -> str:
     """Build the complete HTML report string."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     # Determine report mode from context
@@ -134,15 +218,39 @@ def _build_html(result: PackageDeployResult) -> str:
     sections = [
         _html_head(result, now, mode),
         _html_header(result, now, mode, status, status_colour),
-        _html_action_items(result),
+        _html_provenance_notice(provenance_status),
+        _html_action_items(result, provenance),
         _html_summary(result, mode),
         _html_preflight(result.preflight_result),
         _html_wave_summary(result),
-        _html_object_results(result),
+        _html_object_results(result, provenance),
         _html_footer(now),
     ]
 
     return "\n".join(sections)
+
+
+def _html_provenance_notice(status_message: str) -> str:
+    """
+    Render a small, dismissible-looking banner explaining why
+    drill-downs are disabled. Returns empty string when provenance
+    loaded successfully (status_message == "").
+
+    Sits just below the main header so the DBA sees it before
+    scrolling into the results table — without being so loud that
+    it hides successful deployments.
+    """
+    if not status_message:
+        return ""
+
+    return (
+        '<div style="background:#FFF8E1;border:1px solid #FFE082;'
+        "border-left:4px solid #FFC107;padding:10px 14px;margin:0 0 16px 0;"
+        'border-radius:4px;font-size:13px;color:#5D4E00">'
+        "<strong>ℹ Provenance unavailable</strong> &nbsp;"
+        f"{status_message}"
+        "</div>"
+    )
 
 
 def _html_head(result, now, mode):
@@ -212,6 +320,7 @@ def _html_head(result, now, mode):
     .header {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
     body {{ font-size: 12px; }}
   }}
+  {PROVENANCE_CSS}
 </style>
 </head>
 <body>"""
@@ -235,17 +344,111 @@ def _html_header(result, now, mode, status, status_colour):
 <div class="container">"""
 
 
-def _html_action_items(result):
+def _filename_only(path: str) -> str:
+    """
+    Extract the filename portion of a path regardless of separator
+    style. Necessary because ``os.path.basename`` is OS-dependent —
+    on POSIX it does not treat ``\\`` as a separator, so a Windows-
+    style path like ``views\\X.viw`` returned from a Windows deployer
+    won't be split correctly when the renderer runs on Linux (and
+    vice versa, though that's the rarer direction).
+
+    The provenance document is built on the build host with forward
+    slashes; the deployer's ``ddl_file`` uses whatever separator the
+    OS produced. Normalising both before comparison makes the lookup
+    portable across hosts.
+    """
+    if not path:
+        return ""
+    # Normalise both separator styles, then take last component.
+    return path.replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def _lookup_chain(
+    ddl_file: Optional[str],
+    provenance: Optional[ProvenanceDocument],
+) -> Optional[ProvenanceChain]:
+    """
+    Look up the ProvenanceChain for a given object's ddl_file.
+
+    Matches by filename basename since ddl_file uses a shortened
+    path while ProvenanceDocument keys use the full
+    package-relative path. Path-separator agnostic — handles
+    both ``views\\X.viw`` (Windows) and ``views/X.viw`` (POSIX)
+    against provenance keys regardless of host OS.
+
+    Args:
+        ddl_file:    The ddl_file value from ObjectDeployResult.
+        provenance:  Loaded ProvenanceDocument, or None.
+
+    Returns:
+        The matching chain, or None if no match.
+    """
+    if not ddl_file or provenance is None:
+        return None
+    target = _filename_only(ddl_file)
+    for pkg_path, chain in provenance.entries.items():
+        if _filename_only(pkg_path) == target:
+            return chain
+    return None
+
+
+def _lookup_provenance(
+    ddl_file: Optional[str],
+    provenance: Optional[ProvenanceDocument],
+) -> str:
+    """
+    Look up the original source path for a given object's ddl_file.
+
+    Convenience wrapper around _lookup_chain that returns just the
+    source-stage path. Used by the existing "✎ Edit source" lines
+    in Action Items and Object Results.
+
+    Args:
+        ddl_file:    The ddl_file value from ObjectDeployResult.
+        provenance:  Loaded ProvenanceDocument, or None.
+
+    Returns:
+        Original source path, or empty string if not found.
+    """
+    chain = _lookup_chain(ddl_file, provenance)
+    if chain is None:
+        return ""
+    return chain.source_path()
+
+
+def _html_action_items(result, provenance: Optional[ProvenanceDocument] = None):
     """Action items section — SKIPPED and FAILED objects needing attention."""
     items = []
 
     for obj in result.results:
         if obj.state == DeployState.FAILED:
+            # Show source file so the DBA knows where to look
+            source = ""
+            if hasattr(obj, "ddl_file") and obj.ddl_file:
+                source = (
+                    f' <span class="mono" style="font-size:12px">'
+                    f"[{obj.ddl_file}]</span>"
+                )
+
+            # Show provenance — which project file to edit
+            origin = _lookup_provenance(getattr(obj, "ddl_file", None), provenance)
+            provenance_html = ""
+            if origin:
+                provenance_html = (
+                    f'<div style="font-size:11px;color:#6C757D;'
+                    f'margin-top:4px">'
+                    f'✎ Edit source: <span class="mono">{origin}</span>'
+                    f"</div>"
+                )
+
             items.append(
                 f'<div class="action-item err">'
-                f'<strong>FAILED:</strong> {_display_name(obj)} '
-                f'({obj.object_type.value}) — {obj.error or "Unknown error"}'
-                f'</div>'
+                f"<strong>FAILED:</strong> {_display_name(obj)} "
+                f"({obj.object_type.value}) — "
+                f"{obj.error or 'Unknown error'}{source}"
+                f"{provenance_html}"
+                f"</div>"
             )
         elif obj.state == DeployState.SKIPPED:
             # Build detail from the actual result, not a hardcoded template.
@@ -263,11 +466,19 @@ def _html_action_items(result):
             if obj.backup_table:
                 backup_note = f" Backup preserved as {obj.backup_table}."
 
+            # Source file for traceability
+            source = ""
+            if hasattr(obj, "ddl_file") and obj.ddl_file:
+                source = (
+                    f' <span class="mono" style="font-size:12px">'
+                    f"[{obj.ddl_file}]</span>"
+                )
+
             items.append(
                 f'<div class="action-item warn">'
-                f'<strong>SKIPPED:</strong> {_display_name(obj)} '
-                f'({obj.object_type.value}) — {detail}.{backup_note}'
-                f'</div>'
+                f"<strong>SKIPPED:</strong> {_display_name(obj)} "
+                f"({obj.object_type.value}) — {detail}.{backup_note}{source}"
+                f"</div>"
             )
 
     if not items:
@@ -278,9 +489,7 @@ def _html_action_items(result):
 
     return (
         f'<div class="{css_class}">'
-        f'<h3>Action Items ({len(items)})</h3>'
-        + "\n".join(items)
-        + '</div>'
+        f"<h3>Action Items ({len(items)})</h3>" + "\n".join(items) + "</div>"
     )
 
 
@@ -289,7 +498,8 @@ def _html_summary(result, mode):
     manifest_line = (
         f'<p style="margin:8px 0; font-size:13px; color:#6C757D">'
         f'Manifest: <span class="mono">{result.manifest_path}</span></p>'
-        if result.manifest_path else ""
+        if result.manifest_path
+        else ""
     )
 
     return f"""
@@ -331,9 +541,9 @@ def _html_preflight(pf: Optional[PreflightResult]):
             )
 
     checks_html = (
-        '<div class="preflight-grid">' + "\n".join(check_rows) + '</div>'
-        if check_rows else
-        '<p style="color:#155724; font-size:13px">All checks passed — no issues detected.</p>'
+        '<div class="preflight-grid">' + "\n".join(check_rows) + "</div>"
+        if check_rows
+        else '<p style="color:#155724; font-size:13px">All checks passed — no issues detected.</p>'
     )
 
     return f"""
@@ -353,23 +563,23 @@ def _html_wave_summary(result):
     for ws in result.wave_summaries:
         # Colour the row based on outcome
         if ws.failed > 0:
-            row_style = 'background:#F8D7DA'
+            row_style = "background:#F8D7DA"
         elif ws.skipped > 0 and ws.completed == 0:
-            row_style = 'background:#FFF3CD'
+            row_style = "background:#FFF3CD"
         else:
-            row_style = ''
+            row_style = ""
 
-        style_attr = f' style="{row_style}"' if row_style else ''
+        style_attr = f' style="{row_style}"' if row_style else ""
 
         rows.append(
-            f'<tr{style_attr}>'
+            f"<tr{style_attr}>"
             f'<td style="text-align:center;font-weight:500">{ws.wave_number}</td>'
             f'<td style="text-align:center">{ws.total}</td>'
             f'<td style="text-align:center;color:#28A745">{ws.completed}</td>'
             f'<td style="text-align:center;color:#DC3545">{ws.failed}</td>'
             f'<td style="text-align:center;color:#6C757D">{ws.skipped}</td>'
             f'<td style="text-align:right" class="mono">{ws.duration_ms:,} ms</td>'
-            f'</tr>'
+            f"</tr>"
         )
 
     total_duration = sum(ws.duration_ms for ws in result.wave_summaries)
@@ -395,10 +605,16 @@ def _html_wave_summary(result):
 </table>"""
 
 
-def _html_object_results(result):
+def _html_object_results(result, provenance: Optional[ProvenanceDocument] = None):
     """Per-object results table with optional wave column."""
     has_waves = result.is_wave_parallel
     rows = []
+
+    # Column count determines the colspan for the drill-down row that
+    # spans the table beneath each failed/skipped object's main row.
+    # Without waves: 6 columns (#, Object, Type, Status, Source, Details)
+    # With waves:    7 columns (adds Wave between # and Object)
+    drilldown_colspan = 7 if has_waves else 6
 
     for i, obj in enumerate(result.results, 1):
         badge_label, badge_bg, badge_fg = _STATE_BADGES.get(
@@ -408,25 +624,33 @@ def _html_object_results(result):
         type_html = f'<span class="badge type-badge">{obj.object_type.value}</span>'
         status_html = (
             f'<span class="badge" style="background:{badge_bg};color:{badge_fg}">'
-            f'{badge_label}</span>'
+            f"{badge_label}</span>"
         )
 
         details = [obj.message]
         if obj.backup_table:
             details.append(f'Backup: <span class="mono">{obj.backup_table}</span>')
         if obj.rows_migrated > 0:
-            details.append(f'Rows migrated: {obj.rows_migrated:,}')
+            details.append(f"Rows migrated: {obj.rows_migrated:,}")
 
         # Deploy intent badge
         intent_html = ""
         if obj.deploy_intent:
-            intent_label = obj.deploy_intent.value if hasattr(obj.deploy_intent, 'value') else str(obj.deploy_intent)
+            intent_label = (
+                obj.deploy_intent.value
+                if hasattr(obj.deploy_intent, "value")
+                else str(obj.deploy_intent)
+            )
             intent_html = f'<span class="badge" style="background:#E9ECEF;color:{_NAVY}">{intent_label}</span> '
 
         # Rollback indicator
         rollback_html = ""
         if obj.rollback_file:
-            rb_name = os.path.basename(obj.rollback_file) if '/' in str(obj.rollback_file) else obj.rollback_file
+            rb_name = (
+                os.path.basename(obj.rollback_file)
+                if "/" in str(obj.rollback_file)
+                else obj.rollback_file
+            )
             rollback_html = f'<div style="color:#28A745;font-size:12px">↩ Rollback available: <span class="mono">{rb_name}</span></div>'
         elif obj.prior_existed and obj.state == DeployState.COMPLETED:
             rollback_html = '<div style="color:#6C757D;font-size:12px">↩ No rollback (table uses backup strategy)</div>'
@@ -442,40 +666,68 @@ def _html_object_results(result):
             wn = obj.wave_number if obj.wave_number else "—"
             wave_cell = f'<td style="text-align:center">{wn}</td>'
 
-        # Source file name
-        file_html = ""
-        if hasattr(obj, 'ddl_file') and obj.ddl_file:
-            file_html = f'<span class="mono" style="font-size:11px;color:#6C757D">{obj.ddl_file}</span>'
+        # Source file — dedicated column
+        source_file = ""
+        if hasattr(obj, "ddl_file") and obj.ddl_file:
+            source_file = obj.ddl_file
+
+        # Provenance — show original source path for failed/skipped
+        # items so the DBA knows which project file to edit.
+        origin = _lookup_provenance(getattr(obj, "ddl_file", None), provenance)
+        source_cell = f'<span class="mono" style="font-size:11px;color:#6C757D">{source_file}</span>'
+        if origin and obj.state in (DeployState.FAILED, DeployState.SKIPPED):
+            source_cell += (
+                f'<div style="font-size:10px;color:#F47B20;margin-top:2px">'
+                f"✎ {origin}</div>"
+            )
 
         rows.append(
-            f'<tr>'
+            f"<tr>"
             f'<td style="text-align:center;color:#6C757D">{i}</td>'
-            f'{wave_cell}'
+            f"{wave_cell}"
             f'<td class="mono">{_display_name(obj)}</td>'
-            f'<td>{intent_html}{type_html}</td>'
-            f'<td>{status_html}</td>'
-            f'<td>{"<br>".join(details)}'
-            f'{("<br>" + file_html) if file_html else ""}'
-            f'{rollback_html}{extra_html}</td>'
-            f'</tr>'
+            f"<td>{intent_html}{type_html}</td>"
+            f"<td>{status_html}</td>"
+            f"<td>{source_cell}</td>"
+            f"<td>{'<br>'.join(details)}"
+            f"{rollback_html}{extra_html}</td>"
+            f"</tr>"
         )
+
+        # Provenance drill-down — emit a second TR spanning all
+        # columns when this object failed or was skipped AND we have
+        # a chain for it. This is the only spot the report uses an
+        # expandable detail; keeps the table dense for the happy
+        # path while giving the DBA a one-click path into the full
+        # transformation chain when something went wrong.
+        if obj.state in (DeployState.FAILED, DeployState.SKIPPED):
+            chain = _lookup_chain(getattr(obj, "ddl_file", None), provenance)
+            if chain is not None:
+                rows.append(
+                    f"<tr>"
+                    f'<td colspan="{drilldown_colspan}" '
+                    f'style="background:{_LIGHT_BG};padding:8px 16px">'
+                    f"{render_chain(chain)}"
+                    f"</td>"
+                    f"</tr>"
+                )
 
     if not rows:
         # Check for noop re-run — all objects were completed in a prior
         # deployment and verified as still existing in the database.
-        prior = getattr(result, 'prior_completed', [])
+        prior = getattr(result, "prior_completed", [])
         if prior:
             prior_count = len(prior)
             return (
-                f'<h2>Object Results</h2>'
+                f"<h2>Object Results</h2>"
                 f'<div class="no-actions">'
-                f'All {prior_count} object{"s" if prior_count != 1 else ""} '
-                f'were deployed in a previous run and verified as still '
-                f'present in the database. Nothing new to deploy.</div>'
+                f"All {prior_count} object{'s' if prior_count != 1 else ''} "
+                f"were deployed in a previous run and verified as still "
+                f"present in the database. Nothing new to deploy.</div>"
             )
         return '<h2>Object Results</h2><p style="color:#6C757D">No objects were processed.</p>'
 
-    wave_header = '<th style="width:50px">Wave</th>' if has_waves else ''
+    wave_header = '<th style="width:50px">Wave</th>' if has_waves else ""
 
     return f"""
 <h2>Object Results</h2>
@@ -486,6 +738,7 @@ def _html_object_results(result):
   <th>Object</th>
   <th style="width:100px">Type</th>
   <th style="width:100px">Status</th>
+  <th style="width:180px">Source</th>
   <th>Details</th>
 </tr></thead>
 <tbody>

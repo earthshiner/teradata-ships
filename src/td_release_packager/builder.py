@@ -22,59 +22,57 @@ Package naming:
     {{ENV}}_{{PACKAGE_NAME}}_BUILD_{{BUILD_NO}}_{{TIMESTAMP}}.zip
 """
 
-import glob
 import hashlib
 import json
 import logging
 import os
 import shutil
+import re
+import sys
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 from td_release_packager.models import (
     BuildConfig,
     BuildManifest,
     DeployPhase,
     SOURCE_DIR_MAP,
-    DDL_SUBDIR_ORDER,
-    DCL_SUBDIR_ORDER,
 )
 from td_release_packager.token_engine import (
+    format_malformed_tokens_report,
     read_properties,
+    scan_malformed_tokens_in_directory,
     scan_tokens_in_directory,
-    substitute_file,
     substitute_tokens,
     validate_tokens,
+)
+from td_release_packager.eponymous_rename import extract_eponymous_name
+from ddl_deployer.provenance import (
+    ProvenanceChain,
+    ProvenanceDocument,
+    Stage,
+    Status,
 )
 
 logger = logging.getLogger(__name__)
 
 # -- Regex for MULTISET injection (duplicated from ddl_deployer --
 # to avoid import dependency at build time)
-import re
 
 _HAS_SET_MULTISET_RE = re.compile(
-    r'CREATE\s+(MULTISET|SET)\s+(?:(?:VOLATILE|GLOBAL\s+TEMPORARY)\s+)?TABLE\b',
+    r"CREATE\s+(MULTISET|SET)\s+(?:(?:VOLATILE|GLOBAL\s+TEMPORARY)\s+)?TABLE\b",
     re.IGNORECASE,
 )
 _INJECT_MULTISET_RE = re.compile(
-    r'(CREATE\s+)((?:(?:VOLATILE|GLOBAL\s+TEMPORARY)\s+)?TABLE\b)',
+    r"(CREATE\s+)((?:(?:VOLATILE|GLOBAL\s+TEMPORARY)\s+)?TABLE\b)",
     re.IGNORECASE,
 )
 
-# -- Qualified name extraction for filename resolution --
-# Extracts Database.ObjectName from resolved DDL content.
-# Used to derive the eponymous filename after token substitution.
-_QUALIFIED_NAME_RE = re.compile(
-    r'(?:CREATE|REPLACE)\s+(?:MULTISET\s+|SET\s+)?'
-    r'(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?'
-    r'(?:TRACE\s+)?'
-    r'(?:SPECIFIC\s+)?'
-    r'(?:TABLE|VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER|'
-    r'JOIN\s+INDEX|HASH\s+INDEX)\s+'
-    r'("?[A-Za-z_]\w*"?(?:\."?[A-Za-z_]\w*"?)?)',
-    re.IGNORECASE,
-)
+# -- Eponymous filename resolution --
+# Delegates to extract_eponymous_name which handles comment
+# stripping, {{TOKEN}} patterns, and all object types (including
+# DATABASE, USER, and other single-name types that the original
+# regex missed).
 
 
 def _resolve_filename(
@@ -88,41 +86,48 @@ def _resolve_filename(
     database name (e.g. P_CORE.Customer). The package filename should
     match this — not the harvested source name (e.g. DEV01_CORE.Customer).
 
-    For files where a qualified name cannot be extracted (grants, revokes,
-    .c/.h co-artefacts, system-scope objects), the original filename is
-    returned unchanged.
+    Comments are stripped before parsing to avoid false matches from
+    DDL keywords in comment text (e.g. '-- uses CREATE DATABASE IF').
+
+    For files where a qualified name cannot be extracted (grants,
+    revokes, .c/.h co-artefacts), the original filename is returned
+    unchanged.
 
     Args:
-        original_filename:  The source filename (e.g. 'DEV01_CORE.Customer.tbl').
+        original_filename:  The source filename.
         resolved_content:   The DDL content after token substitution.
 
     Returns:
-        The resolved filename (e.g. 'P_CORE.Customer.tbl').
+        The resolved eponymous filename.
     """
     # Preserve extension from the original filename
     ext = os.path.splitext(original_filename)[1]
 
     # Skip non-DDL files (.c, .h, .jar, etc.)
-    if ext.lower() in ('.c', '.h', '.jar', '.zip', '.gz'):
+    if ext.lower() in (".c", ".h", ".jar", ".zip", ".gz"):
         return original_filename
 
     # Skip hidden/underscore-prefixed files
-    if original_filename.startswith('.') or original_filename.startswith('_'):
+    if original_filename.startswith(".") or original_filename.startswith("_"):
         return original_filename
 
-    # Extract the qualified name from the resolved content
-    match = _QUALIFIED_NAME_RE.search(resolved_content)
-    if not match:
+    # Extract the qualified name from the resolved content.
+    # extract_eponymous_name strips comments internally, so DDL
+    # keywords in comments won't cause false matches.
+    result = extract_eponymous_name(resolved_content)
+    if result is None:
         return original_filename
 
-    qualified = match.group(1).replace('"', '')
+    eponymous_name, qualified, obj_type = result
+
+    # Use the extracted name but preserve the original extension
+    # (extract_eponymous_name assigns its own extension based on
+    # object type, but the source file's extension should win in
+    # case of override conventions like .sql).
     new_filename = f"{qualified}{ext}"
 
     if new_filename != original_filename:
-        logger.info(
-            "Filename resolved: %s → %s",
-            original_filename, new_filename
-        )
+        logger.info("Filename resolved: %s → %s", original_filename, new_filename)
 
     return new_filename
 
@@ -149,6 +154,7 @@ def build_package(config: BuildConfig) -> Tuple[str, BuildManifest]:
     if config.build_number is None:
         # Auto-increment from .build_counter in source project
         from td_release_packager.build_counter import next_build_number
+
         build_int = next_build_number(config.source_dir)
         logger.info("Auto-incremented build number: %d", build_int)
     else:
@@ -157,58 +163,133 @@ def build_package(config: BuildConfig) -> Tuple[str, BuildManifest]:
     build_no = f"{build_int:04d}"
 
     # -- Package naming --
-    pkg_name = (
-        f"{config.environment}_{config.package_name}"
-        f"_BUILD_{build_no}_{ts_str}"
-    )
+    pkg_name = f"{config.environment}_{config.package_name}_BUILD_{build_no}_{ts_str}"
     pkg_dir = os.path.join(config.output_dir, pkg_name)
 
     logger.info("Building package: %s", pkg_name)
 
     # -- Validate source directory --
     if not os.path.isdir(config.source_dir):
-        raise FileNotFoundError(
-            f"Source directory not found: {config.source_dir}"
-        )
+        raise FileNotFoundError(f"Source directory not found: {config.source_dir}")
 
     # -- Phase 1: Read token values --
     token_values = read_properties(config.properties_file)
-    logger.info("Loaded %d token values from %s",
-                len(token_values), config.properties_file)
+    logger.info(
+        "Loaded %d token values from %s", len(token_values), config.properties_file
+    )
 
     # -- Phase 2: Scan source for token references --
     payload_dir = _find_payload_dir(config.source_dir)
     token_usage = scan_tokens_in_directory(payload_dir)
     logger.info("Scanned %d files with token references", len(token_usage))
 
+    # -- Phase 2b: Catch malformed tokens BEFORE packaging --
+    # Malformed {{...}} markers (whitespace inside braces, double-
+    # tokenised content from a re-run harvest, orphan braces from
+    # editor mishaps) silently survive substitution and end up in
+    # the deployed SQL. We fail the build here with a precise
+    # file/line report so the developer can fix the source file
+    # rather than discover the corruption mid-deploy.
+    malformed = scan_malformed_tokens_in_directory(payload_dir)
+    if malformed:
+        report = format_malformed_tokens_report(malformed)
+        print(f"\n{report}", file=sys.stderr)
+        raise ValueError(
+            f"Build aborted: {sum(len(v) for v in malformed.values())} "
+            f"malformed token marker(s) in "
+            f"{len(malformed)} file(s). See report above."
+        )
+
     # -- Phase 3: Validate tokens --
     errors, warnings = validate_tokens(token_values, token_usage)
-    for w in warnings:
-        logger.warning("Token: %s", w)
 
-    if errors:
-        for e in errors:
-            logger.error("Token: %s", e)
-        raise ValueError(
-            f"Token validation failed: {len(errors)} error(s). "
-            "All referenced tokens must be defined in the properties file."
+    if errors or warnings:
+        # -- Build structured report from raw data --
+        # token_usage is {filename: set_of_tokens}
+        # Invert to {token: [filenames]} for undefined token reporting
+        token_to_files: Dict[str, list] = {}
+        for filepath, tokens in token_usage.items():
+            for token in tokens:
+                token_to_files.setdefault(token, []).append(filepath)
+
+        # Compute sets
+        all_referenced = set()
+        for tokens in token_usage.values():
+            all_referenced.update(tokens)
+
+        defined_tokens = set(token_values.keys())
+        undefined = sorted(all_referenced - defined_tokens)
+        unreferenced = sorted(defined_tokens - all_referenced)
+
+        # -- Print structured report --
+        print(f"\n{'=' * 64}")
+        print("  Token Validation")
+        print(f"{'=' * 64}")
+
+        if undefined:
+            print()
+            print("  ERRORS — tokens referenced in DDL but not defined")
+            print("  in properties (must be resolved before packaging):")
+            print()
+
+            for token in undefined:
+                print(f"    {{{{{token}}}}}")
+                files = sorted(token_to_files.get(token, []))
+                # Show paths relative to source for readability
+                for fpath in files:
+                    rel = os.path.relpath(fpath, config.source_dir)
+                    print(f"      -> {rel}")
+                print()
+
+            print("  Action: add these tokens to your .properties file,")
+            print("  or update token_map.conf and re-harvest.")
+
+        if unreferenced:
+            print()
+            print("  WARNINGS — tokens defined in properties but never")
+            print("  referenced (informational — safe to ignore):")
+            print()
+            # Compact display — wrap token names
+            token_list = ", ".join(f"{{{{{t}}}}}" for t in unreferenced)
+            print(f"    {token_list}")
+            print()
+            print("  Tip: if these have been replaced by _T/_V variants,")
+            print("  remove the old flat tokens from your properties file.")
+
+        print()
+        print(f"{'=' * 64}")
+        print(
+            f"  {len(undefined)} undefined token(s) (ERROR)"
+            f" | {len(unreferenced)} unreferenced token(s) (WARNING)"
         )
+        print(f"{'=' * 64}\n")
+
+        if undefined:
+            raise ValueError(
+                f"Token validation failed: {len(undefined)} undefined "
+                f"token(s). All referenced tokens must be defined in "
+                f"the properties file."
+            )
 
     # -- Phase 4: Create package structure --
     _create_package_structure(pkg_dir)
 
     # -- Phase 5: Copy and resolve payload files --
-    total_subs, file_count, phase_inventory, filename_map = _copy_payload(
-        payload_dir, pkg_dir, token_values
+    total_subs, file_count, phase_inventory, filename_map, provenance_doc = (
+        _copy_payload(payload_dir, pkg_dir, token_values)
     )
     logger.info(
         "Resolved %d tokens across %d files (%d filenames resolved)",
-        total_subs, file_count, len(filename_map)
+        total_subs,
+        file_count,
+        len(filename_map),
     )
 
     # -- Phase 6: Copy deployment order files if present --
     _copy_order_files(payload_dir, pkg_dir)
-    _copy_waves_file(config.source_dir, payload_dir, pkg_dir, filename_map)
+    _copy_waves_file(
+        config.source_dir, payload_dir, pkg_dir, filename_map, token_values
+    )
 
     # -- Phase 7: Embed deployment engine --
     _embed_deployer(pkg_dir)
@@ -231,8 +312,24 @@ def build_package(config: BuildConfig) -> Tuple[str, BuildManifest]:
     )
 
     manifest_path = os.path.join(pkg_dir, "BUILD.json")
-    with open(manifest_path, 'w', encoding='utf-8') as f:
+    with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest.__dict__, f, indent=2, ensure_ascii=False)
+
+    # -- Phase 8b: Write provenance document (v2) --
+    # Records the full filename-transformation chain (source →
+    # eponymous → token-resolved → package) for every payload file.
+    # The HTML report uses this to render a drill-down that shows
+    # the DBA exactly where in the pipeline each filename was
+    # rewritten — critical for diagnosing mapping bugs that only
+    # surface at deploy time.
+    provenance_path = os.path.join(pkg_dir, "_provenance.json")
+    provenance_doc.write(provenance_path)
+    logger.info(
+        "Provenance document (v%d): %d entries → %s",
+        provenance_doc.version,
+        len(provenance_doc.entries),
+        provenance_path,
+    )
 
     # -- Phase 9: Generate deploy.py --
     _generate_deploy_script(pkg_dir, manifest)
@@ -259,6 +356,7 @@ def build_package(config: BuildConfig) -> Tuple[str, BuildManifest]:
 # Internal — Source discovery
 # ---------------------------------------------------------------
 
+
 def _find_payload_dir(source_dir: str) -> str:
     """
     Locate the payload directory within the source project.
@@ -275,7 +373,7 @@ def _find_payload_dir(source_dir: str) -> str:
     Raises:
         FileNotFoundError: If no payload directory is found.
     """
-    for candidate in ['payload', 'database', 'payload/database']:
+    for candidate in ["payload", "database", "payload/database"]:
         path = os.path.join(source_dir, candidate)
         if os.path.isdir(path):
             return path
@@ -289,6 +387,7 @@ def _find_payload_dir(source_dir: str) -> str:
 # ---------------------------------------------------------------
 # Internal — Package structure
 # ---------------------------------------------------------------
+
 
 def _create_package_structure(pkg_dir: str):
     """
@@ -317,11 +416,12 @@ def _create_package_structure(pkg_dir: str):
 # Internal — Payload copying with token substitution
 # ---------------------------------------------------------------
 
+
 def _copy_payload(
     source_payload: str,
     pkg_dir: str,
     token_values: Dict[str, str],
-) -> Tuple[int, int, Dict[str, int], Dict[str, str]]:
+) -> Tuple[int, int, Dict[str, int], Dict[str, str], ProvenanceDocument]:
     """
     Copy source payload files to the package, substituting tokens
     and resolving filenames.
@@ -332,6 +432,12 @@ def _copy_payload(
     package filename matches the environment-specific database name
     (e.g. P_CORE.Customer.tbl, not DEV01_CORE.Customer.tbl).
 
+    For each file processed, a ProvenanceChain is recorded capturing
+    the four pipeline stages: source, eponymous, token_resolved,
+    package. The chains are aggregated into a ProvenanceDocument so
+    the HTML report can render a drill-down explaining how each
+    package path was derived.
+
     Args:
         source_payload: Path to the source payload directory.
         pkg_dir:        Package root directory.
@@ -339,16 +445,33 @@ def _copy_payload(
 
     Returns:
         Tuple of (total_substitutions, file_count, phase_inventory,
-        filename_map). filename_map maps original filenames to
-        resolved filenames (only entries where the name changed).
+        filename_map, provenance_doc). filename_map maps original
+        filenames to resolved filenames (only entries where the name
+        changed). provenance_doc is a v2 ProvenanceDocument capturing
+        the full transformation chain per file.
     """
     total_subs = 0
     file_count = 0
     phase_inventory = {}
     filename_map = {}  # original → resolved (only changed names)
+    provenance_doc = ProvenanceDocument()
 
     for root, dirs, files in os.walk(source_payload):
         for filename in files:
+            # Skip scaffolding examples — not deployment artefacts
+            if filename.endswith(".sample"):
+                continue
+
+            # Skip control files — _order.txt, _waves.txt etc. are
+            # handled by _copy_order_files and _copy_waves_file, not
+            # by the token substitution pipeline
+            if filename.startswith("_"):
+                continue
+
+            # Skip git placeholders
+            if filename == ".gitkeep":
+                continue
+
             src_file = os.path.join(root, filename)
             rel_path = os.path.relpath(src_file, source_payload)
 
@@ -358,32 +481,102 @@ def _copy_payload(
             if phase is None:
                 logger.warning(
                     "File '%s' does not map to any deployment phase — skipping.",
-                    rel_path
+                    rel_path,
                 )
                 continue
 
             # Read and resolve content, then resolve filename
             try:
-                with open(src_file, 'r', encoding='utf-8') as f:
+                with open(src_file, "r", encoding="utf-8") as f:
                     content = f.read()
 
                 # Substitute tokens in content
                 resolved_content, subs = substitute_tokens(content, token_values)
                 total_subs += subs
 
-                # Resolve filename from the resolved DDL content
-                resolved_filename = _resolve_filename(filename, resolved_content)
+                # Start a provenance chain for this file. Each stage
+                # is recorded as it runs so the v2 _provenance.json
+                # contains a full audit trail of how the source
+                # filename became the package path.
+                src_rel_path = rel_path.replace("\\", "/")
+                chain = ProvenanceChain()
+                chain.add(
+                    Stage(
+                        stage="source",
+                        path=src_rel_path,
+                        status=Status.APPLIED,
+                    )
+                )
 
-                # If the filename still contains tokens (e.g.
-                # {{SEM_DATABASE}}.db or GRANT files like
-                # ships_test_reader_on_{{SEM_DATABASE}}.dcl),
-                # resolve them using the same token values.
-                # This covers DATABASE, USER, PROFILE, GRANT, and
-                # any other types not handled by the qualified-name
-                # regex in _resolve_filename().
-                if '{{' in resolved_filename:
+                # Stage: eponymous. _resolve_filename extracts the
+                # qualified Database.Object from resolved DDL content
+                # and renames the file to match. If the DDL has no
+                # qualified name (e.g. .db files, .grt files), the
+                # filename is returned unchanged → no_op.
+                resolved_filename = _resolve_filename(filename, resolved_content)
+                eponymous_dir = os.path.dirname(src_rel_path)
+                eponymous_path = (
+                    f"{eponymous_dir}/{resolved_filename}"
+                    if eponymous_dir
+                    else resolved_filename
+                )
+
+                if resolved_filename != filename:
+                    chain.add(
+                        Stage(
+                            stage="eponymous",
+                            path=eponymous_path,
+                            status=Status.APPLIED,
+                            note=f"Renamed from DDL content (was {filename})",
+                        )
+                    )
+                else:
+                    chain.add(
+                        Stage(
+                            stage="eponymous",
+                            path=eponymous_path,
+                            status=Status.NO_OP,
+                            note=(
+                                "Filename unchanged — DDL has no qualified "
+                                "Database.Object name to derive from, or "
+                                "filename already matches"
+                            ),
+                        )
+                    )
+
+                # Stage: token_resolved. If the eponymous stage left
+                # tokens in the filename (e.g. {{DOM_DATABASE_T}}.db),
+                # resolve them now using the same token values.
+                if "{{" in resolved_filename:
+                    pre_token_filename = resolved_filename
                     resolved_filename, _ = substitute_tokens(
-                        resolved_filename, token_values,
+                        resolved_filename,
+                        token_values,
+                    )
+                    token_resolved_path = (
+                        f"{eponymous_dir}/{resolved_filename}"
+                        if eponymous_dir
+                        else resolved_filename
+                    )
+                    chain.add(
+                        Stage(
+                            stage="token_resolved",
+                            path=token_resolved_path,
+                            status=Status.APPLIED,
+                            note=(
+                                f"Substituted tokens in filename "
+                                f"(was {pre_token_filename})"
+                            ),
+                        )
+                    )
+                else:
+                    chain.add(
+                        Stage(
+                            stage="token_resolved",
+                            path=eponymous_path,
+                            status=Status.NO_OP,
+                            note="No {{TOKEN}} markers in filename",
+                        )
                     )
 
                 # Track the mapping (for _waves.txt transformation)
@@ -391,19 +584,40 @@ def _copy_payload(
                     filename_map[filename] = resolved_filename
 
                 # Build destination path with resolved filename
-                # Replace the original filename in sub_path
                 sub_dir = os.path.dirname(sub_path)
+
+                # Compute final package-relative path
+                pkg_rel_path = os.path.join(
+                    phase.value, sub_dir, resolved_filename
+                ).replace("\\", "/")
+
+                # Stage: package. The file lands in its phase
+                # directory. This stage is always 'applied' because
+                # every file is placed in the package — it's recorded
+                # so the report shows where the file ended up and the
+                # chain has a consistent four-stage shape.
+                chain.add(
+                    Stage(
+                        stage="package",
+                        path=pkg_rel_path,
+                        status=Status.APPLIED,
+                        note=f"Placed in phase '{phase.value}'",
+                    )
+                )
+
+                provenance_doc.add_chain(chain)
+
                 dest_file = os.path.join(
                     pkg_dir, "payload", phase.value, sub_dir, resolved_filename
                 )
 
                 # Write resolved content
                 os.makedirs(os.path.dirname(dest_file), exist_ok=True)
-                with open(dest_file, 'w', encoding='utf-8') as f:
+                with open(dest_file, "w", encoding="utf-8") as f:
                     f.write(resolved_content)
 
                 # Inject MULTISET for table DDL files if missing
-                if resolved_filename.endswith('.tbl'):
+                if resolved_filename.endswith(".tbl"):
                     _inject_multiset_in_file(dest_file)
 
                 file_count += 1
@@ -411,17 +625,110 @@ def _copy_payload(
                 phase_inventory[phase_key] = phase_inventory.get(phase_key, 0) + 1
 
             except UnicodeDecodeError:
-                # Binary file — copy without substitution or rename
-                dest_file = os.path.join(
-                    pkg_dir, "payload", phase.value, sub_path
+                # Binary file — copy without substitution or rename.
+                # Provenance chain still recorded so the report has a
+                # complete inventory; the eponymous and token stages
+                # are marked 'skipped' with explanatory notes.
+                src_rel_path = rel_path.replace("\\", "/")
+                pkg_rel_path = os.path.join(phase.value, sub_path).replace("\\", "/")
+
+                bin_chain = ProvenanceChain()
+                bin_chain.add(
+                    Stage(
+                        stage="source",
+                        path=src_rel_path,
+                        status=Status.APPLIED,
+                    )
                 )
+                bin_chain.add(
+                    Stage(
+                        stage="eponymous",
+                        path=src_rel_path,
+                        status=Status.SKIPPED,
+                        note="Binary file — eponymous rename not applicable",
+                    )
+                )
+                bin_chain.add(
+                    Stage(
+                        stage="token_resolved",
+                        path=src_rel_path,
+                        status=Status.SKIPPED,
+                        note="Binary file — token substitution not applicable",
+                    )
+                )
+                bin_chain.add(
+                    Stage(
+                        stage="package",
+                        path=pkg_rel_path,
+                        status=Status.APPLIED,
+                        note=f"Copied verbatim to phase '{phase.value}'",
+                    )
+                )
+                provenance_doc.add_chain(bin_chain)
+
+                dest_file = os.path.join(pkg_dir, "payload", phase.value, sub_path)
                 os.makedirs(os.path.dirname(dest_file), exist_ok=True)
                 shutil.copy2(src_file, dest_file)
                 file_count += 1
                 phase_key = phase.value
                 phase_inventory[phase_key] = phase_inventory.get(phase_key, 0) + 1
 
-    return (total_subs, file_count, phase_inventory, filename_map)
+            except KeyError as e:
+                # Undefined token encountered during substitution.
+                # This means validate_tokens() missed it — the file
+                # was not scanned during Phase 2 but is being
+                # processed during Phase 5. Report with full context.
+                token_name = str(e).strip("'\"")
+                rel_file = os.path.relpath(src_file, source_payload)
+                raise ValueError(
+                    f"Undefined token found during packaging.\n\n"
+                    f"  File:    {rel_file}\n"
+                    f"  Token:   {{{{{token_name}}}}}\n\n"
+                    f"  This token is referenced in the file but is not\n"
+                    f"  defined in the properties file.\n\n"
+                    f"  To fix, either:\n"
+                    f"    1. Add {token_name}=<value> to your .properties\n"
+                    f"       file, or\n"
+                    f"    2. Add the literal database name to your\n"
+                    f"       token_map.conf and re-harvest with --force"
+                ) from None
+
+            except KeyError as e:
+                # Undefined token found during substitution.
+                # The KeyError argument is the bare token name.
+                rel = os.path.relpath(src_file, source_payload)
+                token_name = str(e).strip("'\"")
+                print(
+                    f"\n{'=' * 64}\n"
+                    f"  ERROR — Undefined token during substitution\n"
+                    f"{'=' * 64}\n"
+                    f"\n"
+                    f"  File:  {rel}\n"
+                    f"  Token: {{{{{token_name}}}}}\n"
+                    f"\n"
+                    f"  This token is referenced in the file above but\n"
+                    f"  is not defined in your .properties file.\n"
+                    f"\n"
+                    f"  To fix, either:\n"
+                    f"    1. Add the token to your .properties file:\n"
+                    f"       {token_name}=<value>\n"
+                    f"\n"
+                    f"    2. Add the literal name to your token_map.conf\n"
+                    f"       and re-harvest with --force:\n"
+                    f"       <literal_db_name>={{{{{token_name}}}}}\n"
+                    f"\n"
+                    f"  Note: if this token was not reported during\n"
+                    f"  validation, the file may have been added or\n"
+                    f"  modified after the last harvest.\n"
+                    f"{'=' * 64}\n",
+                    file=sys.stderr,
+                )
+                raise ValueError(
+                    f"Undefined token {{{{{token_name}}}}} in {rel} — "
+                    f"package build aborted."
+                ) from None
+
+    return (total_subs, file_count, phase_inventory, filename_map, provenance_doc)
 
 
 def _inject_multiset_in_file(file_path: str):
@@ -434,21 +741,18 @@ def _inject_multiset_in_file(file_path: str):
     Args:
         file_path: Path to the resolved .tbl file.
     """
-    with open(file_path, 'r', encoding='utf-8') as f:
+    with open(file_path, "r", encoding="utf-8") as f:
         content = f.read()
 
     if _HAS_SET_MULTISET_RE.search(content):
         return  # Already has SET or MULTISET
 
-    modified = _INJECT_MULTISET_RE.sub(r'\1MULTISET \2', content, count=1)
+    modified = _INJECT_MULTISET_RE.sub(r"\1MULTISET \2", content, count=1)
 
     if modified != content:
-        with open(file_path, 'w', encoding='utf-8') as f:
+        with open(file_path, "w", encoding="utf-8") as f:
             f.write(modified)
-        logger.info(
-            "MULTISET injected at build time: %s",
-            os.path.basename(file_path)
-        )
+        logger.info("MULTISET injected at build time: %s", os.path.basename(file_path))
 
 
 def _map_to_phase(rel_path: str) -> Tuple[Optional[DeployPhase], str]:
@@ -464,12 +768,12 @@ def _map_to_phase(rel_path: str) -> Tuple[Optional[DeployPhase], str]:
     Returns:
         Tuple of (DeployPhase_or_None, remaining_sub_path).
     """
-    parts = rel_path.replace('\\', '/').split('/')
+    parts = rel_path.replace("\\", "/").split("/")
 
     for i, part in enumerate(parts):
         if part in SOURCE_DIR_MAP:
             phase = SOURCE_DIR_MAP[part]
-            sub_path = '/'.join(parts[i + 1:])
+            sub_path = "/".join(parts[i + 1 :])
             return (phase, sub_path)
 
     return (None, rel_path)
@@ -487,7 +791,7 @@ def _copy_order_files(source_payload: str, pkg_dir: str):
     """
     for root, dirs, files in os.walk(source_payload):
         for filename in files:
-            if filename == '_order.txt':
+            if filename == "_order.txt":
                 src = os.path.join(root, filename)
                 rel = os.path.relpath(src, source_payload)
                 phase, sub = _map_to_phase(rel)
@@ -502,6 +806,7 @@ def _copy_waves_file(
     source_payload: str,
     pkg_dir: str,
     filename_map: Dict[str, str] = None,
+    token_values: Dict[str, str] = None,
 ):
     """
     Copy _waves.txt from the project root into the package payload,
@@ -514,6 +819,13 @@ def _copy_waves_file(
     paths relative to that phase and resolved filenames
     (e.g. 'tables/A_D01_STD.Table.tbl').
 
+    Path resolution applies two transformations in order:
+        1. Token substitution — {{TOKEN}} placeholders in the path
+           are resolved to environment-specific values.
+        2. Filename mapping — the basename is looked up in the
+           filename_map (from _copy_payload) to match the renamed
+           file in the package.
+
     Args:
         project_dir:     Project root directory.
         source_payload:  Source payload directory (payload/database/).
@@ -522,9 +834,13 @@ def _copy_waves_file(
                          from _copy_payload. Used to transform tokenised
                          filenames in _waves.txt to match the resolved
                          filenames in the package.
+        token_values:    Dict of token_name → value for resolving
+                         {{TOKEN}} placeholders in wave file paths.
     """
     if filename_map is None:
         filename_map = {}
+    if token_values is None:
+        token_values = {}
 
     waves_src = os.path.join(project_dir, "_waves.txt")
     if not os.path.exists(waves_src):
@@ -533,27 +849,27 @@ def _copy_waves_file(
     # Read and transform paths, grouping by phase
     phase_lines = {}  # phase_value → list of transformed lines
 
-    with open(waves_src, 'r', encoding='utf-8') as f:
+    with open(waves_src, "r", encoding="utf-8") as f:
         for line in f:
-            stripped = line.rstrip('\n').rstrip('\r')
+            stripped = line.rstrip("\n").rstrip("\r")
 
             # Comments and blank lines — copy to all phases
-            if not stripped or stripped.startswith('#') or stripped == '---':
+            if not stripped or stripped.startswith("#") or stripped == "---":
                 for phase_val in phase_lines:
                     phase_lines[phase_val].append(stripped)
                 # If no phases seen yet, buffer for later
                 if not phase_lines:
-                    phase_lines.setdefault('_buffer', []).append(stripped)
+                    phase_lines.setdefault("_buffer", []).append(stripped)
                 continue
 
             # File path — transform from source-relative to package-relative
             # Strip 'payload/database/' or 'payload\database\' prefix
-            path_normalised = stripped.replace('\\', '/')
+            path_normalised = stripped.replace("\\", "/")
             rel_to_payload = path_normalised
-            for prefix in ['payload/database/', 'payload\\database\\']:
-                norm_prefix = prefix.replace('\\', '/')
+            for prefix in ["payload/database/", "payload\\database\\"]:
+                norm_prefix = prefix.replace("\\", "/")
                 if path_normalised.startswith(norm_prefix):
-                    rel_to_payload = path_normalised[len(norm_prefix):]
+                    rel_to_payload = path_normalised[len(norm_prefix) :]
                     break
 
             # Map to phase
@@ -568,38 +884,81 @@ def _copy_waves_file(
             phase_val = phase.value
             if phase_val not in phase_lines:
                 # Flush buffer (comments from before first file)
-                phase_lines[phase_val] = phase_lines.pop('_buffer', [])
+                phase_lines[phase_val] = phase_lines.pop("_buffer", [])
 
-            # Resolve the filename if it was renamed during packaging
+            # --- Resolve the filename ---
+            # Step 1: Token substitution on the path (handles
+            # {{TOKEN}}.Object.viw → D01_MP_DOM_V.Object.viw)
             original_filename = os.path.basename(sub_path)
+            resolved_filename = original_filename
+            if "{{" in resolved_filename and token_values:
+                resolved_filename, _ = substitute_tokens(
+                    resolved_filename, token_values
+                )
+
+            # Step 2: Filename map lookup (handles
+            # MortgagePlatform_Domain.Object.viw → D01_MP_DOM_V.Object.viw)
             resolved_filename = filename_map.get(
-                original_filename, original_filename
+                original_filename,
+                filename_map.get(resolved_filename, resolved_filename),
             )
+
+            # Step 3: Verify the resolved file exists in the package.
+            # If steps 1-2 missed (mapping gap), fall back to scanning
+            # the target directory for a file with the same object name
+            # (the part after the first dot). This handles cases where
+            # the source filename format doesn't match the mapping key.
+            sub_dir = os.path.dirname(sub_path)
+            target_dir = os.path.join(pkg_dir, "payload", phase_val, sub_dir)
+            target_path = os.path.join(target_dir, resolved_filename)
+
+            if not os.path.exists(target_path) and os.path.isdir(target_dir):
+                ext = os.path.splitext(resolved_filename)[1].lower()
+                name_parts = os.path.splitext(resolved_filename)[0].split(".", 1)
+                obj_name = name_parts[1] if len(name_parts) == 2 else name_parts[0]
+
+                for candidate in os.listdir(target_dir):
+                    if candidate.startswith("_"):
+                        continue
+                    cand_ext = os.path.splitext(candidate)[1].lower()
+                    cand_parts = os.path.splitext(candidate)[0].split(".", 1)
+                    cand_obj = cand_parts[1] if len(cand_parts) == 2 else cand_parts[0]
+
+                    if cand_obj == obj_name and cand_ext == ext:
+                        logger.info(
+                            "_waves.txt: mapped by object name: %s → %s",
+                            resolved_filename,
+                            candidate,
+                        )
+                        resolved_filename = candidate
+                        break
+
             if resolved_filename != original_filename:
-                sub_dir = os.path.dirname(sub_path)
                 sub_path = os.path.join(sub_dir, resolved_filename)
                 logger.debug(
                     "_waves.txt: resolved %s → %s",
-                    original_filename, resolved_filename,
+                    original_filename,
+                    resolved_filename,
                 )
 
             phase_lines[phase_val].append(sub_path)
 
     # Remove any unused buffer
-    phase_lines.pop('_buffer', None)
+    phase_lines.pop("_buffer", None)
 
     # Write one _waves.txt per phase
     for phase_val, lines in phase_lines.items():
         dest = os.path.join(pkg_dir, "payload", phase_val, "_waves.txt")
         os.makedirs(os.path.dirname(dest), exist_ok=True)
-        with open(dest, 'w', encoding='utf-8') as f:
-            f.write('\n'.join(lines) + '\n')
+        with open(dest, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
         logger.info("Copied _waves.txt → payload/%s/_waves.txt", phase_val)
 
 
 # ---------------------------------------------------------------
 # Internal — Embed the deployment engine
 # ---------------------------------------------------------------
+
 
 def _embed_deployer(pkg_dir: str):
     """
@@ -613,6 +972,7 @@ def _embed_deployer(pkg_dir: str):
     """
     # Find ddl_deployer package location
     import ddl_deployer
+
     deployer_src = os.path.dirname(ddl_deployer.__file__)
 
     dest = os.path.join(pkg_dir, "lib", "ddl_deployer")
@@ -624,6 +984,7 @@ def _embed_deployer(pkg_dir: str):
 # ---------------------------------------------------------------
 # Internal — Generated files
 # ---------------------------------------------------------------
+
 
 def _generate_deploy_script(pkg_dir: str, manifest: BuildManifest):
     """
@@ -897,15 +1258,99 @@ def read_order_file(order_path, base_dir):
 
 
 def connect(args):
-    """Establish Teradata connection."""
+    """
+    Establish Teradata connection with user-friendly error handling.
+
+    Catches common connection failures and translates them into
+    clear, actionable messages for the DBA.
+    """
     import teradatasql
     params = {{"host": args.host, "user": args.user}}
     if args.password:
         params["password"] = args.password
     if args.logmech:
         params["logmech"] = args.logmech
-    conn = teradatasql.connect(**params)
-    return conn.cursor()
+
+    try:
+        conn = teradatasql.connect(**params)
+        return conn.cursor()
+    except teradatasql.OperationalError as e:
+        err = str(e)
+        # -- Hostname / network errors --
+        if "Hostname lookup failed" in err or "no such host" in err:
+            print(
+                "\\n"
+                "  ┌──────────────────────────────────────────────────────┐\\n"
+                "  │  CONNECTION FAILED: Host not found                  │\\n"
+                "  └──────────────────────────────────────────────────────┘\\n"
+                f"\\n"
+                f"  Host:   {{args.host}}\\n"
+                f"\\n"
+                f"  The hostname could not be resolved. Check:\\n"
+                f"    1. Is the hostname correct?\\n"
+                f"    2. Is your VPN connected?\\n"
+                f"    3. Can you ping the host from this machine?\\n"
+                f"       ping {{args.host}}\\n"
+                f"    4. Is DNS resolving correctly?\\n"
+                f"       nslookup {{args.host}}\\n",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        # -- Authentication errors --
+        if "Logon failed" in err or "authentication" in err.lower():
+            print(
+                "\\n"
+                "  ┌──────────────────────────────────────────────────────┐\\n"
+                "  │  CONNECTION FAILED: Authentication error            │\\n"
+                "  └──────────────────────────────────────────────────────┘\\n"
+                f"\\n"
+                f"  Host:   {{args.host}}\\n"
+                f"  User:   {{args.user}}\\n"
+                f"  Logmech: {{args.logmech or '(default)'}}\\n"
+                f"\\n"
+                f"  The username or password was rejected. Check:\\n"
+                f"    1. Is the username correct?\\n"
+                f"    2. Is the password correct?\\n"
+                f"    3. Is the account locked or expired?\\n"
+                f"    4. If using LDAP/KRB5, is --logmech set correctly?\\n",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        # -- Connection refused / timeout --
+        if "refused" in err.lower() or "timeout" in err.lower() or "timed out" in err.lower():
+            print(
+                "\\n"
+                "  ┌──────────────────────────────────────────────────────┐\\n"
+                "  │  CONNECTION FAILED: Connection refused or timed out │\\n"
+                "  └──────────────────────────────────────────────────────┘\\n"
+                f"\\n"
+                f"  Host:   {{args.host}}\\n"
+                f"\\n"
+                f"  The server did not respond. Check:\\n"
+                f"    1. Is the Teradata server running?\\n"
+                f"    2. Is port 1025 open from this machine?\\n"
+                f"    3. Are there firewall rules blocking access?\\n"
+                f"    4. Is the server under maintenance?\\n",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        # -- Fallback for other OperationalErrors --
+        print(
+            "\\n"
+            "  ┌──────────────────────────────────────────────────────┐\\n"
+            "  │  CONNECTION FAILED                                   │\\n"
+            "  └──────────────────────────────────────────────────────┘\\n"
+            f"\\n"
+            f"  Host:   {{args.host}}\\n"
+            f"  User:   {{args.user}}\\n"
+            f"\\n"
+            f"  {{err}}\\n",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 def parse_args():
@@ -953,7 +1398,7 @@ if __name__ == "__main__":
 '''
 
     deploy_path = os.path.join(pkg_dir, "deploy.py")
-    with open(deploy_path, 'w', encoding='utf-8') as f:
+    with open(deploy_path, "w", encoding="utf-8") as f:
         f.write(script)
 
     # Make executable
@@ -1075,13 +1520,13 @@ def _generate_readme(pkg_dir: str, manifest: BuildManifest):
   SUPPORT
 ================================================================
 
-  For issues with this package, contact: {manifest.author or 'the development team'}
+  For issues with this package, contact: {manifest.author or "the development team"}
 
 ================================================================
 """
 
     readme_path = os.path.join(pkg_dir, "README.txt")
-    with open(readme_path, 'w', encoding='utf-8') as f:
+    with open(readme_path, "w", encoding="utf-8") as f:
         f.write(readme)
 
 
@@ -1090,20 +1535,21 @@ def _generate_shell_wrappers(pkg_dir: str):
     # Linux/Mac
     sh_content = '#!/bin/bash\ncd "$(dirname "$0")" && python3 deploy.py "$@"\n'
     sh_path = os.path.join(pkg_dir, "deploy.sh")
-    with open(sh_path, 'w', encoding='utf-8', newline='\n') as f:
+    with open(sh_path, "w", encoding="utf-8", newline="\n") as f:
         f.write(sh_content)
     os.chmod(sh_path, 0o755)
 
     # Windows
     bat_content = '@echo off\r\ncd /d "%~dp0"\r\npython deploy.py %*\r\n'
     bat_path = os.path.join(pkg_dir, "deploy.bat")
-    with open(bat_path, 'w', encoding='utf-8', newline='\r\n') as f:
+    with open(bat_path, "w", encoding="utf-8", newline="\r\n") as f:
         f.write(bat_content)
 
 
 # ---------------------------------------------------------------
 # Internal — Archiving
 # ---------------------------------------------------------------
+
 
 def _archive_package(pkg_dir: str, archive_format: str) -> str:
     """
@@ -1123,14 +1569,14 @@ def _archive_package(pkg_dir: str, archive_format: str) -> str:
     if archive_format == "tar.gz":
         archive_path = shutil.make_archive(
             base_name=pkg_dir,
-            format='gztar',
+            format="gztar",
             root_dir=os.path.dirname(pkg_dir),
             base_dir=os.path.basename(pkg_dir),
         )
     else:
         archive_path = shutil.make_archive(
             base_name=pkg_dir,
-            format='zip',
+            format="zip",
             root_dir=os.path.dirname(pkg_dir),
             base_dir=os.path.basename(pkg_dir),
         )
@@ -1164,7 +1610,7 @@ def _generate_checksum(archive_path: str) -> str:
     """
     sha256 = hashlib.sha256()
 
-    with open(archive_path, 'rb') as f:
+    with open(archive_path, "rb") as f:
         while True:
             chunk = f.read(65536)  # 64 KB chunks
             if not chunk:
@@ -1176,11 +1622,13 @@ def _generate_checksum(archive_path: str) -> str:
 
     # Standard sha256sum format: two-space separator, filename
     checksum_path = archive_path + ".sha256"
-    with open(checksum_path, 'w', encoding='utf-8') as f:
+    with open(checksum_path, "w", encoding="utf-8") as f:
         f.write(f"{digest}  {archive_name}\n")
 
     logger.info(
-        "SHA-256: %s  %s", digest[:16] + "...", archive_name,
+        "SHA-256: %s  %s",
+        digest[:16] + "...",
+        archive_name,
     )
 
     return checksum_path

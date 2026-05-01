@@ -78,9 +78,13 @@ def run_preflight(
             # Skip system-scope and DCL objects from database checks.
             # They don't have a real database qualifier.
             _SKIP_DB_CHECK_TYPES = {
-                ObjectType.MAP, ObjectType.ROLE, ObjectType.PROFILE,
-                ObjectType.AUTHORIZATION, ObjectType.FOREIGN_SERVER,
-                ObjectType.GRANT, ObjectType.REVOKE,
+                ObjectType.MAP,
+                ObjectType.ROLE,
+                ObjectType.PROFILE,
+                ObjectType.AUTHORIZATION,
+                ObjectType.FOREIGN_SERVER,
+                ObjectType.GRANT,
+                ObjectType.REVOKE,
             }
 
             if parsed.object_type not in _SKIP_DB_CHECK_TYPES:
@@ -108,37 +112,43 @@ def run_preflight(
                 parsed.deploy_intent.value if parsed.deploy_intent else "N/A",
             )
 
-            checks.append(PreflightCheck(
-                check_name="ddl_parse",
-                passed=True,
-                database=parsed.database_name or "(system)",
-                message=(
-                    f"Parsed {os.path.basename(ddl_file)}: "
-                    f"{parsed.object_type.value} {parsed.qualified_name}"
-                    + (" (MULTISET injected)" if parsed.multiset_injected else "")
-                ),
-            ))
+            checks.append(
+                PreflightCheck(
+                    check_name="ddl_parse",
+                    passed=True,
+                    database=parsed.database_name or "(system)",
+                    message=(
+                        f"Parsed {os.path.basename(ddl_file)}: "
+                        f"{parsed.object_type.value} {parsed.qualified_name}"
+                        + (" (MULTISET injected)" if parsed.multiset_injected else "")
+                    ),
+                )
+            )
 
             if parsed.multiset_injected:
-                checks.append(PreflightCheck(
-                    check_name="multiset_injection",
-                    passed=True,
-                    database=parsed.database_name,
-                    message=(
-                        f"{parsed.qualified_name}: MULTISET auto-injected "
-                        f"(CREATE TABLE had no SET/MULTISET qualifier)."
-                    ),
-                    severity="WARNING",
-                ))
+                checks.append(
+                    PreflightCheck(
+                        check_name="multiset_injection",
+                        passed=True,
+                        database=parsed.database_name,
+                        message=(
+                            f"{parsed.qualified_name}: MULTISET auto-injected "
+                            f"(CREATE TABLE had no SET/MULTISET qualifier)."
+                        ),
+                        severity="WARNING",
+                    )
+                )
 
         except (ValueError, FileNotFoundError) as e:
             failed_files.append(ddl_file)
-            checks.append(PreflightCheck(
-                check_name="ddl_parse",
-                passed=False,
-                database="UNKNOWN",
-                message=f"Failed to parse {os.path.basename(ddl_file)}: {e}",
-            ))
+            checks.append(
+                PreflightCheck(
+                    check_name="ddl_parse",
+                    passed=False,
+                    database="UNKNOWN",
+                    message=f"Failed to parse {os.path.basename(ddl_file)}: {e}",
+                )
+            )
 
     # -- Phase 2: Check databases exist --
     # Skip databases that will be created by this package.
@@ -152,32 +162,35 @@ def run_preflight(
                 "skipping existence check.",
                 db_name,
             )
-            checks.append(PreflightCheck(
-                check_name="database_exists",
-                passed=True,
-                database=db_name,
-                message=(
-                    f"Database '{db_name}' will be created by this package."
-                ),
-                severity="INFO",
-            ))
+            checks.append(
+                PreflightCheck(
+                    check_name="database_exists",
+                    passed=True,
+                    database=db_name,
+                    message=(f"Database '{db_name}' will be created by this package."),
+                    severity="INFO",
+                )
+            )
             continue
 
         exists = _database_exists(cursor, db_name)
         logger.info(
             "Database '%s' %s.",
-            db_name, "exists" if exists else "does NOT exist",
+            db_name,
+            "exists" if exists else "does NOT exist",
         )
-        checks.append(PreflightCheck(
-            check_name="database_exists",
-            passed=exists,
-            database=db_name,
-            message=(
-                f"Database '{db_name}' exists."
-                if exists else
-                f"Database '{db_name}' does NOT exist."
-            ),
-        ))
+        checks.append(
+            PreflightCheck(
+                check_name="database_exists",
+                passed=exists,
+                database=db_name,
+                message=(
+                    f"Database '{db_name}' exists."
+                    if exists
+                    else f"Database '{db_name}' does NOT exist."
+                ),
+            )
+        )
 
     # -- Phase 3: Check access rights per database --
     # Determine which rights are needed per database.
@@ -190,20 +203,21 @@ def run_preflight(
             continue
         if db_name in databases_being_created:
             logger.info(
-                "Database '%s' is being created — "
-                "skipping access rights check.",
+                "Database '%s' is being created — skipping access rights check.",
                 db_name,
             )
-            checks.append(PreflightCheck(
-                check_name="access_rights",
-                passed=True,
-                database=db_name,
-                message=(
-                    f"Access rights for '{db_name}' will be "
-                    f"established after creation."
-                ),
-                severity="INFO",
-            ))
+            checks.append(
+                PreflightCheck(
+                    check_name="access_rights",
+                    passed=True,
+                    database=db_name,
+                    message=(
+                        f"Access rights for '{db_name}' will be "
+                        f"established after creation."
+                    ),
+                    severity="INFO",
+                )
+            )
             continue
         right_checks = _check_access_rights(cursor, db_name, rights)
         checks.extend(right_checks)
@@ -212,8 +226,10 @@ def run_preflight(
     # Only check databases that actually need tables/JIs
     # (space-consuming objects). Skip databases being created.
     space_databases = {
-        p.database_name for p in parsed_ddls
-        if p.object_type in (ObjectType.TABLE, ObjectType.JOIN_INDEX, ObjectType.HASH_INDEX)
+        p.database_name
+        for p in parsed_ddls
+        if p.object_type
+        in (ObjectType.TABLE, ObjectType.JOIN_INDEX, ObjectType.HASH_INDEX)
         and p.database_name
         and p.database_name not in databases_being_created
     }
@@ -238,9 +254,11 @@ def run_preflight(
     )
 
     logger.info(
-        "Pre-flight complete: %d files parsed, %d databases, "
-        "%d errors, %d warnings",
-        len(parsed_ddls), len(databases), errors, warnings
+        "Pre-flight complete: %d files parsed, %d databases, %d errors, %d warnings",
+        len(parsed_ddls),
+        len(databases),
+        errors,
+        warnings,
     )
 
     return (result, parsed_ddls)
@@ -249,6 +267,7 @@ def run_preflight(
 # ---------------------------------------------------------------
 # Internal — Database existence check
 # ---------------------------------------------------------------
+
 
 def _database_exists(cursor, database_name: str) -> bool:
     """
@@ -263,8 +282,7 @@ def _database_exists(cursor, database_name: str) -> bool:
     """
     try:
         cursor.execute(
-            "SELECT 1 FROM DBC.DatabasesV WHERE DatabaseName = ?",
-            [database_name]
+            "SELECT 1 FROM DBC.DatabasesV WHERE DatabaseName = ?", [database_name]
         )
         return cursor.fetchone() is not None
     except Exception as e:
@@ -275,6 +293,7 @@ def _database_exists(cursor, database_name: str) -> bool:
 # ---------------------------------------------------------------
 # Internal — Access rights checks
 # ---------------------------------------------------------------
+
 
 def _collect_required_rights(
     parsed_ddls: List[ParsedDDL],
@@ -299,10 +318,15 @@ def _collect_required_rights(
         # Skip system-scope objects and DCL — they don't have
         # a target database to check rights on.
         if not db or parsed.object_type in (
-            ObjectType.MAP, ObjectType.ROLE, ObjectType.PROFILE,
-            ObjectType.AUTHORIZATION, ObjectType.FOREIGN_SERVER,
-            ObjectType.GRANT, ObjectType.REVOKE,
-            ObjectType.DATABASE, ObjectType.USER,
+            ObjectType.MAP,
+            ObjectType.ROLE,
+            ObjectType.PROFILE,
+            ObjectType.AUTHORIZATION,
+            ObjectType.FOREIGN_SERVER,
+            ObjectType.GRANT,
+            ObjectType.REVOKE,
+            ObjectType.DATABASE,
+            ObjectType.USER,
         ):
             continue
 
@@ -342,36 +366,40 @@ def _check_access_rights(
     rights_view, using_fallback = _get_rights_view(cursor)
 
     if using_fallback:
-        checks.append(PreflightCheck(
-            check_name="rights_view",
-            passed=True,
-            database=database_name,
-            message=(
-                "Using DBC.AccessRightsV (direct grants only). "
-                "Role-based grants may not be detected. "
-                "False negatives possible."
-            ),
-            severity="WARNING",
-        ))
+        checks.append(
+            PreflightCheck(
+                check_name="rights_view",
+                passed=True,
+                database=database_name,
+                message=(
+                    "Using DBC.AccessRightsV (direct grants only). "
+                    "Role-based grants may not be detected. "
+                    "False negatives possible."
+                ),
+                severity="WARNING",
+            )
+        )
 
     # Query the user's granted rights on this database
     granted_rights = _get_granted_rights(cursor, database_name, rights_view)
 
     for right_code, right_desc in sorted(required_rights):
         # Check if the right is granted (direct or via 'ALL')
-        has_right = right_code.strip() in granted_rights or 'AL' in granted_rights
+        has_right = right_code.strip() in granted_rights or "AL" in granted_rights
 
-        checks.append(PreflightCheck(
-            check_name=f"access_{right_code.strip().lower()}",
-            passed=has_right,
-            database=database_name,
-            message=(
-                f"{right_desc} ({right_code.strip()}) granted on '{database_name}'."
-                if has_right else
-                f"{right_desc} ({right_code.strip()}) NOT granted on '{database_name}'. "
-                f"Deployment will fail for objects requiring this right."
-            ),
-        ))
+        checks.append(
+            PreflightCheck(
+                check_name=f"access_{right_code.strip().lower()}",
+                passed=has_right,
+                database=database_name,
+                message=(
+                    f"{right_desc} ({right_code.strip()}) granted on '{database_name}'."
+                    if has_right
+                    else f"{right_desc} ({right_code.strip()}) NOT granted on '{database_name}'. "
+                    f"Deployment will fail for objects requiring this right."
+                ),
+            )
+        )
 
     return checks
 
@@ -391,9 +419,9 @@ def _get_rights_view(cursor) -> tuple:
     try:
         cursor.execute("SELECT TOP 1 1 FROM DBC.AllRightsV")
         cursor.fetchone()
-        return ('DBC.AllRightsV', False)
+        return ("DBC.AllRightsV", False)
     except Exception:
-        return ('DBC.AccessRightsV', True)
+        return ("DBC.AccessRightsV", True)
 
 
 def _get_granted_rights(
@@ -417,13 +445,12 @@ def _get_granted_rights(
             f"SELECT TRIM(AccessRight) FROM {rights_view} "
             f"WHERE DatabaseName = ? "
             f"AND (UserName = USER OR UserName = 'PUBLIC')",
-            [database_name]
+            [database_name],
         )
         return {row[0] for row in cursor.fetchall()}
     except Exception as e:
         logger.warning(
-            "Rights check failed for '%s' via %s: %s",
-            database_name, rights_view, e
+            "Rights check failed for '%s' via %s: %s", database_name, rights_view, e
         )
         return set()
 
@@ -431,6 +458,7 @@ def _get_granted_rights(
 # ---------------------------------------------------------------
 # Internal — Perm space checks
 # ---------------------------------------------------------------
+
 
 def _check_perm_space(
     cursor,
@@ -461,20 +489,22 @@ def _check_perm_space(
             "    ,SUM(CurrentPerm) AS CurrentPerm"
             " FROM DBC.DiskSpaceV"
             " WHERE DatabaseName = ?",
-            [database_name]
+            [database_name],
         )
         row = cursor.fetchone()
 
         if row is None or row[0] is None:
-            checks.append(PreflightCheck(
-                check_name="perm_space",
-                passed=False,
-                database=database_name,
-                message=(
-                    f"Could not retrieve perm space for '{database_name}'. "
-                    f"Database may not exist or user lacks access."
-                ),
-            ))
+            checks.append(
+                PreflightCheck(
+                    check_name="perm_space",
+                    passed=False,
+                    database=database_name,
+                    message=(
+                        f"Could not retrieve perm space for '{database_name}'. "
+                        f"Database may not exist or user lacks access."
+                    ),
+                )
+            )
             return checks
 
         max_perm = row[0]
@@ -482,15 +512,17 @@ def _check_perm_space(
         free_perm = max_perm - current_perm
 
         if max_perm == 0:
-            checks.append(PreflightCheck(
-                check_name="perm_space",
-                passed=False,
-                database=database_name,
-                message=(
-                    f"Database '{database_name}' has zero MaxPerm allocated. "
-                    f"No objects can be created."
-                ),
-            ))
+            checks.append(
+                PreflightCheck(
+                    check_name="perm_space",
+                    passed=False,
+                    database=database_name,
+                    message=(
+                        f"Database '{database_name}' has zero MaxPerm allocated. "
+                        f"No objects can be created."
+                    ),
+                )
+            )
             return checks
 
         free_pct = (free_perm / max_perm) * 100 if max_perm > 0 else 0
@@ -500,49 +532,57 @@ def _check_perm_space(
         max_str = _format_bytes(max_perm)
 
         if free_perm <= 0:
-            checks.append(PreflightCheck(
-                check_name="perm_space",
-                passed=False,
-                database=database_name,
-                message=(
-                    f"Database '{database_name}' has NO free perm space "
-                    f"({max_str} fully consumed). Cannot create objects."
-                ),
-            ))
+            checks.append(
+                PreflightCheck(
+                    check_name="perm_space",
+                    passed=False,
+                    database=database_name,
+                    message=(
+                        f"Database '{database_name}' has NO free perm space "
+                        f"({max_str} fully consumed). Cannot create objects."
+                    ),
+                )
+            )
         elif free_pct < warn_below_pct:
-            checks.append(PreflightCheck(
-                check_name="perm_space",
-                passed=True,
-                database=database_name,
-                message=(
-                    f"Database '{database_name}' perm space low: "
-                    f"{free_str} free of {max_str} ({free_pct:.1f}% free)."
-                ),
-                severity="WARNING",
-            ))
+            checks.append(
+                PreflightCheck(
+                    check_name="perm_space",
+                    passed=True,
+                    database=database_name,
+                    message=(
+                        f"Database '{database_name}' perm space low: "
+                        f"{free_str} free of {max_str} ({free_pct:.1f}% free)."
+                    ),
+                    severity="WARNING",
+                )
+            )
         else:
-            checks.append(PreflightCheck(
-                check_name="perm_space",
-                passed=True,
-                database=database_name,
-                message=(
-                    f"Database '{database_name}' perm space OK: "
-                    f"{free_str} free of {max_str} ({free_pct:.1f}% free)."
-                ),
-            ))
+            checks.append(
+                PreflightCheck(
+                    check_name="perm_space",
+                    passed=True,
+                    database=database_name,
+                    message=(
+                        f"Database '{database_name}' perm space OK: "
+                        f"{free_str} free of {max_str} ({free_pct:.1f}% free)."
+                    ),
+                )
+            )
 
     except Exception as e:
         logger.warning("Perm space check failed for '%s': %s", database_name, e)
-        checks.append(PreflightCheck(
-            check_name="perm_space",
-            passed=True,  # Don't block on check failure
-            database=database_name,
-            message=(
-                f"Could not check perm space for '{database_name}': {e}. "
-                f"Proceeding without space validation."
-            ),
-            severity="WARNING",
-        ))
+        checks.append(
+            PreflightCheck(
+                check_name="perm_space",
+                passed=True,  # Don't block on check failure
+                database=database_name,
+                message=(
+                    f"Could not check perm space for '{database_name}': {e}. "
+                    f"Proceeding without space validation."
+                ),
+                severity="WARNING",
+            )
+        )
 
     return checks
 
@@ -557,7 +597,7 @@ def _format_bytes(num_bytes: int) -> str:
     Returns:
         Formatted string (e.g. '1.5 GB', '256 MB').
     """
-    for unit in ['B', 'KB', 'MB', 'GB', 'TB', 'PB']:
+    for unit in ["B", "KB", "MB", "GB", "TB", "PB"]:
         if abs(num_bytes) < 1024.0:
             return f"{num_bytes:.1f} {unit}"
         num_bytes /= 1024.0

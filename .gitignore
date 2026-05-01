@@ -56,3 +56,44 @@ releases/
 # Each team decides whether to commit these or not.
 # Uncomment the next line to exclude them:
 # config/properties/*.properties
+
+# === Build / cache artefacts ===
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+build/
+dist/
+
+# === Linter / tool output (should never be committed) ===
+ruff_check_output.txt
+*.lint.txt
+
+# === Archives accidentally left behind ===
+*.7z
+*.zip
+*.tar.gz
+
+# === E2E smoke artefacts (regenerated each test run) ===
+report_e2e_smoke.html
+**/report_e2e_smoke.html
+
+# === Scratch / sandbox folders ===
+src/files/
+
+# === Editor / OS noise ===
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# === Virtual environments ===
+.venv/
+venv/
+env/
+
+# === uv per-developer pin (uv.lock IS committed) ===
+.python-version

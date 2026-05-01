@@ -3,16 +3,63 @@ conftest.py — Shared pytest fixtures for the SHIPS test suite.
 
 Provides temporary directory structures, sample DDL content,
 and properties files used across multiple test modules.
+
+Also handles path discovery for project tools that live outside
+the td_release_packager package (e.g. tools/migrate_view_references.py).
+By doing this once here, individual tests can import tools naturally
+without each one duplicating fragile `parents[N]` arithmetic.
 """
 
-import os
-import pytest
+import sys
 from pathlib import Path
+
+import pytest
+
+
+# ---------------------------------------------------------------
+# Tools-directory discovery
+# ---------------------------------------------------------------
+#
+# The SHIPS repo has standalone tools (currently
+# tools/migrate_view_references.py) that aren't part of the
+# td_release_packager package but are exercised by integration
+# tests. Their location depends on the repo layout — this walks
+# up from the conftest's own location looking for a ``tools/``
+# directory containing the canonical entrypoint, and adds it to
+# sys.path if found.
+#
+# If not found (e.g. someone copied tests/ out of the repo for
+# isolated testing), nothing breaks here — tests that need
+# ``migrate_view_references`` will fail at import time with a
+# clear ModuleNotFoundError, while every other test still runs.
+
+
+def _find_tools_dir(start: Path, marker: str = "migrate_view_references.py") -> Path:
+    """
+    Walk upward from ``start`` looking for a sibling ``tools/``
+    directory containing ``marker``. Returns the path if found,
+    or None if no match in five levels up.
+    """
+    current = start.resolve()
+    for _ in range(5):
+        candidate = current / "tools"
+        if candidate.is_dir() and (candidate / marker).is_file():
+            return candidate
+        if current.parent == current:
+            break  # filesystem root
+        current = current.parent
+    return None
+
+
+_tools_dir = _find_tools_dir(Path(__file__).parent)
+if _tools_dir is not None and str(_tools_dir) not in sys.path:
+    sys.path.insert(0, str(_tools_dir))
 
 
 # ---------------------------------------------------------------
 # Temporary project scaffolding
 # ---------------------------------------------------------------
+
 
 @pytest.fixture
 def tmp_project(tmp_path):
@@ -46,13 +93,23 @@ def tmp_project(tmp_path):
     # -- Payload directories --
     payload = project / "payload" / "database"
     for subdir in [
-        "system/maps", "system/roles", "system/profiles",
-        "system/authorizations", "system/foreign_servers",
-        "DDL/tables", "DDL/views", "DDL/macros",
-        "DDL/procedures", "DDL/functions", "DDL/triggers",
-        "DDL/join_indexes", "DDL/JARs", "DDL/script_table_operators",
+        "system/maps",
+        "system/roles",
+        "system/profiles",
+        "system/authorizations",
+        "system/foreign_servers",
+        "DDL/tables",
+        "DDL/views",
+        "DDL/macros",
+        "DDL/procedures",
+        "DDL/functions",
+        "DDL/triggers",
+        "DDL/join_indexes",
+        "DDL/JARs",
+        "DDL/script_table_operators",
         "pre-requisites/databases",
-        "DCL/roles", "DCL/inter_db",
+        "DCL/roles",
+        "DCL/inter_db",
     ]:
         (payload / subdir).mkdir(parents=True, exist_ok=True)
 
@@ -89,6 +146,7 @@ def sample_properties_file(tmp_path):
 # ---------------------------------------------------------------
 # Sample DDL strings
 # ---------------------------------------------------------------
+
 
 @pytest.fixture
 def ddl_create_table():
@@ -134,10 +192,7 @@ def ddl_replace_view():
 @pytest.fixture
 def ddl_create_view():
     """CREATE VIEW DDL — non-idempotent (CREATE_ONLY intent)."""
-    return (
-        "CREATE VIEW MyDB.NewView AS\n"
-        "SELECT 1 AS Dummy;\n"
-    )
+    return "CREATE VIEW MyDB.NewView AS\nSELECT 1 AS Dummy;\n"
 
 
 @pytest.fixture
@@ -168,12 +223,7 @@ def ddl_replace_trigger():
 @pytest.fixture
 def ddl_create_database():
     """CREATE DATABASE DDL — DIRECT_EXECUTE strategy."""
-    return (
-        "CREATE DATABASE MyDB\n"
-        "FROM DBC\n"
-        "AS PERMANENT = 1e9\n"
-        "   ,SPOOL = 1e8;\n"
-    )
+    return "CREATE DATABASE MyDB\nFROM DBC\nAS PERMANENT = 1e9\n   ,SPOOL = 1e8;\n"
 
 
 @pytest.fixture
@@ -213,6 +263,7 @@ def ddl_global_temp_trace_table():
 # ---------------------------------------------------------------
 # System-scope DDL fixtures
 # ---------------------------------------------------------------
+
 
 @pytest.fixture
 def ddl_create_map():

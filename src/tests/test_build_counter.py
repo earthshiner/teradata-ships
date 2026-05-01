@@ -10,7 +10,6 @@ Covers:
     - --no-increment promotion scenario
 """
 
-import os
 import pytest
 
 from td_release_packager.build_counter import (
@@ -25,6 +24,7 @@ from td_release_packager.build_counter import (
 # ---------------------------------------------------------------
 # read_build_number
 # ---------------------------------------------------------------
+
 
 class TestReadBuildNumber:
     """Tests for reading the current build number."""
@@ -70,6 +70,7 @@ class TestReadBuildNumber:
 # ---------------------------------------------------------------
 # next_build_number
 # ---------------------------------------------------------------
+
 
 class TestNextBuildNumber:
     """Tests for incrementing the build counter."""
@@ -118,6 +119,7 @@ class TestNextBuildNumber:
 # _write_counter
 # ---------------------------------------------------------------
 
+
 class TestWriteCounter:
     """Tests for the atomic write mechanism."""
 
@@ -147,6 +149,7 @@ class TestWriteCounter:
 # reset_build_number
 # ---------------------------------------------------------------
 
+
 class TestResetBuildNumber:
     """Tests for build counter reset."""
 
@@ -170,6 +173,7 @@ class TestResetBuildNumber:
 # ---------------------------------------------------------------
 # Promotion scenario (--no-increment)
 # ---------------------------------------------------------------
+
 
 class TestPromotionScenario:
     """

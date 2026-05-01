@@ -8,7 +8,7 @@ results, pre-flight check outcomes, and deployment result records.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional, Dict, List
+from typing import Optional, List
 
 
 class DeployScope(Enum):
@@ -208,40 +208,29 @@ DEPLOY_ORDER = {
 
 # -- DBC.TablesV TableKind codes for existence checks --
 TABLE_KIND_MAP = {
-    ObjectType.TABLE: 'T',
-    ObjectType.JOIN_INDEX: 'I',
-    ObjectType.HASH_INDEX: 'N',
-    ObjectType.VIEW: 'V',
-    ObjectType.MACRO: 'M',
-    ObjectType.PROCEDURE: 'P',
-    ObjectType.FUNCTION: 'F',
-    ObjectType.TRIGGER: 'G',
-    ObjectType.JAR: 'D',
+    ObjectType.TABLE: "T",
+    ObjectType.JOIN_INDEX: "I",
+    ObjectType.HASH_INDEX: "N",
+    ObjectType.VIEW: "V",
+    ObjectType.MACRO: "M",
+    ObjectType.PROCEDURE: "P",
+    ObjectType.FUNCTION: "F",
+    ObjectType.TRIGGER: "G",
+    ObjectType.JAR: "D",
 }
 
 # -- System-level existence check queries --
 # These objects live outside DBC.TablesV and require
 # specialised existence checks.
 SYSTEM_EXISTENCE_QUERIES = {
-    ObjectType.ROLE: (
-        "SELECT 1 FROM DBC.RoleInfoV "
-        "WHERE RoleName = '{name}'"
-    ),
-    ObjectType.PROFILE: (
-        "SELECT 1 FROM DBC.ProfileInfoV "
-        "WHERE ProfileName = '{name}'"
-    ),
-    ObjectType.MAP: (
-        "SELECT 1 FROM DBC.MapsV "
-        "WHERE MapName = '{name}'"
-    ),
+    ObjectType.ROLE: ("SELECT 1 FROM DBC.RoleInfoV WHERE RoleName = '{name}'"),
+    ObjectType.PROFILE: ("SELECT 1 FROM DBC.ProfileInfoV WHERE ProfileName = '{name}'"),
+    ObjectType.MAP: ("SELECT 1 FROM DBC.MapsV WHERE MapName = '{name}'"),
     ObjectType.AUTHORIZATION: (
-        "SELECT 1 FROM DBC.AuthorizationsV "
-        "WHERE AuthorizationName = '{name}'"
+        "SELECT 1 FROM DBC.AuthorizationsV WHERE AuthorizationName = '{name}'"
     ),
     ObjectType.FOREIGN_SERVER: (
-        "SELECT 1 FROM DBC.ForeignServersV "
-        "WHERE ServerName = '{name}'"
+        "SELECT 1 FROM DBC.ForeignServersV WHERE ServerName = '{name}'"
     ),
 }
 
@@ -249,38 +238,38 @@ SYSTEM_EXISTENCE_QUERIES = {
 # Each tuple: (right_code, description).
 REQUIRED_RIGHTS = {
     ObjectType.TABLE: [
-        ('CT', 'CREATE TABLE'),
-        ('DT', 'DROP TABLE'),
-        ('R ', 'SELECT'),
-        ('I ', 'INSERT'),
+        ("CT", "CREATE TABLE"),
+        ("DT", "DROP TABLE"),
+        ("R ", "SELECT"),
+        ("I ", "INSERT"),
     ],
     ObjectType.JOIN_INDEX: [
-        ('CT', 'CREATE TABLE'),      # JIs use CT right
-        ('DT', 'DROP TABLE'),        # JIs use DT right
-        ('R ', 'SELECT'),
+        ("CT", "CREATE TABLE"),  # JIs use CT right
+        ("DT", "DROP TABLE"),  # JIs use DT right
+        ("R ", "SELECT"),
     ],
     ObjectType.HASH_INDEX: [
-        ('CT', 'CREATE TABLE'),
-        ('DT', 'DROP TABLE'),
+        ("CT", "CREATE TABLE"),
+        ("DT", "DROP TABLE"),
     ],
     ObjectType.INDEX: [
-        ('IX', 'CREATE/DROP INDEX'),  # Index-specific right
+        ("IX", "CREATE/DROP INDEX"),  # Index-specific right
     ],
     ObjectType.VIEW: [
-        ('CV', 'CREATE VIEW'),
+        ("CV", "CREATE VIEW"),
     ],
     ObjectType.MACRO: [
-        ('CM', 'CREATE MACRO'),
+        ("CM", "CREATE MACRO"),
     ],
     ObjectType.PROCEDURE: [
-        ('CP', 'CREATE PROCEDURE'),
+        ("CP", "CREATE PROCEDURE"),
     ],
     ObjectType.FUNCTION: [
-        ('CF', 'CREATE FUNCTION'),
+        ("CF", "CREATE FUNCTION"),
     ],
     ObjectType.TRIGGER: [
-        ('CT', 'CREATE TABLE'),       # Triggers use CT/DT
-        ('DT', 'DROP TABLE'),
+        ("CT", "CREATE TABLE"),  # Triggers use CT/DT
+        ("DT", "DROP TABLE"),
     ],
 }
 
@@ -294,40 +283,52 @@ class DeployState(Enum):
     """
 
     PENDING = "PENDING"
-    BACKED_UP = "BACKED_UP"       # Original renamed to backup (tables only)
-    DROPPED = "DROPPED"           # Existing object dropped
-    CREATED = "CREATED"           # New DDL executed successfully
-    MIGRATED = "MIGRATED"         # Data copied from backup to new table
-    COMPLETED = "COMPLETED"       # Fully deployed, verified
-    SKIPPED = "SKIPPED"           # Incompatible schema — user alerted
-    FAILED = "FAILED"             # Error occurred — needs attention
-    ROLLED_BACK = "ROLLED_BACK"   # Compensating actions applied
+    BACKED_UP = "BACKED_UP"  # Original renamed to backup (tables only)
+    DROPPED = "DROPPED"  # Existing object dropped
+    CREATED = "CREATED"  # New DDL executed successfully
+    MIGRATED = "MIGRATED"  # Data copied from backup to new table
+    COMPLETED = "COMPLETED"  # Fully deployed, verified
+    SKIPPED = "SKIPPED"  # Incompatible schema — user alerted
+    FAILED = "FAILED"  # Error occurred — needs attention
+    ROLLED_BACK = "ROLLED_BACK"  # Compensating actions applied
 
 
 VALID_NEXT_STATES = {
     DeployState.PENDING: {
-        DeployState.BACKED_UP, DeployState.DROPPED,
-        DeployState.CREATED, DeployState.FAILED,
+        DeployState.BACKED_UP,
+        DeployState.DROPPED,
+        DeployState.CREATED,
+        DeployState.FAILED,
     },
     DeployState.BACKED_UP: {
-        DeployState.CREATED, DeployState.FAILED, DeployState.ROLLED_BACK,
+        DeployState.CREATED,
+        DeployState.FAILED,
+        DeployState.ROLLED_BACK,
     },
     DeployState.DROPPED: {
-        DeployState.CREATED, DeployState.FAILED,
+        DeployState.CREATED,
+        DeployState.FAILED,
     },
     DeployState.CREATED: {
-        DeployState.MIGRATED, DeployState.COMPLETED,
-        DeployState.SKIPPED, DeployState.FAILED, DeployState.ROLLED_BACK,
+        DeployState.MIGRATED,
+        DeployState.COMPLETED,
+        DeployState.SKIPPED,
+        DeployState.FAILED,
+        DeployState.ROLLED_BACK,
     },
     DeployState.MIGRATED: {
-        DeployState.COMPLETED, DeployState.FAILED,
+        DeployState.COMPLETED,
+        DeployState.FAILED,
     },
     DeployState.COMPLETED: set(),
     DeployState.SKIPPED: set(),
     DeployState.FAILED: {
-        DeployState.BACKED_UP, DeployState.DROPPED,
-        DeployState.CREATED, DeployState.MIGRATED,
-        DeployState.COMPLETED, DeployState.ROLLED_BACK,
+        DeployState.BACKED_UP,
+        DeployState.DROPPED,
+        DeployState.CREATED,
+        DeployState.MIGRATED,
+        DeployState.COMPLETED,
+        DeployState.ROLLED_BACK,
     },
     DeployState.ROLLED_BACK: set(),
 }
@@ -515,7 +516,4 @@ class PackageDeployResult:
         completed objects — i.e. a re-run of an already-deployed
         package where all objects still exist in the database.
         """
-        return (
-            len(self.results) == 0
-            and len(self.prior_completed) > 0
-        )
+        return len(self.results) == 0 and len(self.prior_completed) > 0

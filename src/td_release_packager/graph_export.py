@@ -32,43 +32,37 @@ import logging
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Set
+from typing import Dict
 
 from td_release_packager.analyser import AnalysisResult
 
 logger = logging.getLogger(__name__)
 
 # -- Producer URI for OpenLineage events -------------------------
-_PRODUCER = (
-    "https://github.com/earthshiner/teradata-deployment-agent"
-)
+_PRODUCER = "https://github.com/earthshiner/teradata-deployment-agent"
 
 # -- OpenLineage schema URLs ------------------------------------
-_OL_SCHEMA_URL = (
-    "https://openlineage.io/spec/2-0-2/OpenLineage.json"
-    "#/$defs/RunEvent"
-)
+_OL_SCHEMA_URL = "https://openlineage.io/spec/2-0-2/OpenLineage.json#/$defs/RunEvent"
 _OL_JOB_TYPE_SCHEMA = (
     "https://openlineage.io/spec/facets/2-0-2/"
     "JobTypeJobFacet.json#/$defs/JobTypeJobFacet"
 )
 _OL_SQL_JOB_SCHEMA = (
-    "https://openlineage.io/spec/facets/1-1-1/"
-    "SQLJobFacet.json#/$defs/SQLJobFacet"
+    "https://openlineage.io/spec/facets/1-1-1/SQLJobFacet.json#/$defs/SQLJobFacet"
 )
 
 # -- Object type → Graphviz shape mapping -----------------------
 _DOT_SHAPES = {
-    "TABLE":                "box",
-    "VIEW":                 "parallelogram",
-    "MACRO":                "hexagon",
-    "PROCEDURE":            "octagon",
-    "FUNCTION":             "ellipse",
-    "TRIGGER":              "diamond",
-    "JOIN_INDEX":           "trapezium",
-    "HASH_INDEX":           "trapezium",
-    "INDEX":                "trapezium",
-    "DATABASE":             "folder",
+    "TABLE": "box",
+    "VIEW": "parallelogram",
+    "MACRO": "hexagon",
+    "PROCEDURE": "octagon",
+    "FUNCTION": "ellipse",
+    "TRIGGER": "diamond",
+    "JOIN_INDEX": "trapezium",
+    "HASH_INDEX": "trapezium",
+    "INDEX": "trapezium",
+    "DATABASE": "folder",
     "SCRIPT_TABLE_OPERATOR": "component",
 }
 
@@ -76,18 +70,19 @@ _DOT_SHAPES = {
 #    Mermaid shapes: [rectangle], ([stadium]), {rhombus},
 #    ((circle)), {{hexagon}}, [/parallelogram/], [\trapezoid\]
 _MERMAID_SHAPES = {
-    "TABLE":     ("[", "]"),
-    "VIEW":      ("[/", "/]"),
-    "MACRO":     ("{{", "}}"),
+    "TABLE": ("[", "]"),
+    "VIEW": ("[/", "/]"),
+    "MACRO": ("{{", "}}"),
     "PROCEDURE": ("([", "])"),
-    "FUNCTION":  ("((", "))"),
-    "TRIGGER":   ("{", "}"),
+    "FUNCTION": ("((", "))"),
+    "TRIGGER": ("{", "}"),
 }
 
 
 # ---------------------------------------------------------------
 # DOT (Graphviz)
 # ---------------------------------------------------------------
+
 
 def export_dot(result: AnalysisResult) -> str:
     """
@@ -118,7 +113,7 @@ def export_dot(result: AnalysisResult) -> str:
     # -- Group nodes by database for readability ------------------
     db_groups: Dict[str, list] = {}
     for qn, obj in sorted(result.objects.items()):
-        parts = qn.split('.', 1)
+        parts = qn.split(".", 1)
         db = parts[0] if len(parts) == 2 else "_unqualified"
         db_groups.setdefault(db, []).append((qn, obj))
 
@@ -130,9 +125,7 @@ def export_dot(result: AnalysisResult) -> str:
         for qn, obj in objects:
             node_id = _dot_id(qn)
             label = f"{obj.object_type}: {qn}"
-            lines.append(
-                f'    {node_id} [label="{label}"];'
-            )
+            lines.append(f'    {node_id} [label="{label}"];')
 
     # -- Emit external dependency nodes ---------------------------
     ext_nodes = set()
@@ -143,23 +136,21 @@ def export_dot(result: AnalysisResult) -> str:
         for ext in sorted(ext_nodes):
             node_id = _dot_id(ext)
             label = f"EXTERNAL: {ext}"
-            lines.append(
-                f'    {node_id} [label="{label}"];'
-            )
+            lines.append(f'    {node_id} [label="{label}"];')
 
     # -- Emit edges (deployment flow: dependency -> dependent) ----
     for qn, deps in sorted(result.dependencies.items()):
         tgt_id = _dot_id(qn)
         for dep in sorted(deps):
             src_id = _dot_id(dep)
-            lines.append(f'    {src_id} -> {tgt_id};')
+            lines.append(f"    {src_id} -> {tgt_id};")
 
     # Emit external dependency edges
     for qn, ext_refs in sorted(result.external_deps.items()):
         tgt_id = _dot_id(qn)
         for ext in sorted(ext_refs):
             src_id = _dot_id(ext)
-            lines.append(f'    {src_id} -> {tgt_id};')
+            lines.append(f"    {src_id} -> {tgt_id};")
 
     lines.append("}")
     return "\n".join(lines)
@@ -173,8 +164,7 @@ def _dot_id(qualified_name: str) -> str:
     Wraps in double quotes to handle any remaining special chars.
     """
     safe = (
-        qualified_name
-        .replace("{{", "")
+        qualified_name.replace("{{", "")
         .replace("}}", "")
         .replace(".", "_")
         .replace(" ", "_")
@@ -185,6 +175,7 @@ def _dot_id(qualified_name: str) -> str:
 # ---------------------------------------------------------------
 # Mermaid
 # ---------------------------------------------------------------
+
 
 def export_mermaid(result: AnalysisResult) -> str:
     """
@@ -213,7 +204,8 @@ def export_mermaid(result: AnalysisResult) -> str:
         node_id = _mermaid_id(qn)
         label = qn
         open_b, close_b = _MERMAID_SHAPES.get(
-            obj.object_type, ("[", "]"),
+            obj.object_type,
+            ("[", "]"),
         )
         lines.append(f'    {node_id}{open_b}"{label}"{close_b}')
 
@@ -224,7 +216,7 @@ def export_mermaid(result: AnalysisResult) -> str:
         tgt_id = _mermaid_id(qn)
         for dep in sorted(deps):
             src_id = _mermaid_id(dep)
-            lines.append(f'    {src_id} --> {tgt_id}')
+            lines.append(f"    {src_id} --> {tgt_id}")
 
     # Emit external edges (dashed)
     for qn, ext_refs in sorted(result.external_deps.items()):
@@ -233,7 +225,7 @@ def export_mermaid(result: AnalysisResult) -> str:
             ext_id = _mermaid_id(ext)
             # Declare external node if not already
             lines.append(f'    {ext_id}[/"{ext}"\\]')
-            lines.append(f'    {ext_id} -.-> {tgt_id}')
+            lines.append(f"    {ext_id} -.-> {tgt_id}")
 
     # Style classes
     lines.append("")
@@ -259,8 +251,7 @@ def _mermaid_id(qualified_name: str) -> str:
     Mermaid IDs cannot contain dots or braces.
     """
     return (
-        qualified_name
-        .replace("{{", "")
+        qualified_name.replace("{{", "")
         .replace("}}", "")
         .replace(".", "_")
         .replace(" ", "_")
@@ -270,6 +261,7 @@ def _mermaid_id(qualified_name: str) -> str:
 # ---------------------------------------------------------------
 # JSON (adjacency list + metadata)
 # ---------------------------------------------------------------
+
 
 def export_json(result: AnalysisResult) -> str:
     """
@@ -302,7 +294,7 @@ def export_json(result: AnalysisResult) -> str:
     # Build nodes
     nodes = []
     for qn, obj in sorted(result.objects.items()):
-        parts = qn.split('.', 1)
+        parts = qn.split(".", 1)
         node = {
             "id": qn,
             "type": obj.object_type,
@@ -319,25 +311,28 @@ def export_json(result: AnalysisResult) -> str:
     edges = []
     for qn, deps in sorted(result.dependencies.items()):
         for dep in sorted(deps):
-            edges.append({
-                "source": dep,
-                "target": qn,
-                "type": "internal",
-            })
+            edges.append(
+                {
+                    "source": dep,
+                    "target": qn,
+                    "type": "internal",
+                }
+            )
 
     # External edges
     for qn, ext_refs in sorted(result.external_deps.items()):
         for ext in sorted(ext_refs):
-            edges.append({
-                "source": ext,
-                "target": qn,
-                "type": "external",
-            })
+            edges.append(
+                {
+                    "source": ext,
+                    "target": qn,
+                    "type": "external",
+                }
+            )
 
     # Serialise external deps (sets → lists for JSON)
     ext_deps_json = {
-        qn: sorted(refs)
-        for qn, refs in sorted(result.external_deps.items())
+        qn: sorted(refs) for qn, refs in sorted(result.external_deps.items())
     }
 
     doc = {
@@ -362,6 +357,7 @@ def export_json(result: AnalysisResult) -> str:
 # ---------------------------------------------------------------
 # CSV (edge list)
 # ---------------------------------------------------------------
+
 
 def export_csv(result: AnalysisResult) -> str:
     """
@@ -392,11 +388,7 @@ def export_csv(result: AnalysisResult) -> str:
     for qn, deps in sorted(result.dependencies.items()):
         tgt_type = result.objects[qn].object_type if qn in result.objects else ""
         for dep in sorted(deps):
-            src_type = (
-                result.objects[dep].object_type
-                if dep in result.objects
-                else ""
-            )
+            src_type = result.objects[dep].object_type if dep in result.objects else ""
             lines.append(f"{dep},{qn},internal,{src_type},{tgt_type}")
 
     for qn, ext_refs in sorted(result.external_deps.items()):
@@ -410,6 +402,7 @@ def export_csv(result: AnalysisResult) -> str:
 # ---------------------------------------------------------------
 # OpenLineage (spec 2-0-2)
 # ---------------------------------------------------------------
+
 
 def export_openlineage(
     result: AnalysisResult,
@@ -466,7 +459,7 @@ def export_openlineage(
 
     for qn, obj in sorted(result.objects.items()):
         # Split qualified name into database and object
-        parts = qn.split('.', 1)
+        parts = qn.split(".", 1)
         db_name = parts[0] if len(parts) == 2 else ""
         obj_name = parts[1] if len(parts) == 2 else parts[0]
 
@@ -476,21 +469,25 @@ def export_openlineage(
         # Build input datasets from internal dependencies
         inputs = []
         for dep in sorted(result.dependencies.get(qn, set())):
-            dep_parts = dep.split('.', 1)
+            dep_parts = dep.split(".", 1)
             dep_db = dep_parts[0] if len(dep_parts) == 2 else ""
             dep_obj = dep_parts[1] if len(dep_parts) == 2 else dep_parts[0]
             dep_ns = f"{namespace}/{dep_db}" if dep_db else namespace
 
-            inputs.append({
-                "namespace": dep_ns,
-                "name": dep_obj,
-            })
+            inputs.append(
+                {
+                    "namespace": dep_ns,
+                    "name": dep_obj,
+                }
+            )
 
         # Build output dataset (the object itself)
-        outputs = [{
-            "namespace": ds_namespace,
-            "name": obj_name,
-        }]
+        outputs = [
+            {
+                "namespace": ds_namespace,
+                "name": obj_name,
+            }
+        ]
 
         # Build the RunEvent
         event = {
@@ -537,8 +534,7 @@ def export_openlineage(
                     "ships": {
                         "_producer": _PRODUCER,
                         "_schemaURL": (
-                            f"{_PRODUCER}/blob/main/spec/"
-                            "ShipsRunFacet.json"
+                            f"{_PRODUCER}/blob/main/spec/ShipsRunFacet.json"
                         ),
                         "objectType": obj.object_type,
                         "qualifiedName": qn,
@@ -555,15 +551,13 @@ def export_openlineage(
 
     # NDJSON: one complete JSON object per line, no wrapping array.
     # This is the standard format for OpenLineage event files.
-    return "\n".join(
-        json.dumps(event, ensure_ascii=False)
-        for event in events
-    )
+    return "\n".join(json.dumps(event, ensure_ascii=False) for event in events)
 
 
 # ---------------------------------------------------------------
 # Batch export — all formats at once
 # ---------------------------------------------------------------
+
 
 def export_all(
     result: AnalysisResult,
@@ -608,7 +602,7 @@ def export_all(
     paths = {}
     for fmt, (filename, content) in exports.items():
         filepath = os.path.join(output_dir, filename)
-        with open(filepath, 'w', encoding='utf-8') as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
         paths[fmt] = filepath
         logger.info("Exported %s → %s", fmt, filepath)

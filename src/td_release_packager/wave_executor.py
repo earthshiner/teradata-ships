@@ -79,8 +79,7 @@ class WaveExecutor:
         """
         if num_streams < MIN_STREAMS or num_streams > MAX_STREAMS:
             raise ValueError(
-                f"Stream count must be {MIN_STREAMS}–{MAX_STREAMS}, "
-                f"got {num_streams}."
+                f"Stream count must be {MIN_STREAMS}–{MAX_STREAMS}, got {num_streams}."
             )
 
         self.num_streams = num_streams
@@ -117,8 +116,7 @@ class WaveExecutor:
                 logger.debug("Stream %d: query band set", stream_id)
             except Exception as e:
                 logger.warning(
-                    "Stream %d: query band failed (non-fatal): %s",
-                    stream_id, e
+                    "Stream %d: query band failed (non-fatal): %s", stream_id, e
                 )
 
             self._cursors.append(cursor)
@@ -184,7 +182,9 @@ class WaveExecutor:
         total_objects = sum(len(w) for w in waves)
         logger.info(
             "Executing %d waves, %d objects, %d streams",
-            len(waves), total_objects, self.num_streams
+            len(waves),
+            total_objects,
+            self.num_streams,
         )
 
         wave_results = []
@@ -198,8 +198,7 @@ class WaveExecutor:
             if failed:
                 # Skip remaining waves after a failure
                 logger.warning(
-                    "Skipping wave %d/%d (previous wave failed)",
-                    wave_num, len(waves)
+                    "Skipping wave %d/%d (previous wave failed)", wave_num, len(waves)
                 )
                 # Record skipped objects
                 for fpath in wave:
@@ -213,21 +212,21 @@ class WaveExecutor:
                     if on_complete:
                         on_complete(fpath, result)
 
-                wave_results.append(WaveResult(
-                    wave_number=wave_num,
-                    total=len(wave),
-                    completed=0,
-                    failed=0,
-                    skipped=len(wave),
-                    duration_ms=0,
-                ))
+                wave_results.append(
+                    WaveResult(
+                        wave_number=wave_num,
+                        total=len(wave),
+                        completed=0,
+                        failed=0,
+                        skipped=len(wave),
+                        duration_ms=0,
+                    )
+                )
                 continue
 
             # Execute this wave
             wave_start = time.monotonic()
-            w_result = self._execute_single_wave(
-                wave_num, wave, deploy_fn, on_complete
-            )
+            w_result = self._execute_single_wave(wave_num, wave, deploy_fn, on_complete)
             w_result.duration_ms = int((time.monotonic() - wave_start) * 1000)
 
             wave_results.append(w_result)
@@ -239,14 +238,17 @@ class WaveExecutor:
             if w_result.failed > 0:
                 logger.error(
                     "Wave %d: %d failure(s) — stopping after this wave.",
-                    wave_num, w_result.failed
+                    wave_num,
+                    w_result.failed,
                 )
                 failed = True
 
             logger.info(
                 "Wave %d/%d complete: %d ok, %d failed (%d ms)",
-                wave_num, len(waves),
-                w_result.completed, w_result.failed,
+                wave_num,
+                len(waves),
+                w_result.completed,
+                w_result.failed,
                 w_result.duration_ms,
             )
 
@@ -313,8 +315,10 @@ class WaveExecutor:
                 except Exception as e:
                     failed_count += 1
                     result = {
-                        "file": fpath, "state": "FAILED",
-                        "wave": wave_num, "stream": 1,
+                        "file": fpath,
+                        "state": "FAILED",
+                        "wave": wave_num,
+                        "stream": 1,
                         "error": str(e),
                     }
                     object_results.append(result)
@@ -344,7 +348,8 @@ class WaveExecutor:
                 if error_occurred:
                     # Drain-and-stop: don't submit new work
                     result = {
-                        "file": fpath, "state": "SKIPPED",
+                        "file": fpath,
+                        "state": "SKIPPED",
                         "wave": wave_num,
                         "message": "Skipped — error in this wave.",
                     }
@@ -353,12 +358,16 @@ class WaveExecutor:
                         on_complete(fpath, result)
                     continue
 
-                stream_id = (i % effective_streams)
+                stream_id = i % effective_streams
                 cursor = self._cursors[stream_id]
 
                 future = executor.submit(
                     self._deploy_on_stream,
-                    cursor, stream_id + 1, wave_num, fpath, deploy_fn
+                    cursor,
+                    stream_id + 1,
+                    wave_num,
+                    fpath,
+                    deploy_fn,
                 )
                 futures[future] = (fpath, stream_id + 1)
 
@@ -385,8 +394,10 @@ class WaveExecutor:
                     failed_count += 1
                     error_occurred = True
                     result = {
-                        "file": fpath, "state": "FAILED",
-                        "wave": wave_num, "stream": stream_id,
+                        "file": fpath,
+                        "state": "FAILED",
+                        "wave": wave_num,
+                        "stream": stream_id,
                         "error": str(e),
                     }
                     object_results.append(result)
@@ -452,6 +463,7 @@ class WaveExecutor:
 # ---------------------------------------------------------------
 # Result classes
 # ---------------------------------------------------------------
+
 
 class WaveResult:
     """Outcome of a single wave execution."""
@@ -525,7 +537,4 @@ class WaveExecutionResult:
         completed objects — i.e. a re-run of an already-deployed
         package where all objects still exist in the database.
         """
-        return (
-            self.total_objects == 0
-            and len(self.prior_completed) > 0
-        )
+        return self.total_objects == 0 and len(self.prior_completed) > 0

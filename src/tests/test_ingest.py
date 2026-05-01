@@ -30,6 +30,7 @@ from td_release_packager.ingest import (
 # _classify_ddl — Object type classification
 # ---------------------------------------------------------------
 
+
 class TestClassifyDDL:
     """Tests for DDL content classification."""
 
@@ -132,7 +133,9 @@ class TestClassifyDDL:
 
     def test_create_hash_index(self):
         """CREATE HASH INDEX is classified as HASH_INDEX."""
-        ddl = "CREATE HASH INDEX MyDB.HI_Cust (Cust_Id) ON MyDB.Customer ORDER BY VALUES;"
+        ddl = (
+            "CREATE HASH INDEX MyDB.HI_Cust (Cust_Id) ON MyDB.Customer ORDER BY VALUES;"
+        )
         assert _classify_ddl(ddl) == "HASH_INDEX"
 
     def test_create_index(self):
@@ -231,6 +234,7 @@ class TestClassifyDDL:
 # _extract_qualified_name
 # ---------------------------------------------------------------
 
+
 class TestExtractQualifiedName:
     """Tests for extracting DB.ObjectName from DDL."""
 
@@ -271,6 +275,7 @@ class TestExtractQualifiedName:
 # _extract_specific_function_name
 # ---------------------------------------------------------------
 
+
 class TestExtractSpecificFunctionName:
     """Tests for SPECIFIC name extraction from function DDL."""
 
@@ -299,6 +304,7 @@ class TestExtractSpecificFunctionName:
 # ---------------------------------------------------------------
 # _inject_multiset
 # ---------------------------------------------------------------
+
 
 class TestInjectMultiset:
     """Tests for MULTISET injection into CREATE TABLE DDL."""
@@ -341,6 +347,7 @@ class TestInjectMultiset:
 # _inject_replace_view
 # ---------------------------------------------------------------
 
+
 class TestInjectReplaceView:
     """Tests for CREATE VIEW → REPLACE VIEW conversion."""
 
@@ -366,6 +373,7 @@ class TestInjectReplaceView:
 # ---------------------------------------------------------------
 # _build_token_candidates
 # ---------------------------------------------------------------
+
 
 class TestBuildTokenCandidates:
     """Tests for hardcoded database name detection."""
@@ -401,12 +409,23 @@ class TestBuildTokenCandidates:
 # _discover_files
 # ---------------------------------------------------------------
 
+
 class TestDiscoverFiles:
     """Tests for DDL file discovery."""
 
     def test_discovers_sql_extensions(self, tmp_path):
         """Files with standard SQL extensions are discovered."""
-        for ext in [".tbl", ".viw", ".spl", ".mcr", ".fnc", ".trg", ".jix", ".db", ".dcl"]:
+        for ext in [
+            ".tbl",
+            ".viw",
+            ".spl",
+            ".mcr",
+            ".fnc",
+            ".trg",
+            ".jix",
+            ".db",
+            ".dcl",
+        ]:
             (tmp_path / f"test{ext}").write_text("DDL", encoding="utf-8")
 
         files = _discover_files(str(tmp_path))
@@ -442,6 +461,7 @@ class TestDiscoverFiles:
 # ingest_directory (integration)
 # ---------------------------------------------------------------
 
+
 class TestIngestDirectory:
     """Integration tests for the full ingest pipeline."""
 
@@ -452,7 +472,9 @@ class TestIngestDirectory:
         (src / "customer.tbl").write_text(ddl_create_table, encoding="utf-8")
 
         result = ingest_directory(
-            str(src), str(tmp_project), detect_tokens=False,
+            str(src),
+            str(tmp_project),
+            detect_tokens=False,
         )
 
         assert result.classified == 1
@@ -467,21 +489,27 @@ class TestIngestDirectory:
         (src / "random.sql").write_text("SELECT 1 AS dummy;", encoding="utf-8")
 
         result = ingest_directory(
-            str(src), str(tmp_project), detect_tokens=False,
+            str(src),
+            str(tmp_project),
+            detect_tokens=False,
         )
 
         assert result.classified == 0
         assert result.unclassified == 1
         assert len(result.unclassified_files) == 1
 
-    def test_ingest_multiset_injection(self, tmp_path, tmp_project, ddl_create_table_no_multiset):
+    def test_ingest_multiset_injection(
+        self, tmp_path, tmp_project, ddl_create_table_no_multiset
+    ):
         """Tables without SET/MULTISET get MULTISET injected during ingest."""
         src = tmp_path / "source"
         src.mkdir()
         (src / "orders.tbl").write_text(ddl_create_table_no_multiset, encoding="utf-8")
 
         result = ingest_directory(
-            str(src), str(tmp_project), detect_tokens=False,
+            str(src),
+            str(tmp_project),
+            detect_tokens=False,
         )
 
         assert result.multiset_injected == 1
