@@ -1,347 +1,508 @@
-#!/usr/bin/env python3
 """
-test_validate_grants.py — Unit tests for validate_grants.py
+Tests for td_release_packager.validate_grants — the cross-file
+grant orchestrator (Step 2 of the validate command).
 
-Tests cover:
-    - .grt file parsing
-    - Grant comparison: missing, stale, matched
-    - Full validation pipeline
-    - Fix mode
-    - Report formatting
+Covers:
+    - Lifecycle: missing → fix → consistent → drift → orphan
+    - The .grt parser (_parse_grt_content)
+    - Drift detection edge cases
+    - Custom dcl_dir
+    - Multi-source consolidation
+    - Report rendering
+
+The orchestrator delegates analysis to infer_grants.py, so tests
+build small SHIPS-shaped projects on disk and exercise the public
+API end-to-end — they do not mock infer_grants. This means the
+tests double as integration tests for the infer_grants ↔
+validate_grants seam.
 """
-
-import os
-import sys
-import tempfile
-import textwrap
-from pathlib import Path
 
 import pytest
-
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from pathlib import Path
 
 from td_release_packager.validate_grants import (
-    parse_grt_file,
-    compare_grants,
-    validate_grants,
+    GrantValidationResult,
+    GranteeStatus,
+    _compute_drift,
+    _parse_grt_content,
+    _resolve_dcl_dir,
     fix_grants,
     format_report,
-    GrantValidationResult,
+    validate_grants,
 )
-from td_release_packager.infer_grants import PRIV_SELECT, PRIV_INSERT, PRIV_UPDATE, PRIV_EXEC_PROC
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def write_temp_grt(content: str) -> Path:
-    """Write content to a temporary .grt file and return its Path."""
-    fd, path = tempfile.mkstemp(suffix=".grt", prefix="test_grant_")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(content)
-    return Path(path)
+# -------------------------------------------------------------------
+# Helpers — build a tiny SHIPS-shaped project with view DDL
+# -------------------------------------------------------------------
 
 
-# ---------------------------------------------------------------------------
-# .grt file parsing tests
-# ---------------------------------------------------------------------------
-
-class TestParseGrtFile:
-    """Tests for parse_grt_file()."""
-
-    def test_parses_single_grant(self):
-        content = (
-            "GRANT SELECT ON {{DOM_DATABASE_T}} "
-            "TO {{DOM_DATABASE_V}} WITH GRANT OPTION;"
-        )
-        path = write_temp_grt(content)
-        try:
-            grants = parse_grt_file(path)
-            assert "{{DOM_DATABASE_T}}" in grants
-            assert PRIV_SELECT in grants["{{DOM_DATABASE_T}}"]
-        finally:
-            os.unlink(path)
-
-    def test_parses_consolidated_grant(self):
-        """Multiple privileges in one statement are parsed correctly."""
-        content = (
-            "GRANT SELECT, INSERT, UPDATE ON {{STG_DATABASE_T}} "
-            "TO {{DOM_DATABASE_T}} WITH GRANT OPTION;"
-        )
-        path = write_temp_grt(content)
-        try:
-            grants = parse_grt_file(path)
-            privs = grants["{{STG_DATABASE_T}}"]
-            assert PRIV_SELECT in privs
-            assert PRIV_INSERT in privs
-            assert PRIV_UPDATE in privs
-        finally:
-            os.unlink(path)
-
-    def test_parses_execute_procedure(self):
-        """EXECUTE PROCEDURE (two-word privilege) is parsed correctly."""
-        content = (
-            "GRANT EXECUTE PROCEDURE ON {{MEM_DATABASE_T}} "
-            "TO {{OBS_DATABASE_T}} WITH GRANT OPTION;"
-        )
-        path = write_temp_grt(content)
-        try:
-            grants = parse_grt_file(path)
-            assert "{{MEM_DATABASE_T}}" in grants
-            assert PRIV_EXEC_PROC in grants["{{MEM_DATABASE_T}}"]
-        finally:
-            os.unlink(path)
-
-    def test_parses_multiple_statements(self):
-        """Multiple GRANT statements in one file are all captured."""
-        content = textwrap.dedent("""
-            GRANT SELECT ON {{DOM_DATABASE_V}} TO {{SEM_DATABASE_V}} WITH GRANT OPTION;
-            GRANT SELECT ON {{OBS_DATABASE_V}} TO {{SEM_DATABASE_V}} WITH GRANT OPTION;
-        """)
-        path = write_temp_grt(content)
-        try:
-            grants = parse_grt_file(path)
-            assert "{{DOM_DATABASE_V}}" in grants
-            assert "{{OBS_DATABASE_V}}" in grants
-        finally:
-            os.unlink(path)
-
-    def test_ignores_comments(self):
-        """Block comments in .grt files don't produce false matches."""
-        content = textwrap.dedent("""
-            /*
-            ** GRANT SELECT ON {{OLD_DB}} TO {{SEM_DATABASE_V}} WITH GRANT OPTION;
-            */
-            GRANT SELECT ON {{DOM_DATABASE_V}} TO {{SEM_DATABASE_V}} WITH GRANT OPTION;
-        """)
-        path = write_temp_grt(content)
-        try:
-            grants = parse_grt_file(path)
-            # The commented GRANT should not appear
-            # (The regex starts with ^\s* so it won't match inside /* */)
-            assert "{{DOM_DATABASE_V}}" in grants
-        finally:
-            os.unlink(path)
-
-    def test_empty_file_returns_empty(self):
-        content = "/* No grants */"
-        path = write_temp_grt(content)
-        try:
-            grants = parse_grt_file(path)
-            assert len(grants) == 0
-        finally:
-            os.unlink(path)
+def _make_view_ddl(grantee: str, grantor: str, view_name: str = "V") -> str:
+    """Generate a minimal CREATE VIEW that implies SELECT on grantor."""
+    return (
+        f"CREATE VIEW {grantee}.{view_name} (col1) AS\n"
+        f"LOCKING ROW FOR ACCESS\n"
+        f"SELECT col1 FROM {grantor}.SomeTable;\n"
+    )
 
 
-# ---------------------------------------------------------------------------
-# Comparison tests
-# ---------------------------------------------------------------------------
-
-class TestCompareGrants:
-    """Tests for compare_grants()."""
-
-    def test_matching_grants_produce_no_issues(self):
-        inferred = {
-            "{{DOM_DATABASE_V}}": {
-                "{{DOM_DATABASE_T}}": {PRIV_SELECT},
-            }
-        }
-        declared = {
-            "{{DOM_DATABASE_V}}": {
-                "{{DOM_DATABASE_T}}": {PRIV_SELECT},
-            }
-        }
-        issues = compare_grants(inferred, declared)
-        assert len(issues) == 0
-
-    def test_missing_file_produces_error(self):
-        """Inferred grantee with no .grt file → ERROR."""
-        inferred = {
-            "{{DOM_DATABASE_V}}": {
-                "{{DOM_DATABASE_T}}": {PRIV_SELECT},
-            }
-        }
-        declared = {}
-        issues = compare_grants(inferred, declared)
-        assert len(issues) == 1
-        assert issues[0].rule == "missing_file"
-        assert issues[0].severity == "ERROR"
-
-    def test_missing_privilege_produces_error(self):
-        """Inferred privilege missing from .grt file → ERROR."""
-        inferred = {
-            "{{DOM_DATABASE_T}}": {
-                "{{STG_DATABASE_T}}": {PRIV_SELECT, PRIV_INSERT},
-            }
-        }
-        declared = {
-            "{{DOM_DATABASE_T}}": {
-                "{{STG_DATABASE_T}}": {PRIV_SELECT},
-            }
-        }
-        issues = compare_grants(inferred, declared)
-        # One missing: INSERT
-        missing = [i for i in issues if i.rule == "missing_grant"]
-        assert len(missing) == 1
-        assert missing[0].privilege == PRIV_INSERT
-
-    def test_stale_file_produces_warning(self):
-        """Declared grantee with no inferred grants → WARNING."""
-        inferred = {}
-        declared = {
-            "{{OLD_DATABASE_V}}": {
-                "{{OLD_DATABASE_T}}": {PRIV_SELECT},
-            }
-        }
-        issues = compare_grants(inferred, declared)
-        assert len(issues) == 1
-        assert issues[0].rule == "stale_file"
-        assert issues[0].severity == "WARNING"
-
-    def test_stale_privilege_produces_warning(self):
-        """Declared privilege with no inferred match → WARNING."""
-        inferred = {
-            "{{DOM_DATABASE_T}}": {
-                "{{STG_DATABASE_T}}": {PRIV_SELECT},
-            }
-        }
-        declared = {
-            "{{DOM_DATABASE_T}}": {
-                "{{STG_DATABASE_T}}": {PRIV_SELECT, PRIV_INSERT},
-            }
-        }
-        issues = compare_grants(inferred, declared)
-        stale = [i for i in issues if i.rule == "stale_grant"]
-        assert len(stale) == 1
-        assert stale[0].privilege == PRIV_INSERT
-        assert stale[0].severity == "WARNING"
-
-    def test_missing_grantor_produces_error(self):
-        """Inferred grant to a new grantor not in .grt → ERROR."""
-        inferred = {
-            "{{SEM_DATABASE_V}}": {
-                "{{DOM_DATABASE_V}}": {PRIV_SELECT},
-                "{{OBS_DATABASE_V}}": {PRIV_SELECT},
-            }
-        }
-        declared = {
-            "{{SEM_DATABASE_V}}": {
-                "{{DOM_DATABASE_V}}": {PRIV_SELECT},
-                # OBS_DATABASE_V missing entirely
-            }
-        }
-        issues = compare_grants(inferred, declared)
-        missing = [i for i in issues if i.rule == "missing_grant"]
-        assert len(missing) == 1
-        assert missing[0].grantor == "{{OBS_DATABASE_V}}"
+def _make_view_with_two_sources(grantee: str, g1: str, g2: str) -> str:
+    """View that JOINs across two source databases — implies SELECT on both."""
+    return (
+        f"CREATE VIEW {grantee}.Joined (id, name, amount) AS\n"
+        f"LOCKING ROW FOR ACCESS\n"
+        f"SELECT a.id, a.name, b.amount\n"
+        f"FROM {g1}.TableA a\n"
+        f"INNER JOIN {g2}.TableB b ON a.id = b.id;\n"
+    )
 
 
-# ---------------------------------------------------------------------------
-# Full pipeline tests (using test_project fixtures)
-# ---------------------------------------------------------------------------
+@pytest.fixture
+def project(tmp_path):
+    """Empty SHIPS-like project root."""
+    views_dir = tmp_path / "payload" / "database" / "DDL" / "views"
+    views_dir.mkdir(parents=True)
+    return tmp_path
 
-class TestFullPipeline:
-    """Integration tests using the test_project directory."""
 
-    @pytest.fixture
-    def test_project(self, tmp_path):
-        """
-        Build a minimal SHIPS project with DDL and .grt files
-        in a temporary directory. Self-contained — no external
-        fixture directory required.
-        """
-        # --- DDL fixtures ---
-        dom_viw = tmp_path / "dom" / "viw"
-        dom_viw.mkdir(parents=True)
+def _add_view(project: Path, filename: str, content: str) -> Path:
+    views_dir = project / "payload" / "database" / "DDL" / "views"
+    path = views_dir / filename
+    path.write_text(content, encoding="utf-8")
+    return path
 
-        (dom_viw / "{{DOM_DATABASE_V}}.Loan_H.viw").write_text(textwrap.dedent("""\
-            CREATE VIEW {{DOM_DATABASE_V}}.Loan_H
-            (loan_key, loan_number)
-            AS
-            LOCKING ROW FOR ACCESS
-            SELECT loan_key, loan_number
-            FROM {{DOM_DATABASE_T}}.Loan_H;
-        """), encoding="utf-8")
 
-        sem_viw = tmp_path / "sem" / "viw"
-        sem_viw.mkdir(parents=True)
+def _dcl_dir(project: Path) -> Path:
+    return project / "payload" / "database" / "DCL" / "inter_db"
 
-        (sem_viw / "{{SEM_DATABASE_V}}.Summary.viw").write_text(textwrap.dedent("""\
-            CREATE VIEW {{SEM_DATABASE_V}}.Summary
-            (loan_key)
-            AS
-            LOCKING ROW FOR ACCESS
-            SELECT l.loan_key
-            FROM {{DOM_DATABASE_V}}.Loan_H l;
-        """), encoding="utf-8")
 
-        # --- Generate matching .grt files via fix_grants ---
-        dcl_dir = tmp_path / "dcl"
-        fix_grants(tmp_path, dcl_dir=dcl_dir)
+# ===================================================================
+# Lifecycle: missing → fix → consistent → drift → orphan
+# ===================================================================
 
-        return tmp_path
 
-    def test_validates_clean_project(self, test_project):
-        """A project with correct .grt files passes validation."""
-        result = validate_grants(test_project)
+class TestLifecycle:
+    def test_empty_project_passes(self, tmp_path):
+        """No DDL files → no inferred grants → passed=True."""
+        result = validate_grants(tmp_path)
         assert result.passed
-        assert result.missing == 0
-        assert result.stale == 0
+        assert result.ddl_count == 0
+        assert result.statuses == []
 
-    def test_fix_then_validate(self, test_project):
-        """Fix mode generates .grt files that pass validation."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            dcl_dir = Path(tmpdir)
-            result, files_written = fix_grants(
-                test_project, dcl_dir=dcl_dir
-            )
-            assert files_written == 2
-            assert result.passed
+    def test_missing_grt_files_detected(self, project):
+        """View DDL exists but no .grt file — grantee classified as missing."""
+        _add_view(
+            project,
+            "{{DOM_V}}.Customer.viw",
+            _make_view_ddl("{{DOM_V}}", "{{DOM_T}}"),
+        )
+        result = validate_grants(project)
+        assert not result.passed
+        assert len(result.missing) == 1
+        assert result.missing[0].grantee == "{{DOM_V}}"
+        assert result.missing[0].expected_grants == {"{{DOM_T}}": {"SELECT"}}
+
+    def test_fix_writes_missing_files(self, project):
+        """fix_grants creates .grt files; post-fix result is consistent."""
+        _add_view(
+            project,
+            "{{DOM_V}}.Customer.viw",
+            _make_view_ddl("{{DOM_V}}", "{{DOM_T}}"),
+        )
+        result, files_written = fix_grants(project)
+        assert files_written == 1
+        assert result.passed
+        assert (_dcl_dir(project) / "{{DOM_V}}.grt").exists()
+
+    def test_validate_after_fix_is_consistent(self, project):
+        """Re-validate after fix — clean state."""
+        _add_view(
+            project,
+            "{{DOM_V}}.Customer.viw",
+            _make_view_ddl("{{DOM_V}}", "{{DOM_T}}"),
+        )
+        fix_grants(project)
+        result = validate_grants(project)
+        assert result.passed
+        assert len(result.consistent) == 1
+
+    def test_drift_detected_after_corruption(self, project):
+        """Modify a .grt to remove a privilege — drift detected."""
+        _add_view(
+            project,
+            "{{DOM_V}}.Customer.viw",
+            _make_view_ddl("{{DOM_V}}", "{{DOM_T}}"),
+        )
+        fix_grants(project)
+        # Replace SELECT with INSERT — drift in BOTH directions
+        grt = _dcl_dir(project) / "{{DOM_V}}.grt"
+        grt.write_text(
+            grt.read_text(encoding="utf-8").replace("SELECT", "INSERT"),
+            encoding="utf-8",
+        )
+        result = validate_grants(project)
+        assert not result.passed
+        assert len(result.drifted) == 1
+        d = result.drifted[0]
+        assert d.missing_privs == {"{{DOM_T}}": {"SELECT"}}
+        assert d.extra_privs == {"{{DOM_T}}": {"INSERT"}}
+
+    def test_orphan_detected(self, project):
+        """A .grt for a grantee with no DDL backing — orphaned."""
+        _add_view(
+            project,
+            "{{DOM_V}}.Customer.viw",
+            _make_view_ddl("{{DOM_V}}", "{{DOM_T}}"),
+        )
+        fix_grants(project)
+        # Add a stray .grt for a grantee that no DDL references
+        orphan = _dcl_dir(project) / "{{LEGACY_V}}.grt"
+        orphan.write_text(
+            "GRANT SELECT ON {{LEGACY_T}} TO {{LEGACY_V}} WITH GRANT OPTION;\n",
+            encoding="utf-8",
+        )
+        result = validate_grants(project)
+        assert not result.passed
+        assert len(result.orphaned) == 1
+        assert result.orphaned[0].grantee == "{{LEGACY_V}}"
+
+    def test_fix_does_not_delete_orphans(self, project):
+        """Fix mode is conservative — orphans are preserved for manual review."""
+        _add_view(
+            project,
+            "{{DOM_V}}.Customer.viw",
+            _make_view_ddl("{{DOM_V}}", "{{DOM_T}}"),
+        )
+        fix_grants(project)
+        orphan = _dcl_dir(project) / "{{LEGACY_V}}.grt"
+        orphan.write_text(
+            "GRANT SELECT ON {{LEGACY_T}} TO {{LEGACY_V}} WITH GRANT OPTION;\n",
+            encoding="utf-8",
+        )
+        result, _files = fix_grants(project)
+        assert orphan.exists()  # Not deleted
+        # And still flagged in the post-fix result
+        assert len(result.orphaned) == 1
 
 
-# ---------------------------------------------------------------------------
-# Report formatting tests
-# ---------------------------------------------------------------------------
+# ===================================================================
+# .grt parser — _parse_grt_content
+# ===================================================================
+
+
+class TestParser:
+    def test_single_grant(self):
+        content = "GRANT SELECT ON {{T}} TO {{V}} WITH GRANT OPTION;\n"
+        assert _parse_grt_content(content) == {"{{T}}": {"SELECT"}}
+
+    def test_multiple_privileges(self):
+        content = "GRANT SELECT, INSERT, UPDATE ON {{T}} TO {{V}};\n"
+        assert _parse_grt_content(content) == {"{{T}}": {"SELECT", "INSERT", "UPDATE"}}
+
+    def test_multi_word_privilege(self):
+        content = "GRANT EXECUTE PROCEDURE ON {{P}} TO {{V}};\n"
+        assert _parse_grt_content(content) == {"{{P}}": {"EXECUTE PROCEDURE"}}
+
+    def test_multiple_grants_same_grantor_merged(self):
+        """Two GRANTs for the same grantor — privileges union."""
+        content = "GRANT SELECT ON {{T}} TO {{V}};\nGRANT INSERT ON {{T}} TO {{V}};\n"
+        assert _parse_grt_content(content) == {"{{T}}": {"SELECT", "INSERT"}}
+
+    def test_multiple_grants_different_grantors(self):
+        content = "GRANT SELECT ON {{A}} TO {{V}};\nGRANT SELECT ON {{B}} TO {{V}};\n"
+        assert _parse_grt_content(content) == {
+            "{{A}}": {"SELECT"},
+            "{{B}}": {"SELECT"},
+        }
+
+    def test_comments_stripped(self):
+        content = (
+            "/* Header comment */\n"
+            "-- Line comment GRANT INSERT ON {{X}} TO {{Y}};\n"
+            "GRANT SELECT ON {{T}} TO {{V}};\n"
+        )
+        # Only the real GRANT is parsed
+        assert _parse_grt_content(content) == {"{{T}}": {"SELECT"}}
+
+    def test_case_insensitive_keywords(self):
+        content = "grant select on {{T}} to {{V}};\n"
+        assert _parse_grt_content(content) == {"{{T}}": {"SELECT"}}
+
+    def test_empty_content(self):
+        assert _parse_grt_content("") == {}
+
+    def test_only_comments(self):
+        assert _parse_grt_content("/* nothing */\n-- empty file\n") == {}
+
+
+# ===================================================================
+# Drift computation — _compute_drift
+# ===================================================================
+
+
+class TestComputeDrift:
+    def test_identical_no_drift(self):
+        a = {"{{T}}": {"SELECT"}}
+        missing, extra = _compute_drift(a, a)
+        assert missing == {}
+        assert extra == {}
+
+    def test_missing_privilege(self):
+        expected = {"{{T}}": {"SELECT", "INSERT"}}
+        actual = {"{{T}}": {"SELECT"}}
+        missing, extra = _compute_drift(expected, actual)
+        assert missing == {"{{T}}": {"INSERT"}}
+        assert extra == {}
+
+    def test_extra_privilege(self):
+        expected = {"{{T}}": {"SELECT"}}
+        actual = {"{{T}}": {"SELECT", "DELETE"}}
+        missing, extra = _compute_drift(expected, actual)
+        assert missing == {}
+        assert extra == {"{{T}}": {"DELETE"}}
+
+    def test_missing_grantor_entirely(self):
+        expected = {"{{A}}": {"SELECT"}, "{{B}}": {"SELECT"}}
+        actual = {"{{A}}": {"SELECT"}}
+        missing, extra = _compute_drift(expected, actual)
+        assert missing == {"{{B}}": {"SELECT"}}
+        assert extra == {}
+
+    def test_extra_grantor_entirely(self):
+        expected = {"{{A}}": {"SELECT"}}
+        actual = {"{{A}}": {"SELECT"}, "{{B}}": {"SELECT"}}
+        missing, extra = _compute_drift(expected, actual)
+        assert missing == {}
+        assert extra == {"{{B}}": {"SELECT"}}
+
+
+# ===================================================================
+# Multi-source consolidation
+# ===================================================================
+
+
+class TestMultiSourceConsolidation:
+    """When multiple DDL files imply grants for the same grantee, the
+    .grt should consolidate them — privilege union per grantor."""
+
+    def test_two_views_same_grantee_different_grantors(self, project):
+        _add_view(
+            project,
+            "{{V}}.A.viw",
+            _make_view_ddl("{{V}}", "{{T1}}", "A"),
+        )
+        _add_view(
+            project,
+            "{{V}}.B.viw",
+            _make_view_ddl("{{V}}", "{{T2}}", "B"),
+        )
+        result, _ = fix_grants(project)
+        assert result.passed
+
+        grt = (_dcl_dir(project) / "{{V}}.grt").read_text(encoding="utf-8")
+        # Both grantors must appear in the file
+        assert "{{T1}}" in grt
+        assert "{{T2}}" in grt
+
+    def test_view_joining_two_sources(self, project):
+        """A single view JOINing two databases implies SELECT on both."""
+        _add_view(
+            project,
+            "{{V}}.Joined.viw",
+            _make_view_with_two_sources("{{V}}", "{{T1}}", "{{T2}}"),
+        )
+        result, _ = fix_grants(project)
+        assert result.passed
+
+        actual = _parse_grt_content(
+            (_dcl_dir(project) / "{{V}}.grt").read_text(encoding="utf-8")
+        )
+        assert actual == {"{{T1}}": {"SELECT"}, "{{T2}}": {"SELECT"}}
+
+    def test_multiple_grantees_distinct_files(self, project):
+        """Two grantees → two separate .grt files."""
+        _add_view(
+            project,
+            "{{V1}}.A.viw",
+            _make_view_ddl("{{V1}}", "{{T}}", "A"),
+        )
+        _add_view(
+            project,
+            "{{V2}}.B.viw",
+            _make_view_ddl("{{V2}}", "{{T}}", "B"),
+        )
+        result, files_written = fix_grants(project)
+        assert files_written == 2
+        assert result.passed
+        assert (_dcl_dir(project) / "{{V1}}.grt").exists()
+        assert (_dcl_dir(project) / "{{V2}}.grt").exists()
+
+
+# ===================================================================
+# Custom dcl_dir
+# ===================================================================
+
+
+class TestCustomDclDir:
+    def test_custom_dcl_dir_is_honoured(self, project, tmp_path):
+        """Files written to and read from the supplied dcl_dir, not default."""
+        _add_view(
+            project,
+            "{{V}}.A.viw",
+            _make_view_ddl("{{V}}", "{{T}}"),
+        )
+        custom_dcl = tmp_path / "elsewhere"
+        result, files_written = fix_grants(project, dcl_dir=custom_dcl)
+        assert files_written == 1
+        assert (custom_dcl / "{{V}}.grt").exists()
+        assert not _dcl_dir(project).exists()
+
+        # Validate against the same custom dir → consistent
+        result = validate_grants(project, dcl_dir=custom_dcl)
+        assert result.passed
+
+    def test_default_dcl_dir_resolution(self, tmp_path):
+        """_resolve_dcl_dir applies the SHIPS default when None."""
+        result = _resolve_dcl_dir(tmp_path, None)
+        assert result == tmp_path / "payload" / "database" / "DCL" / "inter_db"
+
+    def test_explicit_dcl_dir_passes_through(self, tmp_path):
+        custom = tmp_path / "custom"
+        result = _resolve_dcl_dir(tmp_path, custom)
+        assert result == custom
+
+
+# ===================================================================
+# Result properties
+# ===================================================================
+
+
+class TestResultProperties:
+    def test_passed_true_when_all_consistent(self):
+        result = GrantValidationResult(
+            statuses=[
+                GranteeStatus(
+                    grantee="{{A}}", file_path=Path("/tmp/a"), consistent=True
+                ),
+                GranteeStatus(
+                    grantee="{{B}}", file_path=Path("/tmp/b"), consistent=True
+                ),
+            ]
+        )
+        assert result.passed
+
+    def test_passed_false_with_drift(self):
+        result = GrantValidationResult(
+            statuses=[
+                GranteeStatus(
+                    grantee="{{A}}", file_path=Path("/tmp/a"), consistent=True
+                ),
+                GranteeStatus(grantee="{{B}}", file_path=Path("/tmp/b"), drifted=True),
+            ]
+        )
+        assert not result.passed
+
+    def test_passed_false_with_missing(self):
+        result = GrantValidationResult(
+            statuses=[
+                GranteeStatus(grantee="{{A}}", file_path=Path("/tmp/a"), missing=True),
+            ]
+        )
+        assert not result.passed
+
+    def test_passed_false_with_orphan(self):
+        result = GrantValidationResult(
+            statuses=[
+                GranteeStatus(grantee="{{A}}", file_path=Path("/tmp/a"), orphaned=True),
+            ]
+        )
+        assert not result.passed
+
+    def test_empty_result_passes(self):
+        """No grantees inferred → trivially passed."""
+        assert GrantValidationResult().passed
+
+
+# ===================================================================
+# Report rendering
+# ===================================================================
+
 
 class TestFormatReport:
-    """Tests for format_report()."""
-
-    def test_passing_report(self):
-        result = GrantValidationResult(
-            grantees_checked=3,
-            grants_inferred=5,
-            grants_declared=5,
-            matched=5,
-            missing=0,
-            stale=0,
-        )
+    def test_empty_result_message(self):
+        result = GrantValidationResult()
         report = format_report(result)
-        assert "PASSED" in report
-        assert "Missing (ERROR):     0" in report
+        assert "No cross-database grants" in report
 
-    def test_failing_report(self):
-        from td_release_packager.validate_grants import GrantValidationIssue
-        result = GrantValidationResult(
-            grantees_checked=3,
-            grants_inferred=5,
-            grants_declared=3,
-            matched=3,
-            missing=2,
-            stale=0,
-            issues=[
-                GrantValidationIssue(
-                    grantee="{{DOM_DATABASE_V}}",
-                    rule="missing_file",
-                    severity="ERROR",
-                    message="No .grt file exists.",
-                ),
-            ],
+    def test_consistent_marker(self, project):
+        _add_view(
+            project,
+            "{{V}}.A.viw",
+            _make_view_ddl("{{V}}", "{{T}}"),
         )
+        fix_grants(project)
+        result = validate_grants(project)
         report = format_report(result)
-        assert "FAILED" in report
-        assert "ERROR" in report
+        assert "✓" in report
+        assert "{{V}}" in report
+        assert "clean" in report
 
+    def test_drift_marker(self, project):
+        _add_view(
+            project,
+            "{{V}}.A.viw",
+            _make_view_ddl("{{V}}", "{{T}}"),
+        )
+        fix_grants(project)
+        # Corrupt
+        grt = _dcl_dir(project) / "{{V}}.grt"
+        grt.write_text(
+            grt.read_text(encoding="utf-8").replace("SELECT", "DELETE"),
+            encoding="utf-8",
+        )
+        result = validate_grants(project)
+        report = format_report(result)
+        assert "✗" in report
+        assert "drift" in report.lower()
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    def test_missing_marker(self, project):
+        _add_view(
+            project,
+            "{{V}}.A.viw",
+            _make_view_ddl("{{V}}", "{{T}}"),
+        )
+        result = validate_grants(project)
+        report = format_report(result)
+        assert "missing" in report.lower()
+
+    def test_orphan_marker(self, project):
+        # Stray .grt with no DDL
+        dcl = _dcl_dir(project)
+        dcl.mkdir(parents=True)
+        (dcl / "{{LEGACY}}.grt").write_text(
+            "GRANT SELECT ON {{X}} TO {{LEGACY}} WITH GRANT OPTION;\n",
+            encoding="utf-8",
+        )
+        result = validate_grants(project)
+        report = format_report(result)
+        assert "orphan" in report.lower()
+        assert "{{LEGACY}}" in report
+
+    def test_summary_counts(self, project):
+        # 1 consistent
+        _add_view(
+            project,
+            "{{V1}}.A.viw",
+            _make_view_ddl("{{V1}}", "{{T1}}"),
+        )
+        fix_grants(project)
+        # Add 1 missing
+        _add_view(
+            project,
+            "{{V2}}.B.viw",
+            _make_view_ddl("{{V2}}", "{{T2}}"),
+        )
+        result = validate_grants(project)
+        report = format_report(result)
+        assert "1 consistent" in report
+        assert "1 missing" in report

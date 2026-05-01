@@ -29,7 +29,7 @@ Validation:
 
 import logging
 import os
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ def parse_waves_file(
     if not os.path.exists(waves_path):
         raise FileNotFoundError(f"Waves file not found: {waves_path}")
 
-    with open(waves_path, 'r', encoding='utf-8') as f:
+    with open(waves_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
 
     waves = []
@@ -70,11 +70,11 @@ def parse_waves_file(
         stripped = line.strip()
 
         # Skip comment lines
-        if stripped.startswith('#'):
+        if stripped.startswith("#"):
             continue
 
         # Blank line or '---' barrier = wave boundary
-        if not stripped or stripped == '---':
+        if not stripped or stripped == "---":
             if current_wave:
                 waves.append(current_wave)
                 current_wave = []
@@ -110,7 +110,9 @@ def parse_waves_file(
     total_objects = sum(len(w) for w in waves)
     logger.info(
         "Parsed %d waves with %d total objects from %s",
-        len(waves), total_objects, waves_path
+        len(waves),
+        total_objects,
+        waves_path,
     )
 
     return waves
@@ -156,7 +158,10 @@ def validate_waves(waves: List[List[str]]) -> Tuple[List[str], List[str]]:
     total = sum(len(w) for w in waves)
     logger.info(
         "Wave validation: %d waves, %d objects, %d errors, %d warnings",
-        len(waves), total, len(errors), len(warnings)
+        len(waves),
+        total,
+        len(errors),
+        len(warnings),
     )
 
     return (errors, warnings)

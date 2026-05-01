@@ -34,6 +34,7 @@ from td_release_packager.graph_export import (
 # Shared fixtures
 # ---------------------------------------------------------------
 
+
 @pytest.fixture
 def simple_result():
     """
@@ -49,21 +50,22 @@ def simple_result():
 
     result.objects = {
         "STD.Customer": IndexedObject(
-            "STD.Customer", "TABLE",
+            "STD.Customer",
+            "TABLE",
             "DDL/tables/STD.Customer.tbl",
             "CREATE MULTISET TABLE STD.Customer (Id INTEGER);",
         ),
         "VIW.Customer": IndexedObject(
-            "VIW.Customer", "VIEW",
+            "VIW.Customer",
+            "VIEW",
             "DDL/views/VIW.Customer.viw",
-            "REPLACE VIEW VIW.Customer AS\n"
-            "SELECT * FROM STD.Customer;",
+            "REPLACE VIEW VIW.Customer AS\nSELECT * FROM STD.Customer;",
         ),
         "SEM.Dashboard": IndexedObject(
-            "SEM.Dashboard", "VIEW",
+            "SEM.Dashboard",
+            "VIEW",
             "DDL/views/SEM.Dashboard.viw",
-            "REPLACE VIEW SEM.Dashboard AS\n"
-            "SELECT * FROM VIW.Customer;",
+            "REPLACE VIEW SEM.Dashboard AS\nSELECT * FROM VIW.Customer;",
         ),
     }
 
@@ -109,6 +111,7 @@ def empty_result():
 # ---------------------------------------------------------------
 # DOT (Graphviz) tests
 # ---------------------------------------------------------------
+
 
 class TestExportDot:
     """Tests for Graphviz DOT export."""
@@ -175,6 +178,7 @@ class TestExportDot:
 # Mermaid tests
 # ---------------------------------------------------------------
 
+
 class TestExportMermaid:
     """Tests for Mermaid export."""
 
@@ -228,6 +232,7 @@ class TestExportMermaid:
 # JSON tests
 # ---------------------------------------------------------------
 
+
 class TestExportJson:
     """Tests for JSON adjacency list export."""
 
@@ -275,17 +280,13 @@ class TestExportJson:
     def test_internal_edges(self, simple_result):
         """Internal dependency edges are typed 'internal'."""
         doc = json.loads(export_json(simple_result))
-        internal_edges = [
-            e for e in doc["edges"] if e["type"] == "internal"
-        ]
+        internal_edges = [e for e in doc["edges"] if e["type"] == "internal"]
         assert len(internal_edges) == 2
 
     def test_external_edges(self, result_with_externals):
         """External dependency edges are typed 'external'."""
         doc = json.loads(export_json(result_with_externals))
-        ext_edges = [
-            e for e in doc["edges"] if e["type"] == "external"
-        ]
+        ext_edges = [e for e in doc["edges"] if e["type"] == "external"]
         assert len(ext_edges) == 1
         assert ext_edges[0]["source"] == "ExternalDB.Lookup"
 
@@ -307,21 +308,23 @@ class TestExportJson:
 # CSV tests
 # ---------------------------------------------------------------
 
+
 class TestExportCsv:
     """Tests for CSV edge list export."""
 
     def test_header_row(self, simple_result):
         """CSV has a header row with column names."""
         csv = export_csv(simple_result)
-        first_line = csv.split('\n')[0]
+        first_line = csv.split("\n")[0]
         assert first_line == "source,target,edge_type,source_type,target_type"
 
     def test_edge_count(self, simple_result):
         """Two internal edges in the simple graph."""
         csv = export_csv(simple_result)
         data_lines = [
-            l for l in csv.split('\n')
-            if l.strip() and not l.startswith('source')
+            line
+            for line in csv.split("\n")
+            if line.strip() and not line.startswith("source")
         ]
         assert len(data_lines) == 2
 
@@ -339,13 +342,13 @@ class TestExportCsv:
     def test_no_comment_lines(self, simple_result):
         """CSV has no comment lines — clean format for all parsers."""
         csv = export_csv(simple_result)
-        for line in csv.split('\n'):
-            assert not line.startswith('#'), f"Comment found: {line}"
+        for line in csv.split("\n"):
+            assert not line.startswith("#"), f"Comment found: {line}"
 
     def test_empty_graph(self, empty_result):
         """Empty graph produces header-only CSV."""
         csv = export_csv(empty_result)
-        lines = [l for l in csv.split('\n') if l.strip()]
+        lines = [line for line in csv.split("\n") if line.strip()]
         assert len(lines) == 1  # Header only
 
 
@@ -353,17 +356,14 @@ class TestExportCsv:
 # OpenLineage tests
 # ---------------------------------------------------------------
 
+
 class TestExportOpenLineage:
     """Tests for OpenLineage spec 2-0-2 export."""
 
     @staticmethod
     def _parse_ndjson(raw: str) -> list:
         """Parse NDJSON (newline-delimited JSON) into a list of dicts."""
-        return [
-            json.loads(line)
-            for line in raw.strip().splitlines()
-            if line.strip()
-        ]
+        return [json.loads(line) for line in raw.strip().splitlines() if line.strip()]
 
     def test_valid_ndjson(self, simple_result):
         """Output is valid NDJSON — one JSON object per line."""
@@ -419,8 +419,7 @@ class TestExportOpenLineage:
         events = self._parse_ndjson(export_openlineage(simple_result))
         # Find the Customer table event
         cust_event = next(
-            e for e in events
-            if e["job"]["name"] == "deploy.STD.Customer"
+            e for e in events if e["job"]["name"] == "deploy.STD.Customer"
         )
         assert "CREATE MULTISET TABLE" in cust_event["job"]["facets"]["sql"]["query"]
 
@@ -433,18 +432,14 @@ class TestExportOpenLineage:
     def test_parent_run_facet(self, simple_result):
         """All events share the same parent run ID."""
         events = self._parse_ndjson(export_openlineage(simple_result))
-        parent_ids = [
-            e["run"]["facets"]["parent"]["run"]["runId"]
-            for e in events
-        ]
+        parent_ids = [e["run"]["facets"]["parent"]["run"]["runId"] for e in events]
         assert len(set(parent_ids)) == 1  # All same parent
 
     def test_ships_custom_facet(self, simple_result):
         """Custom SHIPS facet includes object metadata."""
         events = self._parse_ndjson(export_openlineage(simple_result))
         cust_event = next(
-            e for e in events
-            if e["job"]["name"] == "deploy.STD.Customer"
+            e for e in events if e["job"]["name"] == "deploy.STD.Customer"
         )
         ships = cust_event["run"]["facets"]["ships"]
         assert ships["objectType"] == "TABLE"
@@ -457,16 +452,12 @@ class TestExportOpenLineage:
 
         # STD.Customer has no inputs
         cust_event = next(
-            e for e in events
-            if e["job"]["name"] == "deploy.STD.Customer"
+            e for e in events if e["job"]["name"] == "deploy.STD.Customer"
         )
         assert cust_event["inputs"] == []
 
         # VIW.Customer has one input (STD.Customer)
-        viw_event = next(
-            e for e in events
-            if e["job"]["name"] == "deploy.VIW.Customer"
-        )
+        viw_event = next(e for e in events if e["job"]["name"] == "deploy.VIW.Customer")
         assert len(viw_event["inputs"]) == 1
         assert viw_event["inputs"][0]["name"] == "Customer"
         assert "STD" in viw_event["inputs"][0]["namespace"]
@@ -479,10 +470,12 @@ class TestExportOpenLineage:
 
     def test_custom_namespace(self, simple_result):
         """Custom namespace URI flows through to datasets."""
-        events = self._parse_ndjson(export_openlineage(
-            simple_result,
-            namespace="teradata://prod-server:1025",
-        ))
+        events = self._parse_ndjson(
+            export_openlineage(
+                simple_result,
+                namespace="teradata://prod-server:1025",
+            )
+        )
         for event in events:
             ns = event["outputs"][0]["namespace"]
             assert ns.startswith("teradata://prod-server:1025")
@@ -496,6 +489,7 @@ class TestExportOpenLineage:
 # ---------------------------------------------------------------
 # export_all batch tests
 # ---------------------------------------------------------------
+
 
 class TestExportAll:
     """Tests for batch export to all formats."""
@@ -519,7 +513,8 @@ class TestExportAll:
     def test_custom_base_name(self, simple_result, tmp_path):
         """Custom base name is used in filenames."""
         paths = export_all(
-            simple_result, str(tmp_path),
+            simple_result,
+            str(tmp_path),
             base_name="my_project",
         )
         for filepath in paths.values():
@@ -528,7 +523,7 @@ class TestExportAll:
     def test_creates_output_dir(self, simple_result, tmp_path):
         """Output directory is created if it does not exist."""
         out_dir = str(tmp_path / "nested" / "output")
-        paths = export_all(simple_result, out_dir)
+        _paths = export_all(simple_result, out_dir)
         assert os.path.isdir(out_dir)
 
     def test_files_not_empty(self, simple_result, tmp_path):

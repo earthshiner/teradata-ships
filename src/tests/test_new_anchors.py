@@ -17,8 +17,6 @@ Anchor coverage:
     18. COMMENT ON TABLE|COLUMN db.name
 """
 
-import pytest
-
 # -- Import the function under test --
 # Adjust the import path to match your project structure.
 from td_release_packager.analyser import _scan_references
@@ -28,8 +26,7 @@ from td_release_packager.analyser import _scan_references
 KNOWN_DBS = {"A_D01_STD", "A_D01_VIW", "A_D01_SEM"}
 
 
-def _refs(ddl: str, obj_type: str = "PROCEDURE",
-          own: str = "A_D01_SEM.self"):
+def _refs(ddl: str, obj_type: str = "PROCEDURE", own: str = "A_D01_SEM.self"):
     """
     Convenience wrapper around _scan_references.
 
@@ -37,7 +34,10 @@ def _refs(ddl: str, obj_type: str = "PROCEDURE",
         Tuple of (internal upper-cased set, external upper-cased set).
     """
     internal, external = _scan_references(
-        ddl, obj_type, own, KNOWN_DBS,
+        ddl,
+        obj_type,
+        own,
+        KNOWN_DBS,
     )
     return (
         {r.upper() for r in internal},
@@ -48,6 +48,7 @@ def _refs(ddl: str, obj_type: str = "PROCEDURE",
 # =================================================================
 # 11. COLLECT [SUMMARY] STATISTICS ... ON
 # =================================================================
+
 
 class TestCollectStatisticsOn:
     """Tests for _COLLECT_STATS_ON_RE."""
@@ -135,6 +136,7 @@ class TestCollectStatisticsOn:
 # 12. CALL (procedure invocation)
 # =================================================================
 
+
 class TestCall:
     """Tests for _CALL_RE."""
 
@@ -187,6 +189,7 @@ class TestCall:
 # 13. EXEC / EXECUTE (macro invocation)
 # =================================================================
 
+
 class TestExec:
     """Tests for _EXEC_RE."""
 
@@ -229,6 +232,7 @@ class TestExec:
 # 14. LOCKING ... FOR
 # =================================================================
 
+
 class TestLocking:
     """Tests for _LOCKING_RE."""
 
@@ -239,8 +243,7 @@ class TestLocking:
         LOCKING A_D01_STD.Customer FOR ACCESS
         SELECT * FROM A_D01_STD.Customer;
         """
-        internal, _ = _refs(ddl, obj_type="VIEW",
-                            own="A_D01_VIW.Customer")
+        internal, _ = _refs(ddl, obj_type="VIEW", own="A_D01_VIW.Customer")
         assert "A_D01_STD.CUSTOMER" in internal
 
     def test_locking_table_keyword(self):
@@ -251,8 +254,7 @@ class TestLocking:
         UPDATE A_D01_STD.Orders SET Order_Status = 'C';
         );
         """
-        internal, _ = _refs(ddl, obj_type="MACRO",
-                            own="A_D01_SEM.mc_Update")
+        internal, _ = _refs(ddl, obj_type="MACRO", own="A_D01_SEM.mc_Update")
         assert "A_D01_STD.ORDERS" in internal
 
     def test_locking_different_table_than_query(self):
@@ -262,8 +264,7 @@ class TestLocking:
         LOCKING A_D01_STD.Customer FOR ACCESS
         SELECT o.* FROM A_D01_STD.Orders o;
         """
-        internal, _ = _refs(ddl, obj_type="VIEW",
-                            own="A_D01_VIW.OrderView")
+        internal, _ = _refs(ddl, obj_type="VIEW", own="A_D01_VIW.OrderView")
         assert "A_D01_STD.CUSTOMER" in internal
         assert "A_D01_STD.ORDERS" in internal
 
@@ -271,6 +272,7 @@ class TestLocking:
 # =================================================================
 # 15. CREATE INDEX ON parent table
 # =================================================================
+
 
 class TestIndexOn:
     """Tests for _INDEX_ON_RE."""
@@ -286,8 +288,7 @@ class TestIndexOn:
         PRIMARY INDEX (Cust_Id)
         ON A_D01_STD.Customer;
         """
-        internal, _ = _refs(ddl, obj_type="JOIN_INDEX",
-                            own="A_D01_STD.ji_CustOrders")
+        internal, _ = _refs(ddl, obj_type="JOIN_INDEX", own="A_D01_STD.ji_CustOrders")
         assert "A_D01_STD.CUSTOMER" in internal
 
     def test_create_hash_index_on(self):
@@ -297,8 +298,7 @@ class TestIndexOn:
         (Order_Dt) ON A_D01_STD.Orders
         BY (Order_Dt);
         """
-        internal, _ = _refs(ddl, obj_type="HASH_INDEX",
-                            own="A_D01_STD.hi_OrderDt")
+        internal, _ = _refs(ddl, obj_type="HASH_INDEX", own="A_D01_STD.hi_OrderDt")
         assert "A_D01_STD.ORDERS" in internal
 
     def test_create_unique_index_on(self):
@@ -307,8 +307,7 @@ class TestIndexOn:
         CREATE UNIQUE INDEX idx_CustEmail (Email)
         ON A_D01_STD.Customer;
         """
-        internal, _ = _refs(ddl, obj_type="INDEX",
-                            own="A_D01_STD.idx_CustEmail")
+        internal, _ = _refs(ddl, obj_type="INDEX", own="A_D01_STD.idx_CustEmail")
         assert "A_D01_STD.CUSTOMER" in internal
 
     def test_create_secondary_index_on(self):
@@ -317,14 +316,14 @@ class TestIndexOn:
         CREATE INDEX idx_OrderStatus (Order_Status)
         ON A_D01_STD.Orders;
         """
-        internal, _ = _refs(ddl, obj_type="INDEX",
-                            own="A_D01_STD.idx_OrderStatus")
+        internal, _ = _refs(ddl, obj_type="INDEX", own="A_D01_STD.idx_OrderStatus")
         assert "A_D01_STD.ORDERS" in internal
 
 
 # =================================================================
 # 16. RENAME TABLE
 # =================================================================
+
 
 class TestRenameTable:
     """Tests for _RENAME_TABLE_RE."""
@@ -357,6 +356,7 @@ class TestRenameTable:
 # =================================================================
 # 17. DROP object (in SPL bodies)
 # =================================================================
+
 
 class TestDropObject:
     """Tests for _DROP_OBJECT_RE."""
@@ -410,6 +410,7 @@ class TestDropObject:
 # 18. COMMENT ON
 # =================================================================
 
+
 class TestCommentOn:
     """Tests for _COMMENT_ON_RE."""
 
@@ -420,8 +421,7 @@ class TestCommentOn:
         """
         # COMMENT ON files don't have a standard object type —
         # scan as generic SQL.
-        internal, _ = _refs(ddl, obj_type="SQL",
-                            own="COMMENT.A_D01_STD.Customer")
+        internal, _ = _refs(ddl, obj_type="SQL", own="COMMENT.A_D01_STD.Customer")
         assert "A_D01_STD.CUSTOMER" in internal
 
     def test_comment_on_column(self):
@@ -429,14 +429,16 @@ class TestCommentOn:
         ddl = """
         COMMENT ON COLUMN A_D01_STD.Customer.Cust_Name IS 'Name';
         """
-        internal, _ = _refs(ddl, obj_type="SQL",
-                            own="COMMENT.A_D01_STD.Customer.Cust_Name")
+        internal, _ = _refs(
+            ddl, obj_type="SQL", own="COMMENT.A_D01_STD.Customer.Cust_Name"
+        )
         assert "A_D01_STD.CUSTOMER" in internal
 
 
 # =================================================================
 # Edge cases and interaction tests
 # =================================================================
+
 
 class TestAnchorInteractions:
     """Cross-anchor and edge case tests."""
@@ -461,9 +463,9 @@ class TestAnchorInteractions:
         END
         """
         internal, _ = _refs(ddl, own="A_D01_SEM.sp_FullRefresh")
-        assert "A_D01_STD.CUSTOMER" in internal    # COLLECT STATS ON
-        assert "A_D01_STD.AUDITLOG" in internal    # INSERT INTO
-        assert "A_D01_STD.ORDERS" in internal      # FROM
+        assert "A_D01_STD.CUSTOMER" in internal  # COLLECT STATS ON
+        assert "A_D01_STD.AUDITLOG" in internal  # INSERT INTO
+        assert "A_D01_STD.ORDERS" in internal  # FROM
         assert "A_D01_SEM.SP_REFRESHSTATS" in internal  # CALL
 
     def test_tokenised_database_names(self):
@@ -477,7 +479,10 @@ class TestAnchorInteractions:
         END
         """
         internal, _ = _scan_references(
-            ddl, "PROCEDURE", "{{SEM_DATABASE}}.sp_Stats", known,
+            ddl,
+            "PROCEDURE",
+            "{{SEM_DATABASE}}.sp_Stats",
+            known,
         )
         internal_upper = {r.upper() for r in internal}
         assert "{{STD_DATABASE}}.CUSTOMER" in internal_upper
@@ -511,8 +516,7 @@ class TestAnchorInteractions:
         INNER JOIN A_D01_STD.Orders o
         ON c.Cust_Id = o.Cust_Id;
         """
-        internal, _ = _refs(ddl, obj_type="VIEW",
-                            own="A_D01_VIW.CustOrders")
+        internal, _ = _refs(ddl, obj_type="VIEW", own="A_D01_VIW.CustOrders")
         # Both should be captured via FROM and JOIN, not COLLECT STATS
         assert "A_D01_STD.CUSTOMER" in internal
         assert "A_D01_STD.ORDERS" in internal

@@ -4,7 +4,7 @@ cli.py — Command-line interface for the Teradata Release Packager.
 Commands:
     scaffold   Create a new project from template.
     harvest    Import raw DDL files into a project.
-    inspect    Check DDL against Coding Discipline.
+    inspect    Check DDL against Coding Discipline + validate grants.
     package    Build a release package for a target environment.
     scan       Scan source files and report all tokens found.
     analyze    Analyse DDL dependencies, generate waves, export graph.
@@ -12,6 +12,7 @@ Commands:
 Usage:
     python -m td_release_packager scaffold --name MortgagePlatform --output /projects
     python -m td_release_packager build --source . --env DEV --name create_objects --properties config/properties/DEV.properties
+    python -m td_release_packager inspect --source . --fix-grants
     python -m td_release_packager scan --source .
     python -m td_release_packager analyze --source . --graph ./output/
     python -m td_release_packager analyze --source . --graph . --formats dot,json,openlineage
@@ -21,6 +22,7 @@ import argparse
 import logging
 import os
 import sys
+from typing import Dict
 
 from td_release_packager.builder import build_package
 from td_release_packager.build_counter import read_build_number
@@ -38,6 +40,11 @@ from td_release_packager.token_engine import (
     validate_tokens,
 )
 from td_release_packager.validate import validate_directory, read_inspect_config
+from td_release_packager.validate_grants import (
+    validate_grants,
+    fix_grants,
+    format_report as format_grant_report,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +59,140 @@ _GRAPH_FORMATS = {
 _ALL_FORMATS = ",".join(_GRAPH_FORMATS.keys())
 
 
+# ---------------------------------------------------------------
+# Final-summary helpers
+# ---------------------------------------------------------------
+#
+# The inspect command prints lint output (Step 1) before grant output
+# (Step 2). When Step 1 produces many issues, the early output scrolls
+# off the terminal by the time the final summary appears. These
+# helpers re-emit a compact recap at the bottom so failures are
+# always visible at a glance.
+
+def _summarise_lint_by_rule(lint_result) -> str:
+    """
+    Produce a compact ``rule (count), rule (count)`` breakdown of
+    ERROR-level issues. Returns empty string if there are no errors.
+    """
+    if not lint_result.errors:
+        return ""
+    counts: Dict[str, int] = {}
+    for issue in lint_result.issues:
+        if issue.severity == "ERROR":
+            counts[issue.rule] = counts.get(issue.rule, 0) + 1
+    # Sort by count desc, then rule name for stable output
+    sorted_rules = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    return ", ".join(f"{rule} ({n})" for rule, n in sorted_rules)
+
+
+def _format_lint_recap(lint_result, max_items: int = 5) -> str:
+    """
+    Produce a "top N lint errors" recap block. Each entry is a
+    file:line and rule name — compact enough that 5 entries fit in
+    a typical terminal viewport.
+
+    Returns empty string if there are no errors.
+    """
+    errors = [i for i in lint_result.issues if i.severity == "ERROR"]
+    if not errors:
+        return ""
+
+    total = len(errors)
+    shown = min(max_items, total)
+
+    lines = []
+    if total == shown:
+        lines.append(f"  ✗ Lint errors ({total}):")
+    else:
+        lines.append(f"  ✗ Top {shown} lint errors ({total} total):")
+
+    # Group by file for readability — same file appears once with its
+    # issues listed beneath. Limit total displayed errors to max_items.
+    by_file: Dict[str, list] = {}
+    displayed = 0
+    for issue in errors:
+        if displayed >= max_items:
+            break
+        by_file.setdefault(issue.file, []).append(issue)
+        displayed += 1
+
+    for file, issues in by_file.items():
+        for issue in issues:
+            line_part = f":{issue.line}" if issue.line is not None else ""
+            lines.append(f"      {file}{line_part}  [{issue.rule}]")
+
+    if shown < total:
+        lines.append("")
+        lines.append(
+            "    Full messages and remaining issues are listed above "
+            "(scroll up, or pipe output to a file)."
+        )
+    return "\n".join(lines)
+
+
+def _format_grant_recap(grant_result, max_items: int = 10) -> str:
+    """
+    Produce a recap of grant validation failures. Returns empty
+    string if grant_result is None or all grantees are consistent.
+    """
+    if grant_result is None or grant_result.passed:
+        return ""
+
+    drifted = grant_result.drifted
+    missing = grant_result.missing
+    orphaned = grant_result.orphaned
+    total = len(drifted) + len(missing) + len(orphaned)
+
+    if total == 0:
+        return ""
+
+    lines = [f"  ✗ Grant issues ({total}):"]
+
+    shown = 0
+    for status in drifted:
+        if shown >= max_items:
+            break
+        lines.append(f"      {status.grantee}  [drift]")
+        shown += 1
+    for status in missing:
+        if shown >= max_items:
+            break
+        lines.append(f"      {status.grantee}  [missing .grt]")
+        shown += 1
+    for status in orphaned:
+        if shown >= max_items:
+            break
+        lines.append(f"      {status.grantee}  [orphaned .grt]")
+        shown += 1
+
+    if shown < total:
+        lines.append("")
+        lines.append(
+            f"    + {total - shown} more — full details listed above."
+        )
+    return "\n".join(lines)
+
+
+
 def main():
     """CLI entry point."""
+    # Force UTF-8 on stdout/stderr regardless of platform locale.
+    # On Windows the default codepage is cp1252, which cannot
+    # represent the Unicode glyphs we use for status output (✓, ✗,
+    # ↑, →). Without this reconfigure, any subprocess capture or
+    # output redirection raises UnicodeEncodeError. Python 3.7+
+    # supports reconfigure(); older versions are not supported.
+    # errors='replace' is a belt-and-braces fallback for any glyph
+    # we might add later that UTF-8 itself can't round-trip on a
+    # legacy console — better to print a '?' than to crash.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            # Stream has no reconfigure (very old Python or a
+            # custom wrapper) or is already detached.
+            pass
+
     parser = _build_parser()
     args = parser.parse_args()
 
@@ -81,13 +220,75 @@ def main():
 
 
 # ---------------------------------------------------------------
+# Path resolution helper
+# ---------------------------------------------------------------
+
+
+def _resolve_path(
+    path: str,
+    relative_to: str = None,
+    label: str = "file",
+) -> str:
+    """
+    Resolve a file path, trying multiple strategies.
+
+    Resolution order:
+        1. The path as given (absolute or relative to CWD)
+        2. The path relative to the --project / --source directory
+        3. If neither exists, report both locations tried
+
+    Args:
+        path:        The path as provided by the user.
+        relative_to: A base directory to try if the path is relative
+                     and not found at the CWD (e.g. the --project dir).
+        label:       A human-readable label for the path (e.g. '--token-map')
+                     used in error messages.
+
+    Returns:
+        The resolved absolute path.
+
+    Raises:
+        SystemExit: If the file is not found at any location tried.
+    """
+    # Strategy 1: path as given
+    if os.path.isfile(path):
+        return os.path.abspath(path)
+
+    # Strategy 2: path relative to the project/source directory
+    if relative_to and not os.path.isabs(path):
+        project_relative = os.path.join(relative_to, path)
+        if os.path.isfile(project_relative):
+            return os.path.abspath(project_relative)
+
+    # Neither worked — build a helpful error message
+    cwd = os.getcwd()
+    tried = [f"    {os.path.abspath(path)}"]
+    if relative_to and not os.path.isabs(path):
+        tried.append(f"    {os.path.abspath(os.path.join(relative_to, path))}")
+
+    print(
+        f"\nERROR: {label} file not found: {path}\n"
+        f"\n"
+        f"  Looked in:\n" + "\n".join(f"  {t}" for t in tried) + f"\n\n"
+        f"  Current directory: {cwd}\n"
+        f"\n"
+        f"  Tip: use an absolute path, or place the file inside\n"
+        f"  the project directory and reference it with a relative\n"
+        f"  path (e.g. config\\token_map.conf).",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
+# ---------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------
 
+
 def _cmd_scaffold(args):
     """Create a new project from template, or repair an existing one."""
-    envs = [e.strip().upper() for e in args.environments.split(',')]
-    repair = getattr(args, 'repair', False)
+    envs = [e.strip().upper() for e in args.environments.split(",")]
+    repair = getattr(args, "repair", False)
 
     try:
         project_dir = scaffold_project(
@@ -107,25 +308,29 @@ def _cmd_scaffold(args):
         print(f"  Environments: {', '.join(envs)}")
 
         if repair:
-            print(f"\n  Repair complete. Missing directories and files have")
-            print(f"  been created. Existing files were NOT overwritten.")
+            print("\n  Repair complete. Missing directories and files have")
+            print("  been created. Existing files were NOT overwritten.")
         else:
-            print(f"\n  SHIPS workflow — next steps:")
-            print(f"    [S] Scaffold  ✓ Done")
-            print(f"    [H] Harvest   python -m td_release_packager harvest \\")
+            print("\n  SHIPS workflow — next steps:")
+            print("    [S] Scaffold  ✓ Done")
+            print("    [H] Harvest   python -m td_release_packager harvest \\")
             print(f"                    --source /raw/ddl/ --project {project_dir}")
-            print(f"    [I] Inspect   python -m td_release_packager inspect \\")
+            print("    [I] Inspect   python -m td_release_packager inspect \\")
             print(f"                    --source {project_dir}")
-            print(f"    [P] Package   python -m td_release_packager package \\")
-            print(f"                    --source {project_dir} --env DEV --name {args.name} \\")
-            print(f"                    --properties config/properties/DEV.properties")
-            print(f"    [S] Ship      python deploy.py --host <host> --user <user>")
+            print("    [P] Package   python -m td_release_packager package \\")
+            print(
+                f"                    --source {project_dir} --env DEV --name {args.name} \\"
+            )
+            print("                    --properties config/properties/DEV.properties")
+            print("    [S] Ship      python deploy.py --host <host> --user <user>")
 
         print(f"{'=' * 64}\n")
 
     except FileExistsError as e:
         print(f"\nERROR: {e}", file=sys.stderr)
-        print(f"  Tip: use --repair to add missing directories and files", file=sys.stderr)
+        print(
+            "  Tip: use --repair to add missing directories and files", file=sys.stderr
+        )
         sys.exit(1)
     except FileNotFoundError as e:
         print(f"\nERROR: {e}", file=sys.stderr)
@@ -138,16 +343,21 @@ def _cmd_ingest(args):
     apply_tokens = None
 
     # Option 1: --token-map file (preferred)
-    if hasattr(args, 'token_map') and args.token_map:
-        apply_tokens = read_token_map(args.token_map)
+    if hasattr(args, "token_map") and args.token_map:
+        token_map_path = _resolve_path(
+            args.token_map,
+            relative_to=args.project,
+            label="--token-map",
+        )
+        apply_tokens = read_token_map(token_map_path)
 
     # Option 2: --apply-tokens inline pairs (legacy)
-    elif hasattr(args, 'apply_tokens') and args.apply_tokens:
+    elif hasattr(args, "apply_tokens") and args.apply_tokens:
         apply_tokens = {}
-        for pair in args.apply_tokens.split(','):
-            if '=' not in pair:
+        for pair in args.apply_tokens.split(","):
+            if "=" not in pair:
                 continue
-            literal, token = pair.split('=', 1)
+            literal, token = pair.split("=", 1)
             apply_tokens[literal.strip()] = token.strip()
 
     try:
@@ -160,12 +370,12 @@ def _cmd_ingest(args):
         )
 
         print(f"\n{'=' * 64}")
-        print(f"  DDL Harvest Results")
+        print("  DDL Harvest Results")
         print(f"{'=' * 64}")
         print(f"  Source:           {args.source}")
         print(f"  Project:          {args.project}")
         if args.force:
-            print(f"  Mode:             FORCE (overwrite existing)")
+            print("  Mode:             FORCE (overwrite existing)")
         print(f"  Files scanned:    {result.total_files}")
         print(f"  Classified:       {result.classified}")
         if result.overwritten:
@@ -179,57 +389,52 @@ def _cmd_ingest(args):
             print(f"  Tokens applied:   {len(apply_tokens)} mappings")
 
         if result.files_placed:
-            print(f"\n  Files placed:")
+            print("\n  Files placed:")
             for src, dest, obj_type in result.files_placed:
                 print(f"    {obj_type:15s} {src}")
                 print(f"    {'':15s} → {dest}")
 
         if result.unclassified_files:
-            print(f"\n  Unclassified files (manual review needed):")
+            print("\n  Unclassified files (manual review needed):")
             for f in result.unclassified_files:
                 print(f"    ⚠ {f}")
 
         # -- Generate token map if requested --
-        env_prefix = getattr(args, 'env_prefix', None)
-        generate_map = getattr(args, 'generate_token_map', False)
+        env_prefix = getattr(args, "env_prefix", None)
+        generate_map = getattr(args, "generate_token_map", False)
 
         if generate_map and result.token_candidates:
-            token_map = generate_token_map(
-                result.token_candidates, env_prefix
-            )
-            map_path = os.path.join(
-                args.project, "config", "token_map.conf"
-            )
+            token_map = generate_token_map(result.token_candidates, env_prefix)
+            map_path = os.path.join(args.project, "config", "token_map.conf")
             write_token_map(
-                map_path, token_map,
-                result.token_candidates, env_prefix or "(none)"
+                map_path, token_map, result.token_candidates, env_prefix or "(none)"
             )
             print(f"\n  Token map generated: {map_path}")
             print(f"  Mappings:           {len(token_map)}")
             if env_prefix:
                 print(f"  Prefix stripped:    {env_prefix}")
             else:
-                print(f"  No --env-prefix:    full names used as tokens")
+                print("  No --env-prefix:    full names used as tokens")
             for literal, token in sorted(token_map.items()):
                 files = result.token_candidates.get(literal, [])
                 print(f"    {literal} → {token}  ({len(files)} refs)")
             print(f"\n  To apply: re-harvest with --token-map {map_path}")
 
         elif result.token_candidates and not apply_tokens:
-            print(f"\n  Token candidates (hardcoded database names):")
+            print("\n  Token candidates (hardcoded database names):")
             for db_name, files in sorted(result.token_candidates.items()):
                 print(f"    '{db_name}' ({len(files)} refs)")
             if not generate_map:
-                print(f"\n  Tip: re-run with --generate-token-map --env-prefix <PREFIX>")
-                print(f"  to auto-generate a token mapping file.")
+                print("\n  Tip: re-run with --generate-token-map --env-prefix <PREFIX>")
+                print("  to auto-generate a token mapping file.")
 
         if result.warnings:
-            print(f"\n  Warnings:")
+            print("\n  Warnings:")
             for w in result.warnings:
                 print(f"    ⚠ {w}")
 
         if result.errors:
-            print(f"\n  Errors:")
+            print("\n  Errors:")
             for e in result.errors:
                 print(f"    ✗ {e}")
 
@@ -241,12 +446,76 @@ def _cmd_ingest(args):
 
 
 def _cmd_validate(args):
-    """Validate DDL files against the Coding Discipline."""
+    """
+    Validate DDL files against the Coding Discipline.
+
+    Runs two steps:
+        Step 1 — Per-file DDL lint (validate.py)
+        Step 2 — Cross-file grant validation (validate_grants.py)
+
+    The overall result is PASSED only if both steps pass.
+    """
+    from pathlib import Path
+
     try:
+        # ==============================================================
+        # Step 0 — Token format check
+        # ==============================================================
+        # Catches malformed {{...}} markers (whitespace inside braces,
+        # double-tokenisation from a re-run harvest, orphan braces from
+        # editor mishaps) BEFORE downstream rules look at the same files.
+        # Malformed tokens silently survive substitution and end up in
+        # the deployed SQL — finding them at inspect time means the
+        # developer fixes them once, not at every build attempt.
+        from td_release_packager.token_engine import (
+            scan_malformed_tokens_in_directory,
+            format_malformed_tokens_report,
+        )
+        from td_release_packager.builder import _find_payload_dir
+
+        try:
+            payload_dir = _find_payload_dir(args.source)
+        except FileNotFoundError:
+            # No payload dir — fall back to scanning the source root.
+            # Hidden/underscore-prefixed files are skipped by the
+            # scanner's own rules, so this is safe even if args.source
+            # is broader than expected.
+            payload_dir = args.source
+
+        token_findings = scan_malformed_tokens_in_directory(payload_dir)
+        token_ok = not token_findings
+
+        token_icon = "✓" if token_ok else "✗"
+        token_status = "PASSED" if token_ok else "FAILED"
+
+        print(f"\n{'=' * 64}")
+        print(f"  {token_icon} Step 0: Token Format Check — {token_status}")
+        print(f"{'=' * 64}")
+
+        if token_findings:
+            n_files = len(token_findings)
+            n_issues = sum(len(v) for v in token_findings.values())
+            print(f"  Files with malformed tokens: {n_files}")
+            print(f"  Total malformed markers:     {n_issues}")
+            print()
+            # The format function emits its own banner+detail block.
+            print(format_malformed_tokens_report(token_findings))
+        else:
+            print("  All {{TOKEN}} markers are well-formed.")
+
+        # ==============================================================
+        # Step 1 — Per-file DDL lint
+        # ==============================================================
+
         # -- Load rules config --
         rules_config = None
-        if hasattr(args, 'config') and args.config:
-            rules_config = read_inspect_config(args.config)
+        if hasattr(args, "config") and args.config:
+            config_path = _resolve_path(
+                args.config,
+                relative_to=args.source,
+                label="--config",
+            )
+            rules_config = read_inspect_config(config_path)
         else:
             # Auto-detect config in project's config/ directory
             auto_config = os.path.join(args.source, "config", "inspect.conf")
@@ -256,41 +525,42 @@ def _cmd_validate(args):
         # -- Apply legacy --skip-* flags as overrides --
         if rules_config is None:
             from td_release_packager.validate import DEFAULT_RULES
+
             rules_config = dict(DEFAULT_RULES)
 
-        if hasattr(args, 'skip_tokens') and args.skip_tokens:
+        if hasattr(args, "skip_tokens") and args.skip_tokens:
             rules_config["hardcoded_name"] = "OFF"
-        if hasattr(args, 'skip_keywords') and args.skip_keywords:
+        if hasattr(args, "skip_keywords") and args.skip_keywords:
             rules_config["keyword_case"] = "OFF"
-        if hasattr(args, 'skip_commas') and args.skip_commas:
+        if hasattr(args, "skip_commas") and args.skip_commas:
             rules_config["leading_commas"] = "OFF"
 
-        result = validate_directory(
+        lint_result = validate_directory(
             source_dir=args.source,
             rules_config=rules_config,
             strict=args.strict,
         )
 
-        icon = "✓" if result.passed else "✗"
-        status = "PASSED" if result.passed else "FAILED"
+        lint_icon = "✓" if lint_result.passed else "✗"
+        lint_status = "PASSED" if lint_result.passed else "FAILED"
         mode = " (strict)" if args.strict else ""
 
         print(f"\n{'=' * 64}")
-        print(f"  {icon} Coding Discipline Validation — {status}{mode}")
+        print(f"  {lint_icon} Step 1: Coding Discipline Lint — {lint_status}{mode}")
         print(f"{'=' * 64}")
-        print(f"  Files scanned:    {result.files_scanned}")
-        print(f"  Files passed:     {result.files_passed}")
-        print(f"  Files with issues:{result.files_with_issues}")
-        print(f"  Errors:           {result.errors}")
-        print(f"  Warnings:         {result.warnings}")
+        print(f"  Files scanned:    {lint_result.files_scanned}")
+        print(f"  Files passed:     {lint_result.files_passed}")
+        print(f"  Files with issues:{lint_result.files_with_issues}")
+        print(f"  Errors:           {lint_result.errors}")
+        print(f"  Warnings:         {lint_result.warnings}")
 
-        if result.issues:
+        if lint_result.issues:
             # Group by file
             by_file = {}
-            for issue in result.issues:
+            for issue in lint_result.issues:
                 by_file.setdefault(issue.file, []).append(issue)
 
-            print(f"\n  Issues by file:")
+            print("\n  Issues by file:")
             for file, issues in sorted(by_file.items()):
                 err_count = sum(1 for i in issues if i.severity == "ERROR")
                 file_icon = "✗" if err_count > 0 else "⚠"
@@ -304,11 +574,137 @@ def _cmd_validate(args):
                         sev = "ℹ"
                     print(f"      {sev} [{issue.rule}] {issue.message}")
 
-        if result.passed:
-            print(f"\n  All files conform to the Teradata Engineering Discipline.")
+        if lint_result.passed:
+            print("\n  All files conform to the Teradata Engineering Discipline.")
+
+        print(f"{'=' * 64}")
+
+        # ==============================================================
+        # Step 2 — Cross-file grant validation
+        # ==============================================================
+
+        skip_grants = getattr(args, "skip_grants", False)
+        do_fix = getattr(args, "fix_grants", False)
+        dcl_dir = None
+        if hasattr(args, "dcl_dir") and args.dcl_dir:
+            dcl_dir = Path(args.dcl_dir)
+
+        project_dir = Path(args.source).resolve()
+        grant_result = None
+
+        if skip_grants:
+            print("\n  ℹ Grant validation skipped (--skip-grants)")
+        elif do_fix:
+            # -- Fix mode: generate/update .grt files --
+            grant_result, files_written = fix_grants(
+                project_dir,
+                dcl_dir=dcl_dir,
+                verbose=args.verbose,
+            )
+
+            grant_icon = "✓" if grant_result.passed else "✗"
+            grant_status = "PASSED" if grant_result.passed else "FAILED"
+
+            print(f"\n{'=' * 64}")
+            print(
+                f"  {grant_icon} Step 2: Grant Validation — {grant_status} (--fix-grants)"
+            )
+            print(f"{'=' * 64}")
+            print(f"  .grt files written: {files_written}")
+            print(format_grant_report(grant_result))
+            print(f"{'=' * 64}")
+        else:
+            # -- Validate mode: compare and report --
+            grant_result = validate_grants(
+                project_dir,
+                dcl_dir=dcl_dir,
+                verbose=args.verbose,
+            )
+
+            grant_icon = "✓" if grant_result.passed else "✗"
+            grant_status = "PASSED" if grant_result.passed else "FAILED"
+
+            print(f"\n{'=' * 64}")
+            print(f"  {grant_icon} Step 2: Grant Validation — {grant_status}")
+            print(f"{'=' * 64}")
+            print(format_grant_report(grant_result))
+            print(f"{'=' * 64}")
+
+        # ==============================================================
+        # Overall result
+        # ==============================================================
+
+        lint_ok = lint_result.passed
+        grant_ok = grant_result.passed if grant_result else True
+        overall_ok = token_ok and lint_ok and grant_ok
+
+        overall_icon = "✓" if overall_ok else "✗"
+        overall_status = "PASSED" if overall_ok else "FAILED"
+
+        print(f"\n{'=' * 64}")
+        print(f"  {overall_icon} SHIPS Inspect — {overall_status}")
+        print(f"{'=' * 64}")
+
+        # -- Step 0 line: token format check --
+        if token_ok:
+            print("  Step 0 (Tokens): PASSED")
+        else:
+            n_files = len(token_findings)
+            n_issues = sum(len(v) for v in token_findings.values())
+            print(
+                f"  Step 0 (Tokens): FAILED — "
+                f"{n_issues} malformed marker(s) in {n_files} file(s)"
+            )
+
+        # -- Step 1 line: status, error/warning counts, by-rule breakdown
+        if lint_ok:
+            warning_note = (
+                f" — {lint_result.warnings} warnings"
+                if lint_result.warnings
+                else ""
+            )
+            print(f"  Step 1 (Lint):   PASSED{warning_note}")
+        else:
+            print(
+                f"  Step 1 (Lint):   FAILED — "
+                f"{lint_result.errors} errors, {lint_result.warnings} warnings"
+            )
+            by_rule = _summarise_lint_by_rule(lint_result)
+            if by_rule:
+                print(f"                   Errors by rule: {by_rule}")
+
+        # -- Step 2 line
+        if skip_grants:
+            print("  Step 2 (Grants): SKIPPED")
+        elif grant_ok:
+            n = len(grant_result.consistent) if grant_result else 0
+            print(f"  Step 2 (Grants): PASSED — {n} grantees consistent")
+        else:
+            d = len(grant_result.drifted)
+            m = len(grant_result.missing)
+            o = len(grant_result.orphaned)
+            print(
+                f"  Step 2 (Grants): FAILED — "
+                f"{d} drifted, {m} missing, {o} orphaned"
+            )
+
+        # -- Top-failures recap: keeps actionable detail visible even
+        #    when the long per-file output has scrolled off the terminal.
+        if not lint_ok:
+            recap = _format_lint_recap(lint_result)
+            if recap:
+                print()
+                print(recap)
+
+        if not grant_ok:
+            recap = _format_grant_recap(grant_result)
+            if recap:
+                print()
+                print(recap)
 
         print(f"{'=' * 64}\n")
-        sys.exit(0 if result.passed else 1)
+
+        sys.exit(0 if overall_ok else 1)
 
     except FileNotFoundError as e:
         print(f"\nERROR: {e}", file=sys.stderr)
@@ -317,6 +713,14 @@ def _cmd_validate(args):
 
 def _cmd_build(args):
     """Build a release package."""
+    # -- Resolve properties file path --
+    properties_path = _resolve_path(
+        args.properties,
+        relative_to=args.source,
+        label="--properties",
+    )
+    args.properties = properties_path
+
     # -- Cross-check: --env must match SHIPS_ENV in properties file --
     # The properties file declares its own environment via SHIPS_ENV.
     # This prevents building a DEV-labelled package with PROD tokens.
@@ -396,7 +800,7 @@ def _cmd_build(args):
         archive_path, manifest = build_package(config)
 
         print(f"\n{'=' * 64}")
-        print(f"  ✓ Package built successfully")
+        print("  ✓ Package built successfully")
         print(f"{'=' * 64}")
         print(f"  Archive:     {archive_path}")
         print(f"  Environment: {manifest.environment}")
@@ -409,7 +813,7 @@ def _cmd_build(args):
             print(f"    {phase}: {count} file(s)")
 
         if manifest.warnings:
-            print(f"\n  Warnings:")
+            print("\n  Warnings:")
             for w in manifest.warnings:
                 print(f"    ⚠ {w}")
 
@@ -429,14 +833,14 @@ def _cmd_scan(args):
 
     # Only scan the payload — not config/, releases/, README, etc.
     scan_dir = source_dir
-    for candidate in ['payload/database', 'payload']:
+    for candidate in ["payload/database", "payload"]:
         path = os.path.join(source_dir, candidate)
         if os.path.isdir(path):
             scan_dir = path
             break
 
     if scan_dir == source_dir:
-        print(f"  ⚠ No payload/ directory found — scanning entire project")
+        print("  ⚠ No payload/ directory found — scanning entire project")
 
     usage = scan_tokens_in_directory(scan_dir)
 
@@ -452,7 +856,7 @@ def _cmd_scan(args):
     print(f"  Unique tokens:     {len(all_tokens)}")
 
     if all_tokens:
-        print(f"\n  Tokens found:")
+        print("\n  Tokens found:")
         for t in sorted(all_tokens):
             files = [f for f, tokens in usage.items() if t in tokens]
             print(f"    {{{{{t}}}}} — used in {len(files)} file(s)")
@@ -464,12 +868,12 @@ def _cmd_scan(args):
             errors, warnings = validate_tokens(values, usage)
 
             if errors:
-                print(f"\n  Validation ERRORS:")
+                print("\n  Validation ERRORS:")
                 for e in errors:
                     print(f"    ✗ {e}")
 
             if warnings:
-                print(f"\n  Validation WARNINGS:")
+                print("\n  Validation WARNINGS:")
                 for w in warnings:
                     print(f"    ⚠ {w}")
 
@@ -485,6 +889,7 @@ def _cmd_scan(args):
 # ---------------------------------------------------------------
 # analyze command — dependency analysis + graph export
 # ---------------------------------------------------------------
+
 
 def _cmd_analyze(args):
     """
@@ -504,7 +909,7 @@ def _cmd_analyze(args):
     result = analyse_project(source_dir)
 
     print(f"\n{'=' * 64}")
-    print(f"  SHIPS Dependency Analysis")
+    print("  SHIPS Dependency Analysis")
     print(f"{'=' * 64}")
     print(format_summary(result))
 
@@ -523,7 +928,7 @@ def _cmd_analyze(args):
         if os.path.exists(waves_path) and not args.overwrite:
             print(f"\n  ⚠ {waves_path} already exists. Use --overwrite to replace.")
         else:
-            with open(waves_path, 'w', encoding='utf-8') as f:
+            with open(waves_path, "w", encoding="utf-8") as f:
                 f.write(result.waves_file_content)
             print(f"\n  ✓ Wave file written: {waves_path}")
             print(f"    {len(result.waves)} waves, {len(result.objects)} objects")
@@ -563,10 +968,7 @@ def _export_graph(result, args):
     os.makedirs(output_dir, exist_ok=True)
 
     # -- Parse requested formats ----------------------------------
-    requested = {
-        f.strip().lower()
-        for f in args.formats.split(',')
-    }
+    requested = {f.strip().lower() for f in args.formats.split(",")}
 
     # Validate format names
     unknown = requested - set(_GRAPH_FORMATS.keys())
@@ -582,10 +984,10 @@ def _export_graph(result, args):
     # Map format name to its export function.
     # OpenLineage is handled separately (extra parameters).
     exporters = {
-        "dot":     export_dot,
+        "dot": export_dot,
         "mermaid": export_mermaid,
-        "json":    export_json,
-        "csv":     export_csv,
+        "json": export_json,
+        "csv": export_csv,
     }
 
     base = args.base_name
@@ -605,7 +1007,7 @@ def _export_graph(result, args):
         else:
             content = exporters[fmt](result)
 
-        with open(filepath, 'w', encoding='utf-8') as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
 
         written.append((fmt, filepath))
@@ -613,10 +1015,7 @@ def _export_graph(result, args):
 
     # -- Print export summary -------------------------------------
     count = len(written)
-    print(
-        f"\n  Graph exported "
-        f"({count} format{'s' if count != 1 else ''}):"
-    )
+    print(f"\n  Graph exported ({count} format{'s' if count != 1 else ''}):")
     for fmt, filepath in written:
         size_kb = os.path.getsize(filepath) / 1024
         print(f"    ✓ {fmt:<14s} → {filepath} ({size_kb:.1f} KB)")
@@ -626,153 +1025,235 @@ def _export_graph(result, args):
 # Argument parser
 # ---------------------------------------------------------------
 
+
 def _build_parser():
     """Build the argument parser."""
     parser = argparse.ArgumentParser(
         prog="td_release_packager",
         description="SHIPS — Scaffold, Harvest, Inspect, Package, Ship. "
-                    "Standardised Teradata DDL deployment methodology.",
+        "Standardised Teradata DDL deployment methodology.",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
 
     subs = parser.add_subparsers(dest="command")
 
     # -- scaffold --
-    sc = subs.add_parser("scaffold",
-                         help="[S] Scaffold — create a new project from template.")
-    sc.add_argument("--name", required=True,
-                    help="Project name (used as directory name).")
-    sc.add_argument("--output", default=".",
-                    help="Parent directory (default: current).")
-    sc.add_argument("--environments", default="DEV,TST,PRD",
-                    help="Comma-separated environment names "
-                         "(default: DEV,TST,PRD).")
-    sc.add_argument("--repair", action="store_true",
-                    help="Repair an existing project — add missing "
-                         "directories and files without overwriting "
-                         "existing configuration. Use after upgrading "
-                         "SHIPS to pick up new directory structure.")
+    sc = subs.add_parser(
+        "scaffold", help="[S] Scaffold — create a new project from template."
+    )
+    sc.add_argument(
+        "--name", required=True, help="Project name (used as directory name)."
+    )
+    sc.add_argument(
+        "--output", default=".", help="Parent directory (default: current)."
+    )
+    sc.add_argument(
+        "--environments",
+        default="DEV,TST,PRD",
+        help="Comma-separated environment names (default: DEV,TST,PRD).",
+    )
+    sc.add_argument(
+        "--repair",
+        action="store_true",
+        help="Repair an existing project — add missing "
+        "directories and files without overwriting "
+        "existing configuration. Use after upgrading "
+        "SHIPS to pick up new directory structure.",
+    )
 
     # -- harvest --
-    ig = subs.add_parser("harvest",
-                         help="[H] Harvest — import raw DDL files into a project.")
-    ig.add_argument("--source", required=True,
-                    help="Directory containing raw DDL files.")
-    ig.add_argument("--project", required=True,
-                    help="Target project directory (must be scaffolded).")
-    ig.add_argument("--token-map",
-                    help="Path to token_map.conf — applies literal → {{TOKEN}} "
-                         "substitutions during harvest. Generate one with "
-                         "--generate-token-map first, review it, then pass "
-                         "it here.")
-    ig.add_argument("--generate-token-map", action="store_true",
-                    help="Scan for hardcoded database names and write a "
-                         "token_map.conf to the project's config/ directory. "
-                         "Requires --env-prefix to derive token names.")
-    ig.add_argument("--env-prefix",
-                    help="Optional environment prefix to strip when deriving "
-                         "token names (e.g. 'A_D01'). Used with "
-                         "--generate-token-map to turn 'A_D01_OMR_STD' into "
-                         "'{{OMR_STD}}'. If omitted, the full database name "
-                         "becomes the token (e.g. 'CORE_STD' → '{{CORE_STD}}').")
-    ig.add_argument("--apply-tokens",
-                    help="(Legacy) Comma-separated name=token pairs. "
-                         "Prefer --token-map instead. "
-                         "E.g. 'DEV01_STD={{STD_DATABASE}},DEV01_SEM={{SEM_DATABASE}}'")
-    ig.add_argument("--no-detect-tokens", action="store_true",
-                    help="Skip hardcoded name detection.")
-    ig.add_argument("--force", action="store_true",
-                    help="Overwrite existing files in the payload. "
-                         "Use when re-harvesting after editing source "
-                         "DDL. Warns if overwriting tokenised files "
-                         "with non-tokenised content — pass the same "
-                         "--token-map to preserve tokenisation.")
+    ig = subs.add_parser(
+        "harvest", help="[H] Harvest — import raw DDL files into a project."
+    )
+    ig.add_argument(
+        "--source", required=True, help="Directory containing raw DDL files."
+    )
+    ig.add_argument(
+        "--project",
+        required=True,
+        help="Target project directory (must be scaffolded).",
+    )
+    ig.add_argument(
+        "--token-map",
+        help="Path to token_map.conf — applies literal → {{TOKEN}} "
+        "substitutions during harvest. Generate one with "
+        "--generate-token-map first, review it, then pass "
+        "it here.",
+    )
+    ig.add_argument(
+        "--generate-token-map",
+        action="store_true",
+        help="Scan for hardcoded database names and write a "
+        "token_map.conf to the project's config/ directory. "
+        "Requires --env-prefix to derive token names.",
+    )
+    ig.add_argument(
+        "--env-prefix",
+        help="Optional environment prefix to strip when deriving "
+        "token names (e.g. 'A_D01'). Used with "
+        "--generate-token-map to turn 'A_D01_OMR_STD' into "
+        "'{{OMR_STD}}'. If omitted, the full database name "
+        "becomes the token (e.g. 'CORE_STD' → '{{CORE_STD}}').",
+    )
+    ig.add_argument(
+        "--apply-tokens",
+        help="(Legacy) Comma-separated name=token pairs. "
+        "Prefer --token-map instead. "
+        "E.g. 'DEV01_STD={{STD_DATABASE}},DEV01_SEM={{SEM_DATABASE}}'",
+    )
+    ig.add_argument(
+        "--no-detect-tokens", action="store_true", help="Skip hardcoded name detection."
+    )
+    ig.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite existing files in the payload. "
+        "Use when re-harvesting after editing source "
+        "DDL. Warns if overwriting tokenised files "
+        "with non-tokenised content — pass the same "
+        "--token-map to preserve tokenisation.",
+    )
     # -- inspect --
-    vl = subs.add_parser("inspect",
-                         help="[I] Inspect — check DDL against Coding Discipline.")
-    vl.add_argument("--source", required=True,
-                    help="Directory to validate.")
-    vl.add_argument("--config",
-                    help="Path to inspect.conf rules configuration file. "
-                         "If not specified, auto-detects config/inspect.conf "
-                         "within the source project.")
-    vl.add_argument("--strict", action="store_true",
-                    help="Strict mode: all WARNING rules promoted to ERROR. "
-                         "OFF rules remain off.")
-    vl.add_argument("--skip-tokens", action="store_true",
-                    help="Disable hardcoded name checks (legacy; "
-                         "prefer inspect.conf).")
-    vl.add_argument("--skip-keywords", action="store_true",
-                    help="Disable keyword case checks (legacy; "
-                         "prefer inspect.conf).")
-    vl.add_argument("--skip-commas", action="store_true",
-                    help="Disable leading comma checks (legacy; "
-                         "prefer inspect.conf).")
+    vl = subs.add_parser(
+        "inspect", help="[I] Inspect — check DDL against Coding Discipline."
+    )
+    vl.add_argument("--source", required=True, help="Directory to validate.")
+    vl.add_argument(
+        "--config",
+        help="Path to inspect.conf rules configuration file. "
+        "If not specified, auto-detects config/inspect.conf "
+        "within the source project.",
+    )
+    vl.add_argument(
+        "--strict",
+        action="store_true",
+        help="Strict mode: all WARNING rules promoted to ERROR. OFF rules remain off.",
+    )
+    vl.add_argument(
+        "--skip-tokens",
+        action="store_true",
+        help="Disable hardcoded name checks (legacy; prefer inspect.conf).",
+    )
+    vl.add_argument(
+        "--skip-keywords",
+        action="store_true",
+        help="Disable keyword case checks (legacy; prefer inspect.conf).",
+    )
+    vl.add_argument(
+        "--skip-commas",
+        action="store_true",
+        help="Disable leading comma checks (legacy; prefer inspect.conf).",
+    )
+    vl.add_argument(
+        "--fix-grants",
+        action="store_true",
+        help="Generate or update .grt files in dcl/ to match "
+        "the inferred grant set from DDL intent analysis. "
+        "Existing .grt files are overwritten.",
+    )
+    vl.add_argument(
+        "--skip-grants",
+        action="store_true",
+        help="Skip cross-database grant validation entirely.",
+    )
+    vl.add_argument(
+        "--dcl-dir",
+        help="Directory containing inter-database .grt files. "
+        "Defaults to <source>/payload/database/DCL/inter_db/. "
+        "The DCL directory has three subdirectories: "
+        "roles/ (grants to roles), users/ (grants to users), "
+        "inter_db/ (grants between databases).",
+    )
 
     # -- package --
     bp = subs.add_parser("package", help="[P] Package — build a release package.")
-    bp.add_argument("--source", required=True,
-                    help="Source project directory.")
-    bp.add_argument("--env", required=True,
-                    help="Target environment (e.g. DEV, TST, SIT, UAT, PRD).")
-    bp.add_argument("--name", required=True,
-                    help="Package name (e.g. 'create_objects').")
-    bp.add_argument("--properties", required=True,
-                    help="Path to environment .properties file.")
-    bp.add_argument("--build-number", type=int, default=None,
-                    help="Build number (default: auto-increment from .build_counter).")
-    bp.add_argument("--no-increment", action="store_true",
-                    help="Reuse current build number without incrementing. "
-                         "Use when building the same source for a different "
-                         "environment (e.g. DEV then PROD).")
-    bp.add_argument("--output", default=".",
-                    help="Output directory (default: current).")
-    bp.add_argument("--format", choices=["zip", "tar.gz"], default="zip",
-                    help="Archive format (default: zip).")
+    bp.add_argument("--source", required=True, help="Source project directory.")
+    bp.add_argument(
+        "--env",
+        required=True,
+        help="Target environment (e.g. DEV, TST, SIT, UAT, PRD).",
+    )
+    bp.add_argument(
+        "--name", required=True, help="Package name (e.g. 'create_objects')."
+    )
+    bp.add_argument(
+        "--properties", required=True, help="Path to environment .properties file."
+    )
+    bp.add_argument(
+        "--build-number",
+        type=int,
+        default=None,
+        help="Build number (default: auto-increment from .build_counter).",
+    )
+    bp.add_argument(
+        "--no-increment",
+        action="store_true",
+        help="Reuse current build number without incrementing. "
+        "Use when building the same source for a different "
+        "environment (e.g. DEV then PROD).",
+    )
+    bp.add_argument(
+        "--output", default=".", help="Output directory (default: current)."
+    )
+    bp.add_argument(
+        "--format",
+        choices=["zip", "tar.gz"],
+        default="zip",
+        help="Archive format (default: zip).",
+    )
     bp.add_argument("--author", help="Builder's name.")
     bp.add_argument("--description", help="Release description.")
     bp.add_argument("--commit", help="Git commit hash.")
 
     # -- scan --
-    sp = subs.add_parser("scan",
-                         help="Scan source for token references (part of Inspect).")
-    sp.add_argument("--source", required=True,
-                    help="Source project directory to scan.")
-    sp.add_argument("--properties",
-                    help="Optional properties file to validate against.")
+    sp = subs.add_parser(
+        "scan", help="Scan source for token references (part of Inspect)."
+    )
+    sp.add_argument("--source", required=True, help="Source project directory to scan.")
+    sp.add_argument(
+        "--properties", help="Optional properties file to validate against."
+    )
 
     # -- analyze --
-    az = subs.add_parser("analyze",
-                         help="Analyse DDL dependencies, generate waves, "
-                              "and export dependency graph.")
-    az.add_argument("--source", required=True,
-                    help="Project directory to analyse.")
-    az.add_argument("--output",
-                    help="Output path for _waves.txt "
-                         "(default: <source>/_waves.txt).")
-    az.add_argument("--overwrite", action="store_true",
-                    help="Overwrite existing _waves.txt.")
-    az.add_argument("--graph",
-                    metavar="OUTPUT_DIR",
-                    help="Export dependency graph to OUTPUT_DIR in one or "
-                         "more formats.  Creates the directory if needed.")
-    az.add_argument("--formats",
-                    default=_ALL_FORMATS,
-                    help=f"Comma-separated graph export formats "
-                         f"(default: {_ALL_FORMATS}).")
-    az.add_argument("--base-name",
-                    default="ships_dependencies",
-                    help="Base filename for exported graph files "
-                         "(default: ships_dependencies).")
-    az.add_argument("--namespace",
-                    default="teradata://ships-analysis",
-                    help="OpenLineage dataset namespace URI.  For a live "
-                         "system use teradata://hostname:1025 "
-                         "(default: teradata://ships-analysis).")
-    az.add_argument("--project-name",
-                    default="ships-project",
-                    help="OpenLineage job namespace / project name "
-                         "(default: ships-project).")
+    az = subs.add_parser(
+        "analyze",
+        help="Analyse DDL dependencies, generate waves, and export dependency graph.",
+    )
+    az.add_argument("--source", required=True, help="Project directory to analyse.")
+    az.add_argument(
+        "--output", help="Output path for _waves.txt (default: <source>/_waves.txt)."
+    )
+    az.add_argument(
+        "--overwrite", action="store_true", help="Overwrite existing _waves.txt."
+    )
+    az.add_argument(
+        "--graph",
+        metavar="OUTPUT_DIR",
+        help="Export dependency graph to OUTPUT_DIR in one or "
+        "more formats.  Creates the directory if needed.",
+    )
+    az.add_argument(
+        "--formats",
+        default=_ALL_FORMATS,
+        help=f"Comma-separated graph export formats (default: {_ALL_FORMATS}).",
+    )
+    az.add_argument(
+        "--base-name",
+        default="ships_dependencies",
+        help="Base filename for exported graph files (default: ships_dependencies).",
+    )
+    az.add_argument(
+        "--namespace",
+        default="teradata://ships-analysis",
+        help="OpenLineage dataset namespace URI.  For a live "
+        "system use teradata://hostname:1025 "
+        "(default: teradata://ships-analysis).",
+    )
+    az.add_argument(
+        "--project-name",
+        default="ships-project",
+        help="OpenLineage job namespace / project name (default: ships-project).",
+    )
 
     return parser
 
