@@ -27,14 +27,27 @@ Usage:
     python infer_grants.py <project_dir> [--output-dir <dir>] [--dry-run] [--verbose]
 
 Examples:
-    # Generate .grt files into the project's dcl/ directory
+    # Generate .grt files into the project's payload/database/DCL/inter_db/ directory
     python infer_grants.py ./MortgagePlatform
 
     # Preview without writing files
     python infer_grants.py ./MortgagePlatform --dry-run --verbose
 
     # Specify a custom output directory
-    python infer_grants.py ./MortgagePlatform --output-dir ./MortgagePlatform/dcl
+    python infer_grants.py ./MortgagePlatform --output-dir ./MortgagePlatform/dcl/inter_db
+
+Output directory:
+    The default output is <project_dir>/payload/database/DCL/inter_db/ — the DCL
+    subdirectory reserved for inter-database (container-to-container)
+    grants. The DCL directory structure is:
+
+        dcl/
+        ├── roles/      — GRANT ... TO {role}
+        ├── users/      — GRANT ... TO {user}
+        └── inter_db/   — GRANT ... ON {database} TO {database}
+
+    This tool generates inter-database grants exclusively. Role and
+    user grants are managed separately.
 
 Author: Paul Dancer — Teradata Worldwide Field Tech
 """
@@ -45,7 +58,7 @@ import re
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, Set, List, Tuple, Optional
+from typing import Dict, Set, List, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -58,19 +71,19 @@ SCANNABLE_EXTENSIONS = {"viw", "spl", "mcr", "trg", "fnc"}
 # Regex to match tokenised database references: {{TOKEN}}.ObjectName
 # Captures the full token including braces and the object name
 RE_TOKEN_REF = re.compile(
-    r"\{\{([A-Z][A-Z0-9_]*)\}\}"   # group 1: token name (inside braces)
-    r"\s*\.\s*"                      # dot separator (optional whitespace)
-    r"([A-Za-z_][A-Za-z0-9_]*)",     # group 2: object name
-    re.IGNORECASE
+    r"\{\{([A-Z][A-Z0-9_]*)\}\}"  # group 1: token name (inside braces)
+    r"\s*\.\s*"  # dot separator (optional whitespace)
+    r"([A-Za-z_][A-Za-z0-9_]*)",  # group 2: object name
+    re.IGNORECASE,
 )
 
 # Regex to match non-tokenised fully-qualified references: Database.ObjectName
 # Only matches when the database name is NOT a token (no braces)
 RE_LITERAL_REF = re.compile(
     r"(?<!\{)\b([A-Z][A-Z0-9_]{1,127})"  # group 1: database name
-    r"\s*\.\s*"                            # dot separator
-    r"([A-Za-z_][A-Za-z0-9_]*)\b",        # group 2: object name
-    re.IGNORECASE
+    r"\s*\.\s*"  # dot separator
+    r"([A-Za-z_][A-Za-z0-9_]*)\b",  # group 2: object name
+    re.IGNORECASE,
 )
 
 # ---------------------------------------------------------------------------
@@ -84,7 +97,7 @@ RE_INSERT_TARGET = re.compile(
     r"\bINSERT\s+(?:INTO\s+)?"
     r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
     r"\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)",
-    re.IGNORECASE
+    re.IGNORECASE,
 )
 
 # UPDATE {{DB}}.Table (the target — not the FROM source)
@@ -92,7 +105,7 @@ RE_UPDATE_TARGET = re.compile(
     r"\bUPDATE\s+"
     r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
     r"\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)",
-    re.IGNORECASE
+    re.IGNORECASE,
 )
 
 # DELETE [FROM] {{DB}}.Table
@@ -101,7 +114,7 @@ RE_DELETE_TARGET = re.compile(
     r"\bDELETE\s+(?:FROM\s+)?"
     r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
     r"\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)",
-    re.IGNORECASE
+    re.IGNORECASE,
 )
 
 # MERGE INTO {{DB}}.Table
@@ -109,7 +122,7 @@ RE_MERGE_TARGET = re.compile(
     r"\bMERGE\s+INTO\s+"
     r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
     r"\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)",
-    re.IGNORECASE
+    re.IGNORECASE,
 )
 
 # CALL {{DB}}.Procedure
@@ -117,7 +130,7 @@ RE_CALL_TARGET = re.compile(
     r"\bCALL\s+"
     r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
     r"\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)",
-    re.IGNORECASE
+    re.IGNORECASE,
 )
 
 # EXEC[UTE] {{DB}}.Macro
@@ -125,7 +138,7 @@ RE_EXEC_TARGET = re.compile(
     r"\bEXEC(?:UTE)?\s+"
     r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
     r"\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)",
-    re.IGNORECASE
+    re.IGNORECASE,
 )
 
 # CREATE statement — extracts the owning database and object type
@@ -136,7 +149,7 @@ RE_CREATE_STMT = re.compile(
     r"\s+"
     r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
     r"\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)",
-    re.IGNORECASE
+    re.IGNORECASE,
 )
 
 # Privilege names as Teradata expects them
@@ -149,14 +162,19 @@ PRIV_EXEC = "EXECUTE"
 
 # Canonical ordering for privilege consolidation in GRANT statements
 PRIV_ORDER = [
-    PRIV_SELECT, PRIV_INSERT, PRIV_UPDATE, PRIV_DELETE,
-    PRIV_EXEC_PROC, PRIV_EXEC
+    PRIV_SELECT,
+    PRIV_INSERT,
+    PRIV_UPDATE,
+    PRIV_DELETE,
+    PRIV_EXEC_PROC,
+    PRIV_EXEC,
 ]
 
 
 # ---------------------------------------------------------------------------
 # Comment stripping
 # ---------------------------------------------------------------------------
+
 
 def strip_sql_comments(sql: str) -> str:
     """
@@ -183,7 +201,10 @@ def strip_sql_comments(sql: str) -> str:
 # Database reference extraction
 # ---------------------------------------------------------------------------
 
-def extract_db_ref(match: re.Match, token_group: int = 1, literal_group: int = 2) -> str:
+
+def extract_db_ref(
+    match: re.Match, token_group: int = 1, literal_group: int = 2
+) -> str:
     """
     Extract the database reference from a regex match.
 
@@ -207,102 +228,173 @@ def extract_db_ref(match: re.Match, token_group: int = 1, literal_group: int = 2
     return literal
 
 
-def find_all_db_references(sql: str) -> Set[str]:
+def find_all_db_references(sql: str, tokens_only: bool = True) -> Set[str]:
     """
     Find all fully-qualified database references in SQL text.
 
-    Matches both tokenised ({{TOKEN}}.Object) and literal (Database.Object)
-    references and returns the set of unique database identifiers.
+    In SHIPS projects, all database references are tokenised
+    (e.g. {{DOM_DATABASE_T}}.Loan_H). Literal references like
+    'mx.column' or 'dl.amount' are table aliases, not database
+    names. Setting tokens_only=True (the default) matches only
+    tokenised references, eliminating alias false positives.
 
-    Excludes false positives:
-        - Table aliases (e.g. 'l', 'dq', 'p' from FROM/JOIN clauses)
-        - Object names used as unqualified correlation names
-          (e.g. 'Data_Quality_Score.entity_key' where the table name
-          is used as a qualifier without a database prefix)
-        - Common Teradata system databases and SQL keywords
+    When tokens_only=False, literal references are also matched
+    with alias/keyword blacklisting — useful for pre-tokenised
+    or ad-hoc DDL analysis.
 
     Args:
-        sql: Comment-stripped SQL text.
+        sql:         Comment-stripped SQL text.
+        tokens_only: If True (default), match only {{TOKEN}}.Object
+                     references. If False, also match literal
+                     Database.Object references with alias filtering.
 
     Returns:
         Set of database references (tokens as '{{TOKEN}}', literals as-is).
     """
     refs = set()
 
-    # --- Collect known object names and aliases to use as a blacklist ---
-    # Object names from fully-qualified tokenised refs can appear as
-    # unqualified correlation names elsewhere (e.g. TableName.column)
-    known_objects = set()
-    known_aliases = set()
-
-    # Collect object names from tokenised references
-    for match in RE_TOKEN_REF.finditer(sql):
-        known_objects.add(match.group(2).upper())
-
-    # Collect table/view aliases from FROM, JOIN, and USING clauses
-    # Pattern: FROM/JOIN {{token}}.Object alias  or  FROM/JOIN Db.Object alias
-    # The alias is the word immediately after the object name, unless it's
-    # a SQL keyword (ON, WHERE, SET, INNER, LEFT, RIGHT, CROSS, FULL, etc.)
-    re_alias = re.compile(
-        r"\b(?:FROM|JOIN|USING)\s+"
-        r"(?:\{\{[A-Z][A-Z0-9_]*\}\}\s*\.\s*)?"  # optional tokenised DB
-        r"[A-Za-z_][A-Za-z0-9_]*"                  # object name
-        r"\s+([A-Za-z_][A-Za-z0-9_]*)",             # group 1: potential alias
-        re.IGNORECASE
-    )
-    sql_keywords = {
-        "ON", "WHERE", "SET", "INNER", "LEFT", "RIGHT", "CROSS", "FULL",
-        "OUTER", "JOIN", "AND", "OR", "NOT", "IN", "EXISTS", "BETWEEN",
-        "LIKE", "AS", "WHEN", "THEN", "ELSE", "END", "CASE", "GROUP",
-        "ORDER", "BY", "HAVING", "UNION", "ALL", "EXCEPT", "INTERSECT",
-        "INTO", "FROM", "SELECT", "INSERT", "UPDATE", "DELETE", "MERGE",
-        "VALUES", "WITH", "GRANT", "OPTION", "LOCKING", "ROW", "FOR",
-        "ACCESS", "TABLE", "VIEW", "USING", "MATCHED", "VOLATILE",
-    }
-    for match in re_alias.finditer(sql):
-        alias_candidate = match.group(1).upper()
-        if alias_candidate not in sql_keywords:
-            known_aliases.add(alias_candidate)
-
-    # Also collect aliases from UPDATE target (UPDATE Db.Table alias ...)
-    re_update_alias = re.compile(
-        r"\bUPDATE\s+"
-        r"(?:\{\{[A-Z][A-Z0-9_]*\}\}\s*\.\s*)?"
-        r"([A-Za-z_][A-Za-z0-9_]*)"                # object name
-        r"\s+([A-Za-z_][A-Za-z0-9_]*)",             # potential alias
-        re.IGNORECASE
-    )
-    for match in re_update_alias.finditer(sql):
-        obj_name = match.group(1).upper()
-        alias_candidate = match.group(2).upper()
-        known_objects.add(obj_name)
-        if alias_candidate not in sql_keywords:
-            known_aliases.add(alias_candidate)
-
-    # Build the combined exclusion set
-    exclusions = known_objects | known_aliases
-
-    # --- Tokenised references (always reliable) ---
+    # --- Tokenised references (always matched) ---
     for match in RE_TOKEN_REF.finditer(sql):
         refs.add(f"{{{{{match.group(1)}}}}}")
 
-    # --- Literal references — with blacklist filtering ---
-    system_dbs = {
-        "DBC", "SYSLIB", "SYSUDTLIB", "SYSSPATIAL",
-        "SYSJDBC", "SYSBAR", "TDSTATS", "TDWM",
-        "SYSTEMFE", "DBCMNGR", "SYSADMIN",
-        "CAST", "TRIM", "COALESCE", "CASE", "WHEN",
-        "THEN", "ELSE", "END", "AND", "NOT", "NULL",
-        "DATE", "TIME", "TIMESTAMP", "INTERVAL",
-        "CHARACTER", "VARCHAR", "INTEGER", "DECIMAL",
-        "FLOAT", "BYTEINT", "SMALLINT", "BIGINT",
-        "LOCKING", "ROW", "FOR", "ACCESS",
-    }
-    for match in RE_LITERAL_REF.finditer(sql):
-        db_name = match.group(1)
-        db_upper = db_name.upper()
-        if db_upper not in system_dbs and db_upper not in exclusions:
-            refs.add(db_name)
+    # --- Literal references (only when tokens_only=False) ---
+    if not tokens_only:
+        # Collect known object names and aliases to use as a blacklist
+        known_objects = set()
+        known_aliases = set()
+
+        # Object names from tokenised references
+        for match in RE_TOKEN_REF.finditer(sql):
+            known_objects.add(match.group(2).upper())
+
+        # Table/view aliases from FROM, JOIN, USING clauses
+        re_alias = re.compile(
+            r"\b(?:FROM|JOIN|USING)\s+"
+            r"(?:\{\{[A-Z][A-Z0-9_]*\}\}\s*\.\s*)?"
+            r"[A-Za-z_][A-Za-z0-9_]*"
+            r"\s+([A-Za-z_][A-Za-z0-9_]*)",
+            re.IGNORECASE,
+        )
+        sql_keywords = {
+            "ON",
+            "WHERE",
+            "SET",
+            "INNER",
+            "LEFT",
+            "RIGHT",
+            "CROSS",
+            "FULL",
+            "OUTER",
+            "JOIN",
+            "AND",
+            "OR",
+            "NOT",
+            "IN",
+            "EXISTS",
+            "BETWEEN",
+            "LIKE",
+            "AS",
+            "WHEN",
+            "THEN",
+            "ELSE",
+            "END",
+            "CASE",
+            "GROUP",
+            "ORDER",
+            "BY",
+            "HAVING",
+            "UNION",
+            "ALL",
+            "EXCEPT",
+            "INTERSECT",
+            "INTO",
+            "FROM",
+            "SELECT",
+            "INSERT",
+            "UPDATE",
+            "DELETE",
+            "MERGE",
+            "VALUES",
+            "WITH",
+            "GRANT",
+            "OPTION",
+            "LOCKING",
+            "ROW",
+            "FOR",
+            "ACCESS",
+            "TABLE",
+            "VIEW",
+            "USING",
+            "MATCHED",
+            "VOLATILE",
+        }
+        for match in re_alias.finditer(sql):
+            alias_candidate = match.group(1).upper()
+            if alias_candidate not in sql_keywords:
+                known_aliases.add(alias_candidate)
+
+        # Aliases from UPDATE target
+        re_update_alias = re.compile(
+            r"\bUPDATE\s+"
+            r"(?:\{\{[A-Z][A-Z0-9_]*\}\}\s*\.\s*)?"
+            r"([A-Za-z_][A-Za-z0-9_]*)"
+            r"\s+([A-Za-z_][A-Za-z0-9_]*)",
+            re.IGNORECASE,
+        )
+        for match in re_update_alias.finditer(sql):
+            obj_name = match.group(1).upper()
+            alias_candidate = match.group(2).upper()
+            known_objects.add(obj_name)
+            if alias_candidate not in sql_keywords:
+                known_aliases.add(alias_candidate)
+
+        exclusions = known_objects | known_aliases
+
+        system_dbs = {
+            "DBC",
+            "SYSLIB",
+            "SYSUDTLIB",
+            "SYSSPATIAL",
+            "SYSJDBC",
+            "SYSBAR",
+            "TDSTATS",
+            "TDWM",
+            "SYSTEMFE",
+            "DBCMNGR",
+            "SYSADMIN",
+            "CAST",
+            "TRIM",
+            "COALESCE",
+            "CASE",
+            "WHEN",
+            "THEN",
+            "ELSE",
+            "END",
+            "AND",
+            "NOT",
+            "NULL",
+            "DATE",
+            "TIME",
+            "TIMESTAMP",
+            "INTERVAL",
+            "CHARACTER",
+            "VARCHAR",
+            "INTEGER",
+            "DECIMAL",
+            "FLOAT",
+            "BYTEINT",
+            "SMALLINT",
+            "BIGINT",
+            "LOCKING",
+            "ROW",
+            "FOR",
+            "ACCESS",
+        }
+        for match in RE_LITERAL_REF.finditer(sql):
+            db_name = match.group(1)
+            db_upper = db_name.upper()
+            if db_upper not in system_dbs and db_upper not in exclusions:
+                refs.add(db_name)
 
     return refs
 
@@ -310,6 +402,7 @@ def find_all_db_references(sql: str) -> Set[str]:
 # ---------------------------------------------------------------------------
 # Intent analysis per file
 # ---------------------------------------------------------------------------
+
 
 def analyse_file(filepath: Path, verbose: bool = False) -> Optional[Dict]:
     """
@@ -374,7 +467,7 @@ def analyse_file(filepath: Path, verbose: bool = False) -> Optional[Dict]:
         # Extract the body after the AS keyword
         as_match = re.search(r"\bAS\b", sql, re.IGNORECASE)
         if as_match:
-            body = sql[as_match.end():]
+            body = sql[as_match.end() :]
             all_refs = find_all_db_references(body)
             for db_ref in all_refs:
                 grants_map[db_ref].add(PRIV_SELECT)
@@ -382,36 +475,50 @@ def analyse_file(filepath: Path, verbose: bool = False) -> Optional[Dict]:
     # For procedures, macros, triggers, functions — parse DML intent
     elif obj_type in ("PROCEDURE", "MACRO", "TRIGGER", "FUNCTION"):
         # --- Write targets: identify databases being written to ---
+        # In SHIPS DDL, all database references are tokenised.
+        # Skip any literal matches (aliases or missing tokenisation).
 
         # INSERT targets
         for match in RE_INSERT_TARGET.finditer(sql):
             db = extract_db_ref(match)
+            if not db.startswith("{{"):
+                continue
             grants_map[db].add(PRIV_INSERT)
 
         # UPDATE targets
         for match in RE_UPDATE_TARGET.finditer(sql):
             db = extract_db_ref(match)
+            if not db.startswith("{{"):
+                continue
             grants_map[db].add(PRIV_UPDATE)
 
         # DELETE targets
         for match in RE_DELETE_TARGET.finditer(sql):
             db = extract_db_ref(match)
+            if not db.startswith("{{"):
+                continue
             grants_map[db].add(PRIV_DELETE)
 
         # MERGE targets — implies both INSERT and UPDATE
         for match in RE_MERGE_TARGET.finditer(sql):
             db = extract_db_ref(match)
+            if not db.startswith("{{"):
+                continue
             grants_map[db].add(PRIV_INSERT)
             grants_map[db].add(PRIV_UPDATE)
 
         # CALL targets — implies EXECUTE PROCEDURE
         for match in RE_CALL_TARGET.finditer(sql):
             db = extract_db_ref(match)
+            if not db.startswith("{{"):
+                continue
             grants_map[db].add(PRIV_EXEC_PROC)
 
         # EXEC/EXECUTE targets — implies EXECUTE (macros)
         for match in RE_EXEC_TARGET.finditer(sql):
             db = extract_db_ref(match)
+            if not db.startswith("{{"):
+                continue
             grants_map[db].add(PRIV_EXEC)
 
         # --- Read sources: all FROM/JOIN references → SELECT ---
@@ -428,14 +535,20 @@ def analyse_file(filepath: Path, verbose: bool = False) -> Optional[Dict]:
             # UNLESS it only appears as a CALL or EXEC target.
             # Check if this db_ref appears in a FROM/JOIN context
             # For simplicity, we add SELECT to all non-CALL/non-EXEC refs
-            if db_ref not in grants_map or grants_map[db_ref] - {PRIV_EXEC_PROC, PRIV_EXEC}:
+            if db_ref not in grants_map or grants_map[db_ref] - {
+                PRIV_EXEC_PROC,
+                PRIV_EXEC,
+            }:
                 grants_map[db_ref].add(PRIV_SELECT)
-            elif db_ref in grants_map and grants_map[db_ref] & {PRIV_EXEC_PROC, PRIV_EXEC}:
+            elif db_ref in grants_map and grants_map[db_ref] & {
+                PRIV_EXEC_PROC,
+                PRIV_EXEC,
+            }:
                 # Only CALL/EXEC — don't add SELECT unless it also appears
                 # in a FROM/JOIN context. Check explicitly.
                 from_join_pattern = re.compile(
                     r"\b(?:FROM|JOIN)\s+" + re.escape(db_ref) + r"\s*\.\s*\w+",
-                    re.IGNORECASE
+                    re.IGNORECASE,
                 )
                 if from_join_pattern.search(sql):
                     grants_map[db_ref].add(PRIV_SELECT)
@@ -443,7 +556,7 @@ def analyse_file(filepath: Path, verbose: bool = False) -> Optional[Dict]:
     # Tables don't typically reference other databases in their DDL
     elif obj_type == "TABLE":
         if verbose:
-            print(f"    Skipping TABLE — no cross-database references expected")
+            print("    Skipping TABLE — no cross-database references expected")
         return None
 
     # --- Step 3: Remove self-references ---
@@ -454,7 +567,7 @@ def analyse_file(filepath: Path, verbose: bool = False) -> Optional[Dict]:
 
     if not grants_map:
         if verbose:
-            print(f"    No cross-database grants required")
+            print("    No cross-database grants required")
         return None
 
     if verbose:
@@ -475,6 +588,7 @@ def analyse_file(filepath: Path, verbose: bool = False) -> Optional[Dict]:
 # Consolidation and .grt file generation
 # ---------------------------------------------------------------------------
 
+
 def consolidate_grants(
     results: List[Dict],
 ) -> Dict[str, Dict[str, Set[str]]]:
@@ -491,9 +605,7 @@ def consolidate_grants(
         A nested dict: {grantee: {grantor: set_of_privileges}}
     """
     # consolidated: {grantee_db: {grantor_db: set of privileges}}
-    consolidated: Dict[str, Dict[str, Set[str]]] = defaultdict(
-        lambda: defaultdict(set)
-    )
+    consolidated: Dict[str, Dict[str, Set[str]]] = defaultdict(lambda: defaultdict(set))
 
     for result in results:
         grantee = result["grantee"]
@@ -529,21 +641,21 @@ def generate_grt_content(
     # --- File header ---
     lines.append("/*")
     lines.append(f"** Implied grants for {grantee}")
-    lines.append(f"** Auto-generated by infer_grants.py from DDL intent analysis")
+    lines.append("** Auto-generated by infer_grants.py from DDL intent analysis")
     lines.append(f"** Source: SHIPS project {project_name}")
-    lines.append(f"**")
+    lines.append("**")
     lines.append(f"** Grantee: {grantee}")
-    lines.append(f"**")
-    lines.append(f"** Axiom: container-level grants derived from SQL verb")
-    lines.append(f"**         decomposition per referenced database.")
-    lines.append(f"**         Each referenced database receives only the")
-    lines.append(f"**         privilege matching the operation applied to")
-    lines.append(f"**         its objects.")
-    lines.append(f"**")
-    lines.append(f"** Contributing DDL files:")
+    lines.append("**")
+    lines.append("** Axiom: container-level grants derived from SQL verb")
+    lines.append("**         decomposition per referenced database.")
+    lines.append("**         Each referenced database receives only the")
+    lines.append("**         privilege matching the operation applied to")
+    lines.append("**         its objects.")
+    lines.append("**")
+    lines.append("** Contributing DDL files:")
     for src in sorted(sources, key=lambda s: s["file"]):
         lines.append(f"**   {src['file']} ({src['obj_type']}: {src['obj_name']})")
-    lines.append(f"*/")
+    lines.append("*/")
     lines.append("")
 
     # --- GRANT statements ---
@@ -553,10 +665,7 @@ def generate_grt_content(
         # Sort privileges in canonical order
         sorted_privs = sorted(privs, key=lambda p: PRIV_ORDER.index(p))
         priv_str = ", ".join(sorted_privs)
-        lines.append(
-            f"GRANT {priv_str} ON {grantor} "
-            f"TO {grantee} WITH GRANT OPTION;"
-        )
+        lines.append(f"GRANT {priv_str} ON {grantor} TO {grantee} WITH GRANT OPTION;")
 
     lines.append("")  # trailing newline
     return "\n".join(lines)
@@ -582,6 +691,7 @@ def grantee_filename(grantee: str) -> str:
 # ---------------------------------------------------------------------------
 # Project scanning
 # ---------------------------------------------------------------------------
+
 
 def find_ddl_files(project_dir: Path) -> List[Path]:
     """
@@ -609,6 +719,7 @@ def find_ddl_files(project_dir: Path) -> List[Path]:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     """
     Entry point for the grant inference tool.
@@ -633,7 +744,8 @@ def main():
         default=None,
         help=(
             "Directory to write .grt files to. "
-            "Defaults to <project_dir>/dcl/"
+            "Defaults to <project_dir>/payload/database/DCL/inter_db/ — the DCL "
+            "subdirectory for inter-database grants."
         ),
     )
     parser.add_argument(
@@ -663,7 +775,9 @@ def main():
         sys.exit(1)
 
     project_name = args.project_name or project_dir.name
-    output_dir = args.output_dir or (project_dir / "dcl")
+    output_dir = args.output_dir or (
+        project_dir / "payload" / "database" / "DCL" / "inter_db"
+    )
 
     # --- Step 1: Find DDL files ---
     ddl_files = find_ddl_files(project_dir)
@@ -701,9 +815,7 @@ def main():
         # Collect the source files that contributed to this grantee
         sources = [r for r in results if r["grantee"] == grantee]
 
-        content = generate_grt_content(
-            grantee, grants, sources, project_name
-        )
+        content = generate_grt_content(grantee, grants, sources, project_name)
         filename = grantee_filename(grantee)
 
         # Count total grant statements

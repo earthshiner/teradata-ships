@@ -14,6 +14,7 @@ engineering discipline rules:
     8. {{TOKENS}} used (not hardcoded database names)
     9. CREATE required (REPLACE prohibited — deployer owns idempotency)
    10. Correct file extension per object type
+   11. Object placement (views must not reference tables databases directly)
 
 Each rule's severity is configurable via inspect.conf:
     ERROR   — must fix before deployment
@@ -25,9 +26,19 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# -- Optional: Object Placement engine --
+# If object_placement.py is available, the object_placement rule
+# can validate that views do not reference tables databases directly.
+try:
+    from .object_placement import ObjectPlacement
+
+    _HAS_PLACEMENT = True
+except ImportError:
+    _HAS_PLACEMENT = False
 
 
 # ---------------------------------------------------------------
@@ -48,6 +59,9 @@ DEFAULT_RULES: Dict[str, str] = {
     "hardcoded_name": "WARNING",
     "keyword_case": "WARNING",
     "leading_commas": "WARNING",
+    "object_placement": "ERROR",
+    "public_grant_on_tables": "WARNING",
+    "review_unmapped_grants": "WARNING",
 }
 
 # -- Valid severity values --
@@ -77,30 +91,27 @@ def read_inspect_config(config_path: str) -> Dict[str, str]:
         FileNotFoundError: If the config file does not exist.
     """
     if not os.path.exists(config_path):
-        raise FileNotFoundError(
-            f"Inspect config not found: {config_path}"
-        )
+        raise FileNotFoundError(f"Inspect config not found: {config_path}")
 
     # Start with defaults
     rules = dict(DEFAULT_RULES)
 
-    with open(config_path, 'r', encoding='utf-8') as f:
+    with open(config_path, "r", encoding="utf-8") as f:
         for lineno, line in enumerate(f, 1):
             stripped = line.strip()
 
             # Skip empty lines and comments
-            if not stripped or stripped.startswith('#'):
+            if not stripped or stripped.startswith("#"):
                 continue
 
             # Split on first '='
-            if '=' not in stripped:
+            if "=" not in stripped:
                 logger.warning(
-                    "inspect.conf line %d: no '=' found, skipping: %s",
-                    lineno, stripped
+                    "inspect.conf line %d: no '=' found, skipping: %s", lineno, stripped
                 )
                 continue
 
-            name, value = stripped.split('=', 1)
+            name, value = stripped.split("=", 1)
             name = name.strip().lower()
             value = value.strip().upper()
 
@@ -109,16 +120,15 @@ def read_inspect_config(config_path: str) -> Dict[str, str]:
                     "inspect.conf line %d: invalid severity '%s' "
                     "for rule '%s' — expected ERROR, WARNING, or OFF. "
                     "Using default.",
-                    lineno, value, name
+                    lineno,
+                    value,
+                    name,
                 )
                 continue
 
             rules[name] = value
 
-    logger.info(
-        "Inspect config: %d rules loaded from %s",
-        len(rules), config_path
-    )
+    logger.info("Inspect config: %d rules loaded from %s", len(rules), config_path)
 
     return rules
 
@@ -160,88 +170,183 @@ def generate_default_config() -> str:
         f"hardcoded_name={DEFAULT_RULES['hardcoded_name']}",
         f"keyword_case={DEFAULT_RULES['keyword_case']}",
         f"leading_commas={DEFAULT_RULES['leading_commas']}",
+        "",
+        "# Object Placement rules",
+        "# object_placement: views must not reference tables databases",
+        "# directly — all access via 1:1 locking view layer.",
+        "# Requires object_placement.yaml in the project root.",
+        f"object_placement={DEFAULT_RULES['object_placement']}",
+        "",
+        "# Grant architecture rules",
+        "# public_grant_on_tables: GRANT ... TO PUBLIC on a tables",
+        "# database bypasses the placement architecture (tables are",
+        "# meant to be private). The rule allows it but warns —",
+        "# promote to ERROR if you want to forbid this entirely.",
+        f"public_grant_on_tables={DEFAULT_RULES['public_grant_on_tables']}",
+        "# review_unmapped_grants: GRANT targets a database that is",
+        "# neither a tables nor a views database in your placement",
+        "# map. Either add it to database_map in object_placement.yaml",
+        "# or confirm it's an out-of-scope database (cross-project,",
+        "# external service, etc.). System databases (DBC, SYSLIB,",
+        "# TDStats, etc.) are auto-excluded.",
+        f"review_unmapped_grants={DEFAULT_RULES['review_unmapped_grants']}",
     ]
     return "\n".join(lines) + "\n"
 
+
 # -- Forbidden type suffixes/prefixes --
 _TYPE_SUFFIX_RE = re.compile(
-    r'(?:_V|_T|_P|_VW|_SP|_TBL|_MCR|_FNC|_TRG|VW_|SP_|TBL_|FN_)\b',
+    r"(?:_V|_T|_P|_VW|_SP|_TBL|_MCR|_FNC|_TRG|VW_|SP_|TBL_|FN_)\b",
     re.IGNORECASE,
 )
 
 # -- Keywords that should be UPPERCASE --
 _KEYWORDS = [
-    'SELECT', 'FROM', 'WHERE', 'AND', 'OR', 'NOT', 'IN', 'ON',
-    'CREATE', 'TABLE', 'VIEW', 'INDEX', 'REPLACE', 'DROP',
-    'INSERT', 'INTO', 'VALUES', 'UPDATE', 'SET', 'DELETE',
-    'GRANT', 'REVOKE', 'PRIMARY', 'UNIQUE', 'FOREIGN', 'KEY',
-    'REFERENCES', 'DEFAULT', 'NULL', 'NOT', 'CHARACTER',
-    'VARCHAR', 'INTEGER', 'DECIMAL', 'DATE', 'TIMESTAMP',
-    'MULTISET', 'FALLBACK', 'JOURNAL', 'AFTER', 'BEFORE',
-    'AS', 'JOIN', 'INNER', 'LEFT', 'RIGHT', 'OUTER', 'CROSS',
-    'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'HAVING', 'GROUP',
-    'ORDER', 'BY', 'BETWEEN', 'LIKE', 'EXISTS', 'UNION', 'ALL',
-    'MERGE', 'USING', 'MATCHED',
+    "SELECT",
+    "FROM",
+    "WHERE",
+    "AND",
+    "OR",
+    "NOT",
+    "IN",
+    "ON",
+    "CREATE",
+    "TABLE",
+    "VIEW",
+    "INDEX",
+    "REPLACE",
+    "DROP",
+    "INSERT",
+    "INTO",
+    "VALUES",
+    "UPDATE",
+    "SET",
+    "DELETE",
+    "GRANT",
+    "REVOKE",
+    "PRIMARY",
+    "UNIQUE",
+    "FOREIGN",
+    "KEY",
+    "REFERENCES",
+    "DEFAULT",
+    "NULL",
+    "NOT",
+    "CHARACTER",
+    "VARCHAR",
+    "INTEGER",
+    "DECIMAL",
+    "DATE",
+    "TIMESTAMP",
+    "MULTISET",
+    "FALLBACK",
+    "JOURNAL",
+    "AFTER",
+    "BEFORE",
+    "AS",
+    "JOIN",
+    "INNER",
+    "LEFT",
+    "RIGHT",
+    "OUTER",
+    "CROSS",
+    "CASE",
+    "WHEN",
+    "THEN",
+    "ELSE",
+    "END",
+    "HAVING",
+    "GROUP",
+    "ORDER",
+    "BY",
+    "BETWEEN",
+    "LIKE",
+    "EXISTS",
+    "UNION",
+    "ALL",
+    "MERGE",
+    "USING",
+    "MATCHED",
 ]
 
 # -- Expected extensions by object type --
 _EXPECTED_EXT = {
-    'TABLE': '.tbl',
-    'VIEW': '.viw',
-    'MACRO': '.mcr',
-    'PROCEDURE': '.spl',
-    'FUNCTION': '.fnc',
-    'TRIGGER': '.trg',
-    'JOIN_INDEX': '.jix',
-    'HASH_INDEX': '.idx',
-    'INDEX': '.idx',
-    'MAP': '.map',
-    'ROLE': '.rol',
-    'PROFILE': '.prf',
-    'AUTHORIZATION': '.auth',
-    'FOREIGN_SERVER': '.fsvr',
-    'JAR': '.jcl',
-    'SCRIPT_TABLE_OPERATOR': '.sto',
+    "TABLE": ".tbl",
+    "VIEW": ".viw",
+    "MACRO": ".mcr",
+    "PROCEDURE": ".spl",
+    "FUNCTION": ".fnc",
+    "TRIGGER": ".trg",
+    "JOIN_INDEX": ".jix",
+    "HASH_INDEX": ".idx",
+    "INDEX": ".idx",
+    "MAP": ".map",
+    "ROLE": ".rol",
+    "PROFILE": ".prf",
+    "AUTHORIZATION": ".auth",
+    "FOREIGN_SERVER": ".fsvr",
+    "JAR": ".jar",
+    "SCRIPT_TABLE_OPERATOR": ".sto",
 }
 
 # -- Classification patterns (reuse from ingest) --
 _CLASSIFY_PATTERNS = [
-    (re.compile(r'CREATE\s+JOIN\s+INDEX\b', re.I), "JOIN_INDEX"),
-    (re.compile(r'CREATE\s+HASH\s+INDEX\b', re.I), "HASH_INDEX"),
-    (re.compile(r'CREATE\s+(?:UNIQUE\s+)?INDEX\b', re.I), "INDEX"),
-    (re.compile(r'(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b.*?TABLE\s+OPERATOR', re.I | re.DOTALL), "SCRIPT_TABLE_OPERATOR"),
-    (re.compile(r'(?:CREATE|REPLACE)\s+(?:MULTISET|SET)?\s*(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?(?:TRACE\s+)?TABLE\b', re.I), "TABLE"),
-    (re.compile(r'(?:CREATE|REPLACE)\s+VIEW\b', re.I), "VIEW"),
-    (re.compile(r'(?:CREATE\s+|REPLACE\s+)MACRO\b', re.I), "MACRO"),
-    (re.compile(r'(?:CREATE\s+|REPLACE\s+)PROCEDURE\b', re.I), "PROCEDURE"),
-    (re.compile(r'(?:CREATE\s+|REPLACE\s+)(?:SPECIFIC\s+)?FUNCTION\b', re.I), "FUNCTION"),
-    (re.compile(r'(?:CREATE|REPLACE)\s+TRIGGER\b', re.I), "TRIGGER"),
-    (re.compile(r'CREATE\s+MAP\b', re.I), "MAP"),
-    (re.compile(r'CREATE\s+AUTHORIZATION\b', re.I), "AUTHORIZATION"),
-    (re.compile(r'CREATE\s+FOREIGN\s+SERVER\b', re.I), "FOREIGN_SERVER"),
-    (re.compile(r'CALL\s+SQLJ\s*\.\s*(?:INSTALL_JAR|REPLACE_JAR)\s*\(', re.I), "JAR"),
+    (re.compile(r"CREATE\s+JOIN\s+INDEX\b", re.I), "JOIN_INDEX"),
+    (re.compile(r"CREATE\s+HASH\s+INDEX\b", re.I), "HASH_INDEX"),
+    (re.compile(r"CREATE\s+(?:UNIQUE\s+)?INDEX\b", re.I), "INDEX"),
+    (
+        re.compile(
+            r"(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b.*?TABLE\s+OPERATOR",
+            re.I | re.DOTALL,
+        ),
+        "SCRIPT_TABLE_OPERATOR",
+    ),
+    (
+        re.compile(
+            r"(?:CREATE|REPLACE)\s+(?:MULTISET|SET)?\s*(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?(?:TRACE\s+)?TABLE\b",
+            re.I,
+        ),
+        "TABLE",
+    ),
+    (re.compile(r"(?:CREATE|REPLACE)\s+VIEW\b", re.I), "VIEW"),
+    (re.compile(r"(?:CREATE\s+|REPLACE\s+)MACRO\b", re.I), "MACRO"),
+    (re.compile(r"(?:CREATE\s+|REPLACE\s+)PROCEDURE\b", re.I), "PROCEDURE"),
+    (
+        re.compile(r"(?:CREATE\s+|REPLACE\s+)(?:SPECIFIC\s+)?FUNCTION\b", re.I),
+        "FUNCTION",
+    ),
+    (re.compile(r"(?:CREATE|REPLACE)\s+TRIGGER\b", re.I), "TRIGGER"),
+    (re.compile(r"CREATE\s+MAP\b", re.I), "MAP"),
+    (re.compile(r"CREATE\s+AUTHORIZATION\b", re.I), "AUTHORIZATION"),
+    (re.compile(r"CREATE\s+FOREIGN\s+SERVER\b", re.I), "FOREIGN_SERVER"),
+    (re.compile(r"CALL\s+SQLJ\s*\.\s*(?:INSTALL_JAR|REPLACE_JAR)\s*\(", re.I), "JAR"),
 ]
 
 # -- System-scope types: no database qualifier, no tokens expected --
 _SYSTEM_SCOPE_TYPES = {
-    "MAP", "ROLE", "PROFILE", "AUTHORIZATION", "FOREIGN_SERVER",
+    "MAP",
+    "ROLE",
+    "PROFILE",
+    "AUTHORIZATION",
+    "FOREIGN_SERVER",
 }
 
 # -- Qualified name extraction --
 _QUALIFIED_NAME_RE = re.compile(
-    r'(?:CREATE|REPLACE)\s+(?:MULTISET\s+|SET\s+)?'
-    r'(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?'
-    r'(?:TRACE\s+)?'
-    r'(?:SPECIFIC\s+)?'
-    r'(?:TABLE|VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER|'
-    r'JOIN\s+INDEX|HASH\s+INDEX)\s+'
+    r"(?:CREATE|REPLACE)\s+(?:MULTISET\s+|SET\s+)?"
+    r"(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?"
+    r"(?:TRACE\s+)?"
+    r"(?:SPECIFIC\s+)?"
+    r"(?:TABLE|VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER|"
+    r"JOIN\s+INDEX|HASH\s+INDEX)\s+"
     r'("?[A-Za-z_]\w*"?(?:\."?[A-Za-z_]\w*"?)?)',
     re.IGNORECASE,
 )
 
 # -- SET/MULTISET detection --
 _HAS_SET_MULTISET_RE = re.compile(
-    r'CREATE\s+(?:MULTISET|SET)\s+', re.I,
+    r"CREATE\s+(?:MULTISET|SET)\s+",
+    re.I,
 )
 
 # -- REPLACE detection (prohibited — deployer owns idempotency) --
@@ -258,13 +363,102 @@ _LEADING_REPLACE_RE = re.compile(
 )
 
 # -- Token detection --
-_TOKEN_RE = re.compile(r'\{\{([A-Za-z_][A-Za-z0-9_-]*)\}\}')
+_TOKEN_RE = re.compile(r"\{\{([A-Za-z_][A-Za-z0-9_-]*)\}\}")
 
 # -- Multi-statement detection --
 _STATEMENT_START_RE = re.compile(
-    r'^\s*(?:CREATE|REPLACE|DROP|GRANT|REVOKE|ALTER|INSERT|UPDATE|DELETE|MERGE)\b',
+    r"^\s*(?:CREATE|REPLACE|DROP|GRANT|REVOKE|ALTER|INSERT|UPDATE|DELETE|MERGE)\b",
     re.IGNORECASE | re.MULTILINE,
 )
+
+# ---------------------------------------------------------------
+# Grant rule infrastructure — shared by:
+#   _check_public_grant_on_tables
+#   _check_unmapped_grants
+# ---------------------------------------------------------------
+
+# Identifier shape — accepts the three forms that appear in GRANT
+# targets: tokens, Teradata-quoted ids, and bare ids.
+_GRANT_IDENT = r'(?:\{\{[A-Za-z_]\w*\}\}|"[^"]+"|[A-Za-z_]\w*)'
+
+# Full GRANT statement. Captures privileges, target (db or db.obj),
+# and grantees. Permissive on whitespace so multi-line GRANTs match.
+_GRANT_STMT_RE = re.compile(
+    rf"""
+    \bGRANT\b\s+
+    (?P<privileges>.+?)
+    \s+\bON\b\s+
+    (?P<target>
+        {_GRANT_IDENT}                # database part
+        (?:\s*\.\s*{_GRANT_IDENT}     # optional .object_name
+            (?:\s*\([^)]*\))?         # optional (arg_type_list)
+        )?
+    )
+    \s+\bTO\b\s+
+    (?P<grantees>.+?)
+    (?:\s+\bWITH\b\s+\bGRANT\b\s+\bOPTION\b)?
+    \s*;
+    """,
+    re.IGNORECASE | re.VERBOSE | re.DOTALL,
+)
+
+# Detect PUBLIC as a standalone grantee. Word boundaries prevent
+# false positives on identifiers like 'PUBLIC_REPORTING_ROLE'.
+_GRANT_PUBLIC_GRANTEE_RE = re.compile(r"\bPUBLIC\b", re.IGNORECASE)
+
+# Teradata system databases auto-excluded from the unmapped-grants
+# rule. These are well-known system catalogs and libraries that
+# legitimately appear in cross-database grants but are never going
+# to be in a project's placement map. Comparison is upper-case
+# (Teradata identifiers are case-insensitive).
+#
+# 'ALL' is included to handle 'GRANT LOGON ON ALL ...' where ALL
+# is a Teradata keyword for "all hosts", not a database name.
+_TERADATA_SYSTEM_DATABASES = frozenset(
+    s.upper()
+    for s in (
+        "DBC",
+        "SYSLIB",
+        "SystemFe",
+        "SQLJ",
+        "SYSUDTLIB",
+        "TDStats",
+        "TD_SERVER_DB",
+        "TD_SYSGPL",
+        "TD_SYSXML",
+        "TD_SYSFNLIB",
+        "console",
+        "crashdumps",
+        "LockLogShredder",
+        "TDQCM",
+        "TDQCD",
+        "TDPUSER",
+        "TDMAPS",
+        "Sys_Calendar",
+        "ALL",  # for GRANT LOGON ON ALL ...
+    )
+)
+
+
+def _extract_grant_database(target: str) -> str:
+    """
+    Extract the database part of a GRANT target.
+
+    Examples::
+
+        'D01_MP_OBS_T'           → 'D01_MP_OBS_T'
+        'D01_MP_OBS_T.MyTable'   → 'D01_MP_OBS_T'
+        '{{OBS_DATABASE_T}}'     → '{{OBS_DATABASE_T}}'
+        '"DBC"'                  → '"DBC"'  (quoted form preserved
+                                              — caller strips quotes
+                                              before comparison)
+
+    Tokens and quoted identifiers cannot contain ``.``, so a simple
+    split-on-first-dot is correct for all three identifier forms.
+    """
+    if "." in target:
+        return target.split(".", 1)[0].strip()
+    return target.strip()
 
 
 @dataclass
@@ -273,7 +467,7 @@ class ValidationIssue:
 
     file: str
     rule: str
-    severity: str       # 'ERROR' or 'WARNING'
+    severity: str  # 'ERROR' or 'WARNING'
     message: str
     line: Optional[int] = None
 
@@ -299,6 +493,7 @@ def validate_directory(
     source_dir: str,
     rules_config: Dict[str, str] = None,
     strict: bool = False,
+    placement: "ObjectPlacement" = None,
 ) -> ValidationResult:
     """
     Validate all DDL files in a directory against the Coding Discipline.
@@ -310,6 +505,9 @@ def validate_directory(
                         Load from inspect.conf via read_inspect_config().
         strict:         If True, all WARNING rules are promoted to
                         ERROR. OFF rules remain off even in strict mode.
+        placement:      Optional ObjectPlacement engine for the
+                        object_placement rule. If None, the rule is
+                        skipped silently.
 
     Returns:
         ValidationResult with per-file issues.
@@ -332,20 +530,38 @@ def validate_directory(
     for root, dirs, filenames in os.walk(source_dir):
         dirs.sort()
         for f in sorted(filenames):
-            if f.startswith('.') or f.startswith('_'):
+            if f.startswith(".") or f.startswith("_"):
                 continue
             ext = os.path.splitext(f)[1].lower()
-            if ext in ('.tbl', '.viw', '.spl', '.mcr', '.fnc', '.trg',
-                        '.jix', '.idx', '.db', '.sql', '.ddl',
-                        '.map', '.rol', '.prf', '.auth', '.fsvr',
-                        '.sto', '.jcl', '.dcl', '.usr'):
+            if ext in (
+                ".tbl",
+                ".viw",
+                ".spl",
+                ".mcr",
+                ".fnc",
+                ".trg",
+                ".jix",
+                ".idx",
+                ".db",
+                ".sql",
+                ".ddl",
+                ".map",
+                ".rol",
+                ".prf",
+                ".auth",
+                ".fsvr",
+                ".sto",
+                ".jar",
+                ".dcl",
+                ".usr",
+            ):
                 files.append(os.path.join(root, f))
 
     result.files_scanned = len(files)
 
     for file_path in files:
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 content = f.read()
         except UnicodeDecodeError:
             continue
@@ -364,6 +580,15 @@ def validate_directory(
         file_issues.extend(_check_hardcoded_names(rel_path, content))
         file_issues.extend(_check_keyword_case(rel_path, content))
         file_issues.extend(_check_leading_commas(rel_path, content))
+        file_issues.extend(
+            _check_object_placement(rel_path, content, file_path, placement)
+        )
+        file_issues.extend(
+            _check_public_grant_on_tables(rel_path, content, file_path, placement)
+        )
+        file_issues.extend(
+            _check_unmapped_grants(rel_path, content, file_path, placement)
+        )
 
         # -- Apply rule config: remap severity or drop OFF rules --
         # INFO issues are informational and not configurable —
@@ -391,8 +616,11 @@ def validate_directory(
 
     logger.info(
         "Validation: %d files, %d passed, %d with issues (%d errors, %d warnings)",
-        result.files_scanned, result.files_passed,
-        result.files_with_issues, result.errors, result.warnings,
+        result.files_scanned,
+        result.files_passed,
+        result.files_with_issues,
+        result.errors,
+        result.warnings,
     )
 
     return result
@@ -401,6 +629,7 @@ def validate_directory(
 # ---------------------------------------------------------------
 # Individual checks
 # ---------------------------------------------------------------
+
 
 def _check_db_qualifier(rel_path: str, content: str) -> List[ValidationIssue]:
     """
@@ -419,33 +648,46 @@ def _check_db_qualifier(rel_path: str, content: str) -> List[ValidationIssue]:
 
     match = _QUALIFIED_NAME_RE.search(content)
     if match:
-        name = match.group(1).replace('"', '')
-        if '.' not in name:
-            return [ValidationIssue(
-                file=rel_path, rule="db_qualifier", severity="ERROR",
-                message=f"Object '{name}' missing database qualifier. "
-                        f"Use Database.{name} syntax.",
-            )]
+        name = match.group(1).replace('"', "")
+        if "." not in name:
+            return [
+                ValidationIssue(
+                    file=rel_path,
+                    rule="db_qualifier",
+                    severity="ERROR",
+                    message=f"Object '{name}' missing database qualifier. "
+                    f"Use Database.{name} syntax.",
+                )
+            ]
     return []
 
 
 def _check_multiset(rel_path: str, content: str) -> List[ValidationIssue]:
     """Check that tables specify SET or MULTISET."""
     # Only applies to CREATE TABLE statements
-    if not re.search(r'CREATE\s+(?:MULTISET\s+|SET\s+)?(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?(?:TRACE\s+)?TABLE\b',
-                      content, re.I):
+    if not re.search(
+        r"CREATE\s+(?:MULTISET\s+|SET\s+)?(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?(?:TRACE\s+)?TABLE\b",
+        content,
+        re.I,
+    ):
         return []
 
     if not _HAS_SET_MULTISET_RE.search(content):
-        return [ValidationIssue(
-            file=rel_path, rule="set_multiset", severity="WARNING",
-            message="CREATE TABLE without SET/MULTISET. "
-                    "MULTISET will be auto-injected at build time.",
-        )]
+        return [
+            ValidationIssue(
+                file=rel_path,
+                rule="set_multiset",
+                severity="WARNING",
+                message="CREATE TABLE without SET/MULTISET. "
+                "MULTISET will be auto-injected at build time.",
+            )
+        ]
     return []
 
 
-def _check_deploy_intent(rel_path: str, content: str, strict: bool = False) -> List[ValidationIssue]:
+def _check_deploy_intent(
+    rel_path: str, content: str, strict: bool = False
+) -> List[ValidationIssue]:
     """
     Enforce CREATE over REPLACE for all replaceable object types.
 
@@ -474,17 +716,19 @@ def _check_deploy_intent(rel_path: str, content: str, strict: bool = False) -> L
         empty list if the file uses CREATE (correct).
     """
     if _LEADING_REPLACE_RE.search(content):
-        return [ValidationIssue(
-            file=rel_path,
-            rule="deploy_intent",
-            severity="ERROR",
-            message=(
-                "Uses REPLACE — use CREATE instead. "
-                "The deployer handles idempotency via "
-                "DROP-and-CREATE with automatic rollback. "
-                "REPLACE overwrites silently with no backup."
-            ),
-        )]
+        return [
+            ValidationIssue(
+                file=rel_path,
+                rule="deploy_intent",
+                severity="ERROR",
+                message=(
+                    "Uses REPLACE — use CREATE instead. "
+                    "The deployer handles idempotency via "
+                    "DROP-and-CREATE with automatic rollback. "
+                    "REPLACE overwrites silently with no backup."
+                ),
+            )
+        ]
     return []
 
 
@@ -493,37 +737,49 @@ def _check_one_object(rel_path: str, content: str) -> List[ValidationIssue]:
     matches = _STATEMENT_START_RE.findall(content)
     # Filter out sub-statements inside procedures (BEGIN...END blocks)
     if len(matches) > 2:
-        return [ValidationIssue(
-            file=rel_path, rule="one_object", severity="WARNING",
-            message=f"File contains {len(matches)} DDL statements. "
-                    f"Discipline requires one object per file.",
-        )]
+        return [
+            ValidationIssue(
+                file=rel_path,
+                rule="one_object",
+                severity="WARNING",
+                message=f"File contains {len(matches)} DDL statements. "
+                f"Discipline requires one object per file.",
+            )
+        ]
     return []
 
 
-def _check_eponymous(rel_path: str, content: str, file_path: str) -> List[ValidationIssue]:
+def _check_eponymous(
+    rel_path: str, content: str, file_path: str
+) -> List[ValidationIssue]:
     """Check that filename matches the DDL's Database.ObjectName."""
     match = _QUALIFIED_NAME_RE.search(content)
     if not match:
         return []
 
-    qualified = match.group(1).replace('"', '')
+    qualified = match.group(1).replace('"', "")
     basename = os.path.splitext(os.path.basename(file_path))[0]
 
     # Allow {{TOKENS}} in names — they'll be resolved at build time
-    if '{{' in basename or '{{' in qualified:
+    if "{{" in basename or "{{" in qualified:
         return []
 
     if basename.upper() != qualified.upper():
-        return [ValidationIssue(
-            file=rel_path, rule="eponymous", severity="WARNING",
-            message=f"Filename '{basename}' does not match "
-                    f"DDL object '{qualified}'.",
-        )]
+        return [
+            ValidationIssue(
+                file=rel_path,
+                rule="eponymous",
+                severity="WARNING",
+                message=f"Filename '{basename}' does not match "
+                f"DDL object '{qualified}'.",
+            )
+        ]
     return []
 
 
-def _check_extension(rel_path: str, content: str, file_path: str) -> List[ValidationIssue]:
+def _check_extension(
+    rel_path: str, content: str, file_path: str
+) -> List[ValidationIssue]:
     """Check that file extension matches the object type."""
     obj_type = None
     for pattern, otype in _CLASSIFY_PATTERNS:
@@ -540,11 +796,14 @@ def _check_extension(rel_path: str, content: str, file_path: str) -> List[Valida
 
     actual = os.path.splitext(file_path)[1].lower()
     if actual != expected:
-        return [ValidationIssue(
-            file=rel_path, rule="extension", severity="WARNING",
-            message=f"Extension '{actual}' — expected '{expected}' "
-                    f"for {obj_type}.",
-        )]
+        return [
+            ValidationIssue(
+                file=rel_path,
+                rule="extension",
+                severity="WARNING",
+                message=f"Extension '{actual}' — expected '{expected}' for {obj_type}.",
+            )
+        ]
     return []
 
 
@@ -554,17 +813,21 @@ def _check_type_suffixes(rel_path: str, content: str) -> List[ValidationIssue]:
     if not match:
         return []
 
-    qualified = match.group(1).replace('"', '')
-    parts = qualified.split('.')
+    qualified = match.group(1).replace('"', "")
+    parts = qualified.split(".")
     obj_name = parts[-1]
 
     if _TYPE_SUFFIX_RE.search(obj_name):
-        return [ValidationIssue(
-            file=rel_path, rule="type_suffix", severity="ERROR",
-            message=f"Object name '{obj_name}' contains a type suffix "
-                    f"(_V, _T, VW_, etc.). Object type belongs in the "
-                    f"database name, not the object name.",
-        )]
+        return [
+            ValidationIssue(
+                file=rel_path,
+                rule="type_suffix",
+                severity="ERROR",
+                message=f"Object name '{obj_name}' contains a type suffix "
+                f"(_V, _T, VW_, etc.). Object type belongs in the "
+                f"database name, not the object name.",
+            )
+        ]
     return []
 
 
@@ -589,19 +852,29 @@ def _check_hardcoded_names(rel_path: str, content: str) -> List[ValidationIssue]
     # Check if there's a qualified name without tokens
     match = _QUALIFIED_NAME_RE.search(content)
     if match:
-        qualified = match.group(1).replace('"', '')
-        parts = qualified.split('.')
+        qualified = match.group(1).replace('"', "")
+        parts = qualified.split(".")
         if len(parts) == 2:
             db_name = parts[0]
             # Skip system databases
-            system_dbs = {'DBC', 'SYSUDTLIB', 'SYSLIB', 'SYSJDBC',
-                          'TD_SYSFNLIB', 'TDSTATS'}
+            system_dbs = {
+                "DBC",
+                "SYSUDTLIB",
+                "SYSLIB",
+                "SYSJDBC",
+                "TD_SYSFNLIB",
+                "TDSTATS",
+            }
             if db_name.upper() not in system_dbs:
-                return [ValidationIssue(
-                    file=rel_path, rule="hardcoded_name", severity="WARNING",
-                    message=f"Database name '{db_name}' appears hardcoded. "
-                            f"Consider using a {{{{TOKEN}}}} for environment portability.",
-                )]
+                return [
+                    ValidationIssue(
+                        file=rel_path,
+                        rule="hardcoded_name",
+                        severity="WARNING",
+                        message=f"Database name '{db_name}' appears hardcoded. "
+                        f"Consider using a {{{{TOKEN}}}} for environment portability.",
+                    )
+                ]
     return []
 
 
@@ -617,7 +890,7 @@ def _check_keyword_case(rel_path: str, content: str) -> List[ValidationIssue]:
     lowercase = 0
 
     # Check each word in the content against the keyword list
-    words = re.findall(r'\b[A-Za-z]+\b', content)
+    words = re.findall(r"\b[A-Za-z]+\b", content)
     for word in words:
         if word.upper() in _KEYWORDS:
             total += 1
@@ -627,11 +900,15 @@ def _check_keyword_case(rel_path: str, content: str) -> List[ValidationIssue]:
                 lowercase += 1
 
     if total > 5 and lowercase / total > 0.3:
-        return [ValidationIssue(
-            file=rel_path, rule="keyword_case", severity="WARNING",
-            message=f"{lowercase}/{total} SQL keywords are lowercase. "
-                    f"Discipline requires UPPERCASE keywords.",
-        )]
+        return [
+            ValidationIssue(
+                file=rel_path,
+                rule="keyword_case",
+                severity="WARNING",
+                message=f"{lowercase}/{total} SQL keywords are lowercase. "
+                f"Discipline requires UPPERCASE keywords.",
+            )
+        ]
     return []
 
 
@@ -643,22 +920,459 @@ def _check_leading_commas(rel_path: str, content: str) -> List[ValidationIssue]:
     definition on the next line. If more trailing commas than leading,
     reports a warning.
     """
-    lines = content.split('\n')
+    lines = content.split("\n")
     trailing = 0
     leading = 0
 
     for i, line in enumerate(lines):
         stripped = line.rstrip()
-        if stripped.endswith(','):
+        if stripped.endswith(","):
             trailing += 1
-        if stripped.lstrip().startswith(','):
+        if stripped.lstrip().startswith(","):
             leading += 1
 
     # Only report if there's a clear trailing pattern
     if trailing > 3 and leading == 0:
-        return [ValidationIssue(
-            file=rel_path, rule="leading_commas", severity="WARNING",
-            message=f"{trailing} trailing commas found. "
-                    f"Discipline requires leading commas.",
-        )]
+        return [
+            ValidationIssue(
+                file=rel_path,
+                rule="leading_commas",
+                severity="WARNING",
+                message=f"{trailing} trailing commas found. "
+                f"Discipline requires leading commas.",
+            )
+        ]
     return []
+
+
+# ---------------------------------------------------------------
+# Object Placement rule
+# ---------------------------------------------------------------
+
+# Marker comments that identify a 1:1 locking view. If found in
+# the file header (first 20 lines), the view is exempt from the
+# object_placement rule because it legitimately references the
+# tables database.
+#
+# The recommended marker is:  -- LOCKING VIEW
+_LOCKING_VIEW_MARKERS = [
+    re.compile(r"--\s*LOCKING\s+VIEW", re.IGNORECASE),
+    re.compile(r"--\s*1:1\s+VIEW", re.IGNORECASE),
+    re.compile(r"--\s*DIRTY\s+READ\s+VIEW", re.IGNORECASE),
+]
+
+# Database-qualified reference: DATABASE.OBJECT
+# Also matches {{TOKEN}}.OBJECT for tokenised DDL.
+_IDENT_OR_TOKEN_RE = r'(\{\{[A-Za-z_]\w*\}\}|"?[A-Za-z_]\w*"?)'
+_DB_QUALIFIED_REF_RE = re.compile(
+    r"(?<![.\w])" + _IDENT_OR_TOKEN_RE + r"\." + _IDENT_OR_TOKEN_RE + r"(?![.\w])",
+    re.IGNORECASE,
+)
+
+# Patterns for excluding comments and string literals from analysis
+_LINE_COMMENT_RE = re.compile(r"--.*$", re.MULTILINE)
+_BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+_STRING_LITERAL_RE = re.compile(r"'(?:[^']|'')*'")
+
+
+def _build_exclusion_mask(text: str) -> List[bool]:
+    """
+    Build a boolean mask marking positions inside comments or
+    string literals as True (excluded from analysis).
+
+    Args:
+        text: The full SQL text of the file.
+
+    Returns:
+        List of booleans, one per character. True = excluded.
+    """
+    mask = [False] * len(text)
+    for pattern in (_BLOCK_COMMENT_RE, _LINE_COMMENT_RE, _STRING_LITERAL_RE):
+        for match in pattern.finditer(text):
+            for i in range(match.start(), match.end()):
+                mask[i] = True
+    return mask
+
+
+def _is_locking_view(content: str) -> bool:
+    """
+    Determine whether the SQL content represents a 1:1 locking view.
+
+    Detection is based on marker comments in the first 20 lines
+    of the file header. The recommended marker is ``-- LOCKING VIEW``.
+    Markers are checked case-insensitively.
+
+    Args:
+        content: The full SQL text of the view file.
+
+    Returns:
+        True if the file is identified as a 1:1 locking view.
+    """
+    header = "\n".join(content.split("\n")[:20])
+    return any(marker.search(header) for marker in _LOCKING_VIEW_MARKERS)
+
+
+def _strip_identifier_quotes(identifier: str) -> str:
+    """Remove surrounding double quotes from a Teradata identifier."""
+    if identifier.startswith('"') and identifier.endswith('"'):
+        return identifier[1:-1]
+    return identifier
+
+
+def _check_object_placement(
+    rel_path: str,
+    content: str,
+    file_path: str,
+    placement: "ObjectPlacement" = None,
+) -> List[ValidationIssue]:
+    """
+    Check that .viw files do not reference tables databases directly.
+
+    All view access should go through the 1:1 locking view layer in
+    the views database. This rule is only active when:
+
+        1. An ObjectPlacement engine is provided (from object_placement.yaml).
+        2. The placement strategy has locking_views enabled.
+        3. The file is a .viw file.
+        4. The file is NOT a 1:1 locking view (exempt by
+           ``-- LOCKING VIEW`` header marker).
+
+    Args:
+        rel_path:  Relative path of the file being checked.
+        content:   Raw file content.
+        file_path: Absolute path of the file.
+        placement: Optional ObjectPlacement engine. If None, the
+                   rule is skipped silently.
+
+    Returns:
+        List of ValidationIssue — one per offending reference.
+    """
+    # -- Guard clauses: skip when the rule does not apply --
+
+    # No placement engine → rule is inactive
+    if placement is None:
+        return []
+
+    # Module not available → rule is inactive
+    if not _HAS_PLACEMENT:
+        return []
+
+    # Only applies when locking views are enabled
+    if not placement.locking_views:
+        return []
+
+    # Colocated strategy has no database separation
+    if placement.strategy == "colocated":
+        return []
+
+    # Only validate .viw files
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext != ".viw":
+        return []
+
+    # Exempt 1:1 locking views (they legitimately reference _T)
+    if _is_locking_view(content):
+        return []
+
+    # -- Scan for database-qualified references to tables databases --
+    exclusion_mask = _build_exclusion_mask(content)
+    issues: List[ValidationIssue] = []
+
+    for match in _DB_QUALIFIED_REF_RE.finditer(content):
+        # Skip if inside a comment or string literal
+        if exclusion_mask[match.start()]:
+            continue
+
+        raw_db = match.group(1)
+        db_name = _strip_identifier_quotes(raw_db)
+
+        # Check if this database matches the tables pattern
+        if not placement.is_tables_database(db_name):
+            continue
+
+        line_num = content[: match.start()].count("\n") + 1
+        qualified_ref = match.group(0)
+
+        # Build the suggestion with the correct views database
+        try:
+            views_db = placement.resolve_views_database(db_name)
+            suggestion = (
+                f"Change '{db_name}' to '{views_db}' so the view "
+                f"reads from the 1:1 locking view layer."
+            )
+        except Exception:
+            suggestion = "Views must not reference tables databases directly."
+
+        issues.append(
+            ValidationIssue(
+                file=rel_path,
+                rule="object_placement",
+                severity="ERROR",
+                line=line_num,
+                message=(
+                    f"Direct reference to tables database "
+                    f"'{db_name}' in '{qualified_ref}'. {suggestion}"
+                ),
+            )
+        )
+
+    return issues
+
+
+def _check_public_grant_on_tables(
+    rel_path: str,
+    content: str,
+    file_path: str,
+    placement: "ObjectPlacement" = None,
+) -> List[ValidationIssue]:
+    """
+    Flag GRANT ... TO PUBLIC statements that target a tables database.
+
+    Tables databases are architecturally private under the SHIPS
+    placement standard — read access should flow through the views
+    database's locking-view layer. A grant to PUBLIC on a tables
+    database bypasses that architecture, exposing every underlying
+    table to all users.
+
+    The rule is conservative — it only fires when:
+
+        1. An ObjectPlacement engine is provided.
+        2. The placement strategy is NOT 'colocated' (which has no
+           tables/views distinction to enforce).
+        3. The file is a .grt file.
+        4. A GRANT statement's grantee list includes PUBLIC (matched
+           with word boundaries — 'PUBLIC_REPORTING_ROLE' does not
+           trigger the rule).
+        5. The GRANT's target database matches a known tables
+           database per the placement engine.
+
+    Tokenised forms (e.g. ``{{OBS_DATABASE_T}}``) are recognised
+    when they appear in the placement's ``database_map``.
+
+    Args:
+        rel_path:  Relative path of the file being checked.
+        content:   Raw file content.
+        file_path: Absolute path of the file (used for extension check).
+        placement: Optional ObjectPlacement engine. If None, the
+                   rule is skipped silently.
+
+    Returns:
+        List of ValidationIssue — one per offending GRANT statement.
+    """
+    # -- Guard clauses: skip when the rule does not apply --
+
+    if placement is None or not _HAS_PLACEMENT:
+        return []
+
+    if placement.strategy == "colocated":
+        return []
+
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext != ".grt":
+        return []
+
+    # -- Scan GRANT statements, skipping any inside comments/strings --
+    exclusion_mask = _build_exclusion_mask(content)
+    issues: List[ValidationIssue] = []
+
+    for match in _GRANT_STMT_RE.finditer(content):
+        if exclusion_mask[match.start()]:
+            continue
+
+        grantees = match.group("grantees")
+        if not _GRANT_PUBLIC_GRANTEE_RE.search(grantees):
+            continue
+
+        target = match.group("target")
+        database = _extract_grant_database(target)
+        db_unquoted = _strip_identifier_quotes(database)
+
+        if not placement.is_tables_database(db_unquoted):
+            continue
+
+        line_num = content[: match.start()].count("\n") + 1
+        issues.append(
+            ValidationIssue(
+                file=rel_path,
+                rule="public_grant_on_tables",
+                severity="WARNING",
+                line=line_num,
+                message=(
+                    f"GRANT ... TO PUBLIC on tables database "
+                    f"'{database}'. Tables databases are architecturally "
+                    f"private under the SHIPS placement standard — read "
+                    f"access should flow through the views layer. If "
+                    f"this grant is intentional (e.g. cross-database "
+                    f"service users, batch processing accounts), "
+                    f"consider granting on the corresponding views "
+                    f"database instead, or restrict the grantee to a "
+                    f"specific role rather than PUBLIC."
+                ),
+            )
+        )
+
+    return issues
+
+
+def _check_unmapped_grants(
+    rel_path: str,
+    content: str,
+    file_path: str,
+    placement: "ObjectPlacement" = None,
+) -> List[ValidationIssue]:
+    """
+    Flag GRANT statements targeting databases not in the placement map.
+
+    Surfaces grants where the target database is neither a tables
+    database nor a views database per the placement configuration.
+    These warrant review — either the database belongs in the
+    placement map and was missed, or the grant is intentionally
+    targeting an out-of-scope database (e.g. cross-project grant,
+    external service database) and the warning can be silenced for
+    that file or the rule disabled.
+
+    Skip conditions:
+
+        1. No ObjectPlacement engine provided.
+        2. Placement strategy is 'colocated' (no map to be 'in').
+        3. File is not a .grt file.
+        4. Target database is in the Teradata system-database
+           allowlist (DBC, SYSLIB, TDStats, etc.).
+        5. Target database IS in the placement map (as either a
+           tables or views database).
+
+    Args:
+        rel_path:  Relative path of the file being checked.
+        content:   Raw file content.
+        file_path: Absolute path of the file.
+        placement: Optional ObjectPlacement engine. If None, the
+                   rule is skipped silently.
+
+    Returns:
+        List of ValidationIssue — one per unmapped GRANT target.
+    """
+    # -- Guard clauses --
+
+    if placement is None or not _HAS_PLACEMENT:
+        return []
+
+    if placement.strategy == "colocated":
+        return []
+
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext != ".grt":
+        return []
+
+    # -- Scan GRANT statements --
+    exclusion_mask = _build_exclusion_mask(content)
+    issues: List[ValidationIssue] = []
+
+    for match in _GRANT_STMT_RE.finditer(content):
+        if exclusion_mask[match.start()]:
+            continue
+
+        target = match.group("target")
+        database = _extract_grant_database(target)
+        db_unquoted = _strip_identifier_quotes(database)
+        db_upper = db_unquoted.upper()
+
+        # System databases bypass the rule entirely
+        if db_upper in _TERADATA_SYSTEM_DATABASES:
+            continue
+
+        # Known tables or views database — already in the map
+        if placement.is_tables_database(db_unquoted):
+            continue
+        if placement.is_views_database(db_unquoted):
+            continue
+
+        line_num = content[: match.start()].count("\n") + 1
+        issues.append(
+            ValidationIssue(
+                file=rel_path,
+                rule="review_unmapped_grants",
+                severity="WARNING",
+                line=line_num,
+                message=(
+                    f"GRANT targets database '{database}' which is "
+                    f"not in the placement map (neither tables nor "
+                    f"views). Either add it to the database_map in "
+                    f"object_placement.yaml, or confirm this is an "
+                    f"out-of-scope database (e.g. cross-project "
+                    f"grant, external service database). Well-known "
+                    f"Teradata system databases (DBC, SYSLIB, "
+                    f"TDStats, etc.) are auto-excluded."
+                ),
+            )
+        )
+
+    return issues
+
+
+# ---------------------------------------------------------------
+# Public API — wrappers for external callers
+# ---------------------------------------------------------------
+#
+# These wrappers exist so external tools and tests can run individual
+# rules against a single file without going through validate_directory.
+# Internally they delegate to the same _check_* functions used by the
+# dispatcher, so behaviour is identical — but the wrappers handle file
+# I/O and accept a severity override that bypasses the inspect.conf
+# dispatch loop.
+
+
+def validate_object_placement(
+    path,
+    placement,
+    severity: str = "ERROR",
+) -> List[ValidationIssue]:
+    """
+    Validate a single file's object placement (public API).
+
+    External wrapper around ``_check_object_placement``. Reads the
+    file, runs the check, and applies the requested severity. Used by
+    migration tools and integration tests that need to validate one
+    file at a time.
+
+    Args:
+        path:      Path to the file to validate (str or Path).
+        placement: Configured ObjectPlacement engine.
+        severity:  Severity to emit on violations. Defaults to ERROR
+                   to match the dispatcher's default. Pass 'WARNING'
+                   to soften.
+
+    Returns:
+        List of ValidationIssue. Empty if the file passes, can't be
+        read, or the rule does not apply.
+    """
+    file_path = str(path)
+    rel_path = os.path.basename(file_path)
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except (OSError, UnicodeDecodeError):
+        return []
+
+    issues = _check_object_placement(rel_path, content, file_path, placement)
+    if severity != "ERROR":
+        for issue in issues:
+            issue.severity = severity
+    return issues
+
+
+def is_locking_view(content: str) -> bool:
+    """
+    Public alias for the 1:1 locking-view header detector.
+
+    A view is treated as a locking view (and exempted from the
+    object_placement rule) when its first 20 lines contain one of
+    the recognised marker comments — see ``_LOCKING_VIEW_MARKERS``.
+
+    Args:
+        content: Full SQL text of the .viw file.
+
+    Returns:
+        True if the file is identified as a 1:1 locking view.
+    """
+    return _is_locking_view(content)

@@ -12,7 +12,6 @@ Covers:
     - Edge cases from real-world bugs
 """
 
-import os
 import pytest
 
 from ddl_deployer.ddl_parser import (
@@ -35,6 +34,7 @@ from ddl_deployer.models import (
 # Object type detection
 # ---------------------------------------------------------------
 
+
 class TestDetectObjectType:
     """Tests for _detect_object_type pattern matching."""
 
@@ -55,7 +55,9 @@ class TestDetectObjectType:
 
     def test_create_volatile_table(self):
         """CREATE MULTISET VOLATILE TABLE → TABLE."""
-        obj_type, _ = _detect_object_type("CREATE MULTISET VOLATILE TABLE MyDB.T (Id INT);")
+        obj_type, _ = _detect_object_type(
+            "CREATE MULTISET VOLATILE TABLE MyDB.T (Id INT);"
+        )
         assert obj_type == ObjectType.TABLE
 
     def test_create_global_temporary_trace_table(self):
@@ -86,32 +88,44 @@ class TestDetectObjectType:
 
     def test_replace_function(self):
         """REPLACE FUNCTION → FUNCTION."""
-        obj_type, _ = _detect_object_type("REPLACE FUNCTION MyDB.F(x INT) RETURNS INT RETURN x;")
+        obj_type, _ = _detect_object_type(
+            "REPLACE FUNCTION MyDB.F(x INT) RETURNS INT RETURN x;"
+        )
         assert obj_type == ObjectType.FUNCTION
 
     def test_replace_specific_function(self):
         """REPLACE SPECIFIC FUNCTION → FUNCTION."""
-        obj_type, _ = _detect_object_type("REPLACE SPECIFIC FUNCTION MyDB.F_Int RETURNS INT RETURN 1;")
+        obj_type, _ = _detect_object_type(
+            "REPLACE SPECIFIC FUNCTION MyDB.F_Int RETURNS INT RETURN 1;"
+        )
         assert obj_type == ObjectType.FUNCTION
 
     def test_create_trigger(self):
         """CREATE TRIGGER → TRIGGER."""
-        obj_type, _ = _detect_object_type("CREATE TRIGGER MyDB.trg AFTER INSERT ON MyDB.T (SELECT 1;);")
+        obj_type, _ = _detect_object_type(
+            "CREATE TRIGGER MyDB.trg AFTER INSERT ON MyDB.T (SELECT 1;);"
+        )
         assert obj_type == ObjectType.TRIGGER
 
     def test_replace_trigger(self):
         """REPLACE TRIGGER → TRIGGER — the bug that was fixed."""
-        obj_type, _ = _detect_object_type("REPLACE TRIGGER MyDB.trg AFTER INSERT ON MyDB.T (SELECT 1;);")
+        obj_type, _ = _detect_object_type(
+            "REPLACE TRIGGER MyDB.trg AFTER INSERT ON MyDB.T (SELECT 1;);"
+        )
         assert obj_type == ObjectType.TRIGGER
 
     def test_create_join_index(self):
         """CREATE JOIN INDEX → JOIN_INDEX."""
-        obj_type, _ = _detect_object_type("CREATE JOIN INDEX MyDB.JI AS SELECT * FROM MyDB.T;")
+        obj_type, _ = _detect_object_type(
+            "CREATE JOIN INDEX MyDB.JI AS SELECT * FROM MyDB.T;"
+        )
         assert obj_type == ObjectType.JOIN_INDEX
 
     def test_create_hash_index(self):
         """CREATE HASH INDEX → HASH_INDEX."""
-        obj_type, _ = _detect_object_type("CREATE HASH INDEX MyDB.HI (Col) ON MyDB.T ORDER BY VALUES;")
+        obj_type, _ = _detect_object_type(
+            "CREATE HASH INDEX MyDB.HI (Col) ON MyDB.T ORDER BY VALUES;"
+        )
         assert obj_type == ObjectType.HASH_INDEX
 
     def test_create_index(self):
@@ -121,12 +135,16 @@ class TestDetectObjectType:
 
     def test_create_database(self):
         """CREATE DATABASE → DATABASE."""
-        obj_type, _ = _detect_object_type("CREATE DATABASE MyDB FROM DBC AS PERMANENT = 1e9;")
+        obj_type, _ = _detect_object_type(
+            "CREATE DATABASE MyDB FROM DBC AS PERMANENT = 1e9;"
+        )
         assert obj_type == ObjectType.DATABASE
 
     def test_create_user(self):
         """CREATE USER → USER."""
-        obj_type, _ = _detect_object_type("CREATE USER svc FROM MyDB AS PERMANENT = 1e6;")
+        obj_type, _ = _detect_object_type(
+            "CREATE USER svc FROM MyDB AS PERMANENT = 1e6;"
+        )
         assert obj_type == ObjectType.USER
 
     def test_create_profile(self):
@@ -156,27 +174,37 @@ class TestDetectObjectType:
 
     def test_create_map(self):
         """CREATE MAP → MAP."""
-        obj_type, _ = _detect_object_type("CREATE MAP TD_GlobalMap CONTIGUOUS AMP BETWEEN 0 AND 7;")
+        obj_type, _ = _detect_object_type(
+            "CREATE MAP TD_GlobalMap CONTIGUOUS AMP BETWEEN 0 AND 7;"
+        )
         assert obj_type == ObjectType.MAP
 
     def test_create_authorization(self):
         """CREATE AUTHORIZATION → AUTHORIZATION."""
-        obj_type, _ = _detect_object_type("CREATE AUTHORIZATION MyAuth AS DEFINER TRUSTED;")
+        obj_type, _ = _detect_object_type(
+            "CREATE AUTHORIZATION MyAuth AS DEFINER TRUSTED;"
+        )
         assert obj_type == ObjectType.AUTHORIZATION
 
     def test_create_foreign_server(self):
         """CREATE FOREIGN SERVER → FOREIGN_SERVER."""
-        obj_type, _ = _detect_object_type("CREATE FOREIGN SERVER MyRemote USING LINK('host=x');")
+        obj_type, _ = _detect_object_type(
+            "CREATE FOREIGN SERVER MyRemote USING LINK('host=x');"
+        )
         assert obj_type == ObjectType.FOREIGN_SERVER
 
     def test_jar_install(self):
         """CALL SQLJ.INSTALL_JAR → JAR."""
-        obj_type, _ = _detect_object_type("CALL SQLJ.INSTALL_JAR('CJ!my.jar', 'MyJar', 0);")
+        obj_type, _ = _detect_object_type(
+            "CALL SQLJ.INSTALL_JAR('CJ!my.jar', 'MyJar', 0);"
+        )
         assert obj_type == ObjectType.JAR
 
     def test_jar_replace(self):
         """CALL SQLJ.REPLACE_JAR → JAR."""
-        obj_type, _ = _detect_object_type("CALL SQLJ.REPLACE_JAR('CJ!my.jar', 'MyJar');")
+        obj_type, _ = _detect_object_type(
+            "CALL SQLJ.REPLACE_JAR('CJ!my.jar', 'MyJar');"
+        )
         assert obj_type == ObjectType.JAR
 
 
@@ -184,66 +212,113 @@ class TestDetectObjectType:
 # Deploy intent detection
 # ---------------------------------------------------------------
 
+
 class TestDetectDeployIntent:
     """Tests for intent-aware deployment — the DDL verb IS the intent."""
 
     def test_table_always_idempotent(self):
         """Tables always use IDEMPOTENT_DEPLOY regardless of verb."""
-        assert _detect_deploy_intent("CREATE TABLE MyDB.T (Id INT);", ObjectType.TABLE) == DeployIntent.IDEMPOTENT_DEPLOY
+        assert (
+            _detect_deploy_intent("CREATE TABLE MyDB.T (Id INT);", ObjectType.TABLE)
+            == DeployIntent.IDEMPOTENT_DEPLOY
+        )
 
     def test_replace_view_intent(self):
         """REPLACE VIEW → REPLACE_WITH_BACKUP."""
-        assert _detect_deploy_intent("REPLACE VIEW MyDB.V AS SELECT 1;", ObjectType.VIEW) == DeployIntent.REPLACE_WITH_BACKUP
+        assert (
+            _detect_deploy_intent("REPLACE VIEW MyDB.V AS SELECT 1;", ObjectType.VIEW)
+            == DeployIntent.REPLACE_WITH_BACKUP
+        )
 
     def test_create_view_intent(self):
         """CREATE VIEW → CREATE_ONLY."""
-        assert _detect_deploy_intent("CREATE VIEW MyDB.V AS SELECT 1;", ObjectType.VIEW) == DeployIntent.CREATE_ONLY
+        assert (
+            _detect_deploy_intent("CREATE VIEW MyDB.V AS SELECT 1;", ObjectType.VIEW)
+            == DeployIntent.CREATE_ONLY
+        )
 
     def test_replace_macro_intent(self):
         """REPLACE MACRO → REPLACE_WITH_BACKUP."""
-        assert _detect_deploy_intent("REPLACE MACRO MyDB.M AS (SELECT 1;);", ObjectType.MACRO) == DeployIntent.REPLACE_WITH_BACKUP
+        assert (
+            _detect_deploy_intent(
+                "REPLACE MACRO MyDB.M AS (SELECT 1;);", ObjectType.MACRO
+            )
+            == DeployIntent.REPLACE_WITH_BACKUP
+        )
 
     def test_create_macro_intent(self):
         """CREATE MACRO → CREATE_ONLY."""
-        assert _detect_deploy_intent("CREATE MACRO MyDB.M AS (SELECT 1;);", ObjectType.MACRO) == DeployIntent.CREATE_ONLY
+        assert (
+            _detect_deploy_intent(
+                "CREATE MACRO MyDB.M AS (SELECT 1;);", ObjectType.MACRO
+            )
+            == DeployIntent.CREATE_ONLY
+        )
 
     def test_replace_procedure_intent(self):
         """REPLACE PROCEDURE → REPLACE_WITH_BACKUP."""
-        assert _detect_deploy_intent("REPLACE PROCEDURE MyDB.P() BEGIN END;", ObjectType.PROCEDURE) == DeployIntent.REPLACE_WITH_BACKUP
+        assert (
+            _detect_deploy_intent(
+                "REPLACE PROCEDURE MyDB.P() BEGIN END;", ObjectType.PROCEDURE
+            )
+            == DeployIntent.REPLACE_WITH_BACKUP
+        )
 
     def test_replace_function_intent(self):
         """REPLACE FUNCTION → REPLACE_WITH_BACKUP."""
-        assert _detect_deploy_intent("REPLACE FUNCTION MyDB.F(x INT) RETURNS INT RETURN x;", ObjectType.FUNCTION) == DeployIntent.REPLACE_WITH_BACKUP
+        assert (
+            _detect_deploy_intent(
+                "REPLACE FUNCTION MyDB.F(x INT) RETURNS INT RETURN x;",
+                ObjectType.FUNCTION,
+            )
+            == DeployIntent.REPLACE_WITH_BACKUP
+        )
 
     def test_replace_specific_function_intent(self):
         """REPLACE SPECIFIC FUNCTION → REPLACE_WITH_BACKUP."""
         ddl = "REPLACE SPECIFIC FUNCTION MyDB.F_Int RETURNS INT RETURN 1;"
-        assert _detect_deploy_intent(ddl, ObjectType.FUNCTION) == DeployIntent.REPLACE_WITH_BACKUP
+        assert (
+            _detect_deploy_intent(ddl, ObjectType.FUNCTION)
+            == DeployIntent.REPLACE_WITH_BACKUP
+        )
 
     def test_replace_trigger_intent(self):
         """REPLACE TRIGGER → REPLACE_WITH_BACKUP."""
         ddl = "REPLACE TRIGGER MyDB.trg AFTER INSERT ON MyDB.T (SELECT 1;);"
-        assert _detect_deploy_intent(ddl, ObjectType.TRIGGER) == DeployIntent.REPLACE_WITH_BACKUP
+        assert (
+            _detect_deploy_intent(ddl, ObjectType.TRIGGER)
+            == DeployIntent.REPLACE_WITH_BACKUP
+        )
 
     def test_create_trigger_intent(self):
         """CREATE TRIGGER → CREATE_ONLY."""
         ddl = "CREATE TRIGGER MyDB.trg AFTER INSERT ON MyDB.T (SELECT 1;);"
-        assert _detect_deploy_intent(ddl, ObjectType.TRIGGER) == DeployIntent.CREATE_ONLY
+        assert (
+            _detect_deploy_intent(ddl, ObjectType.TRIGGER) == DeployIntent.CREATE_ONLY
+        )
 
     def test_join_index_always_drop_and_create(self):
         """JOIN INDEX → DROP_AND_CREATE (no REPLACE alternative)."""
         ddl = "CREATE JOIN INDEX MyDB.JI AS SELECT * FROM MyDB.T;"
-        assert _detect_deploy_intent(ddl, ObjectType.JOIN_INDEX) == DeployIntent.DROP_AND_CREATE
+        assert (
+            _detect_deploy_intent(ddl, ObjectType.JOIN_INDEX)
+            == DeployIntent.DROP_AND_CREATE
+        )
 
     def test_database_direct_execute(self):
         """DATABASE → DIRECT_EXECUTE."""
         ddl = "CREATE DATABASE MyDB FROM DBC AS PERMANENT = 1e9;"
-        assert _detect_deploy_intent(ddl, ObjectType.DATABASE) == DeployIntent.DIRECT_EXECUTE
+        assert (
+            _detect_deploy_intent(ddl, ObjectType.DATABASE)
+            == DeployIntent.DIRECT_EXECUTE
+        )
 
     def test_grant_direct_execute(self):
         """GRANT → DIRECT_EXECUTE."""
         ddl = "GRANT SELECT ON MyDB TO SomeRole;"
-        assert _detect_deploy_intent(ddl, ObjectType.GRANT) == DeployIntent.DIRECT_EXECUTE
+        assert (
+            _detect_deploy_intent(ddl, ObjectType.GRANT) == DeployIntent.DIRECT_EXECUTE
+        )
 
     def test_map_skip_if_exists(self):
         """MAP → SKIP_IF_EXISTS."""
@@ -253,22 +328,33 @@ class TestDetectDeployIntent:
     def test_role_skip_if_exists(self):
         """ROLE → SKIP_IF_EXISTS (changed from DIRECT_EXECUTE)."""
         ddl = "CREATE ROLE analyst_role;"
-        assert _detect_deploy_intent(ddl, ObjectType.ROLE) == DeployIntent.SKIP_IF_EXISTS
+        assert (
+            _detect_deploy_intent(ddl, ObjectType.ROLE) == DeployIntent.SKIP_IF_EXISTS
+        )
 
     def test_profile_skip_if_exists(self):
         """PROFILE → SKIP_IF_EXISTS (changed from DIRECT_EXECUTE)."""
         ddl = "CREATE PROFILE batch_profile;"
-        assert _detect_deploy_intent(ddl, ObjectType.PROFILE) == DeployIntent.SKIP_IF_EXISTS
+        assert (
+            _detect_deploy_intent(ddl, ObjectType.PROFILE)
+            == DeployIntent.SKIP_IF_EXISTS
+        )
 
     def test_authorization_skip_if_exists(self):
         """AUTHORIZATION → SKIP_IF_EXISTS."""
         ddl = "CREATE AUTHORIZATION MyAuth AS DEFINER TRUSTED;"
-        assert _detect_deploy_intent(ddl, ObjectType.AUTHORIZATION) == DeployIntent.SKIP_IF_EXISTS
+        assert (
+            _detect_deploy_intent(ddl, ObjectType.AUTHORIZATION)
+            == DeployIntent.SKIP_IF_EXISTS
+        )
 
     def test_foreign_server_skip_if_exists(self):
         """FOREIGN SERVER → SKIP_IF_EXISTS."""
         ddl = "CREATE FOREIGN SERVER MyRemote USING LINK('host=x');"
-        assert _detect_deploy_intent(ddl, ObjectType.FOREIGN_SERVER) == DeployIntent.SKIP_IF_EXISTS
+        assert (
+            _detect_deploy_intent(ddl, ObjectType.FOREIGN_SERVER)
+            == DeployIntent.SKIP_IF_EXISTS
+        )
 
     def test_jar_direct_execute(self):
         """JAR → DIRECT_EXECUTE."""
@@ -279,6 +365,7 @@ class TestDetectDeployIntent:
 # ---------------------------------------------------------------
 # Strategy derivation from intent
 # ---------------------------------------------------------------
+
 
 class TestStrategyDerivation:
     """Tests that intent maps correctly to deployment strategy."""
@@ -310,7 +397,9 @@ class TestStrategyDerivation:
 
     def test_map_strategy(self):
         """CREATE MAP → SKIP_IF_EXISTS strategy."""
-        parsed = parse_ddl_text("CREATE MAP TD_GlobalMap CONTIGUOUS AMP BETWEEN 0 AND 7;")
+        parsed = parse_ddl_text(
+            "CREATE MAP TD_GlobalMap CONTIGUOUS AMP BETWEEN 0 AND 7;"
+        )
         assert parsed.strategy == DeployStrategy.SKIP_IF_EXISTS
 
     def test_role_strategy(self):
@@ -332,6 +421,7 @@ class TestStrategyDerivation:
 # ---------------------------------------------------------------
 # MULTISET injection
 # ---------------------------------------------------------------
+
 
 class TestMultisetInjection:
     """Tests for MULTISET injection in the deployer parser."""
@@ -367,6 +457,7 @@ class TestMultisetInjection:
 # parse_ddl_text — Full parsing
 # ---------------------------------------------------------------
 
+
 class TestParseDdlText:
     """Tests for the main parse_ddl_text function."""
 
@@ -386,7 +477,9 @@ class TestParseDdlText:
 
     def test_map_single_part_name(self):
         """MAP has single-part qualified name."""
-        parsed = parse_ddl_text("CREATE MAP TD_GlobalMap CONTIGUOUS AMP BETWEEN 0 AND 7;")
+        parsed = parse_ddl_text(
+            "CREATE MAP TD_GlobalMap CONTIGUOUS AMP BETWEEN 0 AND 7;"
+        )
         assert parsed.qualified_name == "TD_GlobalMap"
         assert parsed.database_name == ""
 
@@ -433,6 +526,7 @@ class TestParseDdlText:
 # parse_ddl_file
 # ---------------------------------------------------------------
 
+
 class TestParseDdlFile:
     """Tests for file-based DDL parsing."""
 
@@ -455,6 +549,7 @@ class TestParseDdlFile:
 # ---------------------------------------------------------------
 # _split_qualified_name
 # ---------------------------------------------------------------
+
 
 class TestSplitQualifiedName:
     """Tests for name splitting utility."""
@@ -481,6 +576,7 @@ class TestSplitQualifiedName:
 # ---------------------------------------------------------------
 # parse_index_parent_table
 # ---------------------------------------------------------------
+
 
 class TestParseIndexParentTable:
     """Tests for extracting parent table from CREATE INDEX ON clause."""

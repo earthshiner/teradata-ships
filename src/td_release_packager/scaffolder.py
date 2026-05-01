@@ -46,6 +46,7 @@ Produces:
 import logging
 import os
 from typing import List
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -106,19 +107,25 @@ def scaffold_project(
             )
         logger.info("Scaffolding project: %s", project_dir)
 
+    # -- Ensure the output directory exists --
+    Path(project_dir).mkdir(parents=True, exist_ok=True)
+
     # -- Create directory structure (safe for existing dirs) --
     _create_directories(project_dir)
 
     # -- Generate files (skip existing in repair mode) --
     _generate_properties(
-        project_dir, project_name, environments, sample_tokens,
+        project_dir,
+        project_name,
+        environments,
+        sample_tokens,
         skip_existing=repair,
     )
     _generate_inspect_config(project_dir)  # Already skips existing
+    _generate_object_placement_yaml(project_dir, skip_existing=repair)
     _generate_build_counter(project_dir, skip_existing=repair)
     _generate_gitignore(project_dir, skip_existing=repair)
-    _generate_readme(project_dir, project_name, environments,
-                     skip_existing=repair)
+    _generate_readme(project_dir, project_name, environments, skip_existing=repair)
     _generate_sample_order_file(project_dir, skip_existing=repair)
 
     action = "repaired" if repair else "scaffolded"
@@ -131,23 +138,19 @@ def _create_directories(project_dir: str):
     dirs = [
         # Config
         "config/properties",
-
         # Payload — system-scope objects (00_system phase)
         "payload/database/system/maps",
         "payload/database/system/roles",
         "payload/database/system/profiles",
         "payload/database/system/authorizations",
         "payload/database/system/foreign_servers",
-
         # Payload — pre-requisites (01_pre_requisites phase)
         "payload/database/pre-requisites/databases",
         "payload/database/pre-requisites/users",
-
         # Payload — DCL (02_dcl phase)
         "payload/database/DCL/roles",
         "payload/database/DCL/users",
         "payload/database/DCL/inter_db",
-
         # Payload — DDL (03_ddl phase)
         "payload/database/DDL/functions",
         "payload/database/DDL/JARs",
@@ -158,11 +161,9 @@ def _create_directories(project_dir: str):
         "payload/database/DDL/tables",
         "payload/database/DDL/triggers",
         "payload/database/DDL/views",
-
         # Payload — DML (04_dml), post-install (05_post_install)
         "payload/database/DML",
         "payload/database/post-install",
-
         # Releases output
         "releases",
     ]
@@ -174,8 +175,7 @@ def _create_directories(project_dir: str):
     for d in dirs:
         full = os.path.join(project_dir, d)
         if not os.listdir(full):
-            with open(os.path.join(full, ".gitkeep"), 'w') as f:
-                pass
+            Path(os.path.join(full, ".gitkeep")).touch()
 
 
 def _generate_properties(
@@ -208,12 +208,12 @@ def _generate_properties(
 
     # Default environment prefix mapping
     env_prefix_map = {
-        "DEV": f"D01",
-        "TST": f"S01",
-        "SIT": f"T",
-        "UAT": f"A",
-        "PPR": f"R",
-        "PRD": f"P",
+        "DEV": "D01",
+        "TST": "S01",
+        "SIT": "T",
+        "UAT": "A",
+        "PPR": "R",
+        "PRD": "P",
     }
 
     # Space allocation per environment
@@ -251,42 +251,44 @@ def _generate_properties(
             logger.info("Properties file exists — skipping: %s", props_path)
             continue
 
-        with open(props_path, 'w', encoding='utf-8') as f:
+        with open(props_path, "w", encoding="utf-8") as f:
             # -- Header --
             f.write(f"# {env_upper} Environment — {project_name}\n")
-            f.write(f"#\n")
-            f.write(f"# Usage: python -m td_release_packager package \\\n")
+            f.write("#\n")
+            f.write("# Usage: python -m td_release_packager package \\\n")
             f.write(f"#            --source . --env {env_upper} \\\n")
             f.write(f"#            --name {project_name} \\\n")
-            f.write(f"#            --properties config/properties/{env_upper}.properties\n")
-            f.write(f"#\n\n")
+            f.write(
+                f"#            --properties config/properties/{env_upper}.properties\n"
+            )
+            f.write("#\n\n")
 
             # -- Section 1: Environment metadata --
-            f.write(f"# ---- Environment ----\n\n")
+            f.write("# ---- Environment ----\n\n")
 
-            f.write(f"# Logical environment — must match --env at package time\n")
+            f.write("# Logical environment — must match --env at package time\n")
             f.write(f"SHIPS_ENV={env_upper}\n\n")
 
-            f.write(f"# Physical prefix — maps to database naming convention\n")
-            f.write(f"# (e.g. A_D01, A_S01, A_T, P — adjust per your topology)\n")
+            f.write("# Physical prefix — maps to database naming convention\n")
+            f.write("# (e.g. A_D01, A_S01, A_T, P — adjust per your topology)\n")
             f.write(f"ENV_PREFIX={prefix}\n\n")
 
-            f.write(f"# Project identifier — used in database/user/role names\n")
+            f.write("# Project identifier — used in database/user/role names\n")
             f.write(f"SHIPS_PROJECT={clean_name}\n\n")
 
             # -- Section 2: Space allocations --
-            f.write(f"# ---- Space allocation ----\n\n")
+            f.write("# ---- Space allocation ----\n\n")
 
-            f.write(f"# Permanent space (bytes)\n")
+            f.write("# Permanent space (bytes)\n")
             f.write(f"PERM_SPACE={perm}\n\n")
 
-            f.write(f"# Spool space (bytes)\n")
+            f.write("# Spool space (bytes)\n")
             f.write(f"SPOOL_SPACE={spool}\n\n")
 
             # -- Section 3: Project tokens --
-            f.write(f"# ---- Project tokens ----\n")
-            f.write(f"# All values below resolve from ENV_PREFIX and SHIPS_PROJECT.\n")
-            f.write(f"# No changes needed when promoting between environments.\n\n")
+            f.write("# ---- Project tokens ----\n")
+            f.write("# All values below resolve from ENV_PREFIX and SHIPS_PROJECT.\n")
+            f.write("# No changes needed when promoting between environments.\n\n")
 
             for token_name, description in sample_tokens.items():
                 value = _sample_value(env_upper, clean_name, token_name)
@@ -347,10 +349,134 @@ def _generate_inspect_config(project_dir: str):
         return
 
     os.makedirs(os.path.dirname(config_path), exist_ok=True)
-    with open(config_path, 'w', encoding='utf-8') as f:
+    with open(config_path, "w", encoding="utf-8") as f:
         f.write(generate_default_config())
 
     logger.info("Generated: %s", config_path)
+
+
+def _generate_object_placement_yaml(
+    project_dir: str,
+    skip_existing: bool = False,
+):
+    """
+    Generate the project's ``object_placement.yaml`` starter file.
+
+    The file controls how tables and views are separated across
+    databases — a SHIPS architectural concern. Three strategies are
+    available:
+
+        colocated   Tables and views share the same database
+                    (zero setup, no enforcement)
+        separated   Pattern-based — e.g. {BASE}_T / {BASE}_V
+        mapped      Explicit database-to-database pairs
+
+    The starter file uses ``colocated`` — the only strategy that's a
+    valid working configuration without any prior database setup.
+    Inline comments document the alternatives so users can switch
+    when their environment is ready.
+
+    The placement-related lint rules (``object_placement``,
+    ``public_grant_on_tables``, ``review_unmapped_grants``) all skip
+    silently under ``colocated``, so a freshly scaffolded project is
+    quiet by default and gets louder as the user opts into stricter
+    placement.
+
+    Args:
+        project_dir:    Project root.
+        skip_existing:  If True, don't overwrite an existing file
+                        (repair mode).
+    """
+    yaml_path = os.path.join(project_dir, "object_placement.yaml")
+
+    if skip_existing and os.path.exists(yaml_path):
+        logger.info("object_placement.yaml exists — skipping.")
+        return
+
+    if os.path.exists(yaml_path):
+        logger.info("object_placement.yaml already exists — skipping.")
+        return
+
+    content = """\
+# ================================================================
+# object_placement.yaml — Object Placement Strategy
+# ================================================================
+#
+# Defines how tables and views are separated across databases for
+# the SHIPS deployment pipeline. Read by:
+#
+#   - tools/migrate_view_references.py  (rewrites view DDL refs)
+#   - src/td_release_packager/validate.py (rules: object_placement,
+#     public_grant_on_tables, review_unmapped_grants)
+#
+# Three strategies are available — pick ONE:
+#
+#   colocated   Tables and views share the same database.
+#               No architectural enforcement. Use this when
+#               starting out, or when the project legitimately
+#               does not separate tables from views.
+#
+#   separated   Pattern-based derivation. Tables and views live
+#               in distinct databases whose names are related by
+#               a shared template (suffix, prefix, midfix).
+#
+#   mapped      Explicit pairs of tables_database / views_database.
+#               Use when the naming is irregular and patterns
+#               cannot derive one from the other.
+
+
+# ----------------------------------------------------------------
+# DEFAULT — colocated (no enforcement)
+# ----------------------------------------------------------------
+#
+# Switch to one of the alternatives below when ready to enforce
+# the SHIPS placement standard. Switching is non-breaking — your
+# DDL files do not need to change unless they reference databases
+# explicitly.
+
+strategy: colocated
+locking_views: false
+
+
+# ----------------------------------------------------------------
+# Alternative — separated (pattern-based)
+# ----------------------------------------------------------------
+#
+# Suffix convention (recommended):
+#
+#   strategy: separated
+#   database_pattern_tables: "{BASE}_T"
+#   database_pattern_views: "{BASE}_V"
+#   locking_views: true
+#
+# Means: 'D01_PROJECT_DOM_T' is a tables database; the matching
+# views database is 'D01_PROJECT_DOM_V'. Every tables database
+# requires a 1:1 locking view in its sibling views database.
+#
+# Other patterns (prefix, midfix) are also supported — see the
+# SHIPS documentation for examples.
+
+
+# ----------------------------------------------------------------
+# Alternative — mapped (explicit pairs)
+# ----------------------------------------------------------------
+#
+#   strategy: mapped
+#   locking_views: true
+#   database_map:
+#     - tables_database: MyProject_Domain_T
+#       views_database: MyProject_Domain_V
+#     - tables_database: "{{DOM_DATABASE_T}}"
+#       views_database: "{{DOM_DATABASE_V}}"
+#
+# Use when project naming is irregular, or when migrating from a
+# legacy schema that doesn't follow a consistent convention.
+"""
+
+    with open(yaml_path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+    logger.info("Generated: %s", yaml_path)
 
 
 def _generate_build_counter(project_dir: str, skip_existing: bool = False):
@@ -370,7 +496,7 @@ def _generate_build_counter(project_dir: str, skip_existing: bool = False):
         logger.info("Build counter exists — skipping: %s", counter_path)
         return
 
-    with open(counter_path, 'w', encoding='utf-8') as f:
+    with open(counter_path, "w", encoding="utf-8") as f:
         f.write("0\n")
 
     logger.debug("Generated: %s", counter_path)
@@ -428,12 +554,16 @@ Thumbs.db
 # config/properties/*.properties — environment token values
 """
 
-    with open(gitignore_path, 'w', encoding='utf-8') as f:
+    with open(gitignore_path, "w", encoding="utf-8") as f:
         f.write(gitignore)
 
 
-def _generate_readme(project_dir: str, project_name: str, environments: List[str],
-                     skip_existing: bool = False):
+def _generate_readme(
+    project_dir: str,
+    project_name: str,
+    environments: List[str],
+    skip_existing: bool = False,
+):
     """Generate a project README.md with getting-started instructions."""
     readme_path = os.path.join(project_dir, "README.md")
 
@@ -463,6 +593,8 @@ Properties files: `config/properties/<ENV>.properties`
 
 ```
 config/properties/       — Token values per environment
+config/inspect.conf      — Validation rule severities
+object_placement.yaml    — Tables/views database separation strategy
 payload/database/
   pre-requisites/        — CREATE DATABASE, CREATE USER, CREATE PROFILE
   DCL/                   — GRANT statements (container-level)
@@ -483,6 +615,26 @@ Scan for token usage:
 python -m td_release_packager scan --source .
 python -m td_release_packager scan --source . --properties config/properties/DEV.properties
 ```
+
+## Object Placement
+
+`object_placement.yaml` declares how tables and views are separated
+across databases. Three strategies:
+
+- **colocated** — tables and views share the same database. Zero
+  setup, no enforcement. **This is the scaffolded default.**
+- **separated** — pattern-based, e.g. `{{BASE}}_T` for tables and
+  `{{BASE}}_V` for views. Recommended once you have separate
+  databases for the two roles.
+- **mapped** — explicit `tables_database` / `views_database` pairs.
+  Use when naming is irregular.
+
+The placement-related lint rules in `inspect.conf`
+(`object_placement`, `public_grant_on_tables`,
+`review_unmapped_grants`) all skip silently under `colocated`, so a
+freshly scaffolded project is quiet by default. They get louder as
+you opt into stricter placement — see the comments inside
+`object_placement.yaml` for the syntax of each strategy.
 
 ## Packaging a Release
 
@@ -524,7 +676,7 @@ dependencies), create an `_order.txt` file in the relevant
 phase directory listing filenames one per line.
 """
 
-    with open(readme_path, 'w', encoding='utf-8') as f:
+    with open(readme_path, "w", encoding="utf-8") as f:
         f.write(readme)
 
 
@@ -546,7 +698,7 @@ def _generate_sample_order_file(project_dir: str, skip_existing: bool = False):
         logger.info("Sample order file exists — skipping.")
         return
 
-    with open(order_path, 'w', encoding='utf-8') as f:
+    with open(order_path, "w", encoding="utf-8") as f:
         f.write("""# Deployment order for tables (topological sort).
 # Rename this file to _order.txt to activate.
 #

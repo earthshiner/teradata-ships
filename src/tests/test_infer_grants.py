@@ -34,7 +34,6 @@ from td_release_packager.infer_grants import (
     grantee_filename,
     PRIV_SELECT,
     PRIV_INSERT,
-    PRIV_UPDATE,
     PRIV_DELETE,
     PRIV_EXEC_PROC,
     PRIV_EXEC,
@@ -44,6 +43,7 @@ from td_release_packager.infer_grants import (
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def write_temp_file(content: str, suffix: str = ".viw") -> Path:
     """
@@ -65,6 +65,7 @@ def write_temp_file(content: str, suffix: str = ".viw") -> Path:
 # ---------------------------------------------------------------------------
 # Comment stripping tests
 # ---------------------------------------------------------------------------
+
 
 class TestStripComments:
     """Tests for strip_sql_comments()."""
@@ -97,6 +98,7 @@ class TestStripComments:
 # ---------------------------------------------------------------------------
 # Database reference extraction tests
 # ---------------------------------------------------------------------------
+
 
 class TestFindDbReferences:
     """Tests for find_all_db_references()."""
@@ -160,6 +162,7 @@ class TestFindDbReferences:
 # ---------------------------------------------------------------------------
 # View analysis tests
 # ---------------------------------------------------------------------------
+
 
 class TestAnalyseView:
     """Tests for analyse_file() with view DDL."""
@@ -231,6 +234,7 @@ class TestAnalyseView:
 # ---------------------------------------------------------------------------
 # Procedure analysis tests
 # ---------------------------------------------------------------------------
+
 
 class TestAnalyseProcedure:
     """Tests for analyse_file() with stored procedure DDL."""
@@ -369,6 +373,7 @@ class TestAnalyseProcedure:
 # Macro analysis tests
 # ---------------------------------------------------------------------------
 
+
 class TestAnalyseMacro:
     """Tests for analyse_file() with macro DDL."""
 
@@ -394,6 +399,7 @@ class TestAnalyseMacro:
 # ---------------------------------------------------------------------------
 # Consolidation tests
 # ---------------------------------------------------------------------------
+
 
 class TestConsolidation:
     """Tests for consolidate_grants() and generate_grt_content()."""
@@ -469,8 +475,7 @@ class TestConsolidation:
         # (Count lines starting with GRANT, not the word GRANT which
         # also appears in 'WITH GRANT OPTION')
         grant_lines = [
-            line for line in content.splitlines()
-            if line.strip().startswith("GRANT ")
+            line for line in content.splitlines() if line.strip().startswith("GRANT ")
         ]
         assert len(grant_lines) == 1
 
@@ -478,6 +483,7 @@ class TestConsolidation:
 # ---------------------------------------------------------------------------
 # Filename derivation tests
 # ---------------------------------------------------------------------------
+
 
 class TestFilename:
     """Tests for grantee_filename()."""
@@ -492,6 +498,7 @@ class TestFilename:
 # ---------------------------------------------------------------------------
 # Edge case tests
 # ---------------------------------------------------------------------------
+
 
 class TestEdgeCases:
     """Tests for edge cases and boundary conditions."""

@@ -9,12 +9,16 @@ Two MCP-compatible functions:
 Both support dry_run mode and return structured JSON results.
 """
 
-import json
 import logging
 import os
 from typing import Any, Dict
 
-from ddl_deployer.deployer import deploy_single, deploy_package, resume_package, rollback_package
+from ddl_deployer.deployer import (
+    deploy_single,
+    deploy_package,
+    resume_package,
+    rollback_package,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +61,11 @@ def ddl_deployObject(cursor, ddl_text: str, dry_run: bool = False) -> Dict[str, 
         return {"state": "FAILED", "error": str(e), "message": f"Invalid DDL: {e}"}
     except Exception as e:
         logger.exception("ddl_deployObject failed")
-        return {"state": "FAILED", "error": str(e), "message": f"Deployment failed: {e}"}
+        return {
+            "state": "FAILED",
+            "error": str(e),
+            "message": f"Deployment failed: {e}",
+        }
 
 
 def ddl_deployPackage(
@@ -115,24 +123,28 @@ def ddl_deployPackage(
     if not os.path.isdir(package_dir):
         return {"state": "FAILED", "error": f"Directory not found: {package_dir}"}
 
-    patterns = [p.strip() for p in file_patterns.split(',')]
+    patterns = [p.strip() for p in file_patterns.split(",")]
 
     try:
         if action == "deploy":
             result = deploy_package(
-                cursor=cursor, package_dir=package_dir,
+                cursor=cursor,
+                package_dir=package_dir,
                 file_patterns=patterns,
                 ordered_files=ordered_files,
                 waves=waves,
                 num_streams=num_streams,
                 connect_fn=connect_fn,
-                stop_on_failure=stop_on_failure, dry_run=dry_run,
+                stop_on_failure=stop_on_failure,
+                dry_run=dry_run,
             )
         elif action == "resume":
             manifest_path = os.path.join(package_dir, ".deploy_manifest.json")
             result = resume_package(
-                cursor=cursor, manifest_path=manifest_path,
-                stop_on_failure=stop_on_failure, dry_run=dry_run,
+                cursor=cursor,
+                manifest_path=manifest_path,
+                stop_on_failure=stop_on_failure,
+                dry_run=dry_run,
             )
         elif action == "rollback":
             manifest_path = os.path.join(package_dir, ".deploy_manifest.json")

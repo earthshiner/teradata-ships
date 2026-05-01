@@ -23,12 +23,11 @@ Usage:
 import logging
 import os
 import re
-import shutil
-from collections import Counter, defaultdict
+from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Tuple
 
-from td_release_packager.token_engine import _TOKEN_RE
+from td_release_packager.token_engine import _TOKEN_RE, find_malformed_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +48,8 @@ _TYPE_TO_EXT = {
     "USER": ".usr",
     "GRANT": ".dcl",
     "REVOKE": ".dcl",
+    "COMMENT": ".cmt",
+    "STATISTICS": ".stt",
     "JAR": ".jar",
     "SCRIPT_TABLE_OPERATOR": ".sto",
     # System-scoped objects
@@ -78,6 +79,8 @@ _TYPE_TO_SUBDIR = {
     "USER": "pre-requisites/users",
     "GRANT": "DCL/inter_db",
     "REVOKE": "DCL/inter_db",
+    "COMMENT": "DDL/comments",
+    "STATISTICS": "DDL/statistics",
     "JAR": "DDL/JARs",
     "SCRIPT_TABLE_OPERATOR": "DDL/script_table_operators",
     # System-scoped objects (00_system phase)
@@ -94,64 +97,104 @@ _TYPE_TO_SUBDIR = {
 # -- Classification patterns (order matters — specific before general) --
 _CLASSIFY_PATTERNS = [
     # Indexes (most specific first)
-    (re.compile(r'CREATE\s+JOIN\s+INDEX\b', re.I), "JOIN_INDEX"),
-    (re.compile(r'CREATE\s+HASH\s+INDEX\b', re.I), "HASH_INDEX"),
-    (re.compile(r'CREATE\s+(?:UNIQUE\s+)?INDEX\b', re.I), "INDEX"),
+    (re.compile(r"CREATE\s+JOIN\s+INDEX\b", re.I), "JOIN_INDEX"),
+    (re.compile(r"CREATE\s+HASH\s+INDEX\b", re.I), "HASH_INDEX"),
+    (re.compile(r"CREATE\s+(?:UNIQUE\s+)?INDEX\b", re.I), "INDEX"),
     # Script Table Operator (before FUNCTION — it uses FUNCTION syntax
     # but with TABLE OPERATOR in the body)
-    (re.compile(r'(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b.*?TABLE\s+OPERATOR', re.I | re.DOTALL), "SCRIPT_TABLE_OPERATOR"),
+    (
+        re.compile(
+            r"(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b.*?TABLE\s+OPERATOR",
+            re.I | re.DOTALL,
+        ),
+        "SCRIPT_TABLE_OPERATOR",
+    ),
     # Standard DDL objects
-    (re.compile(r'(?:CREATE|REPLACE)\s+(?:MULTISET|SET)?\s*(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?(?:TRACE\s+)?TABLE\b', re.I), "TABLE"),
-    (re.compile(r'(?:CREATE|REPLACE)\s+VIEW\b', re.I), "VIEW"),
-    (re.compile(r'(?:CREATE\s+|REPLACE\s+)MACRO\b', re.I), "MACRO"),
-    (re.compile(r'(?:CREATE\s+|REPLACE\s+)PROCEDURE\b', re.I), "PROCEDURE"),
-    (re.compile(r'(?:CREATE\s+|REPLACE\s+)(?:SPECIFIC\s+)?FUNCTION\b', re.I), "FUNCTION"),
-    (re.compile(r'(?:CREATE|REPLACE)\s+TRIGGER\b', re.I), "TRIGGER"),
+    (
+        re.compile(
+            r"(?:CREATE|REPLACE)\s+(?:MULTISET|SET)?\s*(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?(?:TRACE\s+)?TABLE\b",
+            re.I,
+        ),
+        "TABLE",
+    ),
+    (re.compile(r"(?:CREATE|REPLACE)\s+VIEW\b", re.I), "VIEW"),
+    (re.compile(r"(?:CREATE\s+|REPLACE\s+)MACRO\b", re.I), "MACRO"),
+    (re.compile(r"(?:CREATE\s+|REPLACE\s+)PROCEDURE\b", re.I), "PROCEDURE"),
+    (
+        re.compile(r"(?:CREATE\s+|REPLACE\s+)(?:SPECIFIC\s+)?FUNCTION\b", re.I),
+        "FUNCTION",
+    ),
+    (re.compile(r"(?:CREATE|REPLACE)\s+TRIGGER\b", re.I), "TRIGGER"),
     # Pre-requisites (environment-scoped)
-    (re.compile(r'CREATE\s+DATABASE\b', re.I), "DATABASE"),
-    (re.compile(r'CREATE\s+USER\b', re.I), "USER"),
+    (re.compile(r"CREATE\s+DATABASE\b", re.I), "DATABASE"),
+    (re.compile(r"CREATE\s+USER\b", re.I), "USER"),
     # System-scoped objects
-    (re.compile(r'CREATE\s+MAP\b', re.I), "MAP"),
-    (re.compile(r'CREATE\s+PROFILE\b', re.I), "PROFILE"),
-    (re.compile(r'CREATE\s+ROLE\b', re.I), "ROLE"),
-    (re.compile(r'CREATE\s+AUTHORIZATION\b', re.I), "AUTHORIZATION"),
-    (re.compile(r'CREATE\s+FOREIGN\s+SERVER\b', re.I), "FOREIGN_SERVER"),
+    (re.compile(r"CREATE\s+MAP\b", re.I), "MAP"),
+    (re.compile(r"CREATE\s+PROFILE\b", re.I), "PROFILE"),
+    (re.compile(r"CREATE\s+ROLE\b", re.I), "ROLE"),
+    (re.compile(r"CREATE\s+AUTHORIZATION\b", re.I), "AUTHORIZATION"),
+    (re.compile(r"CREATE\s+FOREIGN\s+SERVER\b", re.I), "FOREIGN_SERVER"),
     # JAR installation (CALL SQLJ.INSTALL_JAR / SQLJ.REPLACE_JAR)
-    (re.compile(r'CALL\s+SQLJ\s*\.\s*(?:INSTALL_JAR|REPLACE_JAR)\s*\(', re.I), "JAR"),
+    (re.compile(r"CALL\s+SQLJ\s*\.\s*(?:INSTALL_JAR|REPLACE_JAR)\s*\(", re.I), "JAR"),
+    # Metadata and statistics (produced by multi-statement splitting)
+    (re.compile(r"\bCOMMENT\s+ON\b", re.I), "COMMENT"),
+    (re.compile(r"\bCOLLECT\s+STATISTICS\b", re.I), "STATISTICS"),
     # DCL (least specific — GRANT/REVOKE match single keywords)
-    (re.compile(r'\bGRANT\b', re.I), "GRANT"),
-    (re.compile(r'\bREVOKE\b', re.I), "REVOKE"),
+    (re.compile(r"\bGRANT\b", re.I), "GRANT"),
+    (re.compile(r"\bREVOKE\b", re.I), "REVOKE"),
 ]
 
 # -- Qualified name extraction patterns --
+# Matches both literal names (Database.Object) and tokenised names
+# ({{TOKEN}}.Object or {{TOKEN}}) in DDL statements.
+_NAME_PART = r'(?:\{\{[A-Z][A-Z0-9_]*\}\}|"?[A-Za-z_]\w*"?)'
 _QUALIFIED_NAME_RE = re.compile(
-    r'(?:CREATE|REPLACE)\s+(?:MULTISET\s+|SET\s+)?'
-    r'(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?'
-    r'(?:TRACE\s+)?'
-    r'(?:SPECIFIC\s+)?'
-    r'(?:TABLE|VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER|'
-    r'JOIN\s+INDEX|HASH\s+INDEX|DATABASE|USER|PROFILE|ROLE)\s+'
-    r'("?[A-Za-z_]\w*"?(?:\."?[A-Za-z_]\w*"?)?)',
+    r"(?:CREATE|REPLACE)\s+(?:MULTISET\s+|SET\s+)?"
+    r"(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?"
+    r"(?:TRACE\s+)?"
+    r"(?:SPECIFIC\s+)?"
+    r"(?:TABLE|VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER|"
+    r"JOIN\s+INDEX|HASH\s+INDEX|DATABASE|USER|PROFILE|ROLE)\s+"
+    rf"({_NAME_PART}(?:\.{_NAME_PART})?)",
     re.IGNORECASE,
+)
+
+# -- Name extraction for COMMENT ON statements --
+# Matches: COMMENT ON TABLE {{DB}}.table IS ...
+#          COMMENT ON COLUMN {{DB}}.table.column IS ...
+# Captures the database.table part (ignoring column for naming)
+_COMMENT_ON_NAME_RE = re.compile(
+    r"COMMENT\s+ON\s+(?:TABLE|COLUMN)\s+"
+    rf"({_NAME_PART}(?:\.{_NAME_PART}){{1,2}})",
+    re.IGNORECASE,
+)
+
+# -- Name extraction for COLLECT STATISTICS statements --
+# Matches: COLLECT STATISTICS [COLUMN (...)] ON {{DB}}.table
+#          COLLECT STATISTICS ON {{DB}}.table COLUMN (...)
+_COLLECT_STATS_NAME_RE = re.compile(
+    r"COLLECT\s+STATISTICS\b.*?\bON\s+"
+    rf"({_NAME_PART}\.{_NAME_PART})",
+    re.IGNORECASE | re.DOTALL,
 )
 
 # -- Detect REPLACE VIEW vs CREATE VIEW --
 _HAS_REPLACE_VIEW_RE = re.compile(
-    r'REPLACE\s+VIEW',
+    r"REPLACE\s+VIEW",
     re.IGNORECASE,
 )
 _CREATE_VIEW_RE = re.compile(
-    r'CREATE\s+VIEW\b',
+    r"CREATE\s+VIEW\b",
     re.IGNORECASE,
 )
 
 # -- MULTISET detection --
 _HAS_SET_MULTISET_RE = re.compile(
-    r'CREATE\s+(?:MULTISET|SET)\s+',
+    r"CREATE\s+(?:MULTISET|SET)\s+",
     re.IGNORECASE,
 )
 _INJECT_MULTISET_RE = re.compile(
-    r'(CREATE\s+)((?:(?:VOLATILE|GLOBAL\s+TEMPORARY)\s+)?(?:TRACE\s+)?TABLE\b)',
+    r"(CREATE\s+)((?:(?:VOLATILE|GLOBAL\s+TEMPORARY)\s+)?(?:TRACE\s+)?TABLE\b)",
     re.IGNORECASE,
 )
 
@@ -240,132 +283,188 @@ def ingest_directory(
 
     for src_path in source_files:
         try:
-            content = _read_file(src_path)
-            if content is None:
+            raw_content = _read_file(src_path)
+            if raw_content is None:
                 continue  # Binary file
 
-            # -- Classify --
-            obj_type = _classify_ddl(content)
-            if obj_type is None:
-                result.unclassified += 1
-                result.unclassified_files.append(
-                    os.path.relpath(src_path, source_dir)
-                )
-                result.warnings.append(
-                    f"Could not classify: {os.path.basename(src_path)}"
-                )
-                continue
+            # -- Split multi-statement files into individual DDL --
+            # A file like create_databases.sql with 5 CREATE DATABASE
+            # statements becomes 5 individual statements, each
+            # processed and placed as a separate eponymous file.
+            statements = _split_multi_statement(raw_content, src_path)
 
-            # -- Extract qualified name --
-            db_name, obj_name = _extract_qualified_name(content)
+            for content in statements:
+                # Strip comments for safe classification and name
+                # extraction — prevents false matches from DDL keywords
+                # in comments (e.g. 'CREATE DATABASE IF NOT EXISTS' in
+                # a comment would otherwise classify as DATABASE 'IF').
+                # Original content is preserved for file output.
+                clean = _strip_comments(content)
 
-            # -- Track database names for token detection --
-            if db_name and detect_tokens:
-                all_db_names[db_name].append(os.path.basename(src_path))
-
-            # -- Normalise content --
-            # MULTISET injection (tables only, skip if already has SET/MULTISET)
-            if obj_type == "TABLE":
-                content, injected = _inject_multiset(content)
-                if injected:
-                    result.multiset_injected += 1
-
-            # NOTE: We deliberately do NOT inject REPLACE VIEW here.
-            # The developer's DDL verb (CREATE vs REPLACE) is their
-            # deployment intent. SHIPS respects it — the validate step
-            # will inform them of the implications.
-
-            # -- Apply token substitutions if provided --
-            if apply_tokens:
-                for literal, token in apply_tokens.items():
-                    content = content.replace(literal, token)
-
-            # -- Determine destination --
-            subdir = _TYPE_TO_SUBDIR.get(obj_type, "DDL")
-            ext = _TYPE_TO_EXT.get(obj_type, ".sql")
-
-            # For overloaded functions, use the SPECIFIC name
-            # to avoid filename collisions between overloads
-            if obj_type == "FUNCTION":
-                specific_name = _extract_specific_function_name(content)
-                if specific_name:
-                    obj_name = specific_name
-
-            # Build eponymous filename
-            if db_name and obj_name:
-                dest_name = f"{db_name}.{obj_name}{ext}"
-            elif obj_name:
-                dest_name = f"{obj_name}{ext}"
-            else:
-                # Fallback: use original filename with correct extension
-                base = os.path.splitext(os.path.basename(src_path))[0]
-                dest_name = f"{base}{ext}"
-
-            dest_dir = os.path.join(payload_base, subdir)
-            os.makedirs(dest_dir, exist_ok=True)
-
-            # Remove .gitkeep if present
-            gitkeep = os.path.join(dest_dir, ".gitkeep")
-            if os.path.exists(gitkeep):
-                os.remove(gitkeep)
-
-            dest_path = os.path.join(dest_dir, dest_name)
-
-            # -- Handle existing files --------------------------------
-            if os.path.exists(dest_path):
-                if not force:
-                    # Default: skip, warn, count
-                    result.skipped_existing += 1
+                # -- Classify --
+                obj_type = _classify_ddl(clean)
+                if obj_type is None:
+                    result.unclassified += 1
+                    result.unclassified_files.append(
+                        os.path.relpath(src_path, source_dir)
+                    )
                     result.warnings.append(
-                        f"Exists: {dest_name} — skipped "
-                        f"(source: {os.path.basename(src_path)}). "
-                        f"Use --force to overwrite."
+                        f"Could not classify: {os.path.basename(src_path)}"
                     )
                     continue
+
+                # -- Extract qualified name --
+                db_name, obj_name = _extract_qualified_name(clean)
+
+                # -- Track database names for token detection --
+                if db_name and detect_tokens:
+                    all_db_names[db_name].append(os.path.basename(src_path))
+
+                # -- Normalise content --
+                # MULTISET injection (tables only, skip if already has SET/MULTISET)
+                if obj_type == "TABLE":
+                    content, injected = _inject_multiset(content)
+                    if injected:
+                        result.multiset_injected += 1
+
+                # NOTE: We deliberately do NOT inject REPLACE VIEW here.
+                # The developer's DDL verb (CREATE vs REPLACE) is their
+                # deployment intent. SHIPS respects it — the validate step
+                # will inform them of the implications.
+
+                # -- Apply token substitutions if provided --
+                # Use word-boundary regex rather than naive substring
+                # replacement: a plain str.replace('DBC', '{{DBC_DATABASE}}')
+                # also matches the 'DBC' that's INSIDE an existing
+                # '{{DBC_DATABASE}}' token, corrupting it into
+                # '{{{{DBC_DATABASE}}_DATABASE}}'. Word boundaries
+                # (\b) treat the surrounding braces and digits as
+                # non-word characters but underscores as word chars,
+                # so '\bDBC\b' won't match inside '_DATABASE' or
+                # '{{DBC_DATABASE}}' — only standalone 'DBC' tokens.
+                if apply_tokens:
+                    for literal, token in apply_tokens.items():
+                        pattern = r"\b" + re.escape(literal) + r"\b"
+                        content = re.sub(pattern, token, content)
+
+                    # Defense in depth: if substitution produced any
+                    # malformed {{...}} markers (orphan braces, double-
+                    # tokenisation), surface them as warnings so the
+                    # developer sees them at harvest time rather than
+                    # finding them at build or — worse — at deploy.
+                    bad = find_malformed_tokens(content)
+                    if bad:
+                        result.warnings.append(
+                            f"Malformed tokens after substitution in "
+                            f"{os.path.basename(src_path)} "
+                            f"({len(bad)} marker(s)). The build will "
+                            f"reject this file — re-check token_map.conf "
+                            f"and the source content."
+                        )
+
+                # -- Determine destination --
+                subdir = _TYPE_TO_SUBDIR.get(obj_type, "DDL")
+                ext = _TYPE_TO_EXT.get(obj_type, ".sql")
+
+                # For overloaded functions, use the SPECIFIC name
+                # to avoid filename collisions between overloads
+                if obj_type == "FUNCTION":
+                    specific_name = _extract_specific_function_name(content)
+                    if specific_name:
+                        obj_name = specific_name
+
+                # Build eponymous filename
+                if db_name and obj_name:
+                    dest_name = f"{db_name}.{obj_name}{ext}"
+                elif obj_name:
+                    dest_name = f"{obj_name}{ext}"
                 else:
-                    # Force mode: overwrite, but check for
-                    # tokenisation regression first.
-                    existing_content = _read_file(dest_path)
-                    if existing_content is not None:
-                        existing_has_tokens = bool(
-                            _TOKEN_RE.search(existing_content)
-                        )
-                        new_has_tokens = bool(
-                            _TOKEN_RE.search(content)
-                        )
-                        if existing_has_tokens and not new_has_tokens:
-                            result.warnings.append(
-                                f"Token regression: {dest_name} "
-                                f"contains {{{{TOKENS}}}} but the "
-                                f"replacement does not. Apply "
-                                f"--token-map to preserve "
-                                f"tokenisation."
+                    # Fallback: use original filename with correct extension
+                    base = os.path.splitext(os.path.basename(src_path))[0]
+                    dest_name = f"{base}{ext}"
+
+                dest_dir = os.path.join(payload_base, subdir)
+                os.makedirs(dest_dir, exist_ok=True)
+
+                # Remove .gitkeep if present
+                gitkeep = os.path.join(dest_dir, ".gitkeep")
+                if os.path.exists(gitkeep):
+                    os.remove(gitkeep)
+
+                dest_path = os.path.join(dest_dir, dest_name)
+
+                # -- Handle existing files --------------------------------
+                if os.path.exists(dest_path):
+                    # COMMENT and STATISTICS: append to existing file.
+                    # Multiple COMMENT ON or COLLECT STATISTICS statements
+                    # for the same table accumulate into one .cmt/.stt file.
+                    if obj_type in ("COMMENT", "STATISTICS"):
+                        with open(dest_path, "a", encoding="utf-8") as f:
+                            f.write("\n" + content + "\n")
+                        result.classified += 1
+                        result.files_placed.append(
+                            (
+                                os.path.relpath(src_path, source_dir),
+                                os.path.relpath(dest_path, project_dir),
+                                obj_type,
                             )
-                    result.overwritten += 1
-                    logger.info(
-                        "Overwriting: %s (--force)", dest_name,
+                        )
+                        continue
+
+                    elif not force:
+                        # Default: skip, warn, count
+                        result.skipped_existing += 1
+                        result.warnings.append(
+                            f"Exists: {dest_name} — skipped "
+                            f"(source: {os.path.basename(src_path)}). "
+                            f"Use --force to overwrite."
+                        )
+                        continue
+                    else:
+                        # Force mode: overwrite, but check for
+                        # tokenisation regression first.
+                        existing_content = _read_file(dest_path)
+                        if existing_content is not None:
+                            existing_has_tokens = bool(
+                                _TOKEN_RE.search(existing_content)
+                            )
+                            new_has_tokens = bool(_TOKEN_RE.search(content))
+                            if existing_has_tokens and not new_has_tokens:
+                                result.warnings.append(
+                                    f"Token regression: {dest_name} "
+                                    f"contains {{{{TOKENS}}}} but the "
+                                    f"replacement does not. Apply "
+                                    f"--token-map to preserve "
+                                    f"tokenisation."
+                                )
+                        result.overwritten += 1
+                        logger.info(
+                            "Overwriting: %s (--force)",
+                            dest_name,
+                        )
+
+                # -- Write normalised content --
+                with open(dest_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+
+                result.classified += 1
+                result.files_placed.append(
+                    (
+                        os.path.relpath(src_path, source_dir),
+                        os.path.relpath(dest_path, project_dir),
+                        obj_type,
                     )
+                )
 
-            # -- Write normalised content --
-            with open(dest_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-
-            result.classified += 1
-            result.files_placed.append((
-                os.path.relpath(src_path, source_dir),
-                os.path.relpath(dest_path, project_dir),
-                obj_type,
-            ))
-
-            logger.debug(
-                "Ingested: %s → %s (%s)",
-                os.path.basename(src_path), dest_name, obj_type
-            )
+                logger.debug(
+                    "Ingested: %s → %s (%s)",
+                    os.path.basename(src_path),
+                    dest_name,
+                    obj_type,
+                )
 
         except Exception as e:
-            result.errors.append(
-                f"Error processing {os.path.basename(src_path)}: {e}"
-            )
+            result.errors.append(f"Error processing {os.path.basename(src_path)}: {e}")
 
     # -- Build token candidate report --
     if detect_tokens:
@@ -375,8 +474,10 @@ def ingest_directory(
         "Ingest complete: %d classified, %d unclassified, "
         "%d overwritten, %d skipped (existing), "
         "%d MULTISET injected",
-        result.classified, result.unclassified,
-        result.overwritten, result.skipped_existing,
+        result.classified,
+        result.unclassified,
+        result.overwritten,
+        result.skipped_existing,
         result.multiset_injected,
     )
 
@@ -386,6 +487,7 @@ def ingest_directory(
 # ---------------------------------------------------------------
 # Internal — File discovery
 # ---------------------------------------------------------------
+
 
 def _discover_files(source_dir: str, file_patterns: List[str] = None) -> List[str]:
     """
@@ -400,18 +502,36 @@ def _discover_files(source_dir: str, file_patterns: List[str] = None) -> List[st
     """
     if file_patterns is None:
         file_patterns = [
-            '.sql', '.tbl', '.viw', '.spl', '.mcr', '.fnc',
-            '.trg', '.jix', '.idx', '.db', '.ddl', '.dcl', '.dml',
-            '.map', '.rol', '.prf', '.auth', '.fsvr',
-            '.sto', '.jar', '.usr',
-            '.c', '.h',
+            ".sql",
+            ".tbl",
+            ".viw",
+            ".spl",
+            ".mcr",
+            ".fnc",
+            ".trg",
+            ".jix",
+            ".idx",
+            ".db",
+            ".ddl",
+            ".dcl",
+            ".dml",
+            ".map",
+            ".rol",
+            ".prf",
+            ".auth",
+            ".fsvr",
+            ".sto",
+            ".jar",
+            ".usr",
+            ".c",
+            ".h",
         ]
 
     files = []
     for root, dirs, filenames in os.walk(source_dir):
         dirs.sort()
         for f in sorted(filenames):
-            if f.startswith('.') or f.startswith('_'):
+            if f.startswith(".") or f.startswith("_"):
                 continue
             ext = os.path.splitext(f)[1].lower()
             if not file_patterns or ext in file_patterns:
@@ -422,7 +542,7 @@ def _discover_files(source_dir: str, file_patterns: List[str] = None) -> List[st
 def _read_file(path: str) -> Optional[str]:
     """Read a text file, returning None for binary files."""
     try:
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, "r", encoding="utf-8") as f:
             return f.read()
     except UnicodeDecodeError:
         return None
@@ -430,7 +550,7 @@ def _read_file(path: str) -> Optional[str]:
 
 def _find_payload_base(project_dir: str) -> str:
     """Locate the payload/database directory."""
-    for candidate in ['payload/database', 'payload']:
+    for candidate in ["payload/database", "payload"]:
         path = os.path.join(project_dir, candidate)
         if os.path.isdir(path):
             return path
@@ -441,8 +561,151 @@ def _find_payload_base(project_dir: str) -> str:
 
 
 # ---------------------------------------------------------------
+# Internal — Multi-statement splitting
+# ---------------------------------------------------------------
+
+
+def _split_multi_statement(
+    content: str,
+    src_path: str,
+) -> List[str]:
+    """
+    Split a file containing multiple DDL statements into individual
+    statements.
+
+    Strips comments before locating semicolons, so semicolons inside
+    comments (e.g. '-- source->job->target;') do not cause false
+    splits. The original content (with comments) is preserved for
+    each output statement by tracking character positions.
+
+    Handles all DDL, DCL, and metadata statement types:
+        CREATE, REPLACE, DROP, ALTER — DDL objects
+        GRANT, REVOKE               — DCL
+        COMMENT ON                  — object/column metadata
+        COLLECT STATISTICS          — statistics collection
+
+    Does NOT split files containing stored procedures, functions,
+    or macros — these have embedded semicolons within BEGIN...END
+    blocks or parenthesised bodies that would be incorrectly split.
+
+    Args:
+        content:  The raw file content.
+        src_path: Source file path (for logging).
+
+    Returns:
+        List of individual DDL statement strings. Returns a single-
+        element list if the file contains only one statement or if
+        splitting is not safe for this DDL type.
+    """
+    # Don't split files with procedure/function bodies (BEGIN...END)
+    if re.search(r"\bBEGIN\b", content, re.IGNORECASE):
+        return [content]
+
+    # Don't split macros — body is parenthesised with internal semicolons
+    if re.search(r"(?:CREATE|REPLACE)\s+MACRO\b", content, re.IGNORECASE):
+        return [content]
+
+    # --- Build a comment-safe version for splitting ---
+    # Replace each comment with whitespace of the same length so that
+    # character positions are preserved for mapping back to originals.
+    clean = content
+
+    # Block comments
+    for match in re.finditer(r"/\*.*?\*/", clean, flags=re.DOTALL):
+        clean = clean[: match.start()] + " " * len(match.group()) + clean[match.end() :]
+
+    # Single-line comments: replace from '--' to end of line with spaces
+    for match in re.finditer(r"--[^\n]*", clean):
+        clean = clean[: match.start()] + " " * len(match.group()) + clean[match.end() :]
+
+    # --- Find semicolon positions in the clean version ---
+    semi_positions = [i for i, c in enumerate(clean) if c == ";"]
+
+    if len(semi_positions) <= 1:
+        # Zero or one semicolons — single statement, return as-is
+        return [content]
+
+    # --- Extract statements using original content + semicolon positions ---
+    statements = []
+    start = 0
+    for pos in semi_positions:
+        # Extract from original content (preserves comments)
+        chunk = content[start : pos + 1].strip()
+        start = pos + 1
+
+        if not chunk:
+            continue
+
+        # Only keep chunks that contain a DDL/DCL/metadata verb
+        # (checked against comment-stripped version to avoid matching
+        # verbs inside comments)
+        clean_chunk = _strip_comments(chunk)
+        if re.search(
+            r"\b(?:CREATE|REPLACE|DROP|ALTER|GRANT|REVOKE"
+            r"|COMMENT\s+ON|COLLECT\s+STATISTICS)\b",
+            clean_chunk,
+            re.IGNORECASE,
+        ):
+            statements.append(chunk)
+
+    # Trailing content after last semicolon (shouldn't happen but be safe)
+    trailing = content[start:].strip()
+    if trailing:
+        clean_trailing = _strip_comments(trailing)
+        if re.search(
+            r"\b(?:CREATE|REPLACE|DROP|ALTER|GRANT|REVOKE"
+            r"|COMMENT\s+ON|COLLECT\s+STATISTICS)\b",
+            clean_trailing,
+            re.IGNORECASE,
+        ):
+            statements.append(trailing)
+
+    # Single statement or nothing — return original content unchanged
+    if len(statements) <= 1:
+        return [content]
+
+    logger.info(
+        "Multi-statement file split: %s -> %d statements",
+        os.path.basename(src_path),
+        len(statements),
+    )
+    return statements
+
+
+# ---------------------------------------------------------------
+# Internal — Comment stripping (for classification safety)
+# ---------------------------------------------------------------
+
+
+def _strip_comments(content: str) -> str:
+    """
+    Strip SQL comments from content before classification.
+
+    Prevents false matches from DDL keywords appearing inside
+    comments (e.g. '-- uses CREATE DATABASE IF NOT EXISTS pattern'
+    would otherwise match as CREATE DATABASE IF).
+
+    Strips:
+        - Single-line comments: -- to end of line
+        - Block comments: /* ... */ (non-nested)
+
+    Args:
+        content: Raw DDL file content.
+
+    Returns:
+        Content with comments replaced by whitespace.
+    """
+    # Block comments first (non-greedy)
+    result = re.sub(r"/\*.*?\*/", " ", content, flags=re.DOTALL)
+    # Single-line comments
+    result = re.sub(r"--[^\n]*", " ", result)
+    return result
+
+
+# ---------------------------------------------------------------
 # Internal — Classification
 # ---------------------------------------------------------------
+
 
 def _classify_ddl(content: str) -> Optional[str]:
     """
@@ -466,22 +729,48 @@ def _extract_qualified_name(content: str) -> Tuple[Optional[str], Optional[str]]
     """
     Extract database.object name from DDL content.
 
+    Tries multiple patterns in order:
+        1. Standard DDL: CREATE/REPLACE ... Database.Object
+        2. COMMENT ON TABLE/COLUMN Database.Object[.column]
+        3. COLLECT STATISTICS ... ON Database.Object
+
+    For COMMENT ON COLUMN, the column name is ignored — only the
+    database.table portion is used for eponymous naming.
+
     Args:
         content: The DDL file content.
 
     Returns:
         Tuple of (database_name, object_name), either may be None.
     """
+    # --- Standard DDL (CREATE/REPLACE) ---
     match = _QUALIFIED_NAME_RE.search(content)
-    if not match:
-        return (None, None)
+    if match:
+        qualified = match.group(1)
+        parts = qualified.replace('"', "").split(".")
+        if len(parts) == 2:
+            return (parts[0].strip(), parts[1].strip())
+        elif len(parts) == 1:
+            return (None, parts[0].strip())
 
-    qualified = match.group(1)
-    parts = qualified.replace('"', '').split('.')
-    if len(parts) == 2:
-        return (parts[0].strip(), parts[1].strip())
-    elif len(parts) == 1:
-        return (None, parts[0].strip())
+    # --- COMMENT ON TABLE/COLUMN ---
+    match = _COMMENT_ON_NAME_RE.search(content)
+    if match:
+        qualified = match.group(1)
+        parts = qualified.replace('"', "").split(".")
+        # COMMENT ON TABLE db.table → 2 parts
+        # COMMENT ON COLUMN db.table.column → 3 parts (ignore column)
+        if len(parts) >= 2:
+            return (parts[0].strip(), parts[1].strip())
+
+    # --- COLLECT STATISTICS ... ON ---
+    match = _COLLECT_STATS_NAME_RE.search(content)
+    if match:
+        qualified = match.group(1)
+        parts = qualified.replace('"', "").split(".")
+        if len(parts) == 2:
+            return (parts[0].strip(), parts[1].strip())
+
     return (None, None)
 
 
@@ -521,8 +810,8 @@ def _extract_specific_function_name(
     if not match:
         return None
 
-    qualified = match.group(1).replace('"', '')
-    parts = qualified.split('.')
+    qualified = match.group(1).replace('"', "")
+    parts = qualified.split(".")
     # Return just the object name (last part)
     return parts[-1].strip()
 
@@ -531,11 +820,12 @@ def _extract_specific_function_name(
 # Internal — Normalisation
 # ---------------------------------------------------------------
 
+
 def _inject_multiset(content: str) -> Tuple[str, bool]:
     """Inject MULTISET if neither SET nor MULTISET is specified."""
     if _HAS_SET_MULTISET_RE.search(content):
         return (content, False)
-    modified = _INJECT_MULTISET_RE.sub(r'\1MULTISET \2', content, count=1)
+    modified = _INJECT_MULTISET_RE.sub(r"\1MULTISET \2", content, count=1)
     return (modified, modified != content)
 
 
@@ -556,7 +846,7 @@ def _inject_replace_view(content: str) -> Tuple[str, bool]:
         return (content, False)
 
     if _CREATE_VIEW_RE.search(content):
-        modified = _CREATE_VIEW_RE.sub('REPLACE VIEW', content, count=1)
+        modified = _CREATE_VIEW_RE.sub("REPLACE VIEW", content, count=1)
         return (modified, True)
 
     return (content, False)
@@ -565,6 +855,7 @@ def _inject_replace_view(content: str) -> Tuple[str, bool]:
 # ---------------------------------------------------------------
 # Internal — Token candidate detection
 # ---------------------------------------------------------------
+
 
 def _build_token_candidates(
     db_names: Dict[str, List[str]],
@@ -585,10 +876,22 @@ def _build_token_candidates(
     """
     # System databases that should remain hardcoded
     system_dbs = {
-        'DBC', 'SYSUDTLIB', 'SYSLIB', 'SYSJDBC', 'SYSBAR',
-        'SYSTEMFE', 'SYSSPATIAL', 'TD_SYSFNLIB',
-        'TD_SYSXML', 'TDSTATS', 'TDWM', 'TD_SYSGPL',
-        'ALL', 'DEFAULT', 'PUBLIC', 'EXTUSER',
+        "DBC",
+        "SYSUDTLIB",
+        "SYSLIB",
+        "SYSJDBC",
+        "SYSBAR",
+        "SYSTEMFE",
+        "SYSSPATIAL",
+        "TD_SYSFNLIB",
+        "TD_SYSXML",
+        "TDSTATS",
+        "TDWM",
+        "TD_SYSGPL",
+        "ALL",
+        "DEFAULT",
+        "PUBLIC",
+        "EXTUSER",
     }
 
     candidates = {}

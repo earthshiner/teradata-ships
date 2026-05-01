@@ -8,15 +8,13 @@ Covers:
     - Hidden/underscore file preservation
 """
 
-import os
-import pytest
-
 from td_release_packager.builder import _resolve_filename
 
 
 # ---------------------------------------------------------------
 # _resolve_filename — Eponymous filename from resolved content
 # ---------------------------------------------------------------
+
 
 class TestResolveFilename:
     """Tests for deriving filenames from resolved DDL content."""

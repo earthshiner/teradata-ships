@@ -72,7 +72,7 @@ def _cmd_deploy(args):
     cursor = _connect(args)
 
     # Parse file patterns from comma-separated string
-    patterns = [p.strip() for p in args.pattern.split(',')]
+    patterns = [p.strip() for p in args.pattern.split(",")]
 
     # Read ordered file list if provided
     ordered_files = None
@@ -103,6 +103,7 @@ def _cmd_deploy(args):
 # ---------------------------------------------------------------
 # analyze command -- dependency analysis + graph export
 # ---------------------------------------------------------------
+
 
 def _cmd_analyze(args):
     """
@@ -195,10 +196,7 @@ def _export_graph(result, args):
     os.makedirs(output_dir, exist_ok=True)
 
     # -- Parse requested formats ----------------------------------
-    requested = {
-        f.strip().lower()
-        for f in args.formats.split(',')
-    }
+    requested = {f.strip().lower() for f in args.formats.split(",")}
 
     # Validate format names
     unknown = requested - set(_GRAPH_FORMATS.keys())
@@ -215,10 +213,10 @@ def _export_graph(result, args):
     # Map format name to its export function.
     # OpenLineage is handled separately (extra parameters).
     exporters = {
-        "dot":     export_dot,
+        "dot": export_dot,
         "mermaid": export_mermaid,
-        "json":    export_json,
-        "csv":     export_csv,
+        "json": export_json,
+        "csv": export_csv,
     }
 
     base = args.base_name
@@ -238,7 +236,7 @@ def _export_graph(result, args):
         else:
             content = exporters[fmt](result)
 
-        with open(filepath, 'w', encoding='utf-8') as f:
+        with open(filepath, "w", encoding="utf-8") as f:
             f.write(content)
 
         written.append((fmt, filepath))
@@ -246,21 +244,17 @@ def _export_graph(result, args):
 
     # -- Print export summary -------------------------------------
     count = len(written)
-    print(
-        f"\n  Graph exported "
-        f"({count} format{'s' if count != 1 else ''}):"
-    )
+    print(f"\n  Graph exported ({count} format{'s' if count != 1 else ''}):")
     for fmt, filepath in written:
         size_kb = os.path.getsize(filepath) / 1024
-        print(
-            f"    {fmt:<14s} -> {filepath} ({size_kb:.1f} KB)"
-        )
+        print(f"    {fmt:<14s} -> {filepath} ({size_kb:.1f} KB)")
     print()
 
 
 # ---------------------------------------------------------------
 # resume, rollback, status commands (unchanged)
 # ---------------------------------------------------------------
+
 
 def _cmd_resume(args):
     """Execute the 'resume' command."""
@@ -315,7 +309,7 @@ def _cmd_status(args):
         )
         sys.exit(1)
 
-    with open(manifest_path, 'r', encoding='utf-8') as f:
+    with open(manifest_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
     print(f"\n{'=' * 64}")
@@ -335,23 +329,14 @@ def _cmd_status(args):
     for state, count in sorted(counts.items()):
         print(f"    {state:15s}: {count}")
 
-    print(
-        f"\n  {'Object':<40s} {'State':<15s} "
-        f"{'Rows':<10s} Backup"
-    )
-    print(
-        f"  {'-' * 40} {'-' * 15} "
-        f"{'-' * 10} {'-' * 30}"
-    )
+    print(f"\n  {'Object':<40s} {'State':<15s} {'Rows':<10s} Backup")
+    print(f"  {'-' * 40} {'-' * 15} {'-' * 10} {'-' * 30}")
 
     for name, record in data["objects"].items():
         rows = record.get("rows_migrated", 0)
         backup = record.get("backup_table", "\u2014") or "\u2014"
         state = record["state"]
-        print(
-            f"  {name:<40s} {state:<15s} "
-            f"{rows:<10d} {backup}"
-        )
+        print(f"  {name:<40s} {state:<15s} {rows:<10d} {backup}")
 
         if record.get("error"):
             print(f"    ERROR: {record['error']}")
@@ -366,6 +351,7 @@ def _cmd_status(args):
 # Output formatting
 # ---------------------------------------------------------------
 
+
 def _print_preflight_result(preflight_result):
     """Display pre-flight validation results."""
     if preflight_result is None:
@@ -379,10 +365,7 @@ def _print_preflight_result(preflight_result):
     print(f"{'\u2500' * 64}")
 
     if pf.object_count:
-        parts = [
-            f"{v} {k}(s)"
-            for k, v in sorted(pf.object_count.items())
-        ]
+        parts = [f"{v} {k}(s)" for k, v in sorted(pf.object_count.items())]
         print(f"  Objects:    {', '.join(parts)}")
 
     if pf.databases:
@@ -394,13 +377,9 @@ def _print_preflight_result(preflight_result):
     # Show failures and warnings
     for check in pf.checks:
         if not check.passed and check.severity == "ERROR":
-            print(
-                f"    \u2717 [{check.database}] {check.message}"
-            )
+            print(f"    \u2717 [{check.database}] {check.message}")
         elif check.severity == "WARNING":
-            print(
-                f"    \u26a0 [{check.database}] {check.message}"
-            )
+            print(f"    \u26a0 [{check.database}] {check.message}")
 
     print(f"{'\u2500' * 64}")
 
@@ -411,10 +390,7 @@ def _print_package_result(result):
     mode = " (DRY RUN)" if result.dry_run else ""
 
     print(f"\n{'=' * 64}")
-    print(
-        f"  {status_icon} Deployment{mode}: "
-        f"{result.deployment_id}"
-    )
+    print(f"  {status_icon} Deployment{mode}: {result.deployment_id}")
     if result.manifest_path:
         print(f"  Manifest:   {result.manifest_path}")
     if result.report_path:
@@ -457,6 +433,7 @@ def _print_package_result(result):
 # Order file parsing
 # ---------------------------------------------------------------
 
+
 def _read_order_file(
     order_file_path: str,
     package_dir: str,
@@ -482,14 +459,14 @@ def _read_order_file(
         )
         sys.exit(1)
 
-    with open(order_file_path, 'r', encoding='utf-8') as f:
+    with open(order_file_path, "r", encoding="utf-8") as f:
         lines = f.readlines()
 
     ordered = []
     for lineno, line in enumerate(lines, 1):
         stripped = line.strip()
         # Skip blank lines and comments
-        if not stripped or stripped.startswith('#'):
+        if not stripped or stripped.startswith("#"):
             continue
         # Resolve relative to package_dir
         full_path = os.path.join(package_dir, stripped)
@@ -516,6 +493,7 @@ def _read_order_file(
 # ---------------------------------------------------------------
 # Connection
 # ---------------------------------------------------------------
+
 
 def _connect(args):
     """Establish a Teradata database connection."""
@@ -562,8 +540,12 @@ def _connect(args):
         # error code and description.
         err = str(e)
         import re
+
         clean = re.sub(
-            r'\s*\bat\s+gosqldriver/.*', '', err, flags=re.DOTALL,
+            r"\s*\bat\s+gosqldriver/.*",
+            "",
+            err,
+            flags=re.DOTALL,
         ).strip()
         print(
             f"ERROR: Connection failed.\n"
@@ -579,6 +561,7 @@ def _connect(args):
 # Argument parser
 # ---------------------------------------------------------------
 
+
 def _build_arg_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser."""
     parser = argparse.ArgumentParser(
@@ -592,17 +575,21 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "-v", "--verbose", action="store_true",
+        "-v",
+        "--verbose",
+        action="store_true",
         help="Enable debug logging.",
     )
 
     subs = parser.add_subparsers(
-        dest="command", help="Available commands",
+        dest="command",
+        help="Available commands",
     )
 
     # -- deploy --
     dp = subs.add_parser(
-        "deploy", help="Deploy DDL files in a directory.",
+        "deploy",
+        help="Deploy DDL files in a directory.",
     )
     dp.add_argument(
         "package_dir",
@@ -610,14 +597,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     dp.add_argument(
         "--pattern",
-        default=(
-            "*.tbl,*.jix,*.idx,*.viw,"
-            "*.spl,*.mcr,*.fnc,*.trg"
-        ),
-        help=(
-            "Comma-separated file glob patterns "
-            "(default: all DDL types)."
-        ),
+        default=("*.tbl,*.jix,*.idx,*.viw,*.spl,*.mcr,*.fnc,*.trg"),
+        help=("Comma-separated file glob patterns (default: all DDL types)."),
     )
     dp.add_argument(
         "--order-file",
@@ -628,11 +609,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     dp.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="Simulate deployment without executing any DDL.",
     )
     dp.add_argument(
-        "--continue-on-error", action="store_true",
+        "--continue-on-error",
+        action="store_true",
         help="Continue past failures.",
     )
     _add_conn_args(dp)
@@ -657,18 +640,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     az.add_argument(
         "--formats",
         default=_ALL_FORMATS,
-        help=(
-            f"Comma-separated list of export formats "
-            f"(default: {_ALL_FORMATS})."
-        ),
+        help=(f"Comma-separated list of export formats (default: {_ALL_FORMATS})."),
     )
     az.add_argument(
         "--base-name",
         default="ships_dependencies",
-        help=(
-            "Base filename for exported files "
-            "(default: ships_dependencies)."
-        ),
+        help=("Base filename for exported files (default: ships_dependencies)."),
     )
     az.add_argument(
         "--namespace",
@@ -682,32 +659,33 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     az.add_argument(
         "--project-name",
         default="ships-project",
-        help=(
-            "OpenLineage job namespace / project name "
-            "(default: ships-project)."
-        ),
+        help=("OpenLineage job namespace / project name (default: ships-project)."),
     )
 
     # -- resume --
     rp = subs.add_parser(
-        "resume", help="Resume a failed deployment.",
+        "resume",
+        help="Resume a failed deployment.",
     )
     rp.add_argument(
         "manifest_path",
         help="Path to .deploy_manifest.json.",
     )
     rp.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="Simulate remaining deployments.",
     )
     rp.add_argument(
-        "--continue-on-error", action="store_true",
+        "--continue-on-error",
+        action="store_true",
     )
     _add_conn_args(rp)
 
     # -- rollback --
     rb = subs.add_parser(
-        "rollback", help="Roll back a deployment.",
+        "rollback",
+        help="Roll back a deployment.",
     )
     rb.add_argument(
         "manifest_path",
@@ -731,17 +709,20 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 def _add_conn_args(parser):
     """Add Teradata connection arguments."""
     parser.add_argument(
-        "--host", help="Teradata host (or TD_HOST).",
+        "--host",
+        help="Teradata host (or TD_HOST).",
     )
     parser.add_argument(
-        "--user", help="Teradata user (or TD_USER).",
+        "--user",
+        help="Teradata user (or TD_USER).",
     )
     parser.add_argument(
         "--password",
         help="Teradata password (or TD_PASSWORD).",
     )
     parser.add_argument(
-        "--logmech", help="Logon mechanism (or TD_LOGMECH).",
+        "--logmech",
+        help="Logon mechanism (or TD_LOGMECH).",
     )
 
 

@@ -1,311 +1,371 @@
 """
-validate_grants.py — Cross-database grant validation for SHIPS projects.
+validate_grants.py — Cross-file grant validation orchestrator.
 
-Part of the SHIPS Inspect phase. Runs after validate.py (per-file lint)
-and performs cross-file analysis to ensure that all implied grants
-required by the DDL are declared in .grt files, and that no stale
-grants remain.
+This module is Step 2 of the SHIPS validate command. Step 1 (per-file
+DDL lint) lives in ``validate.py``; this module compares the grants
+*implied* by the DDL across an entire project against the *persisted*
+``.grt`` files in the project's DCL/inter_db directory, and reports
+or repairs any drift.
 
-Workflow:
-    1. Infer the required grant set by analysing all DDL files
-       (views, procedures, macros, triggers, functions)
-    2. Parse the existing .grt files in the project's dcl/ directory
-    3. Compare inferred vs declared:
-       - MISSING: inferred grant has no matching .grt entry → ERROR
-       - STALE:   .grt entry has no matching inferred grant → WARNING
-       - MATCH:   inferred and declared agree → OK
-    4. Optionally (--fix) generate or update .grt files to match
-       the inferred set
+The heavy lifting — parsing DDL, extracting cross-database references,
+deciding which privileges each reference implies, and emitting .grt
+content — is delegated to ``infer_grants.py``. This module is a thin
+orchestrator that:
 
-Integration:
-    Called by the SHIPS inspect CLI alongside validate.py:
+    1. Calls infer_grants to derive the *expected* grants per grantee.
+    2. Reads the *actual* .grt files persisted in dcl_dir.
+    3. Compares semantically (set of grantor → privilege-set per
+       grantee), producing a structured GrantValidationResult.
+    4. Optionally writes missing/drifted files (fix mode).
 
-        td_release_packager inspect <project>
-          → validate.py          (per-file lint)
-          → validate_grants.py   (cross-file grant analysis)
+Public API (matches what cli.py imports):
 
-Usage:
-    # Validate only — report missing/stale grants
-    python validate_grants.py <project_dir>
+    validate_grants(project_dir, dcl_dir=None, verbose=False)
+        Read-only audit. Returns a GrantValidationResult.
 
-    # Validate and fix — generate/update .grt files
-    python validate_grants.py <project_dir> --fix
+    fix_grants(project_dir, dcl_dir=None, verbose=False)
+        Writes expected files for any missing or drifted grantees.
+        Does NOT delete orphaned files — manual review required.
+        Returns (GrantValidationResult, files_written: int).
 
-    # Verbose output
-    python validate_grants.py <project_dir> --verbose
+    format_report(result)
+        Human-readable summary string.
 
-Author: Paul Dancer — Teradata Worldwide Field Tech
+Drift semantics:
+    Two .grt files are considered EQUIVALENT if they contain the same
+    set of (grantor, privilege) pairs after parsing — formatting,
+    comment headers, and statement ordering are ignored. This means
+    manual edits that preserve the underlying grant set don't trigger
+    drift, but manual additions/removals of privileges do.
+
+Orphan policy:
+    A .grt file in dcl_dir whose grantee is not present in the DDL
+    inference is reported as ORPHANED. Orphans are NEVER auto-deleted
+    in fix mode — they may be intentional manual grants outside the
+    inference's reach. Manual review and removal are required.
 """
 
-import argparse
-import os
+from __future__ import annotations
+
+import logging
 import re
-import sys
-from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
-# --- Import the inference engine ---
-try:
-    # Package import (when running as part of td_release_packager)
-    from td_release_packager.infer_grants import (
-        find_ddl_files,
-        analyse_file,
-        consolidate_grants,
-        generate_grt_content,
-        grantee_filename,
-        PRIV_ORDER,
-    )
-except ImportError:
-    # Direct import (when running standalone)
-    from infer_grants import (
-        find_ddl_files,
-        analyse_file,
-        consolidate_grants,
-        generate_grt_content,
-        grantee_filename,
-        PRIV_ORDER,
-    )
+from td_release_packager.infer_grants import (
+    PRIV_ORDER,
+    analyse_file,
+    consolidate_grants,
+    find_ddl_files,
+    generate_grt_content,
+    grantee_filename,
+    strip_sql_comments,
+)
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Constants
+# Default DCL directory
 # ---------------------------------------------------------------------------
 
-# Regex to parse a GRANT statement from a .grt file
-# Matches: GRANT priv1[, priv2, ...] ON grantor TO grantee [WITH GRANT OPTION];
-RE_GRANT_STMT = re.compile(
-    r"^\s*GRANT\s+"
-    r"((?:[A-Z]+(?:\s+[A-Z]+)?)"       # first privilege (may be two words)
-    r"(?:\s*,\s*"                        # comma separator
-    r"(?:[A-Z]+(?:\s+[A-Z]+)?))*)"      # additional privileges
-    r"\s+ON\s+"
-    r"(\S+)"                             # grantor database
-    r"\s+TO\s+"
-    r"(\S+)"                             # grantee database
-    r"(?:\s+WITH\s+GRANT\s+OPTION)?"     # optional WITH GRANT OPTION
-    r"\s*;",
-    re.IGNORECASE | re.MULTILINE
+# Where infer_grants.py writes by default and where existing .grt files
+# are expected to live. Mirrored here so a None dcl_dir resolves
+# consistently between validation and inference.
+_DEFAULT_DCL_SUBPATH = ("payload", "database", "DCL", "inter_db")
+
+
+def _resolve_dcl_dir(project_dir: Path, dcl_dir: Optional[Path]) -> Path:
+    """Resolve the DCL directory, applying the project default if None."""
+    if dcl_dir is not None:
+        return dcl_dir
+    return project_dir.joinpath(*_DEFAULT_DCL_SUBPATH)
+
+
+# ---------------------------------------------------------------------------
+# GRANT statement parsing — for reading existing .grt files
+# ---------------------------------------------------------------------------
+
+# Identifier shape — accepts tokens, quoted ids, and bare ids.
+_GRANT_IDENT = r'(?:\{\{[A-Za-z_]\w*\}\}|"[^"]+"|[A-Za-z_]\w*)'
+
+# A GRANT statement of the canonical form produced by infer_grants:
+#   GRANT priv1, priv2, ... ON <grantor> TO <grantee> [WITH GRANT OPTION];
+_GRANT_STMT_RE = re.compile(
+    rf"""
+    \bGRANT\b\s+
+    (?P<privileges>.+?)
+    \s+\bON\b\s+
+    (?P<grantor>{_GRANT_IDENT})
+    \s+\bTO\b\s+
+    (?P<grantee>{_GRANT_IDENT})
+    (?:\s+\bWITH\b\s+\bGRANT\b\s+\bOPTION\b)?
+    \s*;
+    """,
+    re.IGNORECASE | re.VERBOSE | re.DOTALL,
 )
 
 
+def _normalise_privilege(text: str) -> str:
+    """Collapse whitespace and uppercase a single privilege fragment."""
+    return " ".join(text.upper().split())
+
+
+def _split_privileges(privs_str: str) -> Set[str]:
+    """
+    Split a comma-separated privilege list into a set of canonical
+    privilege strings.
+
+    Handles multi-word privileges (e.g. "EXECUTE PROCEDURE") by
+    canonicalising each comma-separated fragment. Unknown tokens are
+    preserved verbatim (uppercased) so unexpected privileges still
+    surface as drift rather than silently disappearing.
+    """
+    parts = [p.strip() for p in privs_str.split(",")]
+    return {_normalise_privilege(p) for p in parts if p.strip()}
+
+
+def _parse_grt_content(content: str) -> Dict[str, Set[str]]:
+    """
+    Parse a .grt file's content into ``{grantor: set_of_privileges}``.
+
+    Comments are stripped before parsing so commented-out GRANTs are
+    correctly ignored. Multiple GRANT statements with the same grantor
+    are merged (union of privilege sets). The grantee is implicit from
+    the file's filename context; the caller is responsible for that
+    mapping.
+    """
+    grants: Dict[str, Set[str]] = {}
+    cleaned = strip_sql_comments(content)
+
+    for match in _GRANT_STMT_RE.finditer(cleaned):
+        grantor = match.group("grantor").strip()
+        privs = _split_privileges(match.group("privileges"))
+        grants.setdefault(grantor, set()).update(privs)
+
+    return grants
+
+
+def _read_grt_file(path: Path) -> Optional[Dict[str, Set[str]]]:
+    """
+    Read and parse a .grt file. Returns None if the file cannot be
+    read (does not exist, permission denied, encoding error).
+    """
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        logger.warning("Cannot read %s: %s", path, e)
+        return None
+    return _parse_grt_content(content)
+
+
 # ---------------------------------------------------------------------------
-# Data classes — compatible with validate.py patterns
+# Result structure
 # ---------------------------------------------------------------------------
+
 
 @dataclass
-class GrantValidationIssue:
-    """A single grant validation finding."""
+class GranteeStatus:
+    """Per-grantee classification for one .grt file's worth of grants."""
 
     grantee: str
-    rule: str           # 'missing_grant', 'stale_grant', 'missing_file'
-    severity: str       # 'ERROR' or 'WARNING'
-    message: str
-    grantor: Optional[str] = None
-    privilege: Optional[str] = None
+    file_path: Path
+
+    # Status — exactly one of these is True
+    consistent: bool = False
+    drifted: bool = False
+    missing: bool = False
+    orphaned: bool = False
+
+    # Populated for drifted/missing/orphaned cases
+    expected_grants: Dict[str, Set[str]] = field(default_factory=dict)
+    actual_grants: Dict[str, Set[str]] = field(default_factory=dict)
+
+    # Detailed drift breakdown (only for drifted)
+    missing_privs: Dict[str, Set[str]] = field(default_factory=dict)
+    extra_privs: Dict[str, Set[str]] = field(default_factory=dict)
 
 
 @dataclass
 class GrantValidationResult:
-    """Aggregate grant validation outcome."""
+    """
+    Outcome of cross-file grant validation.
 
-    grantees_checked: int = 0
-    grants_inferred: int = 0
-    grants_declared: int = 0
-    missing: int = 0
-    stale: int = 0
-    matched: int = 0
-    issues: List[GrantValidationIssue] = field(default_factory=list)
+    Attributes:
+        statuses:     Per-grantee classification (one entry per
+                      grantee considered).
+        project_dir:  Project root that was scanned.
+        dcl_dir:      DCL directory that was checked / written to.
+        ddl_count:    Number of DDL files contributing grants.
+    """
+
+    statuses: List[GranteeStatus] = field(default_factory=list)
+    project_dir: Optional[Path] = None
+    dcl_dir: Optional[Path] = None
+    ddl_count: int = 0
+
+    @property
+    def consistent(self) -> List[GranteeStatus]:
+        return [s for s in self.statuses if s.consistent]
+
+    @property
+    def drifted(self) -> List[GranteeStatus]:
+        return [s for s in self.statuses if s.drifted]
+
+    @property
+    def missing(self) -> List[GranteeStatus]:
+        return [s for s in self.statuses if s.missing]
+
+    @property
+    def orphaned(self) -> List[GranteeStatus]:
+        return [s for s in self.statuses if s.orphaned]
 
     @property
     def passed(self) -> bool:
-        """True if no ERROR-level issues found."""
-        return all(i.severity != "ERROR" for i in self.issues)
+        """True iff every grantee is consistent (no drift, no missing,
+        no orphans). Used by cli.py to set the overall exit code."""
+        return all(s.consistent for s in self.statuses)
 
 
 # ---------------------------------------------------------------------------
-# .grt file parser
+# Comparison logic
 # ---------------------------------------------------------------------------
 
-def parse_grt_file(filepath: Path) -> Dict[str, Set[str]]:
+
+def _compute_drift(
+    expected: Dict[str, Set[str]],
+    actual: Dict[str, Set[str]],
+) -> Tuple[Dict[str, Set[str]], Dict[str, Set[str]]]:
     """
-    Parse a .grt file and extract the declared grants.
+    Compare expected vs actual grants. Returns
+    ``(missing_privs, extra_privs)`` — both keyed by grantor.
 
-    Reads GRANT statements from the file and builds a map of
-    grantor database → set of privileges.
+    missing_privs[grantor]: privileges in expected but not in actual.
+    extra_privs[grantor]:   privileges in actual but not in expected.
 
-    Args:
-        filepath: Path to the .grt file.
-
-    Returns:
-        Dict mapping grantor database references to sets of
-        privilege strings (e.g. {'{{DOM_DATABASE_T}}': {'SELECT'}}).
+    Both empty dicts ⇒ semantically identical.
     """
-    try:
-        content = filepath.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as e:
-        print(f"  WARNING: Cannot read {filepath}: {e}", file=sys.stderr)
-        return {}
+    missing: Dict[str, Set[str]] = {}
+    extra: Dict[str, Set[str]] = {}
 
-    grants: Dict[str, Set[str]] = defaultdict(set)
+    all_grantors = set(expected) | set(actual)
+    for grantor in all_grantors:
+        e = expected.get(grantor, set())
+        a = actual.get(grantor, set())
+        if e - a:
+            missing[grantor] = e - a
+        if a - e:
+            extra[grantor] = a - e
 
-    for match in RE_GRANT_STMT.finditer(content):
-        priv_str = match.group(1).strip()
-        grantor = match.group(2).strip()
-        # grantee = match.group(3).strip()  # available but not needed here
-
-        # Split comma-separated privileges, normalise whitespace
-        privs = [p.strip().upper() for p in priv_str.split(",")]
-        for priv in privs:
-            if priv:
-                grants[grantor].add(priv)
-
-    return dict(grants)
+    return missing, extra
 
 
-def find_grt_files(project_dir: Path, dcl_dir: Optional[Path] = None) -> List[Path]:
+def _classify_grantee(
+    grantee: str,
+    expected: Dict[str, Set[str]],
+    dcl_dir: Path,
+) -> GranteeStatus:
     """
-    Find all .grt files in the project's DCL directory.
-
-    Args:
-        project_dir: Root directory of the SHIPS project.
-        dcl_dir:     Optional explicit DCL directory. Defaults to
-                     <project_dir>/dcl/.
-
-    Returns:
-        Sorted list of Path objects for each .grt file found.
+    Classify one grantee by comparing inferred grants against the
+    persisted .grt file (if any).
     """
-    search_dir = dcl_dir or (project_dir / "dcl")
-    if not search_dir.is_dir():
+    file_path = dcl_dir / grantee_filename(grantee)
+    status = GranteeStatus(
+        grantee=grantee,
+        file_path=file_path,
+        expected_grants=expected,
+    )
+
+    if not file_path.exists():
+        status.missing = True
+        return status
+
+    actual = _read_grt_file(file_path)
+    if actual is None:
+        # Treat unreadable file as missing — caller will overwrite
+        status.missing = True
+        return status
+
+    status.actual_grants = actual
+    missing_privs, extra_privs = _compute_drift(expected, actual)
+
+    if not missing_privs and not extra_privs:
+        status.consistent = True
+    else:
+        status.drifted = True
+        status.missing_privs = missing_privs
+        status.extra_privs = extra_privs
+
+    return status
+
+
+def _find_orphans(
+    expected_grantees: Set[str],
+    dcl_dir: Path,
+) -> List[GranteeStatus]:
+    """
+    Identify .grt files in dcl_dir whose grantee is not in the
+    inferred set. These are reported but not auto-deleted.
+    """
+    if not dcl_dir.is_dir():
         return []
 
-    return sorted(search_dir.glob("*.grt"))
+    orphans: List[GranteeStatus] = []
+    for entry in sorted(dcl_dir.iterdir()):
+        if not entry.is_file() or entry.suffix.lower() != ".grt":
+            continue
+
+        # Recover the grantee from the filename: '{{TOK}}.grt' → '{{TOK}}'
+        grantee_from_filename = entry.stem
+        if grantee_from_filename in expected_grantees:
+            continue
+
+        actual = _read_grt_file(entry) or {}
+        orphans.append(
+            GranteeStatus(
+                grantee=grantee_from_filename,
+                file_path=entry,
+                orphaned=True,
+                actual_grants=actual,
+            )
+        )
+    return orphans
 
 
 # ---------------------------------------------------------------------------
-# Comparison engine
+# Inference harness — the bridge to infer_grants.py
 # ---------------------------------------------------------------------------
 
-def compare_grants(
-    inferred: Dict[str, Dict[str, Set[str]]],
-    declared: Dict[str, Dict[str, Set[str]]],
-) -> List[GrantValidationIssue]:
+
+def _infer_expected_grants(
+    project_dir: Path,
+    verbose: bool = False,
+) -> Tuple[Dict[str, Dict[str, Set[str]]], List[Dict], int]:
     """
-    Compare inferred grants against declared grants.
-
-    Produces issues for:
-        - MISSING grants: inferred but not declared (ERROR)
-        - STALE grants:   declared but not inferred (WARNING)
-
-    Args:
-        inferred: {grantee: {grantor: set_of_privileges}} from DDL analysis.
-        declared: {grantee: {grantor: set_of_privileges}} from .grt files.
+    Run infer_grants over the project to produce the expected grants.
 
     Returns:
-        List of GrantValidationIssue objects.
+        (consolidated, raw_results, ddl_count) where:
+            consolidated: {grantee: {grantor: set_of_privileges}}
+            raw_results:  per-file analysis dicts (kept for fix-mode
+                          source attribution in .grt headers)
+            ddl_count:    number of DDL files contributing grants
     """
-    issues: List[GrantValidationIssue] = []
-
-    # All grantees from both sets
-    all_grantees = set(inferred.keys()) | set(declared.keys())
-
-    for grantee in sorted(all_grantees):
-        inferred_grants = inferred.get(grantee, {})
-        declared_grants = declared.get(grantee, {})
-
-        # --- Check for missing .grt file entirely ---
-        if grantee in inferred and grantee not in declared:
-            # Summarise what's needed
-            grant_pairs = []
-            for grantor in sorted(inferred_grants.keys()):
-                privs = sorted(
-                    inferred_grants[grantor],
-                    key=lambda p: PRIV_ORDER.index(p)
-                    if p in PRIV_ORDER else 99
-                )
-                grant_pairs.append(
-                    f"{', '.join(privs)} ON {grantor}"
-                )
-            issues.append(GrantValidationIssue(
-                grantee=grantee,
-                rule="missing_file",
-                severity="ERROR",
-                message=(
-                    f"No .grt file exists for {grantee}. "
-                    f"Inferred grants: {'; '.join(grant_pairs)}. "
-                    f"Run with --fix to generate."
-                ),
-            ))
-            continue
-
-        # --- Check for stale .grt file (no inferred grants) ---
-        if grantee not in inferred and grantee in declared:
-            issues.append(GrantValidationIssue(
-                grantee=grantee,
-                rule="stale_file",
-                severity="WARNING",
-                message=(
-                    f".grt file exists for {grantee} but no DDL "
-                    f"requires grants for this database. "
-                    f"The file may be stale."
-                ),
-            ))
-            continue
-
-        # --- Per-grantor comparison ---
-        all_grantors = set(inferred_grants.keys()) | set(declared_grants.keys())
-
-        for grantor in sorted(all_grantors):
-            inferred_privs = inferred_grants.get(grantor, set())
-            declared_privs = declared_grants.get(grantor, set())
-
-            # Missing privileges
-            missing_privs = inferred_privs - declared_privs
-            for priv in sorted(
-                missing_privs,
-                key=lambda p: PRIV_ORDER.index(p)
-                if p in PRIV_ORDER else 99
-            ):
-                issues.append(GrantValidationIssue(
-                    grantee=grantee,
-                    rule="missing_grant",
-                    severity="ERROR",
-                    grantor=grantor,
-                    privilege=priv,
-                    message=(
-                        f"Missing: GRANT {priv} ON {grantor} "
-                        f"TO {grantee} WITH GRANT OPTION — "
-                        f"required by DDL but not declared in .grt file."
-                    ),
-                ))
-
-            # Stale privileges
-            stale_privs = declared_privs - inferred_privs
-            for priv in sorted(
-                stale_privs,
-                key=lambda p: PRIV_ORDER.index(p)
-                if p in PRIV_ORDER else 99
-            ):
-                issues.append(GrantValidationIssue(
-                    grantee=grantee,
-                    rule="stale_grant",
-                    severity="WARNING",
-                    grantor=grantor,
-                    privilege=priv,
-                    message=(
-                        f"Stale: GRANT {priv} ON {grantor} "
-                        f"TO {grantee} — declared in .grt file but "
-                        f"no DDL references this privilege."
-                    ),
-                ))
-
-    return issues
+    ddl_files = find_ddl_files(project_dir)
+    raw_results: List[Dict] = []
+    for ddl_file in ddl_files:
+        result = analyse_file(ddl_file, verbose=verbose)
+        if result and result.get("grants"):
+            raw_results.append(result)
+    consolidated = consolidate_grants(raw_results) if raw_results else {}
+    return consolidated, raw_results, len(raw_results)
 
 
 # ---------------------------------------------------------------------------
-# Main validation function (importable)
+# Public API
 # ---------------------------------------------------------------------------
+
 
 def validate_grants(
     project_dir: Path,
@@ -313,89 +373,45 @@ def validate_grants(
     verbose: bool = False,
 ) -> GrantValidationResult:
     """
-    Validate that all implied cross-database grants are declared.
+    Validate that persisted .grt files match the grants implied by
+    the project's DDL.
 
-    Runs the full inference → comparison pipeline:
-        1. Scan DDL files and infer required grants
-        2. Parse existing .grt files
-        3. Compare and report differences
+    Read-only — no files are written. Use ``fix_grants`` to repair
+    drift.
 
     Args:
-        project_dir: Root directory of the SHIPS project.
-        dcl_dir:     Optional explicit DCL directory.
-        verbose:     If True, print diagnostic information.
+        project_dir: Root of the SHIPS project to scan.
+        dcl_dir:     Directory containing .grt files. Defaults to
+                     ``project_dir/payload/database/DCL/inter_db``.
+        verbose:     Forwarded to infer_grants for diagnostic output.
 
     Returns:
-        GrantValidationResult with all findings.
+        GrantValidationResult with per-grantee classifications.
+        ``result.passed`` is True iff every grantee is consistent.
     """
-    result = GrantValidationResult()
+    project_dir = Path(project_dir).resolve()
+    dcl_dir = _resolve_dcl_dir(project_dir, dcl_dir)
 
-    # --- Step 1: Infer grants from DDL ---
-    ddl_files = find_ddl_files(project_dir)
-    if verbose:
-        print(f"  Grant inference: {len(ddl_files)} DDL files found")
+    consolidated, _raw, ddl_count = _infer_expected_grants(project_dir, verbose)
 
-    analysis_results = []
-    for ddl_file in ddl_files:
-        analysis = analyse_file(ddl_file, verbose=verbose)
-        if analysis:
-            analysis_results.append(analysis)
-
-    inferred = consolidate_grants(analysis_results)
-    result.grants_inferred = sum(
-        sum(len(privs) for privs in grantors.values())
-        for grantors in inferred.values()
+    result = GrantValidationResult(
+        project_dir=project_dir,
+        dcl_dir=dcl_dir,
+        ddl_count=ddl_count,
     )
 
-    if verbose:
-        print(
-            f"  Inferred: {result.grants_inferred} privilege(s) "
-            f"across {len(inferred)} grantee(s)"
-        )
+    # Classify each inferred grantee
+    for grantee in sorted(consolidated.keys()):
+        expected = consolidated[grantee]
+        status = _classify_grantee(grantee, expected, dcl_dir)
+        result.statuses.append(status)
 
-    # --- Step 2: Parse existing .grt files ---
-    grt_files = find_grt_files(project_dir, dcl_dir)
-    declared: Dict[str, Dict[str, Set[str]]] = {}
-
-    for grt_path in grt_files:
-        # Derive grantee from filename (strip .grt extension)
-        grantee = grt_path.stem
-        grants = parse_grt_file(grt_path)
-        if grants:
-            declared[grantee] = grants
-
-    result.grants_declared = sum(
-        sum(len(privs) for privs in grantors.values())
-        for grantors in declared.values()
-    )
-
-    if verbose:
-        print(
-            f"  Declared: {result.grants_declared} privilege(s) "
-            f"across {len(declared)} .grt file(s)"
-        )
-
-    # --- Step 3: Compare ---
-    result.grantees_checked = len(set(inferred.keys()) | set(declared.keys()))
-    result.issues = compare_grants(inferred, declared)
-
-    # Tally issue types
-    result.missing = sum(
-        1 for i in result.issues
-        if i.rule in ("missing_grant", "missing_file")
-    )
-    result.stale = sum(
-        1 for i in result.issues
-        if i.rule in ("stale_grant", "stale_file")
-    )
-    result.matched = result.grants_inferred - result.missing
+    # Detect orphans — .grt files with no DDL backing
+    orphans = _find_orphans(set(consolidated.keys()), dcl_dir)
+    result.statuses.extend(orphans)
 
     return result
 
-
-# ---------------------------------------------------------------------------
-# Fix mode — generate/update .grt files
-# ---------------------------------------------------------------------------
 
 def fix_grants(
     project_dir: Path,
@@ -403,198 +419,153 @@ def fix_grants(
     verbose: bool = False,
 ) -> Tuple[GrantValidationResult, int]:
     """
-    Infer grants and write/update .grt files to match.
-
-    This is the --fix mode: it generates .grt files that exactly
-    match the inferred grant set. Existing .grt files are overwritten
-    with the inferred content. Stale .grt files (no matching DDL) are
-    reported but NOT deleted — manual review is required.
+    Repair grant drift by writing expected .grt files for every
+    missing or drifted grantee. Orphaned files are reported but NOT
+    deleted.
 
     Args:
-        project_dir: Root directory of the SHIPS project.
-        dcl_dir:     Optional explicit DCL directory.
-        verbose:     If True, print diagnostic information.
+        project_dir: Root of the SHIPS project to scan.
+        dcl_dir:     Directory containing .grt files. Defaults to
+                     ``project_dir/payload/database/DCL/inter_db``.
+        verbose:     Forwarded to infer_grants for diagnostic output.
 
     Returns:
-        Tuple of (GrantValidationResult, files_written).
+        ``(result, files_written)`` where:
+            result:         The post-fix GrantValidationResult — drifted
+                            and missing entries have been re-classified
+                            as consistent (since they were just written).
+            files_written:  Count of .grt files actually written.
     """
-    output_dir = dcl_dir or (project_dir / "dcl")
+    project_dir = Path(project_dir).resolve()
+    dcl_dir = _resolve_dcl_dir(project_dir, dcl_dir)
 
-    # --- Run inference ---
-    ddl_files = find_ddl_files(project_dir)
-    analysis_results = []
-    for ddl_file in ddl_files:
-        analysis = analyse_file(ddl_file, verbose=verbose)
-        if analysis:
-            analysis_results.append(analysis)
+    consolidated, raw_results, ddl_count = _infer_expected_grants(project_dir, verbose)
 
-    inferred = consolidate_grants(analysis_results)
     project_name = project_dir.name
-
-    # --- Generate .grt files ---
     files_written = 0
-    output_dir.mkdir(parents=True, exist_ok=True)
+    statuses: List[GranteeStatus] = []
 
-    for grantee in sorted(inferred.keys()):
-        grants = inferred[grantee]
-        sources = [r for r in analysis_results if r["grantee"] == grantee]
+    # Ensure target directory exists before any writes
+    if consolidated:
+        dcl_dir.mkdir(parents=True, exist_ok=True)
 
-        content = generate_grt_content(
-            grantee, grants, sources, project_name
-        )
-        filename = grantee_filename(grantee)
-        out_path = output_dir / filename
-        out_path.write_text(content, encoding="utf-8")
+    for grantee in sorted(consolidated.keys()):
+        expected = consolidated[grantee]
+        pre_status = _classify_grantee(grantee, expected, dcl_dir)
+
+        if pre_status.consistent:
+            statuses.append(pre_status)
+            continue
+
+        # Drift or missing → write the expected file
+        sources = [r for r in raw_results if r["grantee"] == grantee]
+        content = generate_grt_content(grantee, expected, sources, project_name)
+        pre_status.file_path.write_text(content, encoding="utf-8")
         files_written += 1
 
-        if verbose:
-            grant_count = len(grants)
-            priv_count = sum(len(privs) for privs in grants.values())
-            print(
-                f"  Written: {filename} — "
-                f"{grant_count} statement(s), "
-                f"{priv_count} privilege(s)"
-            )
+        # Mark as consistent in the post-fix result
+        post_status = GranteeStatus(
+            grantee=grantee,
+            file_path=pre_status.file_path,
+            consistent=True,
+            expected_grants=expected,
+            actual_grants=expected,
+        )
+        statuses.append(post_status)
 
-    # --- Now validate the result (should be clean) ---
-    result = validate_grants(project_dir, dcl_dir, verbose=False)
+    # Orphans are not touched — surface them in the result
+    orphans = _find_orphans(set(consolidated.keys()), dcl_dir)
+    statuses.extend(orphans)
 
+    result = GrantValidationResult(
+        statuses=statuses,
+        project_dir=project_dir,
+        dcl_dir=dcl_dir,
+        ddl_count=ddl_count,
+    )
     return result, files_written
 
 
 # ---------------------------------------------------------------------------
-# Report formatting
+# Reporting
 # ---------------------------------------------------------------------------
 
-def format_report(result: GrantValidationResult) -> str:
-    """
-    Format a grant validation result as a human-readable report.
 
-    Args:
-        result: The GrantValidationResult to format.
+def _format_priv_set(privs: Set[str]) -> str:
+    """Format a privilege set in canonical order for human display."""
+    ordered = sorted(
+        privs,
+        key=lambda p: PRIV_ORDER.index(p) if p in PRIV_ORDER else 999,
+    )
+    return ", ".join(ordered)
 
-    Returns:
-        Multi-line report string.
-    """
+
+def _format_grants_block(
+    grants: Dict[str, Set[str]],
+    indent: str = "      ",
+) -> str:
+    """Format a grantor → privileges dict as readable lines."""
+    if not grants:
+        return f"{indent}(none)"
     lines = []
-    lines.append("Grant Validation Report")
-    lines.append("=" * 50)
-    lines.append(
-        f"  Grantees checked:   {result.grantees_checked}"
-    )
-    lines.append(
-        f"  Privileges inferred: {result.grants_inferred}"
-    )
-    lines.append(
-        f"  Privileges declared: {result.grants_declared}"
-    )
-    lines.append(
-        f"  Matched:             {result.matched}"
-    )
-    lines.append(
-        f"  Missing (ERROR):     {result.missing}"
-    )
-    lines.append(
-        f"  Stale (WARNING):     {result.stale}"
-    )
-    lines.append("")
-
-    if result.issues:
-        # Group issues by grantee
-        by_grantee: Dict[str, List[GrantValidationIssue]] = defaultdict(list)
-        for issue in result.issues:
-            by_grantee[issue.grantee].append(issue)
-
-        for grantee in sorted(by_grantee.keys()):
-            lines.append(f"  {grantee}:")
-            for issue in by_grantee[grantee]:
-                marker = "ERROR  " if issue.severity == "ERROR" else "WARNING"
-                lines.append(f"    [{marker}] {issue.message}")
-            lines.append("")
-
-    if result.passed:
-        lines.append("Result: PASSED — all inferred grants are declared.")
-    else:
-        lines.append(
-            "Result: FAILED — missing grants must be resolved "
-            "before deployment. Run with --fix to generate .grt files."
-        )
-
+    for grantor in sorted(grants):
+        lines.append(f"{indent}{grantor}: {_format_priv_set(grants[grantor])}")
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
-
-def main():
+def format_report(result: GrantValidationResult) -> str:
     """
-    Entry point for the grant validation tool.
+    Render a human-readable summary of a GrantValidationResult.
 
-    Parses command-line arguments, runs validation or fix mode,
-    and prints the report.
+    Used by cli.py for both validate and fix flows. Produces a
+    multi-line string suitable for terminal output.
     """
-    parser = argparse.ArgumentParser(
-        description=(
-            "Validate cross-database grants in a SHIPS project. "
-            "Part of the SHIPS Inspect phase."
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+    lines: List[str] = []
+
+    total = len(result.statuses)
+    consistent_n = len(result.consistent)
+    drifted_n = len(result.drifted)
+    missing_n = len(result.missing)
+    orphaned_n = len(result.orphaned)
+
+    lines.append(
+        f"  Grantees: {total} total — "
+        f"{consistent_n} consistent, "
+        f"{drifted_n} drifted, "
+        f"{missing_n} missing, "
+        f"{orphaned_n} orphaned"
     )
-    parser.add_argument(
-        "project_dir",
-        type=Path,
-        help="Root directory of the SHIPS project.",
-    )
-    parser.add_argument(
-        "--dcl-dir",
-        type=Path,
-        default=None,
-        help=(
-            "Directory containing .grt files. "
-            "Defaults to <project_dir>/dcl/"
-        ),
-    )
-    parser.add_argument(
-        "--fix",
-        action="store_true",
-        help=(
-            "Generate or update .grt files to match inferred grants. "
-            "Existing .grt files are overwritten."
-        ),
-    )
-    parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="Print diagnostic information during analysis.",
-    )
-    args = parser.parse_args()
+    lines.append(f"  DDL files contributing grants: {result.ddl_count}")
 
-    project_dir = args.project_dir.resolve()
-    if not project_dir.is_dir():
-        print(f"ERROR: {project_dir} is not a directory.", file=sys.stderr)
-        sys.exit(1)
+    if total == 0:
+        lines.append("")
+        lines.append("  No cross-database grants inferred from this project.")
+        return "\n".join(lines)
 
-    print(f"SHIPS Grant Validation — {project_dir.name}")
-    print()
+    # Per-grantee detail
+    for status in result.statuses:
+        if status.consistent:
+            lines.append(f"\n  ✓ {status.grantee}: clean")
+        elif status.drifted:
+            lines.append(f"\n  ✗ {status.grantee}: drift detected")
+            lines.append(f"      File: {status.file_path}")
+            if status.missing_privs:
+                lines.append("      Missing from .grt file:")
+                lines.append(_format_grants_block(status.missing_privs))
+            if status.extra_privs:
+                lines.append("      Extra in .grt file (not implied by DDL):")
+                lines.append(_format_grants_block(status.extra_privs))
+        elif status.missing:
+            lines.append(f"\n  ! {status.grantee}: missing .grt file")
+            lines.append(f"      Expected at: {status.file_path}")
+            lines.append("      Inferred grants:")
+            lines.append(_format_grants_block(status.expected_grants))
+        elif status.orphaned:
+            lines.append(f"\n  ⚠ {status.grantee}: orphaned .grt file")
+            lines.append(f"      File:    {status.file_path}")
+            lines.append(
+                "      No DDL in this project implies grants for this "
+                "grantee. Review and remove manually if no longer needed."
+            )
 
-    if args.fix:
-        # --- Fix mode: generate/update .grt files ---
-        result, files_written = fix_grants(
-            project_dir, args.dcl_dir, verbose=args.verbose
-        )
-        print(f"  Generated {files_written} .grt file(s)")
-        print()
-        print(format_report(result))
-    else:
-        # --- Validate mode: compare and report ---
-        result = validate_grants(
-            project_dir, args.dcl_dir, verbose=args.verbose
-        )
-        print(format_report(result))
-
-    sys.exit(0 if result.passed else 1)
-
-
-if __name__ == "__main__":
-    main()
+    return "\n".join(lines)
