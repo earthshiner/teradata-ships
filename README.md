@@ -38,6 +38,10 @@ python -m td_release_packager harvest \
     --token-map config/token_map.conf \
     --force
 
+# Generate the Object Placement Standard view layer
+# (1:1 locking views, business view rewrites, _V databases, consolidated grants)
+python tools/generate_view_layer.py --project ./projects/MyProject --modules ALL
+
 # Inspect against the Coding Discipline
 python -m td_release_packager inspect --source ./projects/MyProject
 
@@ -73,12 +77,16 @@ SHIPS consists of two Python packages:
 ```
 [S] Scaffold  →  Create project structure, properties files, inspect.conf
 [H] Harvest   →  Import raw DDL, classify, tokenise, normalise (--force to overwrite)
+    Generate  →  Object Placement Standard view layer (1:1 locking views, business
+                  view rewrites, _V databases, consolidated grants) — optional
     Analyse   →  Build dependency graph, generate wave ordering, export graphs
 [I] Inspect   →  Lint against configurable Coding Discipline rules
 [P] Package   →  Resolve tokens, resolve filenames, archive
 [S] Ship      →  Pre-flight checks, privilege verification, wave-parallel deployment,
                   rollback, report
 ```
+
+The Generate step is currently invoked through a standalone CLI at [`tools/generate_view_layer.py`](tools/generate_view_layer.py). The engine itself lives at [`td_release_packager.view_layer_generator`](src/td_release_packager/view_layer_generator.py) and is importable as a library, so the future Generate stage of the orchestrator can drive it directly without invoking a subprocess.
 
 ### Deployment Scope
 
@@ -216,9 +224,11 @@ teradata-deployment-agent/
     src/
         td_release_packager/    ← Packager pipeline
             orchestrator/       ← Orchestrator foundation (ships.yaml, cascade, decisions)
+            view_layer_generator.py   ← Engine: importable view-layer generator
         ddl_deployer/           ← Deployment engine
         tests/                  ← Test suite
-    tools/                      ← Standalone utilities and demos
+    tools/                      ← Standalone CLI shims and demos
+        generate_view_layer.py  ← CLI shim around view_layer_generator
         migrate_view_references.py
         object_placement.yaml
         orchestrator_demo.py    ← Runnable smoke trace of the orchestrator foundation
