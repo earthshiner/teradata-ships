@@ -774,6 +774,7 @@ def _strip_sql_comments(content: str) -> str:
         Same length as input, with comments blanked to spaces (newlines
         preserved so line counts match).
     """
+
     # Block comments first: /* ... */ — may span lines, so preserve
     # newlines literally and replace everything else with a space.
     def _blank_block(match: "re.Match") -> str:
@@ -856,7 +857,7 @@ def _check_view_macro_self_reference(
     name_re = re.compile(
         r'"?' + re.escape(db_part) + r'"?\s*\.\s*'
         r'"?' + re.escape(obj_part) + r'"?'
-        r'(?![A-Za-z0-9_])',
+        r"(?![A-Za-z0-9_])",
         re.IGNORECASE,
     )
 

@@ -129,8 +129,10 @@ class TestActionItemsOnReplay:
     def test_singular_object_grammar(self):
         """Single prior object uses singular noun."""
         html = _html_action_items(_noop_replay_result(prior_count=1))
-        assert "1 object were already" in html or "1 object was already" in html or (
-            "all 1 object " in html
+        assert (
+            "1 object were already" in html
+            or "1 object was already" in html
+            or ("all 1 object " in html)
         )
         assert "1 objects" not in html  # no incorrect plural
 
