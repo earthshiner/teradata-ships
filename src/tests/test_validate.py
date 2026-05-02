@@ -261,29 +261,20 @@ class TestCheckViewMacroSelfReference:
 
     def test_literal_view_self_reference_flagged(self):
         """Non-tokenised literal name self-reference is flagged."""
-        ddl = (
-            "CREATE VIEW MyDB.MyView AS\n"
-            "SELECT * FROM MyDB.MyView;"
-        )
+        ddl = "CREATE VIEW MyDB.MyView AS\nSELECT * FROM MyDB.MyView;"
         issues = _check_view_macro_self_reference("v.viw", ddl)
         assert len(issues) == 1
         assert "MyDB.MyView" in issues[0].message
 
     def test_quoted_view_self_reference_flagged(self):
         """Quoted identifiers in both header and body are flagged."""
-        ddl = (
-            'CREATE VIEW "MyDB"."MyView" AS\n'
-            'SELECT * FROM "MyDB"."MyView";'
-        )
+        ddl = 'CREATE VIEW "MyDB"."MyView" AS\nSELECT * FROM "MyDB"."MyView";'
         issues = _check_view_macro_self_reference("v.viw", ddl)
         assert len(issues) == 1
 
     def test_replace_view_self_reference_flagged(self):
         """REPLACE VIEW form is also detected."""
-        ddl = (
-            "REPLACE VIEW {{DOM_V}}.X AS\n"
-            "SELECT 1 FROM {{DOM_V}}.X;"
-        )
+        ddl = "REPLACE VIEW {{DOM_V}}.X AS\nSELECT 1 FROM {{DOM_V}}.X;"
         issues = _check_view_macro_self_reference("x.viw", ddl)
         assert len(issues) == 1
 
@@ -306,17 +297,13 @@ class TestCheckViewMacroSelfReference:
 
     def test_different_object_same_db_passes(self):
         """{{V}}.X selecting from {{V}}.Y is not a self-reference."""
-        ddl = (
-            "CREATE VIEW {{DOM_V}}.X AS\n"
-            "SELECT * FROM {{DOM_V}}.Y;"
-        )
+        ddl = "CREATE VIEW {{DOM_V}}.X AS\nSELECT * FROM {{DOM_V}}.Y;"
         assert _check_view_macro_self_reference("x.viw", ddl) == []
 
     def test_substring_object_name_not_flagged(self):
         """{{V}}.Customer must not match inside {{V}}.CustomerOrders."""
         ddl = (
-            "CREATE VIEW {{DOM_V}}.Customer AS\n"
-            "SELECT * FROM {{DOM_V}}.CustomerOrders;"
+            "CREATE VIEW {{DOM_V}}.Customer AS\nSELECT * FROM {{DOM_V}}.CustomerOrders;"
         )
         assert _check_view_macro_self_reference("x.viw", ddl) == []
 
@@ -344,10 +331,7 @@ class TestCheckViewMacroSelfReference:
         ``db_qualifier`` rule catches the missing qualifier.
         Keeping these rules orthogonal avoids double-reporting.
         """
-        ddl = (
-            "CREATE VIEW {{DOM_V}}.X AS\n"
-            "SELECT * FROM X;"
-        )
+        ddl = "CREATE VIEW {{DOM_V}}.X AS\nSELECT * FROM X;"
         assert _check_view_macro_self_reference("x.viw", ddl) == []
 
     def test_unqualified_view_name_not_checked(self):
@@ -388,12 +372,7 @@ class TestCheckViewMacroSelfReference:
 
     def test_procedure_not_checked(self):
         """CREATE PROCEDURE is out of scope (separate rule planned)."""
-        ddl = (
-            "CREATE PROCEDURE {{DOM_P}}.sp_X()\n"
-            "BEGIN\n"
-            "  CALL {{DOM_P}}.sp_X();\n"
-            "END;"
-        )
+        ddl = "CREATE PROCEDURE {{DOM_P}}.sp_X()\nBEGIN\n  CALL {{DOM_P}}.sp_X();\nEND;"
         assert _check_view_macro_self_reference("x.spl", ddl) == []
 
     def test_no_create_statement_no_match(self):
@@ -412,10 +391,10 @@ class TestCheckViewMacroSelfReference:
     def test_line_number_points_at_body_match(self):
         """Reported line number matches the body occurrence, not the header."""
         ddl = (
-            "CREATE VIEW {{DOM_V}}.X AS\n"   # line 1
-            "LOCKING ROW FOR ACCESS\n"        # line 2
-            "SELECT *\n"                       # line 3
-            "FROM {{DOM_V}}.X;"                # line 4
+            "CREATE VIEW {{DOM_V}}.X AS\n"  # line 1
+            "LOCKING ROW FOR ACCESS\n"  # line 2
+            "SELECT *\n"  # line 3
+            "FROM {{DOM_V}}.X;"  # line 4
         )
         issues = _check_view_macro_self_reference("x.viw", ddl)
         assert len(issues) == 1
@@ -428,10 +407,7 @@ class TestCheckViewMacroSelfReference:
         written that way must still be flagged. The regex is
         deliberately tolerant of inter-segment whitespace.
         """
-        ddl = (
-            "CREATE VIEW MyDB.MyView AS\n"
-            'SELECT * FROM MyDB . "MyView";'
-        )
+        ddl = 'CREATE VIEW MyDB.MyView AS\nSELECT * FROM MyDB . "MyView";'
         issues = _check_view_macro_self_reference("v.viw", ddl)
         assert len(issues) == 1
 

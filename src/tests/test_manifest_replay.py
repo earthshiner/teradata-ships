@@ -237,7 +237,9 @@ class TestManifestReload:
         m = DeploymentManifest(str(tmp_path))
         _seed_completed_object(m, "DEV01_DB.X")
 
-        with open(os.path.join(str(tmp_path), MANIFEST_FILENAME), encoding="utf-8") as f:
+        with open(
+            os.path.join(str(tmp_path), MANIFEST_FILENAME), encoding="utf-8"
+        ) as f:
             data = json.load(f)
 
         assert "deployment_id" in data
@@ -285,9 +287,7 @@ class TestResumePackageRedeployCheck:
         ) as spy:
             resume_package(MagicMock(), manifest_path, dry_run=True)
 
-        assert not spy.called, (
-            "prepare_for_redeploy should not run in dry-run mode"
-        )
+        assert not spy.called, "prepare_for_redeploy should not run in dry-run mode"
 
     def test_resume_skips_check_when_cursor_is_none(self, tmp_path):
         """cursor=None must NOT call prepare_for_redeploy (defensive)."""
@@ -302,9 +302,7 @@ class TestResumePackageRedeployCheck:
         ) as spy:
             resume_package(None, manifest_path)
 
-        assert not spy.called, (
-            "prepare_for_redeploy should not run when cursor is None"
-        )
+        assert not spy.called, "prepare_for_redeploy should not run when cursor is None"
 
     def test_resume_missing_manifest_raises(self, tmp_path):
         """resume_package raises FileNotFoundError when manifest is absent."""
