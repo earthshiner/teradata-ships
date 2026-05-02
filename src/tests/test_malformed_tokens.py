@@ -5,13 +5,12 @@ Covers find_malformed_tokens, scan_malformed_tokens_in_directory,
 format_malformed_tokens_report, and integration with the build flow
 (builder aborts on malformed tokens before packaging).
 """
+
 import os
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
-import pytest
 
 from td_release_packager.token_engine import (
     find_malformed_tokens,
@@ -44,9 +43,7 @@ def _run_subprocess(args, env, *, expect_success=True):
     Returns:
         ``subprocess.CompletedProcess`` instance.
     """
-    result = subprocess.run(
-        args, capture_output=True, text=True, env=env
-    )
+    result = subprocess.run(args, capture_output=True, text=True, env=env)
     if expect_success and result.returncode != 0:
         raise AssertionError(
             f"Subprocess failed (rc={result.returncode}):\n"
@@ -232,9 +229,7 @@ class TestFormatMalformedTokensReport:
     def test_report_mentions_common_cause(self):
         """The fix-it hint about ingest --token-map is included."""
         findings = {
-            "/x.sql": [
-                {"line": 1, "column": 1, "marker": "{{", "line_content": "x"}
-            ]
+            "/x.sql": [{"line": 1, "column": 1, "marker": "{{", "line_content": "x"}]
         }
         report = format_malformed_tokens_report(findings)
         assert "ingest" in report.lower()
@@ -255,14 +250,22 @@ class TestBuilderAbortsOnMalformedTokens:
 
         # Scaffold
         _run_subprocess(
-            [sys.executable, "-m", "td_release_packager", "scaffold",
-             "--name", "Tp", "--output", str(tmp_path),
-             "--environments", "DEV"],
+            [
+                sys.executable,
+                "-m",
+                "td_release_packager",
+                "scaffold",
+                "--name",
+                "Tp",
+                "--output",
+                str(tmp_path),
+                "--environments",
+                "DEV",
+            ],
             env,
         )
         project = tmp_path / "Tp"
-        target = (project / "payload/database/DDL/views/"
-                  "{{SEM_DATABASE_V}}.bad.viw")
+        target = project / "payload/database/DDL/views/{{SEM_DATABASE_V}}.bad.viw"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(
             "CREATE VIEW {{SEM_DATABASE_V}}.bad (id) AS\n"
@@ -281,10 +284,25 @@ class TestBuilderAbortsOnMalformedTokens:
         output.mkdir()
 
         result = subprocess.run(
-            [sys.executable, "-m", "td_release_packager", "package",
-             "--source", str(project), "--env", "DEV", "--name", "Tp",
-             "--properties", str(props), "--output", str(output)],
-            capture_output=True, text=True, env=env,
+            [
+                sys.executable,
+                "-m",
+                "td_release_packager",
+                "package",
+                "--source",
+                str(project),
+                "--env",
+                "DEV",
+                "--name",
+                "Tp",
+                "--properties",
+                str(props),
+                "--output",
+                str(output),
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
         )
 
         # Build aborted
@@ -300,9 +318,18 @@ class TestBuilderAbortsOnMalformedTokens:
         env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
 
         _run_subprocess(
-            [sys.executable, "-m", "td_release_packager", "scaffold",
-             "--name", "Tp", "--output", str(tmp_path),
-             "--environments", "DEV"],
+            [
+                sys.executable,
+                "-m",
+                "td_release_packager",
+                "scaffold",
+                "--name",
+                "Tp",
+                "--output",
+                str(tmp_path),
+                "--environments",
+                "DEV",
+            ],
             env,
         )
         project = tmp_path / "Tp"
@@ -325,10 +352,25 @@ class TestBuilderAbortsOnMalformedTokens:
         output.mkdir()
 
         result = subprocess.run(
-            [sys.executable, "-m", "td_release_packager", "package",
-             "--source", str(project), "--env", "DEV", "--name", "Tp",
-             "--properties", str(props), "--output", str(output)],
-            capture_output=True, text=True, env=env,
+            [
+                sys.executable,
+                "-m",
+                "td_release_packager",
+                "package",
+                "--source",
+                str(project),
+                "--env",
+                "DEV",
+                "--name",
+                "Tp",
+                "--properties",
+                str(props),
+                "--output",
+                str(output),
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
         )
 
         # Build succeeded
@@ -344,17 +386,25 @@ class TestBuilderAbortsOnMalformedTokens:
 class TestHarvesterWordBoundarySubstitution:
     """Harvester apply-tokens must not corrupt already-tokenised files."""
 
-    def _scaffold_and_harvest(self, tmp_path, source_content,
-                              token_map_content):
+    def _scaffold_and_harvest(self, tmp_path, source_content, token_map_content):
         """Helper: scaffold project, write source DDL, run harvest."""
         env = os.environ.copy()
         env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
 
         # Scaffold
         _run_subprocess(
-            [sys.executable, "-m", "td_release_packager", "scaffold",
-             "--name", "Tp", "--output", str(tmp_path),
-             "--environments", "DEV"],
+            [
+                sys.executable,
+                "-m",
+                "td_release_packager",
+                "scaffold",
+                "--name",
+                "Tp",
+                "--output",
+                str(tmp_path),
+                "--environments",
+                "DEV",
+            ],
             env,
         )
         project = tmp_path / "Tp"
@@ -369,10 +419,21 @@ class TestHarvesterWordBoundarySubstitution:
         tm.write_text(token_map_content, encoding="utf-8")
 
         result = subprocess.run(
-            [sys.executable, "-m", "td_release_packager", "harvest",
-             "--source", str(src_dir), "--project", str(project),
-             "--token-map", str(tm)],
-            capture_output=True, text=True, env=env,
+            [
+                sys.executable,
+                "-m",
+                "td_release_packager",
+                "harvest",
+                "--source",
+                str(src_dir),
+                "--project",
+                str(project),
+                "--token-map",
+                str(tm),
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
         )
         return result, project
 
@@ -386,12 +447,9 @@ class TestHarvesterWordBoundarySubstitution:
             "SELECT id FROM {{DBC_DATABASE}}.TablesV;\n"
         )
         token_map = (
-            "MortgagePlatform_Semantic_V={{SEM_DATABASE_V}}\n"
-            "DBC={{DBC_DATABASE}}\n"
+            "MortgagePlatform_Semantic_V={{SEM_DATABASE_V}}\nDBC={{DBC_DATABASE}}\n"
         )
-        result, project = self._scaffold_and_harvest(
-            tmp_path, source, token_map
-        )
+        result, project = self._scaffold_and_harvest(tmp_path, source, token_map)
         assert result.returncode == 0
 
         # Find the harvested file and inspect it
@@ -400,9 +458,7 @@ class TestHarvesterWordBoundarySubstitution:
         content = harvested[0].read_text(encoding="utf-8")
 
         # The corruption marker would be a quadruple opening brace
-        assert "{{{{" not in content, (
-            f"Re-tokenisation corruption detected:\n{content}"
-        )
+        assert "{{{{" not in content, f"Re-tokenisation corruption detected:\n{content}"
         # Original well-formed token preserved exactly once
         assert content.count("{{DBC_DATABASE}}") == 1
 
@@ -413,12 +469,9 @@ class TestHarvesterWordBoundarySubstitution:
             "SELECT id FROM DBC.TablesV;\n"
         )
         token_map = (
-            "MortgagePlatform_Semantic_V={{SEM_DATABASE_V}}\n"
-            "DBC={{DBC_DATABASE}}\n"
+            "MortgagePlatform_Semantic_V={{SEM_DATABASE_V}}\nDBC={{DBC_DATABASE}}\n"
         )
-        result, project = self._scaffold_and_harvest(
-            tmp_path, source, token_map
-        )
+        result, project = self._scaffold_and_harvest(tmp_path, source, token_map)
         assert result.returncode == 0
 
         harvested = list((project / "payload").rglob("*.viw"))
@@ -444,9 +497,7 @@ class TestHarvesterWordBoundarySubstitution:
             "MortgagePlatform_Domain={{DOM_DATABASE_T}}\n"
             "MortgagePlatform_Domain_V={{DOM_DATABASE_V}}\n"
         )
-        result, project = self._scaffold_and_harvest(
-            tmp_path, source, token_map
-        )
+        result, project = self._scaffold_and_harvest(tmp_path, source, token_map)
         assert result.returncode == 0
 
         harvested = list((project / "payload").rglob("*.viw"))
