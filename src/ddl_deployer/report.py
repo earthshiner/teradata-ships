@@ -205,11 +205,16 @@ def _build_html(
 ) -> str:
     """Build the complete HTML report string."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    # Determine report mode from context
+    # Determine report mode from context.
+    # REPLAY takes precedence over DEPLOYMENT when nothing was
+    # processed but prior COMPLETED objects were verified — this is
+    # an honest signal to the DBA that this run did no work.
     if result.dry_run:
         mode = "DRY RUN"
     elif result.deployment_id and result.deployment_id.startswith("explain_"):
         mode = "EXPLAIN"
+    elif result.is_noop_redeploy:
+        mode = "REPLAY"
     else:
         mode = "DEPLOYMENT"
     status = "PASSED" if result.success else "FAILED"
@@ -482,6 +487,16 @@ def _html_action_items(result, provenance: Optional[ProvenanceDocument] = None):
             )
 
     if not items:
+        if getattr(result, "is_noop_redeploy", False):
+            prior_count = len(getattr(result, "prior_completed", []))
+            return (
+                '<div class="no-actions">'
+                f"No action items — all {prior_count} object"
+                f"{'s' if prior_count != 1 else ''} were already deployed "
+                "in a previous run and verified as still present in the "
+                "database. Nothing was processed this run."
+                "</div>"
+            )
         return '<div class="no-actions">No action items — all objects deployed successfully.</div>'
 
     has_errors = any(o.state == DeployState.FAILED for o in result.results)
@@ -501,6 +516,28 @@ def _html_summary(result, mode):
         if result.manifest_path
         else ""
     )
+
+    # In REPLAY mode the standard manifest-summary counts are
+    # misleading — `result.completed` reflects every COMPLETED row
+    # in the manifest, including objects deployed in earlier runs.
+    # Show this run's actual work (zero) and call out the prior
+    # count as a separate "Verified" card.
+    if mode == "REPLAY":
+        prior_count = len(getattr(result, "prior_completed", []))
+        return f"""
+<h2>Summary</h2>
+{manifest_line}
+<p style="margin:0 0 12px 0; font-size:13px; color:#6C757D">
+  This run did not deploy any objects. The figures below show prior-run
+  state verified against the database.
+</p>
+<div class="stats">
+  <div class="stat"><div class="num">{result.total}</div><div class="label">Total</div></div>
+  <div class="stat"><div class="num" style="color:#17A2B8">{prior_count}</div><div class="label">Verified (prior)</div></div>
+  <div class="stat"><div class="num" style="color:#28A745">0</div><div class="label">Deployed (this run)</div></div>
+  <div class="stat"><div class="num" style="color:#FFC107">{result.skipped}</div><div class="label">Skipped</div></div>
+  <div class="stat"><div class="num" style="color:#DC3545">{result.failed}</div><div class="label">Failed</div></div>
+</div>"""
 
     return f"""
 <h2>Summary</h2>
