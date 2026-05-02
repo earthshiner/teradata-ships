@@ -2,6 +2,23 @@
 
 All notable changes to SHIPS are documented in this file.
 
+## [0.4.0] — 2026-05-03
+
+### Fixed
+
+- **Manifest replay bug — resume path** — `resume_package()` now invokes `manifest.prepare_for_redeploy()` before computing the resumable set. Previously, only `deploy_package()` verified stale COMPLETED entries against the database; resume would silently skip objects whose underlying database had been dropped or cleaned between runs. The check is correctly skipped in dry-run mode and when no live cursor is supplied.
+- **Report Action Items section misleading on noop replay** — When a package was re-run with no work to do, the Action Items section claimed "all objects deployed successfully" — implying *this run* did the work. It now reads "all N object(s) were already deployed in a previous run and verified as still present in the database. Nothing was processed this run." Singular/plural grammar handled.
+- **Report summary stat cards misleading on noop replay** — `result.completed` reflects every COMPLETED row in the manifest, including objects deployed in earlier runs, which made the summary cards look like a fresh deploy had happened. The Summary section is now mode-aware: in `REPLAY` mode it renders Total · Verified (prior) · Deployed (this run)=0 · Skipped · Failed, with a one-line caption explaining that the figures reflect prior-run state. Non-replay rendering is unchanged.
+
+### Added
+
+- **`REPLAY` report mode** — A new mode label, distinct from `DEPLOYMENT` / `DRY RUN` / `EXPLAIN`. Triggered when `PackageDeployResult.is_noop_redeploy` is true (no per-object results and at least one verified prior-completed entry). The header banner reads "REPLAY Report" so the DBA can tell at a glance that this run did not deploy anything.
+- **Test coverage for the replay-bug fix** — 34 new unit tests across three modules:
+  - `tests/test_manifest_replay.py` (21 tests) — `prepare_for_redeploy()` reset/keep/partial/check-failure paths, artefact clearing on reset, `get_prior_completed()` filtering, `register_object()` on COMPLETED entries, manifest reload, and `resume_package()` invocation of the redeploy check (including dry-run and missing-cursor short-circuits).
+  - `tests/test_report_replay.py` (13 tests) — Mode banner (REPLAY vs DEPLOYMENT, with DRY RUN / EXPLAIN precedence), Action Items copy on noop replay, Summary stat cards on REPLAY vs normal mode, Object Results section.
+  - `tests/test_deployer_models.py` — `TestIsNoopRedeploy` class added with 4 tests for the property's truth table.
+- Suite total: **896 tests, all passing** (was 862).
+
 ## [0.3.0] — 2026-04-23
 
 ### Added

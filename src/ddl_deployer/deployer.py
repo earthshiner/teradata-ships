@@ -673,6 +673,22 @@ def resume_package(
     manifest = DeploymentManifest(package_dir)
     manifest.set_package_status("IN_PROGRESS")
 
+    # Verify stale COMPLETED entries against the database before
+    # picking up resumable work. The same replay bug that affects
+    # deploy_package — manifest claims COMPLETED but the database
+    # was dropped/cleaned between runs — applies here. Without this
+    # check, resume would silently skip objects that no longer exist.
+    # Skipped in dry-run mode (no live cursor) and when no cursor
+    # was supplied (defensive — resume normally requires a connection).
+    if not dry_run and cursor is not None:
+        checker = _build_redeploy_checker(manifest)
+        reset_names = manifest.prepare_for_redeploy(checker, cursor)
+        if reset_names:
+            logger.info(
+                "Reset %d stale manifest entries — will re-deploy.",
+                len(reset_names),
+            )
+
     resumable = manifest.get_pending_or_failed()
 
     # Reset cascade-skipped objects — these were never attempted,

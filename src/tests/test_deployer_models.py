@@ -391,3 +391,57 @@ class TestPackageDeployResult:
             manifest_path="/tmp/manifest.json",
         )
         assert result.is_wave_parallel is False
+
+
+# ---------------------------------------------------------------
+# is_noop_redeploy — distinguishes 'replayed an already-deployed
+# package' from 'genuine empty run'
+# ---------------------------------------------------------------
+
+
+class TestIsNoopRedeploy:
+    """Tests for PackageDeployResult.is_noop_redeploy."""
+
+    def test_true_when_no_results_with_prior(self):
+        """Empty results + non-empty prior_completed → True."""
+        result = PackageDeployResult(
+            deployment_id="noop-1",
+            manifest_path="/tmp/manifest.json",
+            total=2,
+            completed=2,
+            results=[],
+            prior_completed=[
+                {"qualified_name": "DEV01_DB.A", "state": "COMPLETED"},
+                {"qualified_name": "DEV01_DB.B", "state": "COMPLETED"},
+            ],
+        )
+        assert result.is_noop_redeploy is True
+
+    def test_false_when_results_present(self):
+        """Any per-object results → not a noop redeploy, even with prior."""
+        result = PackageDeployResult(
+            deployment_id="noop-2",
+            manifest_path="/tmp/manifest.json",
+            total=2,
+            results=[object()],  # any non-empty list
+            prior_completed=[{"qualified_name": "DEV01_DB.A"}],
+        )
+        assert result.is_noop_redeploy is False
+
+    def test_false_when_no_prior(self):
+        """Empty results + empty prior → not a noop (just empty)."""
+        result = PackageDeployResult(
+            deployment_id="noop-3",
+            manifest_path="/tmp/manifest.json",
+            results=[],
+            prior_completed=[],
+        )
+        assert result.is_noop_redeploy is False
+
+    def test_false_on_default_construction(self):
+        """A freshly built result with no fields is not a noop redeploy."""
+        result = PackageDeployResult(
+            deployment_id="noop-4",
+            manifest_path="/tmp/manifest.json",
+        )
+        assert result.is_noop_redeploy is False
