@@ -69,6 +69,7 @@ _ALL_FORMATS = ",".join(_GRAPH_FORMATS.keys())
 # helpers re-emit a compact recap at the bottom so failures are
 # always visible at a glance.
 
+
 def _summarise_lint_by_rule(lint_result) -> str:
     """
     Produce a compact ``rule (count), rule (count)`` breakdown of
@@ -167,11 +168,8 @@ def _format_grant_recap(grant_result, max_items: int = 10) -> str:
 
     if shown < total:
         lines.append("")
-        lines.append(
-            f"    + {total - shown} more — full details listed above."
-        )
+        lines.append(f"    + {total - shown} more — full details listed above.")
     return "\n".join(lines)
-
 
 
 def main():
@@ -339,6 +337,25 @@ def _cmd_scaffold(args):
 
 def _cmd_ingest(args):
     """Import raw DDL files into a project."""
+    # -- Reconcile mode short-circuits the normal harvest pipeline --
+    # The user has asked us to clean up twin file pairs, not harvest
+    # new DDL. Dispatch and return before any of the ingest logic
+    # runs.
+    if getattr(args, "reconcile", False):
+        _cmd_harvest_reconcile(args)
+        return
+
+    # --source is required for normal harvest mode. argparse marks it
+    # optional so that --reconcile can run without it; we enforce the
+    # requirement here for the non-reconcile path.
+    if not args.source:
+        print(
+            "\nERROR: --source is required for normal harvest mode.\n"
+            "  Pass --reconcile to run reconciliation without --source.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     # -- Build apply_tokens dict from available sources --
     apply_tokens = None
 
@@ -443,6 +460,132 @@ def _cmd_ingest(args):
     except FileNotFoundError as e:
         print(f"\nERROR: {e}", file=sys.stderr)
         sys.exit(1)
+
+
+def _cmd_harvest_reconcile(args):
+    """
+    Drive interactive twin-pair reconciliation for the harvested tree.
+
+    Detects literal/tokenised twin file pairs in the project's
+    payload/database/DDL/ directory and prompts the user to resolve
+    each pair. Both a human-readable summary banner (stdout) and a
+    machine-readable JSON audit record are produced.
+
+    A "twin pair" is two DDL files that resolve to the same package
+    destination at build time — typically a literal-named survivor
+    from a pre-tokenisation harvest sitting alongside its tokenised
+    counterpart (e.g. ``MortgagePlatform_Domain_V.X.viw`` next to
+    ``{{DOM_DATABASE_V}}.X.viw``). The builder treats these as
+    duplicate-path collisions and aborts.
+
+    Exit codes:
+        0 — clean completion (no errors, no early quit with pending)
+        1 — error during file operations or missing prerequisites
+        2 — quit early with pairs still pending, OR non-TTY refusal
+    """
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    from td_release_packager import reconcile as _reconcile
+    from td_release_packager.builder import _find_payload_dir
+
+    project_dir = args.project
+
+    # -- Locate the harvested DDL tree --
+    # The reconciler walks payload/database/DDL/ specifically, since
+    # twins only exist among DDL artefacts. _find_payload_dir owns
+    # discovery of the payload root; we append the DDL subpath.
+    try:
+        payload_root = Path(_find_payload_dir(project_dir))
+    except FileNotFoundError as exc:
+        print(
+            f"\nERROR: payload directory not found under {project_dir}.\n"
+            f"  {exc}\n\n"
+            f"  Tip: harvest must be run before reconcile. Run a "
+            f"normal harvest first to populate payload/database/DDL/.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    ddl_dir = payload_root / "database" / "DDL"
+    if not ddl_dir.exists():
+        print(
+            f"\nERROR: DDL tree not found at {ddl_dir}.\n\n"
+            f"  Tip: this directory is created by the harvest step. "
+            f"Run a normal harvest first.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # -- token_map.conf is required --
+    # Reconcile uses it to identify which literal prefixes have a
+    # tokenised counterpart. Without the map there's no way to
+    # classify a twin pair.
+    token_map_path = Path(project_dir) / "config" / "token_map.conf"
+    if not token_map_path.exists():
+        print(
+            f"\n[{_reconcile.ERR_NO_TOKEN_MAP}] token_map.conf not found "
+            f"at {token_map_path}.\n"
+            f"  Reconciliation requires the token map to identify "
+            f"twins. Generate one with:\n"
+            f"    td_release_packager harvest --source <raw_dir> "
+            f"--project {project_dir} \\\n"
+            f"      --generate-token-map --env-prefix <PREFIX>",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    token_map = read_token_map(str(token_map_path))
+
+    # -- Resolve JSON audit destination --
+    # Default: <project>/logs/reconcile_<UTC_timestamp>.json. The
+    # timestamp uses %Y%m%dT%H%M%SZ (no colons) so the path is safe
+    # on Windows filesystems. --json-out overrides; relative paths
+    # resolve under --project.
+    if args.json_out:
+        out_path = Path(args.json_out)
+        if not out_path.is_absolute():
+            out_path = Path(project_dir) / args.json_out
+        json_output_path = out_path
+    else:
+        timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        json_output_path = Path(project_dir) / "logs" / f"reconcile_{timestamp}.json"
+
+    # -- Drive the session --
+    try:
+        result = _reconcile.run_interactive_reconciliation(
+            project_root=Path(project_dir),
+            payload_dir=ddl_dir,
+            token_map=token_map,
+            token_map_path=token_map_path,
+            json_output_path=json_output_path,
+        )
+    except RuntimeError as exc:
+        # Non-TTY refusal — surface the formatted message verbatim
+        # (already includes the [E_NOT_INTERACTIVE] reference ID).
+        print(f"\n{exc}", file=sys.stderr)
+        sys.exit(2)
+    except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
+        # Missing payload dir, three-way collision, etc. The message
+        # from reconcile already carries an [E_*] reference ID where
+        # applicable.
+        print(f"\nERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    # -- Summary --
+    print()
+    print(_reconcile.format_summary_banner(result))
+    print(f"  Audit JSON: {json_output_path}\n")
+
+    # -- Exit code policy --
+    # 1 if any delete failed; 2 if user quit with pairs still
+    # pending; 0 otherwise. Distinguishing "quit with pending" from
+    # "completed cleanly" lets calling scripts decide whether
+    # re-running is warranted.
+    if result.error_count > 0:
+        sys.exit(1)
+    if result.quit_early and len(result.resolutions) < len(result.pairs):
+        sys.exit(2)
 
 
 def _cmd_validate(args):
@@ -659,9 +802,7 @@ def _cmd_validate(args):
         # -- Step 1 line: status, error/warning counts, by-rule breakdown
         if lint_ok:
             warning_note = (
-                f" — {lint_result.warnings} warnings"
-                if lint_result.warnings
-                else ""
+                f" — {lint_result.warnings} warnings" if lint_result.warnings else ""
             )
             print(f"  Step 1 (Lint):   PASSED{warning_note}")
         else:
@@ -683,10 +824,7 @@ def _cmd_validate(args):
             d = len(grant_result.drifted)
             m = len(grant_result.missing)
             o = len(grant_result.orphaned)
-            print(
-                f"  Step 2 (Grants): FAILED — "
-                f"{d} drifted, {m} missing, {o} orphaned"
-            )
+            print(f"  Step 2 (Grants): FAILED — {d} drifted, {m} missing, {o} orphaned")
 
         # -- Top-failures recap: keeps actionable detail visible even
         #    when the long per-file output has scrolled off the terminal.
@@ -1066,7 +1204,10 @@ def _build_parser():
         "harvest", help="[H] Harvest — import raw DDL files into a project."
     )
     ig.add_argument(
-        "--source", required=True, help="Directory containing raw DDL files."
+        "--source",
+        required=False,
+        help="Directory containing raw DDL files. "
+        "Required for normal harvest; ignored in --reconcile mode.",
     )
     ig.add_argument(
         "--project",
@@ -1112,6 +1253,20 @@ def _build_parser():
         "DDL. Warns if overwriting tokenised files "
         "with non-tokenised content — pass the same "
         "--token-map to preserve tokenisation.",
+    )
+    ig.add_argument(
+        "--reconcile",
+        action="store_true",
+        help="Run interactive reconciliation: detect literal/tokenised "
+        "twin file pairs in the harvested DDL tree and prompt to "
+        "resolve each. Skips the normal harvest pipeline. Requires "
+        "--project and config/token_map.conf; --source is ignored.",
+    )
+    ig.add_argument(
+        "--json-out",
+        help="Override the default JSON audit destination "
+        "(<project>/logs/reconcile_<timestamp>.json) for "
+        "--reconcile mode. Relative paths resolve under --project.",
     )
     # -- inspect --
     vl = subs.add_parser(
