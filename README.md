@@ -11,8 +11,10 @@ Equally usable by humans at the command line, CI/CD pipelines, and autonomous AI
 ## Quick Start
 
 ```bash
-# Install
-pip install -r requirements.txt
+# Install (choose one)
+pip install -r requirements.txt        # legacy requirements file
+pip install -e .                        # modern pyproject.toml install
+uv sync                                 # uv-managed install (uv.lock present)
 
 # Scaffold a new project
 python -m td_release_packager scaffold --name MyProject --output ./projects
@@ -50,10 +52,11 @@ python -m td_release_packager package \
     --properties config/properties/DEV.properties \
     --output releases/
 
-# Ship (deploy) — three modes, run in order
-python deploy.py --dry-run                                          # 1. No database — validates pipeline, parsing, wave ordering
-python deploy.py --host myserver --user dbc --streams 4 --explain   # 2. Connects — EXPLAIN validates SQL against live catalogue
-python deploy.py --host myserver --user dbc --streams 4             # 3. Connects — executes DDL for real
+# Ship (deploy)
+python -m ddl_deployer deploy ./releases/MyProject_DEV_b0001 --dry-run                       # No database — validates pipeline, parsing, wave ordering
+python -m ddl_deployer deploy ./releases/MyProject_DEV_b0001 --host myserver --user dbc      # Connect and execute DDL
+python -m ddl_deployer resume   ./releases/MyProject_DEV_b0001/.deploy_manifest.json --host myserver --user dbc   # Resume an interrupted deployment
+python -m ddl_deployer status   ./releases/MyProject_DEV_b0001/.deploy_manifest.json         # Show manifest state
 ```
 
 ## Architecture
@@ -103,27 +106,28 @@ The DDL verb IS the deployment intent. SHIPS does not second-guess the developer
 
 ### Deployment Modes
 
-The deployer supports three modes, designed to be run in sequence. Each mode catches a different class of problem, and each produces an HTML report.
+The deployer has two CLI-exposed modes plus an EXPLAIN engine and an automatic REPLAY behaviour. Each produces an HTML report.
 
 **Dry-run** (`--dry-run`) runs the entire deployment pipeline with no database connection. It parses every DDL file, classifies objects, determines deploy intent and strategy, builds wave ordering, and runs preflight validation — then produces a report showing exactly what *would* happen. No SQL is sent to Teradata. Use this as a first pass after harvest or package to answer: *"is this package well-formed?"*
 
-**Explain** (`--explain`) connects to the database and sends each DDL statement wrapped in Teradata's `EXPLAIN`. The database parses the SQL against the live catalogue — validating syntax, resolving object names, checking column types, and verifying permissions — without executing anything or modifying the database. Use this as a pre-deployment gate to answer: *"will this SQL actually work when I run it for real?"*
-
 **Deploy** (default, no flag) connects and executes. Wave-parallel across multiple streams, with manifest restartability, rollback capture, and a full HTML report.
 
-| | Dry-run | Explain | Deploy |
+**REPLAY** is automatic. When you re-run `deploy` against a package whose manifest already records every object as `COMPLETED`, SHIPS verifies each object against the live database (resetting any stale entries to `PENDING`) and, if there's nothing new to deploy, produces a `REPLAY Report` rather than a misleading `DEPLOYMENT Report`. The summary cards switch to `Verified (prior)` / `Deployed (this run)=0` so a DBA reading the report can tell at a glance that this run did no work.
+
+**Explain** is implemented at the engine level (`ddl_deployer.deployer.explain_package`) — it wraps each DDL in Teradata's `EXPLAIN` to validate syntax, object resolution, column types, and permissions against the live catalogue without modifying anything. It is **not currently wired to the `ddl_deployer` subcommand list**; call it programmatically if you need it before that lands.
+
+| | Dry-run | Deploy | REPLAY (auto) |
 |---|---|---|---|
-| Database connection | No | Yes | Yes |
-| Validates | Pipeline, parsing, classification, wave ordering, preflight rules | SQL syntax, object resolution, permissions, catalogue state | Everything — then executes |
-| Catches | Wrong extensions, missing tokens, duplicate objects, wave cycles | Permission errors, missing parent objects, syntax errors, type mismatches | Runtime errors (locks, space, concurrency) |
-| Modifies database | No | No | Yes |
-| Typical use | After harvest/package | Before production deploy | Production deploy |
+| Database connection | No | Yes | Yes (verification only) |
+| Validates | Pipeline, parsing, classification, wave ordering, preflight rules | Everything — then executes | Existence of prior `COMPLETED` objects |
+| Catches | Wrong extensions, missing tokens, duplicate objects, wave cycles | Runtime errors (locks, space, concurrency) | Stale manifest entries after a `DROP DATABASE` |
+| Modifies database | No | Yes | No |
+| Typical trigger | After harvest/package | Production deploy | Re-run of an already-deployed package |
 
 ```bash
 # Recommended workflow
-python deploy.py --dry-run                                          # Pipeline validation
-python deploy.py --host myserver --user dbc --streams 4 --explain   # Database validation
-python deploy.py --host myserver --user dbc --streams 4             # Execute
+python -m ddl_deployer deploy ./releases/MyProject_DEV_b0001 --dry-run                  # Pipeline validation
+python -m ddl_deployer deploy ./releases/MyProject_DEV_b0001 --host myserver --user dbc # Execute
 ```
 
 ### Dependency Analysis
@@ -200,10 +204,10 @@ The deployer is designed for production reliability:
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest tests/ -v --tb=short
+python -m pytest src/tests/ -v --tb=short
 ```
 
-See [tests/README.md](src/tests/README.md) for the full test guide including argument explanations and subset execution.
+See [src/tests/README.md](src/tests/README.md) for the full test guide including argument explanations and subset execution.
 
 ## Project Structure
 
@@ -211,13 +215,20 @@ See [tests/README.md](src/tests/README.md) for the full test guide including arg
 teradata-deployment-agent/
     src/
         td_release_packager/    ← Packager pipeline
+            orchestrator/       ← Orchestrator foundation (ships.yaml, cascade, decisions)
         ddl_deployer/           ← Deployment engine
         tests/                  ← Test suite
+    tools/                      ← Standalone utilities and demos
+        migrate_view_references.py
+        object_placement.yaml
+        orchestrator_demo.py    ← Runnable smoke trace of the orchestrator foundation
     docs/
         INSTALLATION.md
         USER_GUIDE.md
         AGENT_INTEGRATION.md
-    requirements.txt
+    pyproject.toml              ← Modern build/dependency declaration
+    uv.lock                     ← uv-managed lockfile
+    requirements.txt            ← Legacy pip-style dependency list
     requirements-dev.txt
     .gitignore
     CHANGELOG.md
