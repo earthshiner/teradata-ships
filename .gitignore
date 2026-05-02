@@ -97,3 +97,6 @@ env/
 
 # === uv per-developer pin (uv.lock IS committed) ===
 .python-version
+
+# === Personal working notes — not for the public repo ===
+docs/sessions/
