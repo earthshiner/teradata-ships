@@ -21,6 +21,7 @@ from td_release_packager.validate import (
     _check_db_qualifier,
     _check_multiset,
     _check_deploy_intent,
+    _check_view_macro_self_reference,
     _check_one_object,
     _check_eponymous,
     _check_extension,
@@ -230,6 +231,208 @@ class TestCheckDeployIntent:
             "END;"
         )
         issues = _check_deploy_intent("x.spl", ddl)
+        assert len(issues) == 1
+
+
+# ---------------------------------------------------------------
+# _check_view_macro_self_reference
+# ---------------------------------------------------------------
+
+
+class TestCheckViewMacroSelfReference:
+    """Tests for view/macro self-reference detection."""
+
+    # -- Views: positive cases (must flag) --
+
+    def test_tokenised_view_self_reference_flagged(self):
+        """{{V}}.X selecting from {{V}}.X is flagged."""
+        ddl = (
+            "CREATE VIEW {{DOM_V}}.CustomerOrders AS\n"
+            "LOCKING ROW FOR ACCESS\n"
+            "SELECT *\n"
+            "FROM {{DOM_V}}.CustomerOrders;"
+        )
+        issues = _check_view_macro_self_reference("x.viw", ddl)
+        assert len(issues) == 1
+        assert issues[0].rule == "view_macro_self_reference"
+        assert issues[0].severity == "ERROR"
+        assert "{{DOM_V}}.CustomerOrders" in issues[0].message
+        assert issues[0].line is not None
+
+    def test_literal_view_self_reference_flagged(self):
+        """Non-tokenised literal name self-reference is flagged."""
+        ddl = (
+            "CREATE VIEW MyDB.MyView AS\n"
+            "SELECT * FROM MyDB.MyView;"
+        )
+        issues = _check_view_macro_self_reference("v.viw", ddl)
+        assert len(issues) == 1
+        assert "MyDB.MyView" in issues[0].message
+
+    def test_quoted_view_self_reference_flagged(self):
+        """Quoted identifiers in both header and body are flagged."""
+        ddl = (
+            'CREATE VIEW "MyDB"."MyView" AS\n'
+            'SELECT * FROM "MyDB"."MyView";'
+        )
+        issues = _check_view_macro_self_reference("v.viw", ddl)
+        assert len(issues) == 1
+
+    def test_replace_view_self_reference_flagged(self):
+        """REPLACE VIEW form is also detected."""
+        ddl = (
+            "REPLACE VIEW {{DOM_V}}.X AS\n"
+            "SELECT 1 FROM {{DOM_V}}.X;"
+        )
+        issues = _check_view_macro_self_reference("x.viw", ddl)
+        assert len(issues) == 1
+
+    # -- Views: negative cases (must not flag) --
+
+    def test_locking_view_pattern_passes(self):
+        """The standard 1:1 locking view pattern is not flagged.
+
+        {{V_DB}}.X selecting from {{T_DB}}.X is the required
+        Object Placement Standard pattern -- different database,
+        same object name, must pass.
+        """
+        ddl = (
+            "CREATE VIEW {{DOM_V}}.CustomerOrders AS\n"
+            "LOCKING ROW FOR ACCESS\n"
+            "SELECT *\n"
+            "FROM {{DOM_T}}.CustomerOrders;"
+        )
+        assert _check_view_macro_self_reference("x.viw", ddl) == []
+
+    def test_different_object_same_db_passes(self):
+        """{{V}}.X selecting from {{V}}.Y is not a self-reference."""
+        ddl = (
+            "CREATE VIEW {{DOM_V}}.X AS\n"
+            "SELECT * FROM {{DOM_V}}.Y;"
+        )
+        assert _check_view_macro_self_reference("x.viw", ddl) == []
+
+    def test_substring_object_name_not_flagged(self):
+        """{{V}}.Customer must not match inside {{V}}.CustomerOrders."""
+        ddl = (
+            "CREATE VIEW {{DOM_V}}.Customer AS\n"
+            "SELECT * FROM {{DOM_V}}.CustomerOrders;"
+        )
+        assert _check_view_macro_self_reference("x.viw", ddl) == []
+
+    def test_self_reference_in_line_comment_not_flagged(self):
+        """Self-reference inside a -- comment must not be flagged."""
+        ddl = (
+            "CREATE VIEW {{DOM_V}}.X AS\n"
+            "-- previously did SELECT FROM {{DOM_V}}.X\n"
+            "SELECT * FROM {{DOM_T}}.X;"
+        )
+        assert _check_view_macro_self_reference("x.viw", ddl) == []
+
+    def test_self_reference_in_block_comment_not_flagged(self):
+        """Self-reference inside /* ... */ must not be flagged."""
+        ddl = (
+            "CREATE VIEW {{DOM_V}}.X AS\n"
+            "/* historical: was SELECT FROM {{DOM_V}}.X */\n"
+            "SELECT * FROM {{DOM_T}}.X;"
+        )
+        assert _check_view_macro_self_reference("x.viw", ddl) == []
+
+    def test_unqualified_self_reference_not_flagged(self):
+        """Unqualified bare-name reference is not flagged here.
+
+        ``db_qualifier`` rule catches the missing qualifier.
+        Keeping these rules orthogonal avoids double-reporting.
+        """
+        ddl = (
+            "CREATE VIEW {{DOM_V}}.X AS\n"
+            "SELECT * FROM X;"
+        )
+        assert _check_view_macro_self_reference("x.viw", ddl) == []
+
+    def test_unqualified_view_name_not_checked(self):
+        """If the view itself is unqualified, the rule cannot
+        determine self-reference and returns no issues."""
+        ddl = "CREATE VIEW UnqualifiedView AS SELECT 1 FROM UnqualifiedView;"
+        assert _check_view_macro_self_reference("x.viw", ddl) == []
+
+    # -- Macros --
+
+    def test_macro_self_reference_via_exec_flagged(self):
+        """A macro EXECing itself is flagged (infinite loop at runtime)."""
+        ddl = (
+            "CREATE MACRO {{DOM_M}}.RebuildX AS (\n"
+            "  DELETE FROM {{DOM_T}}.X;\n"
+            "  EXEC {{DOM_M}}.RebuildX;\n"
+            ");"
+        )
+        issues = _check_view_macro_self_reference("x.mcr", ddl)
+        assert len(issues) == 1
+        assert "{{DOM_M}}.RebuildX" in issues[0].message
+
+    def test_macro_referencing_other_object_passes(self):
+        """A macro referencing other database objects is fine."""
+        ddl = (
+            "CREATE MACRO {{DOM_M}}.RebuildX AS (\n"
+            "  INSERT INTO {{DOM_T}}.X SELECT * FROM {{DOM_T}}.Y;\n"
+            ");"
+        )
+        assert _check_view_macro_self_reference("x.mcr", ddl) == []
+
+    # -- Out-of-scope object types --
+
+    def test_table_not_checked(self):
+        """CREATE TABLE is out of scope for this rule."""
+        ddl = "CREATE MULTISET TABLE {{DOM_T}}.X (Id INTEGER);"
+        assert _check_view_macro_self_reference("x.tbl", ddl) == []
+
+    def test_procedure_not_checked(self):
+        """CREATE PROCEDURE is out of scope (separate rule planned)."""
+        ddl = (
+            "CREATE PROCEDURE {{DOM_P}}.sp_X()\n"
+            "BEGIN\n"
+            "  CALL {{DOM_P}}.sp_X();\n"
+            "END;"
+        )
+        assert _check_view_macro_self_reference("x.spl", ddl) == []
+
+    def test_no_create_statement_no_match(self):
+        """Random text without a CREATE/REPLACE header returns empty."""
+        assert _check_view_macro_self_reference("x.viw", "-- empty file\n") == []
+
+    # -- Match details --
+
+    def test_case_insensitive_keyword_match(self):
+        """create / Create / CREATE all detected, body match is also case-insensitive."""
+        for verb in ("create", "Create", "CREATE", "replace", "REPLACE"):
+            ddl = f"{verb} VIEW {{{{DOM_V}}}}.X AS SELECT * FROM {{{{dom_v}}}}.x;"
+            issues = _check_view_macro_self_reference("x.viw", ddl)
+            assert len(issues) == 1, f"Failed for verb: {verb}"
+
+    def test_line_number_points_at_body_match(self):
+        """Reported line number matches the body occurrence, not the header."""
+        ddl = (
+            "CREATE VIEW {{DOM_V}}.X AS\n"   # line 1
+            "LOCKING ROW FOR ACCESS\n"        # line 2
+            "SELECT *\n"                       # line 3
+            "FROM {{DOM_V}}.X;"                # line 4
+        )
+        issues = _check_view_macro_self_reference("x.viw", ddl)
+        assert len(issues) == 1
+        assert issues[0].line == 4
+
+    def test_whitespace_around_dot_is_caught(self):
+        """Teradata accepts whitespace around the qualifier dot.
+
+        ``MyDB . MyView`` is valid Teradata syntax, so a self-reference
+        written that way must still be flagged. The regex is
+        deliberately tolerant of inter-segment whitespace.
+        """
+        ddl = (
+            "CREATE VIEW MyDB.MyView AS\n"
+            'SELECT * FROM MyDB . "MyView";'
+        )
+        issues = _check_view_macro_self_reference("v.viw", ddl)
         assert len(issues) == 1
 
 

@@ -60,6 +60,7 @@ DEFAULT_RULES: Dict[str, str] = {
     "keyword_case": "WARNING",
     "leading_commas": "WARNING",
     "object_placement": "ERROR",
+    "view_macro_self_reference": "ERROR",
     "public_grant_on_tables": "WARNING",
     "review_unmapped_grants": "WARNING",
 }
@@ -176,6 +177,12 @@ def generate_default_config() -> str:
         "# directly — all access via 1:1 locking view layer.",
         "# Requires object_placement.yaml in the project root.",
         f"object_placement={DEFAULT_RULES['object_placement']}",
+        "# view_macro_self_reference: a view selecting from itself",
+        "# (or a macro EXECing itself) is always a bug — recursive",
+        "# definition fails at deploy time and infinite-loops at",
+        "# runtime. Cross-database same-name references are allowed",
+        "# (the standard 1:1 locking view pattern).",
+        f"view_macro_self_reference={DEFAULT_RULES['view_macro_self_reference']}",
         "",
         "# Grant architecture rules",
         "# public_grant_on_tables: GRANT ... TO PUBLIC on a tables",
@@ -340,6 +347,23 @@ _QUALIFIED_NAME_RE = re.compile(
     r"(?:TABLE|VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER|"
     r"JOIN\s+INDEX|HASH\s+INDEX)\s+"
     r'("?[A-Za-z_]\w*"?(?:\."?[A-Za-z_]\w*"?)?)',
+    re.IGNORECASE,
+)
+
+# -- View/macro definition name (for self-reference rule) --
+# Captures the fully qualified name of a VIEW or MACRO being defined,
+# handling all three identifier forms used in tokenised projects:
+#   1. Literal:    MyDb.MyView
+#   2. Tokenised:  {{V_DB}}.MyView
+#   3. Quoted:     "MyDb"."MyView"
+#
+# Two named groups: dbpart (database/token) and objpart (object name).
+# Mixed forms (e.g. {{V_DB}}."MyView") are accepted.
+_VIEW_MACRO_DEF_NAME_RE = re.compile(
+    r"(?:CREATE|REPLACE)\s+(?:VIEW|MACRO)\s+"
+    r'(?P<dbpart>"[^"]+"|\{\{[A-Za-z_][A-Za-z0-9_-]*\}\}|[A-Za-z_]\w*)'
+    r"\s*\.\s*"
+    r'(?P<objpart>"[^"]+"|[A-Za-z_]\w*)',
     re.IGNORECASE,
 )
 
@@ -573,6 +597,7 @@ def validate_directory(
         file_issues.extend(_check_db_qualifier(rel_path, content))
         file_issues.extend(_check_multiset(rel_path, content))
         file_issues.extend(_check_deploy_intent(rel_path, content, strict))
+        file_issues.extend(_check_view_macro_self_reference(rel_path, content))
         file_issues.extend(_check_one_object(rel_path, content))
         file_issues.extend(_check_eponymous(rel_path, content, file_path))
         file_issues.extend(_check_extension(rel_path, content, file_path))
@@ -730,6 +755,137 @@ def _check_deploy_intent(
             )
         ]
     return []
+
+
+def _strip_sql_comments(content: str) -> str:
+    """
+    Strip SQL comments from content while preserving string offsets.
+
+    Replaces ``--`` line comments and ``/* ... */`` block comments with
+    runs of spaces of equal length so that line numbers and character
+    positions in the output align with the input. This lets callers
+    compute line numbers from match positions in the stripped content
+    without an offset translation table.
+
+    Args:
+        content: SQL text possibly containing comments.
+
+    Returns:
+        Same length as input, with comments blanked to spaces (newlines
+        preserved so line counts match).
+    """
+    # Block comments first: /* ... */ — may span lines, so preserve
+    # newlines literally and replace everything else with a space.
+    def _blank_block(match: "re.Match") -> str:
+        return re.sub(r"[^\n]", " ", match.group(0))
+
+    no_block = re.sub(r"/\*.*?\*/", _blank_block, content, flags=re.DOTALL)
+
+    # Line comments: -- to end of line — never span lines, so a flat
+    # equal-length space run is sufficient.
+    no_line = re.sub(
+        r"--[^\n]*",
+        lambda m: " " * len(m.group(0)),
+        no_block,
+    )
+    return no_line
+
+
+def _check_view_macro_self_reference(
+    rel_path: str, content: str
+) -> List[ValidationIssue]:
+    """
+    Flag views and macros that reference their own fully qualified
+    name in the body.
+
+    A view selecting from itself is always a bug — the definition is
+    recursive, the deploy fails, and the resulting object is unusable.
+    A macro EXECing itself loops infinitely at runtime. Both cases are
+    flagged ERROR by default; there is no legitimate use case.
+
+    The check matches the *fully qualified* name (database segment plus
+    object segment), so cross-database same-name references are NOT
+    flagged. That preserves the standard 1:1 locking view pattern
+    where ``{{V_DB}}.X`` legitimately selects from ``{{T_DB}}.X``.
+
+    Substring collisions are avoided by requiring the matched span to
+    end at a non-identifier character: ``{{V}}.Customer`` will not
+    match inside ``{{V}}.CustomerOrders``.
+
+    Comments are stripped before searching, so a self-reference inside
+    a ``--`` line comment or ``/* ... */`` block comment does not
+    trigger the rule.
+
+    Unqualified self-references (e.g. bare ``X`` in a view defined as
+    ``{{V}}.X``) are not flagged here -- the ``db_qualifier`` rule
+    catches the missing qualifier already.
+
+    Args:
+        rel_path: Relative path of the DDL file being checked.
+        content: Raw DDL file content.
+
+    Returns:
+        List of ValidationIssue — one issue per detected self-reference
+        (typically zero or one; multiple matches for the same name
+        produce a single issue pointing at the first occurrence).
+    """
+    # Only views and macros are in scope. Procedures and functions
+    # have legitimate recursive patterns and need a separate rule.
+    header = _VIEW_MACRO_DEF_NAME_RE.search(content)
+    if header is None:
+        return []
+
+    db_part = header.group("dbpart").replace('"', "")
+    obj_part = header.group("objpart").replace('"', "")
+    qualified_name = f"{db_part}.{obj_part}"
+
+    # Body starts immediately after the header match. Comments are
+    # stripped so commented-out self-references are not flagged.
+    body_offset = header.end()
+    stripped_body = _strip_sql_comments(content[body_offset:])
+
+    # Build a search regex that matches the literal qualified name
+    # case-insensitively (Teradata identifier rules) and refuses
+    # matches that continue into another identifier character. Each
+    # segment is allowed an optional surrounding pair of quotes and
+    # the dot is allowed surrounding whitespace, so the body match
+    # works whether identifiers are bare ('MyDB.MyView'), quoted
+    # ('"MyDB"."MyView"'), tokenised ('{{V_DB}}.MyView'), or any
+    # mix of the three. The leading side is unambiguous because
+    # qualified names start with '"', '{', or a letter.
+    name_re = re.compile(
+        r'"?' + re.escape(db_part) + r'"?\s*\.\s*'
+        r'"?' + re.escape(obj_part) + r'"?'
+        r'(?![A-Za-z0-9_])',
+        re.IGNORECASE,
+    )
+
+    body_match = name_re.search(stripped_body)
+    if body_match is None:
+        return []
+
+    # Compute 1-based line number of the first body match within the
+    # full original content.
+    abs_pos = body_offset + body_match.start()
+    line_num = content[:abs_pos].count("\n") + 1
+
+    return [
+        ValidationIssue(
+            file=rel_path,
+            rule="view_macro_self_reference",
+            severity="ERROR",
+            line=line_num,
+            message=(
+                f"References itself: '{qualified_name}' appears in "
+                f"the body of its own definition. A view selecting "
+                f"from itself is always a bug; a macro EXECing "
+                f"itself loops infinitely. Did you mean to reference "
+                f"the corresponding tables-database object "
+                f"(e.g. the {{{{T_DB}}}} counterpart of "
+                f"{{{{V_DB}}}})?"
+            ),
+        )
+    ]
 
 
 def _check_one_object(rel_path: str, content: str) -> List[ValidationIssue]:
