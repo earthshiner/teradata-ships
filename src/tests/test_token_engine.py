@@ -109,6 +109,41 @@ class TestReadProperties:
 
         assert result == {"VALID": "yes"}
 
+    def test_parens_in_sql_type_values_are_accepted(self, tmp_path):
+        """SQL type expressions with parentheses must resolve cleanly.
+
+        Token values for type literals (TIMESTAMP(6), TIME(6),
+        CURRENT_TIMESTAMP(6)) are commonplace in Teradata DDL token
+        maps. The resolved-value validator must permit them.
+        """
+        props = tmp_path / "test.properties"
+        props.write_text(
+            "TS_TYPE=TIMESTAMP(6)\n"
+            "TIME_TYPE=TIME(6)\n"
+            "CURRENT_TS_TYPE=CURRENT_TIMESTAMP(6)\n",
+            encoding="utf-8",
+        )
+
+        result = read_properties(str(props))
+
+        assert result["TS_TYPE"] == "TIMESTAMP(6)"
+        assert result["TIME_TYPE"] == "TIME(6)"
+        assert result["CURRENT_TS_TYPE"] == "CURRENT_TIMESTAMP(6)"
+
+    def test_curly_braces_in_resolved_values_still_rejected(self, tmp_path):
+        """Unresolved {{TOKEN}} references must still fail validation.
+
+        Curly braces remain invalid in resolved values — they would
+        indicate either an unresolved reference or a corrupted value.
+        """
+        props = tmp_path / "test.properties"
+        # {{UNDEFINED}} cannot be resolved → braces survive into the
+        # resolved value and trigger the validator.
+        props.write_text("BROKEN={{UNDEFINED}}\n", encoding="utf-8")
+
+        with pytest.raises(ValueError, match=r"after token resolution"):
+            read_properties(str(props))
+
 
 # ---------------------------------------------------------------
 # _resolve_internal_references
