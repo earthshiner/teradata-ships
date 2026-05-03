@@ -174,6 +174,40 @@ class TestFormatPropertiesFile:
         assert out.count("A=first") == 1
         assert out.count("A=second") == 1
 
+    def test_renders_full_seven_section_scaffold(self):
+        """Output must include all 7 canonical sections as
+        placeholders so the user can move imports into them."""
+        subs = [importer.Substitution("$A", "A", "1", 1)]
+        out = importer.format_properties_file("DEV", subs)
+
+        for n in range(1, 8):
+            assert f"# {n}." in out, f"section {n} header missing"
+        # Plus section 8 for the imports themselves
+        assert "# 8. Imported (UNCATEGORISED)" in out
+
+    def test_imports_land_in_section_8_not_loose_at_top(self):
+        """Imported entries must appear BELOW section 8's header,
+        not interleaved with the canonical sections — the whole
+        point is to give the user a re-section workflow."""
+        subs = [importer.Substitution("$A", "A", "1", 1)]
+        out = importer.format_properties_file("DEV", subs)
+
+        sec8_pos = out.find("# 8. Imported (UNCATEGORISED)")
+        a_pos = out.find("A=1")
+        assert sec8_pos > 0
+        assert a_pos > sec8_pos, (
+            "import 'A=1' appears before section 8 header — should be "
+            "INSIDE the imported section, not above it"
+        )
+
+    def test_sections_1_through_7_show_empty_hint(self):
+        """Empty sections must carry the 'no entries' hint comment
+        so the user knows to populate by moving from section 8."""
+        subs = [importer.Substitution("$A", "A", "1", 1)]
+        out = importer.format_properties_file("DEV", subs)
+        # All seven canonical sections are empty for import-legacy
+        assert out.count("no entries") == 7
+
 
 # ---------------------------------------------------------------
 # Migration sed emitter
