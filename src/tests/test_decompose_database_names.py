@@ -272,6 +272,46 @@ class TestFormatPropertiesFile:
 
         assert "GCFR_APPL_ADMIN_USER_LITERAL=GCFR_APPL_ADMIN_USER" in out
 
+    def test_renders_full_seven_section_scaffold(self):
+        """Output includes all 7 canonical sections — sections 1
+        and 2 populated, the rest empty placeholders."""
+        names = ["PDE_DEV_00", "PDE_DEV_00_MDL_0_T"]
+        result = decomp.decompose_all(names)
+        out = decomp.format_properties_file("DEV", result)
+
+        for n in range(1, 8):
+            assert f"# {n}." in out, f"section {n} header missing"
+
+    def test_outliers_land_in_section_8(self):
+        """Outliers must appear below section 8 header, not
+        interleaved with sections 1-2."""
+        names = ["PDE_DEV_00_MDL_0_T", "EXTERNAL_USER"]
+        result = decomp.decompose_all(names)
+        out = decomp.format_properties_file("DEV", result)
+
+        sec8_pos = out.find("# 8. Outliers")
+        outlier_pos = out.find("EXTERNAL_USER_LITERAL=EXTERNAL_USER")
+        assert sec8_pos > 0
+        assert outlier_pos > sec8_pos
+
+    def test_no_section_8_when_no_outliers(self):
+        """If every name decomposes cleanly, section 8 is omitted."""
+        names = ["PDE_DEV_00", "PDE_DEV_00_MDL_0_T", "PDE_DEV_00_MDL_0_V"]
+        result = decomp.decompose_all(names)
+        out = decomp.format_properties_file("DEV", result)
+
+        assert "# 8." not in out
+
+    def test_sections_3_through_7_remain_empty_placeholders(self):
+        """Decomposer only fills sections 1-2; sections 3-7 stay as
+        placeholders for the user to populate from other sources."""
+        names = ["PDE_DEV_00", "PDE_DEV_00_MDL_0_T"]
+        result = decomp.decompose_all(names)
+        out = decomp.format_properties_file("DEV", result)
+
+        # 5 empty sections (3, 4, 5, 6, 7) → 5 'no entries' hints
+        assert out.count("no entries") == 5
+
     def test_collision_emits_warn_comment(self):
         # Two literals that decompose to the same token name
         names = [
