@@ -24,6 +24,7 @@ import pytest
 # CLI shim is just an entry point, not the source of truth.
 from td_release_packager.view_layer_generator import (
     TableSpec,
+    _build_arg_parser,
     companion_token,
     expand_select_star,
     generate_database_ddl,
@@ -755,3 +756,32 @@ class TestEndToEnd:
             / "{{DOM_DATABASE_V}}.Mortgage.viw"
         )
         assert not lv.exists()
+
+
+# ---------------------------------------------------------------
+# CLI prog plumbing — guards the misleading-help-text fix
+# ---------------------------------------------------------------
+
+
+class TestArgParserProg:
+    """The shim and `python -m` entry both override argparse's prog."""
+
+    def test_default_prog_when_unspecified(self):
+        # No prog → argparse picks one from sys.argv[0] / module name.
+        # Just guard that something non-empty is chosen.
+        parser = _build_arg_parser()
+        assert parser.prog
+
+    def test_custom_prog_propagates_to_usage_text(self):
+        parser = _build_arg_parser(
+            prog="python -m td_release_packager.view_layer_generator"
+        )
+        assert parser.prog == "python -m td_release_packager.view_layer_generator"
+        assert (
+            "python -m td_release_packager.view_layer_generator"
+            in parser.format_usage()
+        )
+
+    def test_shim_prog_propagates_to_usage_text(self):
+        parser = _build_arg_parser(prog="python tools/generate_view_layer.py")
+        assert "python tools/generate_view_layer.py" in parser.format_usage()

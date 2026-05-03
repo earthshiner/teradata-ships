@@ -1312,9 +1312,19 @@ def _parse_modules_arg(raw: str) -> Optional[Set[str]]:
     return {part.strip().upper() for part in raw.split(",") if part.strip()}
 
 
-def _build_arg_parser() -> argparse.ArgumentParser:
-    """Construct the CLI argument parser."""
+def _build_arg_parser(prog: Optional[str] = None) -> argparse.ArgumentParser:
+    """
+    Construct the CLI argument parser.
+
+    Args:
+        prog: Optional program name used in usage/help text. The shim
+              and the ``python -m ...`` entry point each pass their own
+              canonical invocation here so users see a copy-pasteable
+              command in ``--help`` output instead of argparse's default
+              ``view_layer_generator.py`` filename.
+    """
     parser = argparse.ArgumentParser(
+        prog=prog,
         description=(
             "Generate the Object Placement Standard view layer "
             "(1:1 locking views, business view rewrites, _V databases, "
@@ -1375,11 +1385,17 @@ def _print_summary(result: GenerationResult) -> None:
             print(f"  - {error}")
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: Optional[List[str]] = None, *, prog: Optional[str] = None) -> int:
     """
     Entry point. Returns process exit code (0 on success, 1 on error).
+
+    Args:
+        argv: Override the argv list (used by tests).
+        prog: Override the program name shown in usage/help text.
+              When None, argparse's default basename-of-sys.argv[0] is
+              used (which is misleading for `python -m ...` invocations).
     """
-    parser = _build_arg_parser()
+    parser = _build_arg_parser(prog=prog)
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -1407,4 +1423,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # When invoked via `python -m td_release_packager.view_layer_generator`,
+    # __package__ is the package name. When invoked as a bare file
+    # (`python src/td_release_packager/view_layer_generator.py`), it's empty.
+    if __package__:
+        sys.exit(main(prog="python -m td_release_packager.view_layer_generator"))
+    else:
+        sys.exit(main())
