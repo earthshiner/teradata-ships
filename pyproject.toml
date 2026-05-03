@@ -14,3 +14,11 @@ dev = [
     "pytest>=9.0.3",
     "ruff>=0.15.12",
 ]
+
+[tool.pytest.ini_options]
+# Tests live under src/tests/ and the package under src/. Pinning
+# both here means `pytest`, `pytest src/tests/`, and even
+# `pytest tests/` (typo / muscle memory) all resolve to the same
+# collection — and PYTHONPATH=src is no longer required.
+testpaths = ["src/tests"]
+pythonpath = ["src"]
