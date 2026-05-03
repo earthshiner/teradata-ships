@@ -2,12 +2,16 @@
 cli.py — Command-line interface for the Teradata Release Packager.
 
 Commands:
-    scaffold   Create a new project from template.
-    harvest    Import raw DDL files into a project.
-    inspect    Check DDL against Coding Discipline + validate grants.
-    package    Build a release package for a target environment.
-    scan       Scan source files and report all tokens found.
-    analyze    Analyse DDL dependencies, generate waves, export graph.
+    scaffold          Create a new project from template.
+    harvest           Import raw DDL files into a project.
+    inspect           Check DDL against Coding Discipline + validate grants.
+    package           Build a release package for a target environment.
+    scan              Scan source files and report all tokens found.
+    analyze           Analyse DDL dependencies, generate waves, export graph.
+    import-legacy     Import a pre-SHIPS sed substitution script and
+                      emit a .properties file plus a migration sed.
+    decompose-names   Infer composition roots from literal database
+                      names and emit a cascade-form .properties file.
 
 Usage:
     python -m td_release_packager scaffold --name MortgagePlatform --output /projects
@@ -16,6 +20,8 @@ Usage:
     python -m td_release_packager scan --source .
     python -m td_release_packager analyze --source . --graph ./output/
     python -m td_release_packager analyze --source . --graph . --formats dot,json,openlineage
+    python -m td_release_packager import-legacy legacy.sh --env DEV --output-dir ./config
+    python -m td_release_packager decompose-names token_map.conf --env DEV --output-dir ./config
 """
 
 import argparse
@@ -212,9 +218,167 @@ def main():
         _cmd_scan(args)
     elif args.command == "analyze":
         _cmd_analyze(args)
+    elif args.command == "import-legacy":
+        _cmd_import_legacy(args)
+    elif args.command == "decompose-names":
+        _cmd_decompose_names(args)
     else:
         parser.print_help()
         sys.exit(1)
+
+
+# ---------------------------------------------------------------
+# Orchestrator integration helpers
+# ---------------------------------------------------------------
+#
+# Build-order item 4: every stage opens a ``decisions.json`` and
+# records its run. Two concerns colliding here:
+#
+#   1. We don't want a decisions.json appearing in random
+#      directories where the user is doing a one-off scan against
+#      a non-project tree (litter on disc, surprise artefact).
+#
+#   2. We want every stage to use the same construction code so
+#      the integration is consistent and the duplication doesn't
+#      grow as more stages are refactored.
+#
+# The helpers below solve both: a project-detection check (1) and a
+# single context manager every stage uses (2). When the path isn't
+# a project the manager yields a no-op recorder, so call sites stay
+# simple — they don't branch on "is this a project".
+
+
+def _looks_like_ships_project(path: str) -> bool:
+    """
+    Heuristic: does ``path`` look like a SHIPS project root?
+
+    True if it contains either:
+      - ``ships.yaml``  (orchestrator config — definitive marker)
+      - ``payload/``    (the canonical scaffolded payload tree)
+
+    Used to decide whether a stage should write decisions.json.
+    For ad-hoc invocations against a non-project directory we
+    yield a no-op recorder so the file doesn't appear.
+    """
+    if not os.path.isdir(path):
+        return False
+    if os.path.isfile(os.path.join(path, "ships.yaml")):
+        return True
+    if os.path.isdir(os.path.join(path, "payload")):
+        return True
+    return False
+
+
+class _NullStageRecorder:
+    """
+    Drop-in for ``StageRecorder`` that ignores every call.
+
+    Used by ``_stage_recording`` when the target directory isn't a
+    SHIPS project. Lets the same stage code run end-to-end without
+    branching on whether decisions.json is being written.
+    """
+
+    def set_status(self, status: str) -> None:
+        pass
+
+    def set_config_resolved(
+        self,
+        name: str,
+        value,
+        source: str,
+        source_path: str,
+    ) -> None:
+        pass
+
+    def set_inputs(self, **fields) -> None:
+        pass
+
+    def set_outputs(self, **fields) -> None:
+        pass
+
+    def set_decisions(self, **fields) -> None:
+        pass
+
+    def add_issue(
+        self,
+        severity: str,
+        code: str,
+        message: str,
+        location=None,
+    ) -> None:
+        pass
+
+
+def _stage_recording(project_dir: str, stage_name: str):
+    """
+    Context manager: yield a stage recorder for ``stage_name`` rooted
+    at ``project_dir``.
+
+    If ``project_dir`` looks like a SHIPS project, opens
+    ``<project_dir>/decisions.json`` and yields a real
+    ``StageRecorder``. Otherwise yields a ``_NullStageRecorder`` so
+    ad-hoc one-off invocations don't litter the filesystem.
+
+    Usage::
+
+        with _stage_recording(args.source, "scan") as stage:
+            stage.set_config_resolved(...)
+            ...
+
+    The yielded object always supports the StageRecorder interface
+    so call sites don't need to branch.
+    """
+    from contextlib import contextmanager
+
+    from td_release_packager.orchestrator import (
+        DECISIONS_FILENAME,
+        DecisionsManifest,
+    )
+
+    @contextmanager
+    def _ctx():
+        if not _looks_like_ships_project(project_dir):
+            yield _NullStageRecorder()
+            return
+
+        manifest_path = os.path.join(project_dir, DECISIONS_FILENAME)
+        manifest = DecisionsManifest(manifest_path)
+        with manifest.run(stage_name) as run:
+            with run.stage(stage_name) as stage:
+                yield stage
+
+    return _ctx()
+
+
+# ---------------------------------------------------------------
+# Legacy-importer / decomposer dispatchers
+# ---------------------------------------------------------------
+#
+# Both tools have a ``main(argv)`` entry point in the package that
+# accepts argparse-style argument lists. We reconstruct the argv
+# from the parsed top-level args and delegate. Keeping the engines'
+# main() functions as the single source of truth means the CLI and
+# the standalone tools/ shims behave identically.
+
+
+def _cmd_import_legacy(args):
+    """Dispatch to td_release_packager.legacy_importer.main()."""
+    from td_release_packager.legacy_importer import main as importer_main
+
+    argv = [args.input, "--env", args.env, "--output-dir", args.output_dir]
+    if args.verbose:
+        argv.append("-v")
+    sys.exit(importer_main(argv))
+
+
+def _cmd_decompose_names(args):
+    """Dispatch to td_release_packager.decomposer.main()."""
+    from td_release_packager.decomposer import main as decomposer_main
+
+    argv = [args.input, "--env", args.env, "--output-dir", args.output_dir]
+    if args.verbose:
+        argv.append("-v")
+    sys.exit(decomposer_main(argv))
 
 
 # ---------------------------------------------------------------
@@ -456,6 +620,39 @@ def _cmd_ingest(args):
                 print(f"    ✗ {e}")
 
         print(f"{'=' * 64}\n")
+
+        # -- Next Steps banner --
+        # Harvest produces a tokenised project tree, but packaging
+        # also needs an environment .properties file with values
+        # filled in for the target environment. The properties file
+        # is the user's responsibility — flag this prominently so
+        # they don't go straight to `package` and hit a missing-
+        # token failure or, worse, ship the wrong values.
+        print(f"{'=' * 64}")
+        print("  Next Steps")
+        print(f"{'=' * 64}")
+        print(
+            "\n  1. Verify environment properties before packaging.\n"
+            "     Edit config/properties/<ENV>.properties for each\n"
+            "     target environment (DEV / TST / PRD) and confirm:\n"
+            "\n"
+            "       • SHIPS_ENV       matches the target environment\n"
+            "       • ENV_PREFIX      matches your platform topology\n"
+            "       • SHIPS_PROJECT   identifies your project\n"
+            "       • INSTANCE        00 unless deploying in parallel\n"
+            "       • SECURITY_TIER   0 unless handling restricted data\n"
+            "\n"
+            "     All other tokens derive from these roots automatically."
+        )
+        print(
+            "\n  2. Package for an environment (example: DEV):\n"
+            "\n"
+            "     python -m td_release_packager package \\\n"
+            f"         --source {args.project} --env DEV --name <name> \\\n"
+            "         --properties config/properties/DEV.properties \\\n"
+            "         --output releases/"
+        )
+        print(f"\n{'=' * 64}\n")
 
     except FileNotFoundError as e:
         print(f"\nERROR: {e}", file=sys.stderr)
@@ -963,7 +1160,17 @@ def _cmd_build(args):
 
 
 def _cmd_scan(args):
-    """Scan payload files for token references."""
+    """
+    Scan payload files for token references.
+
+    Pilot for build-order item 4 — refactored onto the orchestrator
+    foundation. ``_stage_recording`` decides whether to open a real
+    ``decisions.json`` (when running inside a SHIPS project) or a
+    no-op recorder (for ad-hoc scans against arbitrary directories).
+    The stdout output is identical in both cases.
+    """
+    from td_release_packager.orchestrator import issue_codes
+
     source_dir = args.source
     if not os.path.isdir(source_dir):
         print(f"ERROR: Source directory not found: {source_dir}", file=sys.stderr)
@@ -980,48 +1187,85 @@ def _cmd_scan(args):
     if scan_dir == source_dir:
         print("  ⚠ No payload/ directory found — scanning entire project")
 
-    usage = scan_tokens_in_directory(scan_dir)
+    with _stage_recording(source_dir, "scan") as stage:
+        # Cascade for `scan` is trivial today — no ships.yaml,
+        # template, or env-properties contributions yet. Every
+        # setting comes from CLI (Layer 5). Recording the provenance
+        # here so future cascade integration just plugs in
+        # additional layers without changing downstream consumers.
+        stage.set_config_resolved("source", source_dir, "layer-5", "cli")
+        stage.set_config_resolved(
+            "properties",
+            args.properties or None,
+            "layer-5",
+            "cli",
+        )
 
-    # Collect all unique tokens
-    all_tokens = set()
-    for tokens in usage.values():
-        all_tokens.update(tokens)
+        usage = scan_tokens_in_directory(scan_dir)
 
-    print(f"\n{'=' * 64}")
-    print(f"  Token Scan: {scan_dir}")
-    print(f"{'=' * 64}")
-    print(f"  Files with tokens: {len(usage)}")
-    print(f"  Unique tokens:     {len(all_tokens)}")
+        all_tokens = set()
+        for tokens in usage.values():
+            all_tokens.update(tokens)
 
-    if all_tokens:
-        print("\n  Tokens found:")
-        for t in sorted(all_tokens):
-            files = [f for f, tokens in usage.items() if t in tokens]
-            print(f"    {{{{{t}}}}} — used in {len(files)} file(s)")
+        stage.set_inputs(
+            scan_directory=scan_dir,
+            files_with_tokens=len(usage),
+        )
+        stage.set_outputs(
+            unique_tokens=len(all_tokens),
+            tokens=sorted(all_tokens),
+        )
 
-    # Validate against properties if provided
-    if args.properties:
-        try:
-            values = read_properties(args.properties)
-            errors, warnings = validate_tokens(values, usage)
+        print(f"\n{'=' * 64}")
+        print(f"  Token Scan: {scan_dir}")
+        print(f"{'=' * 64}")
+        print(f"  Files with tokens: {len(usage)}")
+        print(f"  Unique tokens:     {len(all_tokens)}")
 
-            if errors:
-                print("\n  Validation ERRORS:")
+        if all_tokens:
+            print("\n  Tokens found:")
+            for t in sorted(all_tokens):
+                files = [f for f, tokens in usage.items() if t in tokens]
+                print(f"    {{{{{t}}}}} — used in {len(files)} file(s)")
+
+        # Validate against properties if provided
+        if args.properties:
+            try:
+                values = read_properties(args.properties)
+                errors, warnings = validate_tokens(values, usage)
+
                 for e in errors:
-                    print(f"    ✗ {e}")
-
-            if warnings:
-                print("\n  Validation WARNINGS:")
+                    stage.add_issue("error", issue_codes.TOKEN_UNDEFINED, e)
                 for w in warnings:
-                    print(f"    ⚠ {w}")
+                    stage.add_issue("warning", issue_codes.TOKEN_UNUSED, w)
 
-            if not errors and not warnings:
-                print(f"\n  ✓ All tokens validated against {args.properties}")
+                if errors:
+                    print("\n  Validation ERRORS:")
+                    for e in errors:
+                        print(f"    ✗ {e}")
 
-        except FileNotFoundError:
-            print(f"\n  ⚠ Properties file not found: {args.properties}")
+                if warnings:
+                    print("\n  Validation WARNINGS:")
+                    for w in warnings:
+                        print(f"    ⚠ {w}")
 
-    print()
+                if not errors and not warnings:
+                    print(f"\n  ✓ All tokens validated against {args.properties}")
+
+                # Stage status: error issues auto-upgrade to "error"
+                # via the recorder; warnings need an explicit set.
+                if warnings and not errors:
+                    stage.set_status("warning")
+
+            except FileNotFoundError:
+                print(f"\n  ⚠ Properties file not found: {args.properties}")
+                stage.add_issue(
+                    "error",
+                    issue_codes.PROPERTIES_NOT_FOUND,
+                    f"Properties file not found: {args.properties}",
+                )
+
+        print()
 
 
 # ---------------------------------------------------------------
@@ -1408,6 +1652,66 @@ def _build_parser():
         "--project-name",
         default="ships-project",
         help="OpenLineage job namespace / project name (default: ships-project).",
+    )
+
+    # -- import-legacy --
+    il = subs.add_parser(
+        "import-legacy",
+        help="Import a pre-SHIPS sed substitution script. "
+        "Emits a .properties file (token values) + a sed migration "
+        "script (legacy markers → {{TOKEN}}).",
+        description="Import a pre-SHIPS sed substitution script and "
+        "produce two artefacts that bootstrap a SHIPS project: "
+        "(1) a flat .properties file with token values, and "
+        "(2) a sed migration script that converts legacy markers "
+        "($VAR, ${VAR}, &&VAR&&) in source files to the SHIPS "
+        "{{TOKEN}} convention.",
+    )
+    il.add_argument(
+        "input",
+        help="Path to the legacy sed substitution script.",
+    )
+    il.add_argument(
+        "--env",
+        required=True,
+        help="Target environment name (DEV, TST, PRD).",
+    )
+    il.add_argument(
+        "--output-dir",
+        default=".",
+        help="Output directory (default: current). Files written under "
+        "<output-dir>/properties/<env>.properties and "
+        "<output-dir>/legacy_migration.sed.",
+    )
+
+    # -- decompose-names --
+    dn = subs.add_parser(
+        "decompose-names",
+        help="Decompose literal database names against the SHIPS "
+        "naming grammar and emit a cascade-form .properties file.",
+        description="Read a list of literal Teradata database names "
+        "(from a token_map.conf or a plain names file) and decompose "
+        "them against the SHIPS grammar "
+        "{ENV_PREFIX}_{SHIPS_ENV}_{INSTANCE}_{LAYER}_{SECURITY_TIER}_{KIND}. "
+        "Emits a sectioned .properties file with composition roots "
+        "and derived names in cascade form, plus a markdown report.",
+    )
+    dn.add_argument(
+        "input",
+        help="Path to a token_map.conf or plain names file (one literal "
+        "per line). Format auto-detected.",
+    )
+    dn.add_argument(
+        "--env",
+        required=True,
+        help="Target environment name (DEV, TST, PRD).",
+    )
+    dn.add_argument(
+        "--output-dir",
+        default=".",
+        help="Output directory (default: current). Files written under "
+        "<output-dir>/properties/<env>.properties and "
+        "<output-dir>/decomposition_report.md.",
     )
 
     return parser

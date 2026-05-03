@@ -31,11 +31,14 @@ logger = logging.getLogger(__name__)
 # Allows alphanumeric, underscores, and hyphens in names.
 _TOKEN_RE = re.compile(r"\{\{([A-Za-z_][A-Za-z0-9_-]*)\}\}")
 
-# Characters that should never appear in a resolved token value
-# (Teradata identifiers: alphanumeric, underscores, and {{}} for
-# unresolved internal references only. Parentheses and brackets
-# are also invalid in token values.)
-_INVALID_VALUE_CHARS = re.compile(r"[()\[\]{}]")
+# Characters that should never appear in a resolved token value.
+# Curly braces would indicate an unresolved {{TOKEN}} reference;
+# square brackets are SQL Server bracketed-identifier syntax that
+# does not belong in Teradata DDL.
+# Parentheses ARE permitted because they appear in legitimate
+# SQL type expressions used as token values (e.g. TIMESTAMP(6),
+# TIME(6), CURRENT_TIMESTAMP(6)).
+_INVALID_VALUE_CHARS = re.compile(r"[\[\]{}]")
 
 
 def _validate_property_values(
