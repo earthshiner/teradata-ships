@@ -37,6 +37,14 @@ from td_release_packager.orchestrator.decisions import (
     RunRecorder,
     StageRecorder,
 )
+from td_release_packager.orchestrator.issue_codes import (
+    ISSUE_CODES,
+    PROPERTIES_NOT_FOUND,
+    TOKEN_UNDEFINED,
+    TOKEN_UNUSED,
+    describe,
+    is_registered,
+)
 from td_release_packager.orchestrator.ships_yaml import (
     LAYER_1_DEFAULTS,
     STAGES,
@@ -80,4 +88,11 @@ __all__ = [
     "DecisionsSchemaError",
     "RunRecorder",
     "StageRecorder",
+    # issue_codes
+    "ISSUE_CODES",
+    "PROPERTIES_NOT_FOUND",
+    "TOKEN_UNDEFINED",
+    "TOKEN_UNUSED",
+    "describe",
+    "is_registered",
 ]
