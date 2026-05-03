@@ -34,4 +34,4 @@ from td_release_packager.view_layer_generator import main  # noqa: E402
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(prog="python tools/generate_view_layer.py"))
