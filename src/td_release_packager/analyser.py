@@ -637,30 +637,60 @@ def _scan_references(
 # Object index builder
 # ---------------------------------------------------------------
 
-# Classification patterns (same as ingest.py)
+# Classification patterns (mirror classifier.py).
+#
+# Anchored to start-of-statement (``^\s*`` + ``re.MULTILINE``) so a
+# verb appearing inside another statement -- e.g. ``GRANT CREATE
+# PROCEDURE ON db TO user`` -- does not get misclassified as the
+# inner verb's type. See classifier.py for the full rationale.
+_ANALYSER_STMT_FLAGS = re.IGNORECASE | re.MULTILINE
 _CLASSIFY_PATTERNS = [
-    (re.compile(r"CREATE\s+JOIN\s+INDEX\b", re.I), "JOIN_INDEX"),
-    (re.compile(r"CREATE\s+HASH\s+INDEX\b", re.I), "HASH_INDEX"),
-    (re.compile(r"CREATE\s+(?:UNIQUE\s+)?INDEX\b", re.I), "INDEX"),
+    (re.compile(r"^\s*CREATE\s+JOIN\s+INDEX\b", _ANALYSER_STMT_FLAGS), "JOIN_INDEX"),
+    (re.compile(r"^\s*CREATE\s+HASH\s+INDEX\b", _ANALYSER_STMT_FLAGS), "HASH_INDEX"),
+    (
+        re.compile(r"^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\b", _ANALYSER_STMT_FLAGS),
+        "INDEX",
+    ),
     (
         re.compile(
-            r"(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b.*?TABLE\s+OPERATOR",
-            re.I | re.DOTALL,
+            r"^\s*(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b"
+            r".*?TABLE\s+OPERATOR",
+            re.IGNORECASE | re.MULTILINE | re.DOTALL,
         ),
         "SCRIPT_TABLE_OPERATOR",
     ),
     (
         re.compile(
-            r"(?:CREATE|REPLACE)\s+(?:MULTISET|SET)?\s*(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?(?:TRACE\s+)?TABLE\b",
-            re.I,
+            r"^\s*(?:CREATE|REPLACE)\s+(?:MULTISET|SET)?\s*"
+            r"(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?"
+            r"(?:TRACE\s+)?TABLE\b",
+            _ANALYSER_STMT_FLAGS,
         ),
         "TABLE",
     ),
-    (re.compile(r"(?:CREATE|REPLACE)\s+VIEW\b", re.I), "VIEW"),
-    (re.compile(r"(?:CREATE|REPLACE)\s+MACRO\b", re.I), "MACRO"),
-    (re.compile(r"(?:CREATE|REPLACE)\s+PROCEDURE\b", re.I), "PROCEDURE"),
-    (re.compile(r"(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b", re.I), "FUNCTION"),
-    (re.compile(r"(?:CREATE|REPLACE)\s+TRIGGER\b", re.I), "TRIGGER"),
+    (
+        re.compile(r"^\s*(?:CREATE|REPLACE)\s+VIEW\b", _ANALYSER_STMT_FLAGS),
+        "VIEW",
+    ),
+    (
+        re.compile(r"^\s*(?:CREATE|REPLACE)\s+MACRO\b", _ANALYSER_STMT_FLAGS),
+        "MACRO",
+    ),
+    (
+        re.compile(r"^\s*(?:CREATE|REPLACE)\s+PROCEDURE\b", _ANALYSER_STMT_FLAGS),
+        "PROCEDURE",
+    ),
+    (
+        re.compile(
+            r"^\s*(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b",
+            _ANALYSER_STMT_FLAGS,
+        ),
+        "FUNCTION",
+    ),
+    (
+        re.compile(r"^\s*(?:CREATE|REPLACE)\s+TRIGGER\b", _ANALYSER_STMT_FLAGS),
+        "TRIGGER",
+    ),
 ]
 
 # Qualified name extraction
