@@ -437,16 +437,64 @@ class TestCheckOneObject:
         assert issues[0].rule == "one_object"
 
     def test_procedure_with_inner_statements_allowed(self):
-        """Procedure with inner DML (INSERT, SELECT) under threshold is OK."""
+        """Procedure with INSERT/UPDATE in its body is exactly ONE
+        DDL statement (the CREATE PROCEDURE). Body DML must NOT
+        count toward the one-object threshold."""
         ddl = (
             "CREATE PROCEDURE MyDB.sp_X()\n"
             "BEGIN\n"
             "    INSERT INTO MyDB.Log VALUES (1);\n"
             "END;\n"
         )
-        # 2 matches (CREATE + INSERT) — under the >2 threshold
         issues = _check_one_object("x.spl", ddl)
         assert issues == []
+
+    def test_real_world_procedure_with_if_else_branches(self):
+        """Regression test: GCFR_BB_ProcessIDTool_Set.spl had
+        CREATE PROCEDURE with an IF/ELSE block doing one INSERT
+        and one UPDATE inside BEGIN...END. The previous regex
+        counted INSERT + UPDATE as additional 'DDL statements',
+        firing a spurious one_object warning. With DML excluded
+        from the count, this passes cleanly."""
+        ddl = (
+            "CREATE PROCEDURE MyDB.sp_X(IN flag BYTEINT)\n"
+            "MAIN:\n"
+            "BEGIN\n"
+            "    IF flag = 0 THEN\n"
+            "        INSERT INTO MyDB.t (a) VALUES (1);\n"
+            "    ELSE\n"
+            "        UPDATE MyDB.t SET a = 1 WHERE a = 0;\n"
+            "    END IF;\n"
+            "END MAIN;\n"
+        )
+        issues = _check_one_object("real.spl", ddl)
+        assert issues == [], (
+            "Procedure with body DML must not trip the one-object "
+            "rule — body INSERT/UPDATE are DML, not DDL."
+        )
+
+    def test_two_top_level_dml_does_not_count(self):
+        """Even at top level, INSERT and UPDATE shouldn't count
+        toward the DDL count — they're DML statements. A file
+        with CREATE TABLE followed by INSERT is unusual but not
+        a violation of one-object-per-DDL."""
+        ddl = (
+            "CREATE TABLE MyDB.t (a INT);\n"
+            "INSERT INTO MyDB.t VALUES (1);\n"
+        )
+        issues = _check_one_object("seed.tbl", ddl)
+        assert issues == []
+
+    def test_two_top_level_create_statements_flagged(self):
+        """Two real DDL statements (both CREATE) still trip the
+        rule — that's the actual one-object violation."""
+        ddl = (
+            "CREATE TABLE MyDB.t1 (a INT);\n"
+            "CREATE TABLE MyDB.t2 (a INT);\n"
+        )
+        issues = _check_one_object("two.sql", ddl)
+        assert len(issues) == 1
+        assert issues[0].rule == "one_object"
 
 
 # ---------------------------------------------------------------
@@ -705,6 +753,71 @@ class TestValidateDirectory:
 
         deploy_issues = [i for i in result.issues if i.rule == "deploy_intent"]
         assert deploy_issues == []
+
+    def test_block_comment_keywords_do_not_trigger_rules(self, tmp_path):
+        """Regression test for the GCFR_FF_IMGTableDelta_Create.spl
+        report: a procedure with a multi-line ``/* purpose: ... */``
+        header containing words like 'truncates', 'Create', and
+        'temp table' was firing five spurious rule violations
+        (db_qualifier, set_multiset, one_object, eponymous,
+        extension) because the rules scanned raw content including
+        comment text.
+
+        The fix runs every check against comment-stripped content.
+        This test mirrors the user's actual file shape — a single
+        CREATE PROCEDURE whose body comment mentions 'TABLE',
+        'CREATE', 'truncates', 'replaces', etc. — and asserts the
+        only legitimate observation is no warnings on the headers."""
+        ddl_dir = tmp_path / "DDL" / "procedures"
+        ddl_dir.mkdir(parents=True)
+        # A faithful re-creation of the GCFR procedure header: one
+        # CREATE PROCEDURE statement, then a /* ... */ block with
+        # natural-language descriptions full of DDL-ish keywords,
+        # then a body that does the real work.
+        (ddl_dir / "{{GCFR_P_FF}}.GCFR_FF_IMGTableDelta_Create.spl").write_text(
+            "CREATE PROCEDURE {{GCFR_P_FF}}.GCFR_FF_IMGTableDelta_Create\n"
+            "/*======================================================\n"
+            "# Purpose: GCFR_FF_IMGTableDelta_Create procedure truncates\n"
+            "#          or replaces the Image and Insert temporary tables\n"
+            "#          If the temporary table does not exist, it is created\n"
+            "#          If the temporary table exists, it is dropped and\n"
+            "#          created again.\n"
+            "#\n"
+            "#          Function Flow Steps\n"
+            "#              1 - Check if the temp table exists or not.\n"
+            "#              2 - Create and execute DDL for temp table creation.\n"
+            "#              3 - Log API completion message.\n"
+            "======================================================*/\n"
+            "(IN iExtension VARCHAR(3))\n"
+            "MAIN:\n"
+            "BEGIN\n"
+            "    SET temp_var = 1;\n"
+            "END MAIN;\n",
+            encoding="utf-8",
+        )
+
+        result = validate_directory(str(tmp_path))
+
+        # Filter to issues for this file only
+        relevant = [
+            i for i in result.issues
+            if "GCFR_FF_IMGTableDelta_Create" in i.file
+        ]
+        # The buggy rules from the user's report — all should now
+        # be silent because the rule patterns no longer see the
+        # comment-text words 'truncates', 'CREATE TABLE', etc.
+        bug_rules = {
+            "db_qualifier",
+            "set_multiset",
+            "one_object",
+            "eponymous",
+            "extension",
+        }
+        triggered_buggy = {i.rule for i in relevant if i.rule in bug_rules}
+        assert triggered_buggy == set(), (
+            f"Comment text triggered spurious rule(s): {triggered_buggy}. "
+            f"All issues: {[(i.rule, i.message) for i in relevant]}"
+        )
 
 
 # ---------------------------------------------------------------

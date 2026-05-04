@@ -741,13 +741,33 @@ def _inject_multiset_in_file(file_path: str):
     Args:
         file_path: Path to the resolved .tbl file.
     """
+    from td_release_packager.sql_text import (
+        strip_comments_preserving_positions,
+    )
+
     with open(file_path, "r", encoding="utf-8") as f:
         content = f.read()
 
-    if _HAS_SET_MULTISET_RE.search(content):
+    # Use comment-stripped content for BOTH detection and the
+    # position lookup. A header comment like "/* serves as parent
+    # for the inner CREATE TABLE */" would otherwise match the
+    # injection pattern before the real CREATE statement.
+    cleaned = strip_comments_preserving_positions(content)
+
+    if _HAS_SET_MULTISET_RE.search(cleaned):
         return  # Already has SET or MULTISET
 
-    modified = _INJECT_MULTISET_RE.sub(r"\1MULTISET \2", content, count=1)
+    m = _INJECT_MULTISET_RE.search(cleaned)
+    if m is None:
+        return
+
+    # Apply the substitution at the exact span of the real DDL,
+    # preserving any surrounding comments verbatim.
+    head = content[: m.start()]
+    matched = content[m.start() : m.end()]
+    tail = content[m.end() :]
+    new_matched = _INJECT_MULTISET_RE.sub(r"\1MULTISET \2", matched, count=1)
+    modified = head + new_matched + tail
 
     if modified != content:
         with open(file_path, "w", encoding="utf-8") as f:
