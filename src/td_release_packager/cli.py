@@ -28,7 +28,7 @@ import argparse
 import logging
 import os
 import sys
-from typing import Dict
+from typing import Dict, Optional
 
 from td_release_packager.builder import build_package
 from td_release_packager.build_counter import read_build_number
@@ -351,6 +351,159 @@ def _stage_recording(project_dir: str, stage_name: str):
 
 
 # ---------------------------------------------------------------
+# Harvest "Next Steps" banner
+# ---------------------------------------------------------------
+
+
+def _project_has_env_properties(project_dir: str) -> bool:
+    """True if ``<project>/config/properties/`` contains any
+    ``*.properties`` file. Used to pick between the 'bootstrap'
+    and 'verify' wording in the harvest banner."""
+    props_dir = os.path.join(project_dir, "config", "properties")
+    if not os.path.isdir(props_dir):
+        return False
+    return any(
+        f.endswith(".properties") for f in os.listdir(props_dir)
+    )
+
+
+def _print_harvest_next_steps(
+    args,
+    *,
+    generated_token_map_path: Optional[str],
+    substitutions_applied: bool,
+) -> None:
+    """
+    Print a context-aware Next Steps banner after harvest.
+
+    Three flows, three distinct next-step lists:
+
+      A. ``--generate-token-map`` was used. The map was just written
+         but no substitutions are in the source yet. The user needs
+         to review it, bootstrap a .properties file from it, and
+         re-harvest with ``--token-map`` to apply.
+
+      B. ``--token-map`` (or ``--apply-tokens``) was provided.
+         Substitutions are now in the source. The user just needs
+         to verify their .properties file and package.
+
+      C. Plain harvest with no token activity. Same as flow B —
+         substitutions either weren't needed or aren't ready yet.
+
+    Args:
+        args: The parsed CLI args (used for ``args.project``).
+        generated_token_map_path: Path to the token_map.conf that
+            ``--generate-token-map`` just wrote, or None if no map
+            was generated this run.
+        substitutions_applied: True if harvest applied substitutions
+            via ``--token-map`` or ``--apply-tokens`` this run.
+    """
+    from typing import List
+
+    print("=" * 64)
+    print("  Next Steps")
+    print("=" * 64)
+
+    steps: List[str] = []
+    project = args.project
+    has_props = _project_has_env_properties(project)
+
+    if generated_token_map_path is not None:
+        # Flow A — token map was just written, substitutions not applied
+        steps.append(
+            f"1. Review the generated token map:\n"
+            f"     {generated_token_map_path}\n"
+            f"\n"
+            f"   Each line is LITERAL_DB_NAME={{{{TOKEN}}}}. Edit\n"
+            f"   token names if you'd prefer different conventions.\n"
+            f"   Lines you want to skip can be deleted or commented (#)."
+        )
+        if not has_props:
+            steps.append(
+                f"2. Bootstrap a .properties file from the token map:\n"
+                f"\n"
+                f"     python -m td_release_packager decompose-names \\\n"
+                f"         {generated_token_map_path} \\\n"
+                f"         --env DEV \\\n"
+                f"         --output-dir {project}\\config\n"
+                f"\n"
+                f"   Output: a 7-section .properties scaffold under\n"
+                f"   {project}\\config\\properties\\DEV.properties\n"
+                f"   plus a decomposition_report.md with confidence\n"
+                f"   ratings and outliers."
+            )
+            next_num = 3
+        else:
+            next_num = 2
+        steps.append(
+            f"{next_num}. Re-harvest with the token map applied:\n"
+            f"\n"
+            f"     python -m td_release_packager harvest \\\n"
+            f"         --source <legacy_src> \\\n"
+            f"         --project {project} \\\n"
+            f"         --token-map {generated_token_map_path} \\\n"
+            f"         --force\n"
+            f"\n"
+            f"   This rewrites the staged DDL to use {{{{TOKEN}}}} form."
+        )
+        next_num += 1
+        steps.append(
+            f"{next_num}. Verify environment properties before packaging.\n"
+            f"   Edit config/properties/<ENV>.properties and confirm:\n"
+            f"\n"
+            f"     • SHIPS_ENV       matches the target environment\n"
+            f"     • ENV_PREFIX      matches your platform topology\n"
+            f"     • SHIPS_PROJECT   identifies your project\n"
+            f"     • INSTANCE        00 unless deploying in parallel\n"
+            f"     • SECURITY_TIER   0 unless handling restricted data\n"
+            f"\n"
+            f"   All other tokens derive from these roots automatically."
+        )
+        next_num += 1
+        steps.append(
+            f"{next_num}. Package for an environment (example: DEV):\n"
+            f"\n"
+            f"     python -m td_release_packager package \\\n"
+            f"         --source {project} --env DEV --name <name> \\\n"
+            f"         --properties config/properties/DEV.properties \\\n"
+            f"         --output releases/"
+        )
+
+    else:
+        # Flow B / C — substitutions applied (B) or no map activity (C).
+        # Same steps either way: verify properties + package.
+        steps.append(
+            "1. Verify environment properties before packaging.\n"
+            "   Edit config/properties/<ENV>.properties for each\n"
+            "   target environment (DEV / TST / PRD) and confirm:\n"
+            "\n"
+            "     • SHIPS_ENV       matches the target environment\n"
+            "     • ENV_PREFIX      matches your platform topology\n"
+            "     • SHIPS_PROJECT   identifies your project\n"
+            "     • INSTANCE        00 unless deploying in parallel\n"
+            "     • SECURITY_TIER   0 unless handling restricted data\n"
+            "\n"
+            "   All other tokens derive from these roots automatically."
+        )
+        steps.append(
+            f"2. Package for an environment (example: DEV):\n"
+            f"\n"
+            f"     python -m td_release_packager package \\\n"
+            f"         --source {project} --env DEV --name <name> \\\n"
+            f"         --properties config/properties/DEV.properties \\\n"
+            f"         --output releases/"
+        )
+
+    for step in steps:
+        print()
+        # Indent each line with two spaces for the banner block.
+        for line in step.splitlines():
+            print(f"  {line}" if line else "")
+
+    print(f"\n{'=' * 64}\n")
+
+
+# ---------------------------------------------------------------
 # Legacy-importer / decomposer dispatchers
 # ---------------------------------------------------------------
 #
@@ -584,12 +737,18 @@ def _cmd_ingest(args):
         env_prefix = getattr(args, "env_prefix", None)
         generate_map = getattr(args, "generate_token_map", False)
 
+        # Track the generated token-map path so the Next Steps
+        # banner can reference it without re-deriving it. None when
+        # --generate-token-map was not used (or produced nothing).
+        generated_token_map_path = None
+
         if generate_map and result.token_candidates:
             token_map = generate_token_map(result.token_candidates, env_prefix)
             map_path = os.path.join(args.project, "config", "token_map.conf")
             write_token_map(
                 map_path, token_map, result.token_candidates, env_prefix or "(none)"
             )
+            generated_token_map_path = map_path
             print(f"\n  Token map generated: {map_path}")
             print(f"  Mappings:           {len(token_map)}")
             if env_prefix:
@@ -599,7 +758,9 @@ def _cmd_ingest(args):
             for literal, token in sorted(token_map.items()):
                 files = result.token_candidates.get(literal, [])
                 print(f"    {literal} → {token}  ({len(files)} refs)")
-            print(f"\n  To apply: re-harvest with --token-map {map_path}")
+            # Detailed next-action guidance is consolidated into the
+            # Next Steps banner below — keep this block focused on
+            # reporting what was just done.
 
         elif result.token_candidates and not apply_tokens:
             print("\n  Token candidates (hardcoded database names):")
@@ -622,37 +783,14 @@ def _cmd_ingest(args):
         print(f"{'=' * 64}\n")
 
         # -- Next Steps banner --
-        # Harvest produces a tokenised project tree, but packaging
-        # also needs an environment .properties file with values
-        # filled in for the target environment. The properties file
-        # is the user's responsibility — flag this prominently so
-        # they don't go straight to `package` and hit a missing-
-        # token failure or, worse, ship the wrong values.
-        print(f"{'=' * 64}")
-        print("  Next Steps")
-        print(f"{'=' * 64}")
-        print(
-            "\n  1. Verify environment properties before packaging.\n"
-            "     Edit config/properties/<ENV>.properties for each\n"
-            "     target environment (DEV / TST / PRD) and confirm:\n"
-            "\n"
-            "       • SHIPS_ENV       matches the target environment\n"
-            "       • ENV_PREFIX      matches your platform topology\n"
-            "       • SHIPS_PROJECT   identifies your project\n"
-            "       • INSTANCE        00 unless deploying in parallel\n"
-            "       • SECURITY_TIER   0 unless handling restricted data\n"
-            "\n"
-            "     All other tokens derive from these roots automatically."
+        # Three distinct flows produce three distinct sets of next
+        # steps. Get the recommendation right per flow so the user
+        # isn't left guessing.
+        _print_harvest_next_steps(
+            args=args,
+            generated_token_map_path=generated_token_map_path,
+            substitutions_applied=bool(apply_tokens),
         )
-        print(
-            "\n  2. Package for an environment (example: DEV):\n"
-            "\n"
-            "     python -m td_release_packager package \\\n"
-            f"         --source {args.project} --env DEV --name <name> \\\n"
-            "         --properties config/properties/DEV.properties \\\n"
-            "         --output releases/"
-        )
-        print(f"\n{'=' * 64}\n")
 
     except FileNotFoundError as e:
         print(f"\nERROR: {e}", file=sys.stderr)
