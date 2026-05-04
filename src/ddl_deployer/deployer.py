@@ -935,8 +935,17 @@ _EXPLAIN_SKIP_TYPES = {
     ObjectType.PROCEDURE,  # technical — see comment above
 }
 _PREREQ_EXEMPT_TYPES = {
+    # Hierarchy-circular: EXPLAIN requires the parent/grantee to exist.
+    # DATABASE and USER form hierarchies (CREATE x FROM parent); GRANT
+    # and ROLE statements reference databases that don't yet exist when
+    # the prereqs haven't been deployed. Preflight validates rights;
+    # _order.txt guarantees sequence.
     ObjectType.DATABASE,
     ObjectType.USER,
+    ObjectType.ROLE,    # CREATE ROLE has no EXPLAIN form (Error 3706)
+    ObjectType.GRANT,   # GRANTs on in-package databases always fail
+                        # EXPLAIN (Error 3802 "database does not exist")
+                        # when the database is itself created by this package
 }
 
 
