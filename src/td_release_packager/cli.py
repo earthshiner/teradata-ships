@@ -1109,15 +1109,71 @@ def _cmd_validate(args):
     """
     Validate DDL files against the Coding Discipline.
 
-    Runs two steps:
+    Runs three steps:
+        Step 0 — Token format check (token_engine.scan_malformed)
         Step 1 — Per-file DDL lint (validate.py)
         Step 2 — Cross-file grant validation (validate_grants.py)
 
-    The overall result is PASSED only if both steps pass.
+    The overall result is PASSED only if all enabled steps pass.
+
+    Refactored onto the orchestrator (build-order item 4b): wraps the
+    existing logic in ``_stage_recording`` so projects with a SHIPS
+    layout grow a ``decisions.json`` entry per inspect run while ad-
+    hoc invocations against arbitrary directories see identical
+    stdout and zero filesystem litter.
+
+    The actual exit code is computed inside ``_run_inspect`` and
+    surfaced AFTER the recording context manager closes — calling
+    ``sys.exit`` inside ``with _stage_recording`` would trip the
+    recorder's BaseException handler and force every run to record
+    status="error", swamping the manifest with false errors.
+    """
+    from td_release_packager.orchestrator import issue_codes
+
+    try:
+        with _stage_recording(args.source, "inspect") as stage:
+            exit_code = _run_inspect(args, stage, issue_codes)
+    except FileNotFoundError as e:
+        print(f"\nERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    sys.exit(exit_code)
+
+
+def _run_inspect(args, stage, issue_codes) -> int:
+    """
+    Body of the inspect command, factored out so ``_cmd_validate``
+    can wrap it in ``_stage_recording`` without indenting 250 lines.
+
+    ``stage`` is either a real ``StageRecorder`` (project mode) or a
+    ``_NullStageRecorder`` (ad-hoc mode); the call sites don't have
+    to branch.
+
+    Returns:
+        The exit code to surface to the shell. The caller is
+        responsible for calling ``sys.exit`` AFTER the recorder
+        context closes — see ``_cmd_validate`` for why.
     """
     from pathlib import Path
 
     try:
+        # -- Record the resolved CLI configuration (Layer 5) --
+        # Future cascade work plugs in additional layers without
+        # changing how the call sites read config.
+        stage.set_config_resolved("source", args.source, "layer-5", "cli")
+        stage.set_config_resolved(
+            "config", getattr(args, "config", None), "layer-5", "cli"
+        )
+        stage.set_config_resolved(
+            "strict", getattr(args, "strict", False), "layer-5", "cli"
+        )
+        stage.set_config_resolved(
+            "skip_grants", getattr(args, "skip_grants", False), "layer-5", "cli"
+        )
+        stage.set_config_resolved(
+            "fix_grants", getattr(args, "fix_grants", False), "layer-5", "cli"
+        )
+
         # ==============================================================
         # Step 0 — Token format check
         # ==============================================================
@@ -1160,6 +1216,21 @@ def _cmd_validate(args):
             print()
             # The format function emits its own banner+detail block.
             print(format_malformed_tokens_report(token_findings))
+            # Record one issue per malformed marker so explain can
+            # group findings by file. Each finding is a dict with
+            # line/column/marker keys (see token_engine.find_malformed_tokens).
+            for file_path, findings in token_findings.items():
+                for finding in findings:
+                    stage.add_issue(
+                        "error",
+                        issue_codes.INSPECT_TOKEN_MALFORMED,
+                        (
+                            f"Malformed token marker '{finding['marker']}' "
+                            f"in {file_path} at line {finding['line']}, "
+                            f"col {finding['column']}"
+                        ),
+                        location=f"{file_path}:{finding['line']}:{finding['column']}",
+                    )
         else:
             print("  All {{TOKEN}} markers are well-formed.")
 
@@ -1233,6 +1304,25 @@ def _cmd_validate(args):
                     else:
                         sev = "ℹ"
                     print(f"      {sev} [{issue.rule}] {issue.message}")
+
+            # Record one decisions.json issue per lint finding. The
+            # rule name is carried in the message so explain can
+            # group by rule even though the issue code is coarse.
+            for issue in lint_result.issues:
+                # Map validate.py severities into the recorder's
+                # vocabulary: ERROR/WARNING/INFO → error/warning/info.
+                rec_severity = issue.severity.lower()
+                if rec_severity not in ("error", "warning", "info"):
+                    rec_severity = "warning"
+                location = issue.file
+                if issue.line is not None:
+                    location = f"{issue.file}:{issue.line}"
+                stage.add_issue(
+                    rec_severity,
+                    issue_codes.INSPECT_LINT_VIOLATION,
+                    f"[{issue.rule}] {issue.message}",
+                    location=location,
+                )
 
         if lint_result.passed:
             print("\n  All files conform to the Teradata Engineering Discipline.")
@@ -1359,11 +1449,70 @@ def _cmd_validate(args):
 
         print(f"{'=' * 64}\n")
 
-        sys.exit(0 if overall_ok else 1)
+        # ==============================================================
+        # decisions.json — record grants, inputs, outputs, status
+        # ==============================================================
+        # Done after the human-facing report so an interruption mid-
+        # report still leaves the printed output intact. The recorder
+        # itself was set up at the top of this function — we only
+        # need to attach the per-step findings now.
+        if grant_result is not None and not grant_ok:
+            for entry in getattr(grant_result, "drifted", []):
+                stage.add_issue(
+                    "error",
+                    issue_codes.INSPECT_GRANT_VIOLATION,
+                    f"Drifted grant: {entry}",
+                )
+            for entry in getattr(grant_result, "missing", []):
+                stage.add_issue(
+                    "error",
+                    issue_codes.INSPECT_GRANT_VIOLATION,
+                    f"Missing grant (intent has it, .grt does not): {entry}",
+                )
+            for entry in getattr(grant_result, "orphaned", []):
+                stage.add_issue(
+                    "error",
+                    issue_codes.INSPECT_GRANT_VIOLATION,
+                    f"Orphaned grant (.grt has it, intent does not): {entry}",
+                )
+
+        stage.set_inputs(
+            source_dir=args.source,
+            payload_dir=payload_dir,
+            files_scanned=lint_result.files_scanned,
+            grant_validation_skipped=skip_grants,
+            grant_validation_fix_mode=do_fix,
+        )
+        stage.set_outputs(
+            token_format_passed=token_ok,
+            lint_passed=lint_ok,
+            grants_passed=grant_ok,
+            overall_passed=overall_ok,
+            lint_errors=lint_result.errors,
+            lint_warnings=lint_result.warnings,
+            files_with_issues=lint_result.files_with_issues,
+        )
+
+        # The recorder auto-rolls up "error" issues into the run's
+        # final_status. Warnings need an explicit set_status to
+        # surface in decisions.json — otherwise a clean run that
+        # only emitted warnings would still report status="success".
+        if not overall_ok:
+            stage.set_status("error")
+        elif lint_result.warnings or (
+            grant_result and not grant_ok
+        ):
+            stage.set_status("warning")
+        else:
+            stage.set_status("success")
+
+        # Return — DO NOT sys.exit inside the recording context.
+        # See _cmd_validate's docstring for why.
+        return 0 if overall_ok else 1
 
     except FileNotFoundError as e:
         print(f"\nERROR: {e}", file=sys.stderr)
-        sys.exit(1)
+        return 1
 
 
 def _cmd_build(args):
