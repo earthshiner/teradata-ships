@@ -1381,11 +1381,53 @@ class TestCheckIntraPackageDependency:
 
 class TestIntraPackageDependencyIntegration:
     """End-to-end tests for the intra_package_dependency rule via
-    validate_directory — checks the pre-pass and dispatcher wiring."""
+    validate_directory — checks the pre-pass and dispatcher wiring.
+
+    The rule defaults to OFF because the package stage auto-splits
+    affected sources (see Phase 2 of the intra_package_dependency
+    work). These tests explicitly opt the rule back in via
+    rules_config so the rule's wiring stays exercised.
+    """
+
+    @staticmethod
+    def _rules_with_intra_at(severity: str):
+        rules = dict(DEFAULT_RULES)
+        rules["intra_package_dependency"] = severity
+        return rules
 
     def test_create_database_plus_table_in_same_package_flagged(self, tmp_path):
         """The headline case Paul reported: CREATE DATABASE x +
-        CREATE TABLE x.foo in the same package fires an ERROR."""
+        CREATE TABLE x.foo in the same package fires an ERROR when
+        the rule is enabled."""
+        prereq_dir = tmp_path / "pre-requisites" / "databases"
+        prereq_dir.mkdir(parents=True)
+        (prereq_dir / "MyDB.db").write_text(
+            "CREATE DATABASE MyDB AS PERMANENT = 1024;",
+            encoding="utf-8",
+        )
+        ddl_dir = tmp_path / "DDL" / "tables"
+        ddl_dir.mkdir(parents=True)
+        (ddl_dir / "MyDB.Customer.tbl").write_text(
+            "CREATE MULTISET TABLE MyDB.Customer (Id INTEGER);",
+            encoding="utf-8",
+        )
+
+        result = validate_directory(
+            str(tmp_path), rules_config=self._rules_with_intra_at("ERROR")
+        )
+
+        intra_issues = [
+            i for i in result.issues if i.rule == "intra_package_dependency"
+        ]
+        assert len(intra_issues) == 1
+        assert intra_issues[0].severity == "ERROR"
+        assert "MyDB.Customer.tbl" in intra_issues[0].file
+        assert not result.passed
+
+    def test_default_severity_is_off(self, tmp_path):
+        """With default rules, the violation is silent — package
+        auto-split handles it transparently. This is the normal
+        user experience after Phase 2."""
         prereq_dir = tmp_path / "pre-requisites" / "databases"
         prereq_dir.mkdir(parents=True)
         (prereq_dir / "MyDB.db").write_text(
@@ -1404,15 +1446,11 @@ class TestIntraPackageDependencyIntegration:
         intra_issues = [
             i for i in result.issues if i.rule == "intra_package_dependency"
         ]
-        assert len(intra_issues) == 1
-        assert intra_issues[0].severity == "ERROR"
-        assert "MyDB.Customer.tbl" in intra_issues[0].file
-        assert not result.passed
+        assert intra_issues == []
 
     def test_objects_in_external_database_pass(self, tmp_path):
         """A package containing only objects (no CREATE DATABASE) does
-        not trigger the rule even if the qualifier database happens to
-        share a name with something elsewhere."""
+        not trigger the rule even when explicitly enabled."""
         ddl_dir = tmp_path / "DDL" / "tables"
         ddl_dir.mkdir(parents=True)
         (ddl_dir / "MyDB.Customer.tbl").write_text(
@@ -1420,7 +1458,9 @@ class TestIntraPackageDependencyIntegration:
             encoding="utf-8",
         )
 
-        result = validate_directory(str(tmp_path))
+        result = validate_directory(
+            str(tmp_path), rules_config=self._rules_with_intra_at("ERROR")
+        )
 
         intra_issues = [
             i for i in result.issues if i.rule == "intra_package_dependency"
@@ -1429,7 +1469,7 @@ class TestIntraPackageDependencyIntegration:
 
     def test_tokenised_pair_flagged_end_to_end(self, tmp_path):
         """Tokenised CREATE DATABASE + tokenised dependants match through
-        the full pipeline."""
+        the full pipeline when the rule is enabled."""
         prereq_dir = tmp_path / "pre-requisites" / "databases"
         prereq_dir.mkdir(parents=True)
         (prereq_dir / "{{T_DB}}.db").write_text(
@@ -1443,7 +1483,9 @@ class TestIntraPackageDependencyIntegration:
             encoding="utf-8",
         )
 
-        result = validate_directory(str(tmp_path))
+        result = validate_directory(
+            str(tmp_path), rules_config=self._rules_with_intra_at("ERROR")
+        )
 
         intra_issues = [
             i for i in result.issues if i.rule == "intra_package_dependency"
@@ -1460,7 +1502,9 @@ class TestIntraPackageDependencyIntegration:
             encoding="utf-8",
         )
 
-        result = validate_directory(str(tmp_path))
+        result = validate_directory(
+            str(tmp_path), rules_config=self._rules_with_intra_at("ERROR")
+        )
 
         intra_issues = [
             i for i in result.issues if i.rule == "intra_package_dependency"
@@ -1470,7 +1514,7 @@ class TestIntraPackageDependencyIntegration:
 
     def test_create_user_plus_dependant_object_flagged(self, tmp_path):
         """CREATE USER also creates a database in Teradata; objects in
-        that user's database fire the rule too."""
+        that user's database fire the rule too when enabled."""
         prereq_dir = tmp_path / "pre-requisites" / "users"
         prereq_dir.mkdir(parents=True)
         (prereq_dir / "MyUser.usr").write_text(
@@ -1484,37 +1528,15 @@ class TestIntraPackageDependencyIntegration:
             encoding="utf-8",
         )
 
-        result = validate_directory(str(tmp_path))
+        result = validate_directory(
+            str(tmp_path), rules_config=self._rules_with_intra_at("ERROR")
+        )
 
         intra_issues = [
             i for i in result.issues if i.rule == "intra_package_dependency"
         ]
         assert len(intra_issues) == 1
         assert "MyUser" in intra_issues[0].message
-
-    def test_rule_can_be_disabled_via_config(self, tmp_path):
-        """Setting the rule to OFF silences it even when violated."""
-        prereq_dir = tmp_path / "pre-requisites" / "databases"
-        prereq_dir.mkdir(parents=True)
-        (prereq_dir / "MyDB.db").write_text(
-            "CREATE DATABASE MyDB AS PERMANENT = 1024;",
-            encoding="utf-8",
-        )
-        ddl_dir = tmp_path / "DDL" / "tables"
-        ddl_dir.mkdir(parents=True)
-        (ddl_dir / "MyDB.Customer.tbl").write_text(
-            "CREATE MULTISET TABLE MyDB.Customer (Id INTEGER);",
-            encoding="utf-8",
-        )
-
-        rules = dict(DEFAULT_RULES)
-        rules["intra_package_dependency"] = "OFF"
-        result = validate_directory(str(tmp_path), rules_config=rules)
-
-        intra_issues = [
-            i for i in result.issues if i.rule == "intra_package_dependency"
-        ]
-        assert intra_issues == []
 
     def test_rule_can_be_softened_to_warning(self, tmp_path):
         """Setting the rule to WARNING demotes it from ERROR."""
@@ -1531,9 +1553,9 @@ class TestIntraPackageDependencyIntegration:
             encoding="utf-8",
         )
 
-        rules = dict(DEFAULT_RULES)
-        rules["intra_package_dependency"] = "WARNING"
-        result = validate_directory(str(tmp_path), rules_config=rules)
+        result = validate_directory(
+            str(tmp_path), rules_config=self._rules_with_intra_at("WARNING")
+        )
 
         intra_issues = [
             i for i in result.issues if i.rule == "intra_package_dependency"

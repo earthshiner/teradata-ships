@@ -69,15 +69,13 @@ DEFAULT_RULES: Dict[str, str] = {
     "view_macro_self_reference": "ERROR",
     "public_grant_on_tables": "WARNING",
     "review_unmapped_grants": "WARNING",
-    # intra_package_dependency is ERROR by default. A package that
-    # contains both ``CREATE DATABASE x`` and objects living in
-    # ``x`` cannot be validated with ``deploy --explain`` — the
-    # database does not exist on the target at the moment EXPLAIN
-    # runs, so every dependent object reports a noisy false error.
-    # Catching the structural mistake at inspect time keeps the
-    # explain report accurate-or-silent (never noisy-but-eventually-
-    # correct).
-    "intra_package_dependency": "ERROR",
+    # intra_package_dependency defaults to OFF because the
+    # ``package`` stage now auto-splits affected sources into a
+    # paired prereqs + main bundle (Phase 2 of this work). The
+    # rule still exists for teams that want to enforce manual
+    # splits — set it to ERROR or WARNING in inspect.conf to
+    # surface the structural pattern at lint time.
+    "intra_package_dependency": "OFF",
 }
 
 # -- Valid severity values --
@@ -214,14 +212,13 @@ def generate_default_config() -> str:
         f"review_unmapped_grants={DEFAULT_RULES['review_unmapped_grants']}",
         "",
         "# Cross-file structural rules",
-        "# intra_package_dependency: an object lives in a database/user",
-        "# that is CREATEd elsewhere in this same package. SHIPS uses",
-        "# EXPLAIN-based dry-run validation against the live target —",
-        "# but the prerequisite database doesn't exist on the target",
-        "# yet, so EXPLAIN of dependent objects fails. Fix structurally:",
-        "# emit CREATE DATABASE/USER as a separate prerequisites package",
-        "# deployed first, OR remove the CREATE DATABASE/USER from this",
-        "# package if the database already exists in the target.",
+        "# intra_package_dependency: object lives in a database/user that",
+        "# is CREATEd elsewhere in this same package. The package stage",
+        "# now auto-splits affected sources into a paired prereqs + main",
+        "# bundle, so the structural mistake is fixed transparently at",
+        "# build time and this rule defaults to OFF. Set to WARNING or",
+        "# ERROR if you want lint-time visibility (e.g. policy-driven",
+        "# manual splits, or CI gates that pre-date the auto-split).",
         f"intra_package_dependency={DEFAULT_RULES['intra_package_dependency']}",
     ]
     return "\n".join(lines) + "\n"
