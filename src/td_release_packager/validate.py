@@ -410,15 +410,22 @@ _SYSTEM_SCOPE_TYPES = {
 }
 
 # -- Qualified name extraction --
+#
+# Anchored to start-of-statement (``^\s*`` + ``re.MULTILINE``) so a
+# DDL verb appearing inside another statement -- e.g. the ``CREATE
+# PROCEDURE`` privilege inside ``GRANT CREATE PROCEDURE ON db TO
+# user`` -- doesn't get its capture group greedily claim the next
+# token (which would be ``ON``) as the object name. See
+# classifier.py for the full rationale.
 _QUALIFIED_NAME_RE = re.compile(
-    r"(?:CREATE|REPLACE)\s+(?:MULTISET\s+|SET\s+)?"
+    r"^\s*(?:CREATE|REPLACE)\s+(?:MULTISET\s+|SET\s+)?"
     r"(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?"
     r"(?:TRACE\s+)?"
     r"(?:SPECIFIC\s+)?"
     r"(?:TABLE|VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER|"
     r"JOIN\s+INDEX|HASH\s+INDEX)\s+"
     r'("?[A-Za-z_]\w*"?(?:\."?[A-Za-z_]\w*"?)?)',
-    re.IGNORECASE,
+    re.IGNORECASE | re.MULTILINE,
 )
 
 # -- View/macro definition name (for self-reference rule) --
@@ -430,18 +437,23 @@ _QUALIFIED_NAME_RE = re.compile(
 #
 # Two named groups: dbpart (database/token) and objpart (object name).
 # Mixed forms (e.g. {{V_DB}}."MyView") are accepted.
+# Anchored — see _QUALIFIED_NAME_RE.
 _VIEW_MACRO_DEF_NAME_RE = re.compile(
-    r"(?:CREATE|REPLACE)\s+(?:VIEW|MACRO)\s+"
+    r"^\s*(?:CREATE|REPLACE)\s+(?:VIEW|MACRO)\s+"
     r'(?P<dbpart>"[^"]+"|\{\{[A-Za-z_][A-Za-z0-9_-]*\}\}|[A-Za-z_]\w*)'
     r"\s*\.\s*"
     r'(?P<objpart>"[^"]+"|[A-Za-z_]\w*)',
-    re.IGNORECASE,
+    re.IGNORECASE | re.MULTILINE,
 )
 
 # -- SET/MULTISET detection --
+# Anchored to start-of-statement: a procedure body that mentions
+# ``SET`` (Teradata's variable assignment keyword) followed by an
+# upstream ``CREATE`` keyword in a comment must not be mistaken
+# for a real ``CREATE SET TABLE`` declaration.
 _HAS_SET_MULTISET_RE = re.compile(
-    r"CREATE\s+(?:MULTISET|SET)\s+",
-    re.I,
+    r"^\s*CREATE\s+(?:MULTISET|SET)\s+",
+    re.IGNORECASE | re.MULTILINE,
 )
 
 # -- REPLACE detection (prohibited — deployer owns idempotency) --
@@ -479,20 +491,24 @@ _PREREQ_IDENT_FRAG = (
 )
 
 # CREATE DATABASE <name> | CREATE USER <name>
+# Anchored — without ``^\s*`` a GRANT statement listing ``CREATE
+# DATABASE`` as a privilege would be scooped up as a real database
+# creation. See classifier.py for the full rationale.
 _CREATE_DATABASE_NAME_RE = re.compile(
-    r"\bCREATE\s+DATABASE\s+(" + _PREREQ_IDENT_FRAG + r")",
-    re.IGNORECASE,
+    r"^\s*CREATE\s+DATABASE\s+(" + _PREREQ_IDENT_FRAG + r")",
+    re.IGNORECASE | re.MULTILINE,
 )
 _CREATE_USER_NAME_RE = re.compile(
-    r"\bCREATE\s+USER\s+(" + _PREREQ_IDENT_FRAG + r")",
-    re.IGNORECASE,
+    r"^\s*CREATE\s+USER\s+(" + _PREREQ_IDENT_FRAG + r")",
+    re.IGNORECASE | re.MULTILINE,
 )
 
 # Token-aware qualified-name extractor. Mirrors the structure of
 # ``_QUALIFIED_NAME_RE`` above but accepts ``{{TOKEN}}`` in the
 # database slot and REQUIRES a two-part qualified name.
+# Anchored — see _QUALIFIED_NAME_RE.
 _INTRA_QUALIFIED_NAME_RE = re.compile(
-    r"(?:CREATE|REPLACE)\s+(?:MULTISET\s+|SET\s+)?"
+    r"^\s*(?:CREATE|REPLACE)\s+(?:MULTISET\s+|SET\s+)?"
     r"(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?"
     r"(?:TRACE\s+)?"
     r"(?:SPECIFIC\s+)?"
@@ -501,7 +517,7 @@ _INTRA_QUALIFIED_NAME_RE = re.compile(
     r"(?P<dbpart>" + _PREREQ_IDENT_FRAG + r")"
     r"\s*\.\s*"
     r"(?P<objpart>" + _PREREQ_IDENT_FRAG + r")",
-    re.IGNORECASE,
+    re.IGNORECASE | re.MULTILINE,
 )
 
 # -- Comment stripping ------------------------------------------
@@ -971,39 +987,16 @@ def _check_deploy_intent(
     return []
 
 
-def _strip_sql_comments(content: str) -> str:
-    """
-    Strip SQL comments from content while preserving string offsets.
-
-    Replaces ``--`` line comments and ``/* ... */`` block comments with
-    runs of spaces of equal length so that line numbers and character
-    positions in the output align with the input. This lets callers
-    compute line numbers from match positions in the stripped content
-    without an offset translation table.
-
-    Args:
-        content: SQL text possibly containing comments.
-
-    Returns:
-        Same length as input, with comments blanked to spaces (newlines
-        preserved so line counts match).
-    """
-
-    # Block comments first: /* ... */ — may span lines, so preserve
-    # newlines literally and replace everything else with a space.
-    def _blank_block(match: "re.Match") -> str:
-        return re.sub(r"[^\n]", " ", match.group(0))
-
-    no_block = re.sub(r"/\*.*?\*/", _blank_block, content, flags=re.DOTALL)
-
-    # Line comments: -- to end of line — never span lines, so a flat
-    # equal-length space run is sufficient.
-    no_line = re.sub(
-        r"--[^\n]*",
-        lambda m: " " * len(m.group(0)),
-        no_block,
-    )
-    return no_line
+# NOTE: An older comment-only ``_strip_sql_comments`` used to live
+# here and silently shadowed the import at the top of the module.
+# Removed: every caller wants both comments AND string literals
+# stripped (otherwise dynamic-SQL strings like ``'CREATE TABLE ...'``
+# inside procedure bodies trigger spurious set_multiset / qualifier
+# warnings — see the regression test in test_validate.py for the
+# canonical reproducer). The shared
+# ``td_release_packager.sql_text.strip_comments_and_string_literals``
+# (imported as ``_strip_sql_comments``) is the single source of
+# truth.
 
 
 def _check_view_macro_self_reference(

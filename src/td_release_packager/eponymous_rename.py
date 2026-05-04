@@ -38,9 +38,19 @@ def _strip_sql_comments(text: str) -> str:
 
 
 # -- DDL patterns for name extraction --
+#
+# All verbs are anchored to the **start of a SQL statement** via
+# ``^\s*`` plus ``re.MULTILINE``. Without the anchor a GRANT
+# statement listing privileges (``GRANT CREATE PROCEDURE ON db
+# TO user``) matches mid-line and the name capture greedily
+# claims ``ON`` as the procedure's object name -- the staged file
+# then ends up named ``ON.spl`` and the operator wonders where
+# their permissions script went.
+_EPO_STMT_FLAGS = re.IGNORECASE | re.MULTILINE
+
 # Covers all object types that follow Database.ObjectName convention.
 _QUALIFIED_DDL_RE = re.compile(
-    r"(?:CREATE|REPLACE)\s+"
+    r"^\s*(?:CREATE|REPLACE)\s+"
     r"(?:(?:MULTISET|SET)\s+)?"
     r"(?:(?:VOLATILE|GLOBAL\s+TEMPORARY)\s+)?"
     r"(?:TRACE\s+)?"
@@ -49,16 +59,16 @@ _QUALIFIED_DDL_RE = re.compile(
     r"FUNCTION|TRIGGER)\s+"
     r"((?:\{\{[A-Za-z_]\w*\}\}|\"[^\"]+\"|[A-Za-z_]\w*)"
     r"(?:\.(?:\{\{[A-Za-z_]\w*\}\}|\"[^\"]+\"|[A-Za-z_]\w*))?)",
-    re.IGNORECASE,
+    _EPO_STMT_FLAGS,
 )
 
 # -- Single-name DDL patterns (no database qualifier) --
 _SINGLE_NAME_DDL_RE = re.compile(
-    r"(?:CREATE)\s+"
+    r"^\s*(?:CREATE)\s+"
     r"(?:DATABASE|USER|ROLE|PROFILE|MAP|AUTHORIZATION|"
     r"FOREIGN\s+SERVER)\s+"
     r"((?:\{\{[A-Za-z_]\w*\}\}|\"[^\"]+\"|[A-Za-z_]\w*))",
-    re.IGNORECASE,
+    _EPO_STMT_FLAGS,
 )
 
 # -- Extension map by detected object type keyword --
@@ -80,9 +90,9 @@ _EXT_MAP = {
     "FOREIGN SERVER": ".fsvr",
 }
 
-# -- Object type keyword extraction --
+# -- Object type keyword extraction (anchored — see _QUALIFIED_DDL_RE) --
 _OBJ_TYPE_RE = re.compile(
-    r"(?:CREATE|REPLACE)\s+"
+    r"^\s*(?:CREATE|REPLACE)\s+"
     r"(?:(?:MULTISET|SET)\s+)?"
     r"(?:(?:VOLATILE|GLOBAL\s+TEMPORARY)\s+)?"
     r"(?:TRACE\s+)?"
@@ -90,7 +100,7 @@ _OBJ_TYPE_RE = re.compile(
     r"(JOIN\s+INDEX|HASH\s+INDEX|TABLE|VIEW|MACRO|PROCEDURE|"
     r"FUNCTION|TRIGGER|DATABASE|USER|ROLE|PROFILE|MAP|"
     r"AUTHORIZATION|FOREIGN\s+SERVER)",
-    re.IGNORECASE,
+    _EPO_STMT_FLAGS,
 )
 
 
