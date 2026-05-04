@@ -301,6 +301,16 @@ def build_package(
         config.source_dir, payload_dir, pkg_dir, filename_map, token_values
     )
 
+    # -- Phase 6b: Re-emit pre-requisite ordering with resolved names --
+    # The harvest may have written a pre-requisites/_order.txt using
+    # tokenised filenames (e.g. ``{{BASE_NODE}}.db``).  By this point
+    # _copy_payload has resolved all tokens and applied eponymous
+    # renaming so the package contains real filenames
+    # (e.g. ``PDE_D01_00.db``).  Re-running _emit_prereq_order on the
+    # PACKAGE directory overwrites the copied tokenised version with
+    # one that references the filenames the deployer will actually find.
+    _refresh_prereq_order_in_package(pkg_dir)
+
     # -- Phase 7: Embed deployment engine --
     _embed_deployer(pkg_dir)
 
@@ -1093,6 +1103,43 @@ def _copy_order_files(source_payload: str, pkg_dir: str):
                     dest = os.path.join(pkg_dir, "payload", phase.value, sub)
                     os.makedirs(os.path.dirname(dest), exist_ok=True)
                     shutil.copy2(src, dest)
+
+
+def _refresh_prereq_order_in_package(pkg_dir: str) -> None:
+    """Re-emit pre-requisites/_order.txt inside the BUILT PACKAGE.
+
+    By the time this runs, ``_copy_payload`` has resolved every
+    ``{{TOKEN}}`` and applied eponymous renaming, so the package's
+    ``payload/01_pre_requisites/`` directory contains real filenames
+    (e.g. ``PDE_D01_00.db``, ``PDE_D01_00_GCFR_API.db``).
+
+    ``_copy_order_files`` may have already copied a harvest-time
+    ``_order.txt`` that references tokenised names.  This function
+    overwrites it with a fresh version derived from the resolved
+    filenames and their ``CREATE DATABASE/USER FROM <parent>``
+    dependency clauses, so the deployer's ``read_order_file`` finds
+    names that actually exist in the package.
+
+    Args:
+        pkg_dir: Root of the fully-built package directory (not yet
+                 archived — files are still readable on disk).
+    """
+    from td_release_packager.ingest import _emit_prereq_order
+
+    prereq_phase_dir = os.path.join(pkg_dir, "payload", "01_pre_requisites")
+    if not os.path.isdir(prereq_phase_dir):
+        return
+
+    # Only refresh when there are actually prereq files.  An empty
+    # phase directory produces an empty ordered list — nothing to do.
+    result = _emit_prereq_order(prereq_phase_dir)
+    if result.ordered:
+        logger.info(
+            "Package: refreshed pre-requisites/_order.txt with %d resolved "
+            "filename(s) (%d unresolvable)",
+            len(result.ordered),
+            len(result.unresolvable),
+        )
 
 
 def _copy_waves_file(
