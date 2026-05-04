@@ -437,16 +437,64 @@ class TestCheckOneObject:
         assert issues[0].rule == "one_object"
 
     def test_procedure_with_inner_statements_allowed(self):
-        """Procedure with inner DML (INSERT, SELECT) under threshold is OK."""
+        """Procedure with INSERT/UPDATE in its body is exactly ONE
+        DDL statement (the CREATE PROCEDURE). Body DML must NOT
+        count toward the one-object threshold."""
         ddl = (
             "CREATE PROCEDURE MyDB.sp_X()\n"
             "BEGIN\n"
             "    INSERT INTO MyDB.Log VALUES (1);\n"
             "END;\n"
         )
-        # 2 matches (CREATE + INSERT) — under the >2 threshold
         issues = _check_one_object("x.spl", ddl)
         assert issues == []
+
+    def test_real_world_procedure_with_if_else_branches(self):
+        """Regression test: GCFR_BB_ProcessIDTool_Set.spl had
+        CREATE PROCEDURE with an IF/ELSE block doing one INSERT
+        and one UPDATE inside BEGIN...END. The previous regex
+        counted INSERT + UPDATE as additional 'DDL statements',
+        firing a spurious one_object warning. With DML excluded
+        from the count, this passes cleanly."""
+        ddl = (
+            "CREATE PROCEDURE MyDB.sp_X(IN flag BYTEINT)\n"
+            "MAIN:\n"
+            "BEGIN\n"
+            "    IF flag = 0 THEN\n"
+            "        INSERT INTO MyDB.t (a) VALUES (1);\n"
+            "    ELSE\n"
+            "        UPDATE MyDB.t SET a = 1 WHERE a = 0;\n"
+            "    END IF;\n"
+            "END MAIN;\n"
+        )
+        issues = _check_one_object("real.spl", ddl)
+        assert issues == [], (
+            "Procedure with body DML must not trip the one-object "
+            "rule — body INSERT/UPDATE are DML, not DDL."
+        )
+
+    def test_two_top_level_dml_does_not_count(self):
+        """Even at top level, INSERT and UPDATE shouldn't count
+        toward the DDL count — they're DML statements. A file
+        with CREATE TABLE followed by INSERT is unusual but not
+        a violation of one-object-per-DDL."""
+        ddl = (
+            "CREATE TABLE MyDB.t (a INT);\n"
+            "INSERT INTO MyDB.t VALUES (1);\n"
+        )
+        issues = _check_one_object("seed.tbl", ddl)
+        assert issues == []
+
+    def test_two_top_level_create_statements_flagged(self):
+        """Two real DDL statements (both CREATE) still trip the
+        rule — that's the actual one-object violation."""
+        ddl = (
+            "CREATE TABLE MyDB.t1 (a INT);\n"
+            "CREATE TABLE MyDB.t2 (a INT);\n"
+        )
+        issues = _check_one_object("two.sql", ddl)
+        assert len(issues) == 1
+        assert issues[0].rule == "one_object"
 
 
 # ---------------------------------------------------------------
