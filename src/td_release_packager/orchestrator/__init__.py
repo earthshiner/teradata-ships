@@ -38,6 +38,9 @@ from td_release_packager.orchestrator.decisions import (
     StageRecorder,
 )
 from td_release_packager.orchestrator.issue_codes import (
+    INSPECT_GRANT_VIOLATION,
+    INSPECT_LINT_VIOLATION,
+    INSPECT_TOKEN_MALFORMED,
     ISSUE_CODES,
     PROPERTIES_NOT_FOUND,
     TOKEN_UNDEFINED,
@@ -89,6 +92,9 @@ __all__ = [
     "RunRecorder",
     "StageRecorder",
     # issue_codes
+    "INSPECT_GRANT_VIOLATION",
+    "INSPECT_LINT_VIOLATION",
+    "INSPECT_TOKEN_MALFORMED",
     "ISSUE_CODES",
     "PROPERTIES_NOT_FOUND",
     "TOKEN_UNDEFINED",

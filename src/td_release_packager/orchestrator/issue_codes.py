@@ -50,6 +50,31 @@ PROPERTIES_NOT_FOUND = "PROPERTIES_NOT_FOUND"
 
 
 # ---------------------------------------------------------------
+# Inspect domain (build-order item 4 — inspect rollout)
+# ---------------------------------------------------------------
+#
+# Inspect runs three steps and surfaces three families of finding.
+# Coarse codes (one per step) keep the registry small while still
+# letting `explain` group issues by step. The originating rule
+# name from validate.py is carried in the issue's free-text
+# message so finer-grained queries remain possible.
+
+#: Step 0 — A {{TOKEN}} marker is malformed (whitespace inside
+#: braces, double-tokenisation, orphan braces). Survives substitution
+#: silently and ends up in deployed SQL.
+INSPECT_TOKEN_MALFORMED = "INSPECT_TOKEN_MALFORMED"
+
+#: Step 1 — A Coding Discipline lint rule fired against a DDL file.
+#: The originating rule (db_qualifier, set_multiset, deploy_intent,
+#: ...) appears in the message body.
+INSPECT_LINT_VIOLATION = "INSPECT_LINT_VIOLATION"
+
+#: Step 2 — Cross-file grant validation found a drifted, missing,
+#: or orphaned grant relative to the inferred intent.
+INSPECT_GRANT_VIOLATION = "INSPECT_GRANT_VIOLATION"
+
+
+# ---------------------------------------------------------------
 # Registry — code → human description
 # ---------------------------------------------------------------
 
@@ -68,6 +93,26 @@ ISSUE_CODES: Dict[str, str] = {
     PROPERTIES_NOT_FOUND: (
         "The --properties path was supplied but the file does not "
         "exist on disc. Check the path and re-run."
+    ),
+    INSPECT_TOKEN_MALFORMED: (
+        "A {{TOKEN}} marker is malformed — typically stray whitespace "
+        "inside the braces, a double-substitution from a re-run "
+        "harvest, or orphan braces from an editor mishap. Survives "
+        "substitution silently and ends up in deployed SQL, so it "
+        "must be fixed at source."
+    ),
+    INSPECT_LINT_VIOLATION: (
+        "A Coding Discipline rule (db_qualifier, set_multiset, "
+        "deploy_intent, etc.) flagged a DDL file. The originating "
+        "rule name is carried in the message body so explain and "
+        "CI tooling can group findings by rule."
+    ),
+    INSPECT_GRANT_VIOLATION: (
+        "Cross-file grant validation found a discrepancy between the "
+        "inferred grant set (from DDL intent analysis) and the .grt "
+        "files in the project's DCL/ tree — typically a drifted, "
+        "missing, or orphaned grant. Re-run with --fix-grants to "
+        "regenerate the .grt files."
     ),
 }
 
