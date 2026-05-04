@@ -514,6 +514,102 @@ class TestIngestDirectory:
 
         assert result.multiset_injected == 1
 
+    def test_ingest_records_subtypes_for_c_udf(self, tmp_path, tmp_project):
+        """A C UDF is classified as FUNCTION_C and the sub-type
+        plus C source/header references propagate to IngestResult."""
+        src = tmp_path / "source"
+        src.mkdir()
+        ddl = (
+            "CREATE FUNCTION x.foo (a INT) RETURNS INT\n"
+            "LANGUAGE C\n"
+            "NO SQL\n"
+            "PARAMETER STYLE SQL\n"
+            "EXTERNAL NAME 'CS!foo!../FOO/foo.c!CH!foo_h!../FOO/foo.h';"
+        )
+        (src / "foo.fnc").write_text(ddl, encoding="utf-8")
+
+        result = ingest_directory(
+            str(src), str(tmp_project), detect_tokens=False
+        )
+
+        assert result.classified == 1
+        # base type is FUNCTION (preserved for backward compat)
+        assert result.files_placed[0][2] == "FUNCTION"
+        # rich sub-type recorded against the staged path
+        staged = result.files_placed[0][1]
+        assert result.subtypes.get(staged) == "FUNCTION_C"
+        # external refs captured
+        refs = result.external_references.get(staged, [])
+        assert any(p.endswith("foo.c") for p in refs)
+        assert any(p.endswith("foo.h") for p in refs)
+
+    def test_ingest_records_subtype_for_java_procedure(
+        self, tmp_path, tmp_project
+    ):
+        """A Java procedure is classified as PROCEDURE_JAVA and the
+        JAR alias is recorded in external_references."""
+        src = tmp_path / "source"
+        src.mkdir()
+        ddl = (
+            "CREATE PROCEDURE x.foo()\n"
+            "LANGUAGE JAVA\n"
+            "PARAMETER STYLE JAVA\n"
+            "EXTERNAL NAME 'jar_execute_large_sql:com.example.Foo.bar';"
+        )
+        (src / "foo.spl").write_text(ddl, encoding="utf-8")
+
+        result = ingest_directory(
+            str(src), str(tmp_project), detect_tokens=False
+        )
+
+        assert result.classified == 1
+        assert result.files_placed[0][2] == "PROCEDURE"
+        staged = result.files_placed[0][1]
+        assert result.subtypes.get(staged) == "PROCEDURE_JAVA"
+        assert result.external_references.get(staged) == [
+            "jar_execute_large_sql"
+        ]
+
+    def test_ingest_surfaces_filename_mismatch_warning(
+        self, tmp_path, tmp_project
+    ):
+        """A file named .tbl whose content is CREATE VIEW gets
+        classified as VIEW (content wins) but a classification
+        warning is surfaced for the user."""
+        src = tmp_path / "source"
+        src.mkdir()
+        # .tbl extension says TABLE; content says VIEW
+        (src / "looks_like_table.tbl").write_text(
+            "CREATE VIEW x.v AS SELECT 1;", encoding="utf-8"
+        )
+
+        result = ingest_directory(
+            str(src), str(tmp_project), detect_tokens=False
+        )
+
+        # Content wins
+        assert result.files_placed[0][2] == "VIEW"
+        # Warning surfaced
+        assert any(
+            "Filename mismatch" in w for w in result.classification_warnings
+        )
+
+    def test_ingest_no_classification_warnings_for_clean_files(
+        self, tmp_path, tmp_project
+    ):
+        """A consistent file (matching extension + content) produces
+        no classification warnings."""
+        src = tmp_path / "source"
+        src.mkdir()
+        (src / "ok.tbl").write_text(
+            "CREATE TABLE x.t (id INT);", encoding="utf-8"
+        )
+
+        result = ingest_directory(
+            str(src), str(tmp_project), detect_tokens=False
+        )
+        assert result.classification_warnings == []
+
     def test_ingest_sqlj_install_script_uses_sjr_extension(
         self, tmp_path, tmp_project
     ):
