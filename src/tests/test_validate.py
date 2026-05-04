@@ -1249,18 +1249,36 @@ class TestCollectPackagePrereqs:
         assert prereqs == {"REALDB"}
 
     def test_files_with_unrelated_extensions_skipped(self, tmp_path):
-        """Files with extensions other than .db/.usr/.sql/.ddl are skipped."""
-        ddl_dir = tmp_path / "DDL" / "tables"
-        ddl_dir.mkdir(parents=True)
-        # Bury a CREATE DATABASE inside a .tbl file — should NOT be picked
-        # up because .tbl is not a prereq-bearing extension.
-        (ddl_dir / "MyDB.T.tbl").write_text(
-            "CREATE DATABASE Sneaky AS PERMANENT = 1;\n"
-            "CREATE TABLE MyDB.T (Id INT);",
+        """Files with extensions outside the discovery set are skipped.
+
+        ``.txt`` is not a SQL-bearing extension and never appears in
+        ``DEFAULT_HARVEST_EXTENSIONS`` or any reasonable ships.yaml
+        override, so a CREATE DATABASE buried in a README is ignored.
+        """
+        readme_dir = tmp_path / "docs"
+        readme_dir.mkdir(parents=True)
+        (readme_dir / "notes.txt").write_text(
+            "Example DDL: CREATE DATABASE Sneaky AS PERMANENT = 1;",
             encoding="utf-8",
         )
 
         assert _collect_package_prereqs(str(tmp_path)) == set()
+
+    def test_create_database_in_any_discovery_extension_collected(self, tmp_path):
+        """Now that the prereq scan uses the central discovery set,
+        a CREATE DATABASE in a .tbl file (mis-named source, perhaps
+        from a copy-paste mistake) IS picked up — better to flag
+        the misplacement via the intra_package_dependency rule than
+        to silently skip it because of the file extension."""
+        ddl_dir = tmp_path / "DDL" / "tables"
+        ddl_dir.mkdir(parents=True)
+        (ddl_dir / "MyDB.T.tbl").write_text(
+            "CREATE DATABASE MisplacedDb AS PERMANENT = 1;\n"
+            "CREATE TABLE MisplacedDb.T (Id INT);",
+            encoding="utf-8",
+        )
+
+        assert _collect_package_prereqs(str(tmp_path)) == {"MISPLACEDDB"}
 
 
 # ---------------------------------------------------------------

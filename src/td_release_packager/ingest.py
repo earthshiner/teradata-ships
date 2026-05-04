@@ -305,7 +305,11 @@ def ingest_directory(
     result = IngestResult()
 
     # -- Discover source files --
-    source_files = _discover_files(source_dir, file_patterns)
+    # Pass project_dir so _discover_files can resolve any
+    # ships.yaml ``discovery.extensions`` overrides — sites that
+    # use convention-specific extensions (.bteq2, .tdsql, etc.)
+    # configure them once in ships.yaml rather than per-call.
+    source_files = _discover_files(source_dir, file_patterns, project_dir=project_dir)
     result.total_files = len(source_files)
     logger.info("Found %d files in %s", len(source_files), source_dir)
 
@@ -578,58 +582,42 @@ def ingest_directory(
 # ---------------------------------------------------------------
 
 
-def _discover_files(source_dir: str, file_patterns: List[str] = None) -> List[str]:
+def _discover_files(
+    source_dir: str,
+    file_patterns: List[str] = None,
+    project_dir: Optional[str] = None,
+) -> List[str]:
     """
     Discover SQL/DDL files in a directory tree.
 
+    The default extension set lives in ``td_release_packager.discovery``
+    and is project-overridable via ``ships.yaml``'s
+    ``discovery.extensions`` list. Pass ``file_patterns`` explicitly
+    to bypass both defaults and project config (used by tests and
+    callers that already know exactly what they want).
+
     Args:
-        source_dir:     Root directory to scan.
-        file_patterns:  Extensions to include (default: common SQL).
+        source_dir:    Root directory to scan.
+        file_patterns: Optional explicit extension list. When
+                       supplied, neither the canonical defaults nor
+                       ships.yaml are consulted — the caller's list
+                       wins outright.
+        project_dir:   Optional project root for ships.yaml
+                       resolution. Only consulted when
+                       ``file_patterns`` is None. Pass ``None`` to
+                       skip ships.yaml lookups entirely (e.g. for
+                       harvest invocations where ``source_dir`` is
+                       outside any SHIPS project).
 
     Returns:
         Sorted list of file paths.
     """
     if file_patterns is None:
-        file_patterns = [
-            ".sql",
-            ".tbl",
-            ".viw",
-            ".spl",
-            ".mcr",
-            ".fnc",
-            ".trg",
-            ".jix",
-            ".idx",
-            ".db",
-            ".ddl",
-            ".dcl",
-            ".dml",
-            ".map",
-            ".rol",
-            ".prf",
-            ".auth",
-            ".fsvr",
-            ".sto",
-            ".sjr",  # SQLJ Runtime install script (SHIPS convention)
-            # BTEQ-style extensions. Many legacy Teradata codebases
-            # name their CREATE TABLE / CREATE VIEW scripts ``.bteq``
-            # or ``.btq`` even when the body is pure SQL with no BTEQ
-            # commands. Without these in the include list the harvest
-            # silently skips the entire file and the project ends up
-            # with no tables or views — a particularly opaque failure
-            # mode because the discovery counts look "0" rather than
-            # "wrong".
-            ".bteq",
-            ".btq",
-            # NOTE: ``.jar``, ``.c``, ``.h``, ``.cpp``, ``.cc``, ``.cxx``
-            # are NOT in this include list. Binary artefacts come into
-            # the payload via the binary-harvest path (driven by SQL
-            # EXTERNAL NAME and CALL SQLJ.INSTALL_JAR references), not
-            # as standalone discovered files. Including them here would
-            # trigger spurious "unclassified" warnings for every binary
-            # sitting alongside a SQL script.
-            ".usr",
-        ]
+        from td_release_packager.discovery import resolve_harvest_extensions
+
+        extensions = resolve_harvest_extensions(project_dir=project_dir)
+    else:
+        extensions = {ext.lower() for ext in file_patterns}
 
     files = []
     for root, dirs, filenames in os.walk(source_dir):
@@ -638,7 +626,7 @@ def _discover_files(source_dir: str, file_patterns: List[str] = None) -> List[st
             if f.startswith(".") or f.startswith("_"):
                 continue
             ext = os.path.splitext(f)[1].lower()
-            if not file_patterns or ext in file_patterns:
+            if not extensions or ext in extensions:
                 files.append(os.path.join(root, f))
     return files
 

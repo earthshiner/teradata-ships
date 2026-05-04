@@ -222,6 +222,36 @@ def validate(data: Dict[str, Any]) -> List[ValidationError]:
                         )
                     )
 
+    # -- discovery block — optional. Currently only one knob:
+    #    ``extensions`` (list of strings) extends the default
+    #    harvest-candidate set. See discovery.DEFAULT_HARVEST_EXTENSIONS
+    #    for the baked-in baseline; the values here are added on top.
+    discovery_block = data.get("discovery")
+    if discovery_block is not None:
+        if not isinstance(discovery_block, dict):
+            errors.append(ValidationError("discovery", "must be a mapping"))
+        else:
+            extensions = discovery_block.get("extensions")
+            if extensions is not None:
+                if not isinstance(extensions, list):
+                    errors.append(
+                        ValidationError(
+                            "discovery.extensions",
+                            f"must be a list of extension strings, got "
+                            f"{type(extensions).__name__}",
+                        )
+                    )
+                else:
+                    for i, ext in enumerate(extensions):
+                        if not isinstance(ext, str) or not ext.strip():
+                            errors.append(
+                                ValidationError(
+                                    f"discovery.extensions[{i}]",
+                                    "must be a non-empty string "
+                                    "(e.g. '.bteq' or 'bteq')",
+                                )
+                            )
+
     # -- stages block — optional; each entry must be a known stage with
     #    valid strict/on_error values --
     stages_block = data.get("stages")
