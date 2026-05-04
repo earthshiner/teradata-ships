@@ -153,7 +153,10 @@ def _create_directories(project_dir: str):
         "payload/database/DCL/inter_db",
         # Payload — DDL (03_ddl phase)
         "payload/database/DDL/functions",
-        "payload/database/DDL/JARs",
+        # SQLJ install scripts AND their .jar binaries live together
+        # so the install script's CJ! references resolve to siblings
+        # (./X.jar). See classifier.TYPE_TO_SUBDIR for the convention.
+        "payload/database/DDL/jar_install",
         "payload/database/DDL/join_indexes",
         "payload/database/DDL/macros",
         "payload/database/DDL/procedures",

@@ -514,6 +514,319 @@ class TestIngestDirectory:
 
         assert result.multiset_injected == 1
 
+    def test_ingest_harvests_jar_binary_alongside_install_script(
+        self, tmp_path, tmp_project
+    ):
+        """End-to-end: source layout mirroring the user's GCFR case.
+        Install script lives in scripts/, JAR in JAVA/JAR/. After
+        harvest both should be in the project payload, and the
+        install script's CJ! path should be rewritten to ./X.jar."""
+        # Source: <tmp>/raw/scripts/install.ddl + <tmp>/raw/JAVA/JAR/X.jar
+        src = tmp_path / "raw"
+        scripts_dir = src / "scripts"
+        scripts_dir.mkdir(parents=True)
+        (scripts_dir / "install.ddl").write_text(
+            "DATABASE x;\n"
+            "CALL SQLJ.INSTALL_JAR("
+            "'CJ!../JAVA/JAR/ExecLargeSqlJ.jar', "
+            "'JAR_EXECUTE_LARGE_SQL', 0);",
+            encoding="utf-8",
+        )
+        jar_dir = src / "JAVA" / "JAR"
+        jar_dir.mkdir(parents=True)
+        (jar_dir / "ExecLargeSqlJ.jar").write_bytes(b"jar-bytes-here")
+
+        result = ingest_directory(
+            str(src), str(tmp_project), detect_tokens=False
+        )
+
+        # SQL placed under DDL/jar_install/ as a .sjr
+        assert any(
+            "jar_install" in dest for _, dest, _ in result.files_placed
+        )
+
+        # Binary recorded
+        assert len(result.binaries_placed) == 1
+        bin_src, bin_dest, bin_kind = result.binaries_placed[0]
+        assert bin_kind == "JAR_BINARY"
+        assert bin_dest.endswith("ExecLargeSqlJ.jar")
+
+        # Binary physically copied into the project
+        from pathlib import Path
+        assert (Path(tmp_project) / bin_dest).exists()
+        assert (Path(tmp_project) / bin_dest).read_bytes() == b"jar-bytes-here"
+
+        # The install script's path was rewritten to ./X.jar form
+        sql_dest = next(
+            dest for _, dest, _ in result.files_placed
+            if "jar_install" in dest
+        )
+        sql_text = (Path(tmp_project) / sql_dest).read_text(encoding="utf-8")
+        assert "../JAVA/JAR/" not in sql_text
+        assert "./ExecLargeSqlJ.jar" in sql_text
+
+    def test_ingest_harvests_c_source_alongside_function(
+        self, tmp_path, tmp_project
+    ):
+        """End-to-end: a C UDF references .c/.h files in a sibling
+        directory. After harvest both should be in DDL/functions/
+        with the function's EXTERNAL NAME path rewritten."""
+        src = tmp_path / "raw"
+        fnc_dir = src / "fncs"
+        fnc_dir.mkdir(parents=True)
+        (fnc_dir / "foo.fnc").write_text(
+            "CREATE FUNCTION x.foo (a INT) RETURNS INT\n"
+            "LANGUAGE C NO SQL\n"
+            "EXTERNAL NAME 'CS!foo!../C/foo.c!CH!foo_h!../C/foo.h';",
+            encoding="utf-8",
+        )
+        c_dir = src / "C"
+        c_dir.mkdir(parents=True)
+        (c_dir / "foo.c").write_bytes(b"int foo(int x) { return x; }")
+        (c_dir / "foo.h").write_bytes(b"int foo(int);")
+
+        result = ingest_directory(
+            str(src), str(tmp_project), detect_tokens=False
+        )
+
+        # Two binaries copied (.c + .h)
+        kinds = [k for _, _, k in result.binaries_placed]
+        assert "C_SOURCE" in kinds
+        assert "C_HEADER" in kinds
+
+        # Both physically present in the function destination dir
+        from pathlib import Path
+        for bin_src, bin_dest, _ in result.binaries_placed:
+            assert (Path(tmp_project) / bin_dest).exists()
+
+        # Function content has rewritten paths
+        fnc_dest = next(
+            dest for _, dest, t in result.files_placed if t == "FUNCTION"
+        )
+        fnc_text = (Path(tmp_project) / fnc_dest).read_text(encoding="utf-8")
+        assert "../C/" not in fnc_text
+        assert "./foo.c" in fnc_text
+        assert "./foo.h" in fnc_text
+
+    def test_ingest_warns_when_binary_reference_is_missing(
+        self, tmp_path, tmp_project
+    ):
+        """JAR install script that points at a non-existent binary
+        should produce a classification warning so the user knows
+        the deployer will fail."""
+        src = tmp_path / "raw"
+        scripts_dir = src / "scripts"
+        scripts_dir.mkdir(parents=True)
+        (scripts_dir / "install.ddl").write_text(
+            "CALL SQLJ.INSTALL_JAR('CJ!../missing/X.jar', 'a', 0);",
+            encoding="utf-8",
+        )
+
+        result = ingest_directory(
+            str(src), str(tmp_project), detect_tokens=False
+        )
+
+        # No binary placed — there was nothing to copy
+        assert result.binaries_placed == []
+        # But a warning fired
+        assert any(
+            "not found" in w for w in result.classification_warnings
+        )
+
+    def test_ingest_records_subtypes_for_c_udf(self, tmp_path, tmp_project):
+        """A C UDF is classified as FUNCTION_C and the sub-type
+        plus C source/header references propagate to IngestResult."""
+        src = tmp_path / "source"
+        src.mkdir()
+        ddl = (
+            "CREATE FUNCTION x.foo (a INT) RETURNS INT\n"
+            "LANGUAGE C\n"
+            "NO SQL\n"
+            "PARAMETER STYLE SQL\n"
+            "EXTERNAL NAME 'CS!foo!../FOO/foo.c!CH!foo_h!../FOO/foo.h';"
+        )
+        (src / "foo.fnc").write_text(ddl, encoding="utf-8")
+
+        result = ingest_directory(
+            str(src), str(tmp_project), detect_tokens=False
+        )
+
+        assert result.classified == 1
+        # base type is FUNCTION (preserved for backward compat)
+        assert result.files_placed[0][2] == "FUNCTION"
+        # rich sub-type recorded against the staged path
+        staged = result.files_placed[0][1]
+        assert result.subtypes.get(staged) == "FUNCTION_C"
+        # external refs captured
+        refs = result.external_references.get(staged, [])
+        assert any(p.endswith("foo.c") for p in refs)
+        assert any(p.endswith("foo.h") for p in refs)
+
+    def test_ingest_records_subtype_for_java_procedure(
+        self, tmp_path, tmp_project
+    ):
+        """A Java procedure is classified as PROCEDURE_JAVA and the
+        JAR alias is recorded in external_references."""
+        src = tmp_path / "source"
+        src.mkdir()
+        ddl = (
+            "CREATE PROCEDURE x.foo()\n"
+            "LANGUAGE JAVA\n"
+            "PARAMETER STYLE JAVA\n"
+            "EXTERNAL NAME 'jar_execute_large_sql:com.example.Foo.bar';"
+        )
+        (src / "foo.spl").write_text(ddl, encoding="utf-8")
+
+        result = ingest_directory(
+            str(src), str(tmp_project), detect_tokens=False
+        )
+
+        assert result.classified == 1
+        assert result.files_placed[0][2] == "PROCEDURE"
+        staged = result.files_placed[0][1]
+        assert result.subtypes.get(staged) == "PROCEDURE_JAVA"
+        assert result.external_references.get(staged) == [
+            "jar_execute_large_sql"
+        ]
+
+    def test_ingest_surfaces_filename_mismatch_warning(
+        self, tmp_path, tmp_project
+    ):
+        """A file named .tbl whose content is CREATE VIEW gets
+        classified as VIEW (content wins) but a classification
+        warning is surfaced for the user."""
+        src = tmp_path / "source"
+        src.mkdir()
+        # .tbl extension says TABLE; content says VIEW
+        (src / "looks_like_table.tbl").write_text(
+            "CREATE VIEW x.v AS SELECT 1;", encoding="utf-8"
+        )
+
+        result = ingest_directory(
+            str(src), str(tmp_project), detect_tokens=False
+        )
+
+        # Content wins
+        assert result.files_placed[0][2] == "VIEW"
+        # Warning surfaced
+        assert any(
+            "Filename mismatch" in w for w in result.classification_warnings
+        )
+
+    def test_ingest_no_classification_warnings_for_clean_files(
+        self, tmp_path, tmp_project
+    ):
+        """A consistent file (matching extension + content) produces
+        no classification warnings."""
+        src = tmp_path / "source"
+        src.mkdir()
+        (src / "ok.tbl").write_text(
+            "CREATE TABLE x.t (id INT);", encoding="utf-8"
+        )
+
+        result = ingest_directory(
+            str(src), str(tmp_project), detect_tokens=False
+        )
+        assert result.classification_warnings == []
+
+    def test_ingest_sqlj_install_script_uses_sjr_extension(
+        self, tmp_path, tmp_project
+    ):
+        """A SQL file containing CALL SQLJ.INSTALL_JAR(...) is classified as
+        JAR but the staged file gets ``.sjr`` (SQLJ Runtime install
+        script), NOT ``.jar``. The latter is reserved for actual binary
+        Java archives.
+
+        Regression test for the GCFR_UT_Install_Jar.ddl case where a
+        legacy DDL extension was being remapped to ``.jar``,
+        misleadingly suggesting a binary archive.
+        """
+        src = tmp_path / "source"
+        src.mkdir()
+        # User's actual file contents (anonymised). Source extension
+        # is .ddl (legacy) — SHIPS reclassifies based on content.
+        (src / "GCFR_UT_Install_Jar.ddl").write_text(
+            "DATABASE $GCFR_P_UT;\n"
+            "\n"
+            "CALL SQLJ.INSTALL_JAR("
+            "'CJ!../JAVA/JAR/ExecLargeSqlJ.jar', "
+            "'JAR_EXECUTE_LARGE_SQL', 0);\n"
+            "\n"
+            "CALL SQLJ.INSTALL_JAR("
+            "'CJ!../JAVA/JAR/ExecLargeNOSSqlJ.jar', "
+            "'JAR_EXECUTE_LARGE_NOS_SQL', 0);\n",
+            encoding="utf-8",
+        )
+
+        result = ingest_directory(
+            str(src),
+            str(tmp_project),
+            detect_tokens=False,
+        )
+
+        assert result.classified == 1
+        # Classification stays "JAR" — that's the semantic type
+        assert result.files_placed[0][2] == "JAR"
+        # ...but the staged file extension is .sjr, not .jar
+        dest_path = result.files_placed[0][1]
+        assert dest_path.endswith(".sjr"), (
+            f"Expected .sjr extension; got {dest_path}"
+        )
+        # And it lives under DDL/jar_install (not DDL/JARs)
+        assert "jar_install" in dest_path.replace("\\", "/")
+
+    def test_ingest_splits_multistatement_ddl_and_grant(
+        self, tmp_path, tmp_project
+    ):
+        """A file with CREATE TABLE followed by GRANT splits into
+        two destinations — TABLE under DDL/tables, GRANT under
+        DCL/inter_db. Pre-existing splitter behaviour, captured here
+        as a regression guard.
+        """
+        src = tmp_path / "raw"
+        src.mkdir()
+        (src / "compound.ddl").write_text(
+            "CREATE MULTISET TABLE x.t (id INT);\n"
+            "GRANT SELECT ON x.t TO ROLE READER;",
+            encoding="utf-8",
+        )
+
+        result = ingest_directory(
+            str(src), str(tmp_project), detect_tokens=False
+        )
+
+        types = sorted(t for _, _, t in result.files_placed)
+        assert types == ["GRANT", "TABLE"]
+        # Each placed in its conventional subdir
+        dests = [d for _, d, _ in result.files_placed]
+        assert any("DDL" in d and "tables" in d for d in dests)
+        assert any("DCL" in d for d in dests)
+
+    def test_ingest_does_not_split_procedure_with_begin_end(
+        self, tmp_path, tmp_project
+    ):
+        """A CREATE PROCEDURE with a BEGIN...END body must NOT be
+        split on its internal semicolons — the splitter detects
+        BEGIN and bails. The whole file lands as one PROCEDURE."""
+        src = tmp_path / "raw"
+        src.mkdir()
+        (src / "proc.spl").write_text(
+            "CREATE PROCEDURE x.foo (IN p INT)\n"
+            "BEGIN\n"
+            "  DECLARE local_v INT;\n"
+            "  SET local_v = p;\n"
+            "  UPDATE x.t SET v = local_v;\n"
+            "END;",
+            encoding="utf-8",
+        )
+
+        result = ingest_directory(
+            str(src), str(tmp_project), detect_tokens=False
+        )
+
+        assert result.classified == 1
+        assert result.files_placed[0][2] == "PROCEDURE"
+
     def test_ingest_missing_source_raises(self, tmp_project):
         """Missing source directory raises FileNotFoundError."""
         with pytest.raises(FileNotFoundError):

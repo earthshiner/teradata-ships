@@ -28,7 +28,7 @@ import argparse
 import logging
 import os
 import sys
-from typing import Dict
+from typing import Dict, Optional
 
 from td_release_packager.builder import build_package
 from td_release_packager.build_counter import read_build_number
@@ -222,6 +222,8 @@ def main():
         _cmd_import_legacy(args)
     elif args.command == "decompose-names":
         _cmd_decompose_names(args)
+    elif args.command == "bootstrap-properties":
+        _cmd_bootstrap_properties(args)
     else:
         parser.print_help()
         sys.exit(1)
@@ -351,6 +353,234 @@ def _stage_recording(project_dir: str, stage_name: str):
 
 
 # ---------------------------------------------------------------
+# Harvest "Next Steps" banner
+# ---------------------------------------------------------------
+
+
+def _project_has_env_properties(project_dir: str) -> bool:
+    """True if ``<project>/config/properties/`` contains any
+    ``*.properties`` file. Used to pick between the 'bootstrap'
+    and 'verify' wording in the harvest banner."""
+    props_dir = os.path.join(project_dir, "config", "properties")
+    if not os.path.isdir(props_dir):
+        return False
+    return any(
+        f.endswith(".properties") for f in os.listdir(props_dir)
+    )
+
+
+def _print_harvest_next_steps(
+    args,
+    *,
+    generated_token_map_path: Optional[str],
+    substitutions_applied: bool,
+    already_tokenised: bool = False,
+) -> None:
+    """
+    Print a context-aware Next Steps banner after harvest.
+
+    Four flows, four distinct next-step lists:
+
+      A. ``--generate-token-map`` was used AND literals were found.
+         Token map was written; substitutions not yet applied. User
+         needs to review the map, bootstrap properties, re-harvest
+         to apply, then validate + package.
+
+      B. ``--token-map`` (or ``--apply-tokens``) was provided.
+         Substitutions baked into the source. User just validates
+         and packages.
+
+      C. Plain harvest, no token activity. Same as flow B.
+
+      D. ``--generate-token-map`` was used but NO literals found.
+         The source is already tokenised — user skips the token-map
+         dance entirely and goes straight to bootstrap-properties.
+
+    Args:
+        args: The parsed CLI args (used for ``args.project``).
+        generated_token_map_path: Path to the token_map.conf that
+            ``--generate-token-map`` just wrote, or None if no map
+            was generated this run.
+        substitutions_applied: True if harvest applied substitutions
+            via ``--token-map`` or ``--apply-tokens`` this run.
+        already_tokenised: True when ``--generate-token-map`` was
+            requested but the source had no literals to map. The
+            source is already in the end-state — route to
+            bootstrap-properties.
+    """
+    from typing import List
+
+    print("=" * 64)
+    print("  Next Steps")
+    print("=" * 64)
+
+    project = args.project
+    has_props = _project_has_env_properties(project)
+
+    # Lead with stage label + state line so the user knows where
+    # they are before they see the steps. Same shape across all
+    # four flows.
+    print()
+    print("  You are here:  [H] Harvest complete")
+    if already_tokenised:
+        state = "source already tokenised; .properties not yet defined"
+    elif generated_token_map_path:
+        state = "literals scanned; token map written; substitutions NOT applied"
+    elif substitutions_applied:
+        state = "source tokenised via --token-map; substitutions applied"
+    else:
+        state = "source ingested; no token activity this run"
+    print(f"  Project state: {state}")
+    print()
+
+    steps: List[str] = []
+
+    # Quality-gate block — appears in every flow before packaging.
+    # 'inspect' is part of the canonical S-H-I-P-S workflow;
+    # 'analyze' produces dependency waves for parallel deploy
+    # (optional but recommended); 'scan' catches {{TOKEN}}
+    # references that have no value in the .properties file.
+    def _quality_gates_step(num: int) -> str:
+        return (
+            f"{num}. Validate the harvested DDL before packaging:\n"
+            f"\n"
+            f"     python -m td_release_packager inspect \\\n"
+            f"         --source {project}\n"
+            f"\n"
+            f"     python -m td_release_packager analyze \\\n"
+            f"         --source {project}            "
+            f"# optional, deploy waves\n"
+            f"\n"
+            f"     python -m td_release_packager scan \\\n"
+            f"         --source {project} \\\n"
+            f"         --properties config/properties/DEV.properties\n"
+            f"\n"
+            f"   inspect lints the DDL and validates grants;\n"
+            f"   analyze produces dependency waves for parallel deploy;\n"
+            f"   scan confirms every {{{{TOKEN}}}} in source has a value."
+        )
+
+    def _verify_props_step(num: int) -> str:
+        return (
+            f"{num}. Verify environment properties match your topology:\n"
+            f"\n"
+            f"     • SHIPS_ENV       matches the target environment\n"
+            f"     • ENV_PREFIX      matches your platform topology\n"
+            f"     • SHIPS_PROJECT   identifies your project\n"
+            f"     • INSTANCE        00 unless deploying in parallel\n"
+            f"     • SECURITY_TIER   0 unless handling restricted data\n"
+            f"\n"
+            f"   All other tokens derive from these roots automatically."
+        )
+
+    def _package_step(num: int) -> str:
+        return (
+            f"{num}. Package for an environment (example: DEV):\n"
+            f"\n"
+            f"     python -m td_release_packager package \\\n"
+            f"         --source {project} --env DEV --name <name> \\\n"
+            f"         --properties config/properties/DEV.properties \\\n"
+            f"         --output releases/"
+        )
+
+    if already_tokenised:
+        # Flow D — source already uses {{TOKEN}} references. Skip
+        # the token map entirely and bootstrap properties directly
+        # from the tokens the source already references.
+        bootstrap_cmd_parts = [
+            f"     python -m td_release_packager bootstrap-properties \\\n"
+            f"         --source {project} \\\n"
+            f"         --env DEV"
+        ]
+        if not has_props:
+            steps.append(
+                f"1. Bootstrap a .properties file from the tokens the\n"
+                f"   source already references:\n"
+                f"\n"
+                f"{bootstrap_cmd_parts[0]}\n"
+                f"\n"
+                f"   Output: a 7-section .properties scaffold under\n"
+                f"   {project}\\config\\properties\\DEV.properties\n"
+                f"   with every {{{{TOKEN}}}} parked in section 8\n"
+                f"   for you to re-section by cut-and-paste."
+            )
+        else:
+            steps.append(
+                f"1. (Optional) Refresh the existing .properties scaffold\n"
+                f"   to pick up any newly-referenced tokens:\n"
+                f"\n"
+                f"{bootstrap_cmd_parts[0]} --force\n"
+                f"\n"
+                f"   --force is required because the file already exists.\n"
+                f"   Existing values for still-referenced tokens are\n"
+                f"   preserved; new tokens are added to section 8."
+            )
+        steps.append(_quality_gates_step(2))
+        steps.append(_verify_props_step(3))
+        steps.append(_package_step(4))
+
+    elif generated_token_map_path is not None:
+        # Flow A — token map was just written, substitutions not applied
+        steps.append(
+            f"1. Review the generated token map:\n"
+            f"     {generated_token_map_path}\n"
+            f"\n"
+            f"   Each line is LITERAL_DB_NAME={{{{TOKEN}}}}. Edit\n"
+            f"   token names if you'd prefer different conventions.\n"
+            f"   Lines you want to skip can be deleted or commented (#)."
+        )
+        if not has_props:
+            steps.append(
+                f"2. Bootstrap a .properties file from the token map:\n"
+                f"\n"
+                f"     python -m td_release_packager decompose-names \\\n"
+                f"         {generated_token_map_path} \\\n"
+                f"         --env DEV \\\n"
+                f"         --output-dir {project}\\config\n"
+                f"\n"
+                f"   Output: a 7-section .properties scaffold under\n"
+                f"   {project}\\config\\properties\\DEV.properties\n"
+                f"   plus a decomposition_report.md with confidence\n"
+                f"   ratings and outliers."
+            )
+            next_num = 3
+        else:
+            next_num = 2
+        steps.append(
+            f"{next_num}. Re-harvest with the token map applied:\n"
+            f"\n"
+            f"     python -m td_release_packager harvest \\\n"
+            f"         --source <legacy_src> \\\n"
+            f"         --project {project} \\\n"
+            f"         --token-map {generated_token_map_path} \\\n"
+            f"         --force\n"
+            f"\n"
+            f"   This rewrites the staged DDL to use {{{{TOKEN}}}} form."
+        )
+        next_num += 1
+        steps.append(_quality_gates_step(next_num))
+        next_num += 1
+        steps.append(_verify_props_step(next_num))
+        next_num += 1
+        steps.append(_package_step(next_num))
+
+    else:
+        # Flow B / C — substitutions applied (B) or no map activity (C).
+        # Same steps either way: validate, verify properties, package.
+        steps.append(_quality_gates_step(1))
+        steps.append(_verify_props_step(2))
+        steps.append(_package_step(3))
+
+    for step in steps:
+        print()
+        # Indent each line with two spaces for the banner block.
+        for line in step.splitlines():
+            print(f"  {line}" if line else "")
+
+    print(f"\n{'=' * 64}\n")
+
+
+# ---------------------------------------------------------------
 # Legacy-importer / decomposer dispatchers
 # ---------------------------------------------------------------
 #
@@ -379,6 +609,20 @@ def _cmd_decompose_names(args):
     if args.verbose:
         argv.append("-v")
     sys.exit(decomposer_main(argv))
+
+
+def _cmd_bootstrap_properties(args):
+    """Dispatch to td_release_packager.properties_bootstrapper.main()."""
+    from td_release_packager.properties_bootstrapper import main as bootstrap_main
+
+    argv = ["--source", args.source, "--env", args.env]
+    if args.output_dir:
+        argv.extend(["--output-dir", args.output_dir])
+    if args.force:
+        argv.append("--force")
+    if args.verbose:
+        argv.append("-v")
+    sys.exit(bootstrap_main(argv))
 
 
 # ---------------------------------------------------------------
@@ -584,22 +828,62 @@ def _cmd_ingest(args):
         env_prefix = getattr(args, "env_prefix", None)
         generate_map = getattr(args, "generate_token_map", False)
 
+        # Track the generated token-map path so the Next Steps
+        # banner can reference it without re-deriving it. None when
+        # --generate-token-map was not used (or produced nothing).
+        generated_token_map_path = None
+
         if generate_map and result.token_candidates:
             token_map = generate_token_map(result.token_candidates, env_prefix)
             map_path = os.path.join(args.project, "config", "token_map.conf")
             write_token_map(
                 map_path, token_map, result.token_candidates, env_prefix or "(none)"
             )
-            print(f"\n  Token map generated: {map_path}")
-            print(f"  Mappings:           {len(token_map)}")
+            generated_token_map_path = map_path
+
+            # Header — prominent path so it's the first thing the
+            # user sees in the token-map block, before any per-
+            # mapping listing pushes it off-screen.
+            print()
+            print("  +-- Token map ----------------------------------------------+")
+            print(f"  |   Path:     {map_path}")
+            print(f"  |   Mappings: {len(token_map)}")
             if env_prefix:
-                print(f"  Prefix stripped:    {env_prefix}")
+                print(f"  |   Prefix:   {env_prefix} (stripped from token names)")
             else:
-                print("  No --env-prefix:    full names used as tokens")
-            for literal, token in sorted(token_map.items()):
+                print("  |   Prefix:   none (full names used as tokens)")
+            print("  +------------------------------------------------------------+")
+
+            # Sample of mappings — capped to keep the output short.
+            # Anything past the cap stays in the file; the user can
+            # cat / open the path printed above to see them all.
+            CAP = 10
+            sorted_mappings = sorted(token_map.items())
+            print(f"\n  Sample mappings (showing {min(CAP, len(token_map))} of {len(token_map)}):")
+            for literal, token in sorted_mappings[:CAP]:
                 files = result.token_candidates.get(literal, [])
                 print(f"    {literal} → {token}  ({len(files)} refs)")
-            print(f"\n  To apply: re-harvest with --token-map {map_path}")
+            if len(token_map) > CAP:
+                print(f"    ... {len(token_map) - CAP} more — see the file above.")
+
+            # Footer — repeat the path as the LAST line of the block
+            # so even if the listing is long the user finds it again
+            # right above the Next Steps banner.
+            print(f"\n  ✓ Token map written to: {map_path}")
+
+        elif generate_map and not result.token_candidates:
+            # User asked for a token map but no hardcoded names were
+            # detected. The most common cause is that the source is
+            # ALREADY TOKENISED — the end-state most users have to
+            # work toward. Tell them clearly, and route them to
+            # bootstrap-properties (the third bootstrap path) since
+            # they no longer need a token map at all.
+            print(
+                "\n  ✓ No hardcoded database names detected.\n"
+                "    The source DDL appears to be already tokenised — you're at\n"
+                "    the end-state most projects have to work toward. Skip the\n"
+                "    token map and go straight to .properties bootstrap below."
+            )
 
         elif result.token_candidates and not apply_tokens:
             print("\n  Token candidates (hardcoded database names):")
@@ -614,6 +898,64 @@ def _cmd_ingest(args):
             for w in result.warnings:
                 print(f"    ⚠ {w}")
 
+        # -- Classification warnings (from the rich classifier) --
+        # Filename mismatches and unrecognised externals get their
+        # own section so they don't drown in the generic warnings
+        # list. These are the "you're going to want to act on this"
+        # diagnostics — surface them prominently.
+        if result.classification_warnings:
+            print("\n  Classification warnings:")
+            for w in result.classification_warnings:
+                print(f"    ⚠ {w}")
+
+        # -- Sub-types detected --
+        # Show counts per sub-type so users see at a glance how
+        # many C UDFs / Java procedures the harvester recognised.
+        if result.subtypes:
+            from collections import Counter
+
+            subtype_counts = Counter(result.subtypes.values())
+            print("\n  Sub-types detected:")
+            for subtype, count in sorted(subtype_counts.items()):
+                print(f"    {subtype:20s} {count}")
+
+        # -- External references --
+        # FUNCTION_C → .c/.h paths; PROCEDURE_JAVA → JAR alias.
+        # Capped to keep banner short — full list is in the
+        # decisions.json once item 4 of the orchestrator wires
+        # ingest into the recording context.
+        if result.external_references:
+            print("\n  External references discovered:")
+            for staged_path, refs in sorted(
+                result.external_references.items()
+            )[:5]:
+                print(f"    {staged_path}")
+                for ref in refs:
+                    print(f"        → {ref}")
+            extra = len(result.external_references) - 5
+            if extra > 0:
+                print(f"    ... and {extra} more file(s) with externals.")
+
+        # -- Binary artefacts physically copied into the payload --
+        # JAR archives (for SQLJ install) and C source/header files
+        # (for C UDFs) get copied alongside their SQL scripts so
+        # the deployer can ship them. Show counts per kind plus a
+        # sample.
+        if result.binaries_placed:
+            from collections import Counter
+
+            kind_counts = Counter(k for _, _, k in result.binaries_placed)
+            print("\n  Binary artefacts copied into payload:")
+            for kind, count in sorted(kind_counts.items()):
+                print(f"    {kind:14s} {count}")
+            print()
+            for src, dest, kind in result.binaries_placed[:5]:
+                print(f"    {kind}  {os.path.basename(src)}")
+                print(f"      → {dest}")
+            extra = len(result.binaries_placed) - 5
+            if extra > 0:
+                print(f"    ... and {extra} more binary file(s).")
+
         if result.errors:
             print("\n  Errors:")
             for e in result.errors:
@@ -622,37 +964,15 @@ def _cmd_ingest(args):
         print(f"{'=' * 64}\n")
 
         # -- Next Steps banner --
-        # Harvest produces a tokenised project tree, but packaging
-        # also needs an environment .properties file with values
-        # filled in for the target environment. The properties file
-        # is the user's responsibility — flag this prominently so
-        # they don't go straight to `package` and hit a missing-
-        # token failure or, worse, ship the wrong values.
-        print(f"{'=' * 64}")
-        print("  Next Steps")
-        print(f"{'=' * 64}")
-        print(
-            "\n  1. Verify environment properties before packaging.\n"
-            "     Edit config/properties/<ENV>.properties for each\n"
-            "     target environment (DEV / TST / PRD) and confirm:\n"
-            "\n"
-            "       • SHIPS_ENV       matches the target environment\n"
-            "       • ENV_PREFIX      matches your platform topology\n"
-            "       • SHIPS_PROJECT   identifies your project\n"
-            "       • INSTANCE        00 unless deploying in parallel\n"
-            "       • SECURITY_TIER   0 unless handling restricted data\n"
-            "\n"
-            "     All other tokens derive from these roots automatically."
+        # Four distinct flows produce four distinct sets of next
+        # steps. Get the recommendation right per flow so the user
+        # isn't left guessing.
+        _print_harvest_next_steps(
+            args=args,
+            generated_token_map_path=generated_token_map_path,
+            substitutions_applied=bool(apply_tokens),
+            already_tokenised=(generate_map and not result.token_candidates),
         )
-        print(
-            "\n  2. Package for an environment (example: DEV):\n"
-            "\n"
-            "     python -m td_release_packager package \\\n"
-            f"         --source {args.project} --env DEV --name <name> \\\n"
-            "         --properties config/properties/DEV.properties \\\n"
-            "         --output releases/"
-        )
-        print(f"\n{'=' * 64}\n")
 
     except FileNotFoundError as e:
         print(f"\nERROR: {e}", file=sys.stderr)
@@ -1712,6 +2032,43 @@ def _build_parser():
         help="Output directory (default: current). Files written under "
         "<output-dir>/properties/<env>.properties and "
         "<output-dir>/decomposition_report.md.",
+    )
+
+    # -- bootstrap-properties --
+    bp = subs.add_parser(
+        "bootstrap-properties",
+        help="Generate a .properties scaffold for an already-tokenised "
+        "project. Use when the source already references "
+        "{{TOKEN}} but no .properties file exists yet.",
+        description="Scan an already-tokenised SHIPS project for "
+        "{{TOKEN}} references and emit a 7-section .properties "
+        "scaffold with every referenced token parked in section 8 "
+        "for the user to re-section. Closes the third bootstrap "
+        "path: when there's nothing to convert (no literals, no "
+        "legacy script) you just need a starting .properties skeleton.",
+    )
+    bp.add_argument(
+        "--source",
+        required=True,
+        help="SHIPS project directory (with payload/ already harvested).",
+    )
+    bp.add_argument(
+        "--env",
+        required=True,
+        help="Target environment name (DEV / TST / PRD).",
+    )
+    bp.add_argument(
+        "--output-dir",
+        default=None,
+        help="Output directory; .properties written under "
+        "<output-dir>/properties/<env>.properties. Defaults to "
+        "<source>/config.",
+    )
+    bp.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing .properties file at the target. "
+        "Without this, the tool refuses to clobber.",
     )
 
     return parser
