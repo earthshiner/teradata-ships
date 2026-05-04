@@ -857,6 +857,12 @@ def _inject_replace_view(content: str) -> Tuple[str, bool]:
 # ---------------------------------------------------------------
 
 
+#: Pattern matching a fully-formed ``{{TOKEN}}`` reference. Names
+#: that already match this shape are not "candidates" — they're
+#: the end-state token-candidate detection is supposed to lead to.
+_ALREADY_TOKEN_RE = re.compile(r"^\{\{[A-Za-z_][A-Za-z0-9_-]*\}\}$")
+
+
 def _build_token_candidates(
     db_names: Dict[str, List[str]],
 ) -> Dict[str, List[str]]:
@@ -865,14 +871,18 @@ def _build_token_candidates(
     become tokens.
 
     Groups by name, reports which files reference each.
-    Filters out known system databases (DBC, SYSUDTLIB, etc.)
-    that should remain hardcoded.
+    Filters out:
+      - Known system databases (DBC, SYSUDTLIB, etc.) that should
+        remain hardcoded.
+      - Already-tokenised references (``{{NAME}}`` shape) — these
+        are not candidates, they're the goal state.
 
     Args:
         db_names: Dict of database_name → list of files referencing it.
 
     Returns:
-        Dict of database_name → list of files (excluding system DBs).
+        Dict of database_name → list of files (excluding system DBs
+        and existing tokens).
     """
     # System databases that should remain hardcoded
     system_dbs = {
@@ -897,6 +907,11 @@ def _build_token_candidates(
     candidates = {}
     for db_name, files in sorted(db_names.items()):
         if db_name.upper() in system_dbs:
+            continue
+        if _ALREADY_TOKEN_RE.match(db_name):
+            # {{TOKEN}} references are not candidates; they're the
+            # goal. Filtering them out lets the harvest banner detect
+            # "already tokenised" cleanly.
             continue
         candidates[db_name] = files
 

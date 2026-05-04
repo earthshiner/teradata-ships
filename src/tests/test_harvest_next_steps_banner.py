@@ -185,3 +185,72 @@ class TestFlowC_PlainHarvest:
         assert "inspect" in out
         assert "Verify environment properties" in out
         assert "package" in out
+
+
+# ---------------------------------------------------------------
+# Flow D — already-tokenised source
+# ---------------------------------------------------------------
+
+
+class TestFlowD_AlreadyTokenised:
+    """--generate-token-map was used, but no literals were found
+    because the source already uses {{TOKEN}} references. Banner
+    must skip the token-map dance and route straight to
+    bootstrap-properties."""
+
+    def test_already_tokenised_no_props_yet(self, tmp_path, capsys):
+        """Flow D, no .properties file → 4 steps:
+        bootstrap-properties, validate, verify, package.
+        Token map / decompose-names / re-harvest must NOT appear."""
+        args = Namespace(project=str(tmp_path))
+
+        _print_harvest_next_steps(
+            args,
+            generated_token_map_path=None,
+            substitutions_applied=False,
+            already_tokenised=True,
+        )
+
+        out = capsys.readouterr().out
+
+        # Stage line + state line
+        assert "[H] Harvest complete" in out
+        assert "already tokenised" in out
+
+        # Flow-D-specific guidance
+        assert "bootstrap-properties" in out
+        assert "Bootstrap a .properties file from the tokens" in out
+
+        # Must NOT mention token-map activities — we're past that
+        assert "Review the generated token map" not in out
+        assert "decompose-names" not in out
+        assert "Re-harvest with the token map applied" not in out
+
+        # Quality gates + verify + package still required
+        assert "Validate the harvested DDL" in out
+        assert "Verify environment properties" in out
+        assert "package" in out
+
+    def test_already_tokenised_with_existing_props(self, tmp_path, capsys):
+        """When a .properties file already exists, bootstrap step
+        becomes optional with --force. Flow still ends in
+        validate / verify / package."""
+        d = tmp_path / "config" / "properties"
+        d.mkdir(parents=True)
+        (d / "DEV.properties").write_text("X=1\n", encoding="utf-8")
+
+        args = Namespace(project=str(tmp_path))
+
+        _print_harvest_next_steps(
+            args,
+            generated_token_map_path=None,
+            substitutions_applied=False,
+            already_tokenised=True,
+        )
+
+        out = capsys.readouterr().out
+        # Optional step references --force
+        assert "(Optional) Refresh" in out
+        assert "--force" in out
+        # Quality gates still appear
+        assert "Validate the harvested DDL" in out
