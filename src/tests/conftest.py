@@ -105,7 +105,7 @@ def tmp_project(tmp_path):
         "DDL/functions",
         "DDL/triggers",
         "DDL/join_indexes",
-        "DDL/JARs",
+        "DDL/jar_install",
         "DDL/script_table_operators",
         "pre-requisites/databases",
         "DCL/roles",

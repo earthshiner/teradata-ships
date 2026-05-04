@@ -50,7 +50,12 @@ _TYPE_TO_EXT = {
     "REVOKE": ".dcl",
     "COMMENT": ".cmt",
     "STATISTICS": ".stt",
-    "JAR": ".jar",
+    # SQLJ install scripts. Convention: ``.sjr`` (SQLJ Runtime
+    # install script). Deliberately NOT ``.jar`` — these files are
+    # SQL scripts that CALL SQLJ.INSTALL_JAR(...), not binary Java
+    # archives. ``.jar`` stays reserved for actual binary JARs if a
+    # future deployment shipped them alongside the install scripts.
+    "JAR": ".sjr",
     "SCRIPT_TABLE_OPERATOR": ".sto",
     # System-scoped objects
     "MAP": ".map",
@@ -81,7 +86,9 @@ _TYPE_TO_SUBDIR = {
     "REVOKE": "DCL/inter_db",
     "COMMENT": "DDL/comments",
     "STATISTICS": "DDL/statistics",
-    "JAR": "DDL/JARs",
+    # SQLJ install scripts go under DDL/jar_install — clearer than
+    # the older DDL/JARs which suggested binary archives.
+    "JAR": "DDL/jar_install",
     "SCRIPT_TABLE_OPERATOR": "DDL/script_table_operators",
     # System-scoped objects (00_system phase)
     "MAP": "system/maps",
@@ -205,13 +212,30 @@ class IngestResult:
     Outcome of ingesting DDL files into a project.
 
     Attributes:
-        total_files:       Files scanned in source directory.
-        classified:        Successfully classified and placed.
-        unclassified:      Could not determine object type.
-        token_candidates:  Hardcoded names detected as token candidates.
-        files_placed:      List of (source, destination, type) tuples.
-        warnings:          Non-fatal issues.
-        errors:            Fatal issues.
+        total_files:           Files scanned in source directory.
+        classified:            Successfully classified and placed.
+        unclassified:          Could not determine object type.
+        token_candidates:      Hardcoded names detected as token candidates.
+        files_placed:          List of (source, destination, type) tuples.
+        warnings:              Non-fatal issues.
+        errors:                Fatal issues.
+        classification_warnings:
+                               Per-file diagnostics from the rich
+                               classifier — filename mismatches,
+                               unrecognised externals, etc. Surfaced
+                               in the harvest banner so users can act
+                               on them at harvest time.
+        external_references:   Map of staged-file path to the list of
+                               external file references discovered
+                               (C source/header paths for FUNCTION_C,
+                               JAR aliases for PROCEDURE_JAVA). The
+                               deployer can use this to bundle / order
+                               dependencies.
+        subtypes:              Map of staged-file path to its rich
+                               sub-type (FUNCTION_C, PROCEDURE_JAVA,
+                               etc.). Files without a sub-type are
+                               omitted; the base type lives in
+                               files_placed.
     """
 
     total_files: int = 0
@@ -225,6 +249,13 @@ class IngestResult:
     warnings: List[str] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
     unclassified_files: List[str] = field(default_factory=list)
+    classification_warnings: List[str] = field(default_factory=list)
+    external_references: Dict[str, List[str]] = field(default_factory=dict)
+    subtypes: Dict[str, str] = field(default_factory=dict)
+    #: Binary artefacts physically copied into the payload —
+    #: list of (source_abs_path, dest_rel_path, kind) tuples.
+    #: kind is JAR_BINARY / C_SOURCE / C_HEADER / etc.
+    binaries_placed: List[Tuple[str, str, str]] = field(default_factory=list)
 
 
 def ingest_directory(
@@ -293,6 +324,8 @@ def ingest_directory(
             # processed and placed as a separate eponymous file.
             statements = _split_multi_statement(raw_content, src_path)
 
+            from td_release_packager.classifier import classify, base_type
+
             for content in statements:
                 # Strip comments for safe classification and name
                 # extraction — prevents false matches from DDL keywords
@@ -301,13 +334,22 @@ def ingest_directory(
                 # Original content is preserved for file output.
                 clean = _strip_comments(content)
 
-                # -- Classify --
-                obj_type = _classify_ddl(clean)
+                # -- Classify (rich) --
+                # Pass the source path so the classifier can detect
+                # filename-vs-content mismatches and surface them in
+                # the per-file warnings.
+                classification = classify(path=src_path, content=clean)
+                obj_subtype = classification.type
+                obj_type = base_type(obj_subtype)
+                # Surface filename-mismatch and unrecognised-external
+                # warnings to the harvest banner for user attention.
+                rel_path = os.path.relpath(src_path, source_dir)
+                for w in classification.warnings:
+                    result.classification_warnings.append(f"{rel_path}: {w}")
+
                 if obj_type is None:
                     result.unclassified += 1
-                    result.unclassified_files.append(
-                        os.path.relpath(src_path, source_dir)
-                    )
+                    result.unclassified_files.append(rel_path)
                     result.warnings.append(
                         f"Could not classify: {os.path.basename(src_path)}"
                     )
@@ -443,18 +485,65 @@ def ingest_directory(
                             dest_name,
                         )
 
+                # -- Harvest binary dependencies BEFORE writing --
+                # FUNCTION_C and JAR install scripts reference
+                # binary files (.c/.h, .jar) that the deployer
+                # needs alongside. Resolve, copy, and rewrite the
+                # paths so the deployed script's references are
+                # sibling-relative.
+                if obj_subtype in ("FUNCTION_C", "JAR") and classification.related_files:
+                    from td_release_packager.binary_harvester import (
+                        harvest_binaries,
+                    )
+
+                    harvest_dest_dir = os.path.dirname(dest_path)
+                    bh_result = harvest_binaries(
+                        content=content,
+                        related_paths=classification.related_files,
+                        source_file_path=src_path,
+                        destination_dir=harvest_dest_dir,
+                    )
+                    content = bh_result.rewritten_content
+
+                    # Track each successfully copied binary
+                    for dep in bh_result.copied:
+                        rel_bin_dest = os.path.relpath(
+                            dep.destination_path, project_dir
+                        )
+                        result.binaries_placed.append(
+                            (dep.source_path, rel_bin_dest, dep.kind)
+                        )
+
+                    # Surface any missing-binary warnings
+                    for w in bh_result.warnings:
+                        result.classification_warnings.append(
+                            f"{os.path.relpath(src_path, source_dir)}: {w}"
+                        )
+
                 # -- Write normalised content --
                 with open(dest_path, "w", encoding="utf-8") as f:
                     f.write(content)
 
                 result.classified += 1
+                rel_dest = os.path.relpath(dest_path, project_dir)
                 result.files_placed.append(
                     (
                         os.path.relpath(src_path, source_dir),
-                        os.path.relpath(dest_path, project_dir),
+                        rel_dest,
                         obj_type,
                     )
                 )
+                # Record sub-type + external refs against the staged
+                # destination path so downstream stages (deployer,
+                # explain) can resolve them. Only persist sub-types
+                # when they differ from the base — keeps the dict
+                # focused on dialect distinctions.
+                if obj_subtype is not None and obj_subtype != obj_type:
+                    result.subtypes[rel_dest] = obj_subtype
+                if classification.related_files:
+                    result.external_references[rel_dest] = list(
+                        classification.related_files
+                    )
 
                 logger.debug(
                     "Ingested: %s → %s (%s)",
@@ -521,10 +610,15 @@ def _discover_files(source_dir: str, file_patterns: List[str] = None) -> List[st
             ".auth",
             ".fsvr",
             ".sto",
-            ".jar",
+            ".sjr",  # SQLJ Runtime install script (SHIPS convention)
+            # NOTE: ``.jar``, ``.c``, ``.h`` are NOT in this include
+            # list. Binary artefacts come into the payload via the
+            # binary-harvest path (driven by SQL EXTERNAL NAME and
+            # CALL SQLJ.INSTALL_JAR references), not as standalone
+            # discovered files. Including them here would trigger
+            # spurious "unclassified" warnings for every binary
+            # sitting alongside a SQL script.
             ".usr",
-            ".c",
-            ".h",
         ]
 
     files = []
@@ -709,20 +803,26 @@ def _strip_comments(content: str) -> str:
 
 def _classify_ddl(content: str) -> Optional[str]:
     """
-    Classify DDL content by object type.
+    Classify DDL content by object type — backward-compat shim.
 
-    Tests patterns in specificity order.
+    Delegates to ``td_release_packager.classifier.classify`` and
+    returns the BASE type so existing call sites that index into
+    ``_TYPE_TO_SUBDIR`` / ``_TYPE_TO_EXT`` keep working. Callers
+    that want sub-types (FUNCTION_C, PROCEDURE_JAVA), confidence,
+    external references, or filename-mismatch warnings should call
+    ``classifier.classify(path, content)`` directly.
 
     Args:
         content: The DDL file content.
 
     Returns:
-        Object type string, or None if unclassifiable.
+        Base object type string (TABLE, VIEW, FUNCTION, PROCEDURE,
+        ...), or None if unclassifiable.
     """
-    for pattern, obj_type in _CLASSIFY_PATTERNS:
-        if pattern.search(content):
-            return obj_type
-    return None
+    from td_release_packager.classifier import classify, base_type
+
+    result = classify(path="", content=content)
+    return base_type(result.type)
 
 
 def _extract_qualified_name(content: str) -> Tuple[Optional[str], Optional[str]]:
@@ -857,6 +957,12 @@ def _inject_replace_view(content: str) -> Tuple[str, bool]:
 # ---------------------------------------------------------------
 
 
+#: Pattern matching a fully-formed ``{{TOKEN}}`` reference. Names
+#: that already match this shape are not "candidates" — they're
+#: the end-state token-candidate detection is supposed to lead to.
+_ALREADY_TOKEN_RE = re.compile(r"^\{\{[A-Za-z_][A-Za-z0-9_-]*\}\}$")
+
+
 def _build_token_candidates(
     db_names: Dict[str, List[str]],
 ) -> Dict[str, List[str]]:
@@ -865,14 +971,18 @@ def _build_token_candidates(
     become tokens.
 
     Groups by name, reports which files reference each.
-    Filters out known system databases (DBC, SYSUDTLIB, etc.)
-    that should remain hardcoded.
+    Filters out:
+      - Known system databases (DBC, SYSUDTLIB, etc.) that should
+        remain hardcoded.
+      - Already-tokenised references (``{{NAME}}`` shape) — these
+        are not candidates, they're the goal state.
 
     Args:
         db_names: Dict of database_name → list of files referencing it.
 
     Returns:
-        Dict of database_name → list of files (excluding system DBs).
+        Dict of database_name → list of files (excluding system DBs
+        and existing tokens).
     """
     # System databases that should remain hardcoded
     system_dbs = {
@@ -897,6 +1007,11 @@ def _build_token_candidates(
     candidates = {}
     for db_name, files in sorted(db_names.items()):
         if db_name.upper() in system_dbs:
+            continue
+        if _ALREADY_TOKEN_RE.match(db_name):
+            # {{TOKEN}} references are not candidates; they're the
+            # goal. Filtering them out lets the harvest banner detect
+            # "already tokenised" cleanly.
             continue
         candidates[db_name] = files
 
