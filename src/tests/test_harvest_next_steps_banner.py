@@ -70,8 +70,8 @@ class TestFlowA_GenerateTokenMap:
         return args
 
     def test_flow_a_with_no_properties_yet(self, tmp_path, capsys):
-        """5 steps: review map, bootstrap properties, re-harvest,
-        verify properties, package."""
+        """6 steps: review map, bootstrap properties, re-harvest,
+        validate (inspect/analyze/scan), verify properties, package."""
         args = self._run(tmp_path, has_props=False)
         token_map = str(tmp_path / "config" / "token_map.conf")
 
@@ -91,16 +91,21 @@ class TestFlowA_GenerateTokenMap:
         # Step 3: re-harvest with --token-map
         assert "Re-harvest with the token map applied" in out
         assert "--token-map" in out
-        # Step 4: verify properties
-        assert "Verify environment properties" in out
+        # Step 4: quality gates — all three SHIPS validators
+        assert "inspect" in out
+        assert "analyze" in out
+        assert "scan" in out
+        assert "Validate the harvested DDL" in out
+        # Step 5: verify properties
+        assert "Verify environment properties match your topology" in out
         assert "SHIPS_ENV" in out
-        # Step 5: package
+        # Step 6: package
         assert "package" in out
         assert "--output releases/" in out
 
     def test_flow_a_with_existing_properties_skips_bootstrap(self, tmp_path, capsys):
-        """4 steps when properties already exist: review map,
-        re-harvest, verify, package. No bootstrap step."""
+        """5 steps when properties already exist: review map,
+        re-harvest, validate, verify, package. No bootstrap step."""
         args = self._run(tmp_path, has_props=True)
         token_map = str(tmp_path / "config" / "token_map.conf")
 
@@ -113,9 +118,13 @@ class TestFlowA_GenerateTokenMap:
         out = capsys.readouterr().out
         # The bootstrap step is skipped
         assert "Bootstrap a .properties file" not in out
-        # But the rest should still appear
+        # But the rest — including the quality gates — should appear
         assert "Review the generated token map" in out
         assert "Re-harvest with the token map applied" in out
+        assert "Validate the harvested DDL" in out
+        assert "inspect" in out
+        assert "analyze" in out
+        assert "scan" in out
         assert "Verify environment properties" in out
 
 
@@ -126,7 +135,7 @@ class TestFlowA_GenerateTokenMap:
 
 class TestFlowB_SubstitutionsApplied:
     """Substitutions are now baked into the staged DDL.
-    Banner: 2 steps — verify properties, package."""
+    Banner: 3 steps — validate, verify properties, package."""
 
     def test_no_token_map_guidance_when_applied(self, tmp_path, capsys):
         args = Namespace(project=str(tmp_path))
@@ -143,7 +152,11 @@ class TestFlowB_SubstitutionsApplied:
         assert "Review the generated token map" not in out
         assert "decompose-names" not in out
         assert "Re-harvest with the token map applied" not in out
-        # But verify + package must be present
+        # But quality gates + verify + package must be present
+        assert "Validate the harvested DDL" in out
+        assert "inspect" in out
+        assert "analyze" in out
+        assert "scan" in out
         assert "Verify environment properties" in out
         assert "package" in out
 
@@ -155,7 +168,7 @@ class TestFlowB_SubstitutionsApplied:
 
 class TestFlowC_PlainHarvest:
     """No --generate-token-map and no --token-map. Banner is the
-    same as flow B — verify properties, package."""
+    same as flow B — validate, verify properties, package."""
 
     def test_plain_harvest_same_as_applied(self, tmp_path, capsys):
         args = Namespace(project=str(tmp_path))
@@ -168,5 +181,7 @@ class TestFlowC_PlainHarvest:
 
         out = capsys.readouterr().out
         assert "decompose-names" not in out
+        assert "Validate the harvested DDL" in out
+        assert "inspect" in out
         assert "Verify environment properties" in out
         assert "package" in out

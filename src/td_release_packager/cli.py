@@ -408,6 +408,54 @@ def _print_harvest_next_steps(
     project = args.project
     has_props = _project_has_env_properties(project)
 
+    # Quality-gate block — appears in every flow before packaging.
+    # 'inspect' is part of the canonical S-H-I-P-S workflow;
+    # 'analyze' produces dependency waves for parallel deploy
+    # (optional but recommended); 'scan' catches {{TOKEN}}
+    # references that have no value in the .properties file.
+    def _quality_gates_step(num: int) -> str:
+        return (
+            f"{num}. Validate the harvested DDL before packaging:\n"
+            f"\n"
+            f"     python -m td_release_packager inspect \\\n"
+            f"         --source {project}\n"
+            f"\n"
+            f"     python -m td_release_packager analyze \\\n"
+            f"         --source {project}            "
+            f"# optional, deploy waves\n"
+            f"\n"
+            f"     python -m td_release_packager scan \\\n"
+            f"         --source {project} \\\n"
+            f"         --properties config/properties/DEV.properties\n"
+            f"\n"
+            f"   inspect lints the DDL and validates grants;\n"
+            f"   analyze produces dependency waves for parallel deploy;\n"
+            f"   scan confirms every {{{{TOKEN}}}} in source has a value."
+        )
+
+    def _verify_props_step(num: int) -> str:
+        return (
+            f"{num}. Verify environment properties match your topology:\n"
+            f"\n"
+            f"     • SHIPS_ENV       matches the target environment\n"
+            f"     • ENV_PREFIX      matches your platform topology\n"
+            f"     • SHIPS_PROJECT   identifies your project\n"
+            f"     • INSTANCE        00 unless deploying in parallel\n"
+            f"     • SECURITY_TIER   0 unless handling restricted data\n"
+            f"\n"
+            f"   All other tokens derive from these roots automatically."
+        )
+
+    def _package_step(num: int) -> str:
+        return (
+            f"{num}. Package for an environment (example: DEV):\n"
+            f"\n"
+            f"     python -m td_release_packager package \\\n"
+            f"         --source {project} --env DEV --name <name> \\\n"
+            f"         --properties config/properties/DEV.properties \\\n"
+            f"         --output releases/"
+        )
+
     if generated_token_map_path is not None:
         # Flow A — token map was just written, substitutions not applied
         steps.append(
@@ -447,52 +495,18 @@ def _print_harvest_next_steps(
             f"   This rewrites the staged DDL to use {{{{TOKEN}}}} form."
         )
         next_num += 1
-        steps.append(
-            f"{next_num}. Verify environment properties before packaging.\n"
-            f"   Edit config/properties/<ENV>.properties and confirm:\n"
-            f"\n"
-            f"     • SHIPS_ENV       matches the target environment\n"
-            f"     • ENV_PREFIX      matches your platform topology\n"
-            f"     • SHIPS_PROJECT   identifies your project\n"
-            f"     • INSTANCE        00 unless deploying in parallel\n"
-            f"     • SECURITY_TIER   0 unless handling restricted data\n"
-            f"\n"
-            f"   All other tokens derive from these roots automatically."
-        )
+        steps.append(_quality_gates_step(next_num))
         next_num += 1
-        steps.append(
-            f"{next_num}. Package for an environment (example: DEV):\n"
-            f"\n"
-            f"     python -m td_release_packager package \\\n"
-            f"         --source {project} --env DEV --name <name> \\\n"
-            f"         --properties config/properties/DEV.properties \\\n"
-            f"         --output releases/"
-        )
+        steps.append(_verify_props_step(next_num))
+        next_num += 1
+        steps.append(_package_step(next_num))
 
     else:
         # Flow B / C — substitutions applied (B) or no map activity (C).
-        # Same steps either way: verify properties + package.
-        steps.append(
-            "1. Verify environment properties before packaging.\n"
-            "   Edit config/properties/<ENV>.properties for each\n"
-            "   target environment (DEV / TST / PRD) and confirm:\n"
-            "\n"
-            "     • SHIPS_ENV       matches the target environment\n"
-            "     • ENV_PREFIX      matches your platform topology\n"
-            "     • SHIPS_PROJECT   identifies your project\n"
-            "     • INSTANCE        00 unless deploying in parallel\n"
-            "     • SECURITY_TIER   0 unless handling restricted data\n"
-            "\n"
-            "   All other tokens derive from these roots automatically."
-        )
-        steps.append(
-            f"2. Package for an environment (example: DEV):\n"
-            f"\n"
-            f"     python -m td_release_packager package \\\n"
-            f"         --source {project} --env DEV --name <name> \\\n"
-            f"         --properties config/properties/DEV.properties \\\n"
-            f"         --output releases/"
-        )
+        # Same steps either way: validate, verify properties, package.
+        steps.append(_quality_gates_step(1))
+        steps.append(_verify_props_step(2))
+        steps.append(_package_step(3))
 
     for step in steps:
         print()
