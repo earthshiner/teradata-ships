@@ -963,6 +963,23 @@ def _cmd_ingest(args):
 
         print(f"{'=' * 64}\n")
 
+        # -- Legacy-placeholder banner --
+        # Prints its own self-framed banner immediately after the
+        # harvest results so the user sees it before Next Steps.
+        # Empty-finding case suppresses the banner entirely.
+        if result.legacy_placeholders:
+            from td_release_packager.legacy_placeholders import (
+                format_legacy_placeholders_report,
+            )
+
+            print(
+                format_legacy_placeholders_report(
+                    result.legacy_placeholders,
+                    source_dir=args.source,
+                    project_dir_hint=args.project,
+                )
+            )
+
         # -- Next Steps banner --
         # Four distinct flows produce four distinct sets of next
         # steps. Get the recommendation right per flow so the user
