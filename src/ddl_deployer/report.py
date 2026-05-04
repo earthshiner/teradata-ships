@@ -286,8 +286,11 @@ def _html_head(result, now, mode):
                    padding: 16px 20px; margin-bottom: 20px; }}
   .action-items.has-errors {{ background: #F8D7DA; border-color: #F5C6CB; }}
   .action-items h3 {{ font-size: 14px; font-weight: 600; margin-bottom: 8px; }}
-  .action-item {{ padding: 6px 0; border-bottom: 1px solid rgba(0,0,0,0.08); }}
+  .action-item {{ padding: 6px 0; border-bottom: 1px solid rgba(0,0,0,0.08);
+                   overflow-wrap: break-word; word-break: break-word; }}
   .action-item:last-child {{ border-bottom: none; }}
+  .action-item .path-short {{ color: #6C757D; font-size: 12px; }}
+  .action-item .path-full {{ display: none; }}
   .no-actions {{ background: #D4EDDA; border-color: #C3E6CB; border-radius: 6px;
                  padding: 12px 20px; margin-bottom: 20px; color: #155724; }}
   .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
@@ -422,6 +425,35 @@ def _lookup_provenance(
     return chain.source_path()
 
 
+def _shorten_path(text: str) -> str:
+    """Replace full absolute paths in a string with just the filename.
+
+    Keeps the full path in a ``title`` attribute so it's accessible
+    on hover, but stops the action items panel from being overwhelmed
+    by long Windows/Linux paths.
+
+    Detects path-like substrings: tokens that contain a path separator
+    and end with a file extension.
+    """
+    import re as _re
+
+    # Match an absolute path (Windows or Unix) referencing a file.
+    # Captures everything from a drive letter or leading slash through
+    # an extension-bearing filename.
+    _PATH_RE = _re.compile(
+        r'(?:[A-Za-z]:\\|/)(?:[^\s<>"\']+[/\\])+([^\s<>"\']+\.[A-Za-z0-9]{1,6})'
+    )
+
+    def _replace(m):
+        full = m.group(0)
+        basename = m.group(1)
+        return (
+            f'<span class="path-short" title="{full}">{basename}</span>'
+        )
+
+    return _PATH_RE.sub(_replace, text)
+
+
 def _html_action_items(result, provenance: Optional[ProvenanceDocument] = None):
     """Action items section — SKIPPED and FAILED objects needing attention."""
     items = []
@@ -451,7 +483,7 @@ def _html_action_items(result, provenance: Optional[ProvenanceDocument] = None):
                 f'<div class="action-item err">'
                 f"<strong>FAILED:</strong> {_display_name(obj)} "
                 f"({obj.object_type.value}) — "
-                f"{obj.error or 'Unknown error'}{source}"
+                f"{_shorten_path(obj.error or 'Unknown error')}{source}"
                 f"{provenance_html}"
                 f"</div>"
             )
@@ -482,7 +514,8 @@ def _html_action_items(result, provenance: Optional[ProvenanceDocument] = None):
             items.append(
                 f'<div class="action-item warn">'
                 f"<strong>SKIPPED:</strong> {_display_name(obj)} "
-                f"({obj.object_type.value}) — {detail}.{backup_note}{source}"
+                f"({obj.object_type.value}) — "
+                f"{_shorten_path(detail)}.{backup_note}{source}"
                 f"</div>"
             )
 
