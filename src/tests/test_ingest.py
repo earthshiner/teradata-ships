@@ -388,6 +388,25 @@ class TestInjectMultiset:
         assert injected is True
         assert "CREATE MULTISET TABLE MyDB.Stage" in result
 
+    def test_create_table_inside_string_literal_is_ignored(self):
+        """A CHECK constraint or other string literal containing
+        the words 'CREATE TABLE' must not be treated as the real
+        DDL — MULTISET should be injected into the actual statement."""
+        ddl = (
+            "CREATE TABLE MyDB.Stage (\n"
+            "    Id INT,\n"
+            "    Doc VARCHAR(100) "
+            "CHECK (Doc NOT LIKE '%CREATE TABLE%')\n"
+            ");\n"
+        )
+        result, injected = _inject_multiset(ddl)
+        assert injected is True
+        # Real CREATE TABLE got the MULTISET
+        assert "CREATE MULTISET TABLE MyDB.Stage" in result
+        # The string literal is unchanged — its CREATE TABLE survives
+        # verbatim so the constraint still works
+        assert "%CREATE TABLE%" in result
+
 
 # ---------------------------------------------------------------
 # _inject_replace_view

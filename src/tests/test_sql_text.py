@@ -84,6 +84,78 @@ class TestStripCommentsPreservingPositions:
     def test_empty_input(self):
         assert strip("") == ""
 
+    def test_combined_stripper_blanks_both(self):
+        """The convenience ``strip_comments_and_string_literals``
+        blanks both kinds in one pass, which is what every
+        rule-check site actually wants."""
+        from td_release_packager.sql_text import (
+            strip_comments_and_string_literals,
+        )
+
+        text = (
+            "/* purpose: builds CREATE TABLE dynamically */\n"
+            "SET sql = 'CREATE MULTISET TABLE foo (a INT)';\n"
+        )
+        result = strip_comments_and_string_literals(text)
+        # Comment AND string-literal contents are gone
+        assert "purpose: builds CREATE TABLE" not in result
+        assert "CREATE MULTISET TABLE" not in result
+        # Length preserved
+        assert len(result) == len(text)
+        # Real surrounding code survives
+        assert "SET sql =" in result
+
+    def test_string_literal_stripped(self):
+        """String literals like ``'CREATE TABLE foo'`` get blanked
+        so regex content scans don't see the keyword inside."""
+        from td_release_packager.sql_text import (
+            strip_string_literals_preserving_positions as strip_lit,
+        )
+
+        text = "SET v = 'CREATE TABLE x.y (a INT)' || ',other';"
+        result = strip_lit(text)
+        # Literal content gone
+        assert "CREATE TABLE" not in result
+        assert "other" not in result
+        # Surrounding code intact
+        assert "SET v =" in result
+        assert "||" in result
+        # Length preserved
+        assert len(result) == len(text)
+
+    def test_string_literal_with_doubled_quotes_handled(self):
+        """Teradata's ``'it''s a test'`` doubled-quote escape is
+        a single literal, not two separate ones."""
+        from td_release_packager.sql_text import (
+            strip_string_literals_preserving_positions as strip_lit,
+        )
+
+        text = "SET v = 'it''s a test'; CREATE TABLE x.y (a INT);"
+        result = strip_lit(text)
+        # The literal 'it''s a test' is fully blanked
+        assert "it" not in result
+        assert "test" not in result
+        # CREATE TABLE outside any literal survives
+        assert "CREATE TABLE" in result
+
+    def test_multiline_string_literal_blanked(self):
+        from td_release_packager.sql_text import (
+            strip_string_literals_preserving_positions as strip_lit,
+        )
+
+        text = (
+            "SET v = 'line one\n"
+            "CREATE TABLE inside literal\n"
+            "line three';\n"
+            "CREATE TABLE real.t (a INT);"
+        )
+        result = strip_lit(text)
+        # The CREATE TABLE inside the multi-line literal is gone
+        # but the one outside survives
+        assert result.count("CREATE TABLE") == 1
+        # Newlines preserved (line numbers stay accurate)
+        assert result.count("\n") == text.count("\n")
+
     def test_position_preservation_enables_match_alignment(self):
         """The contract: a regex match position in the cleaned
         content also identifies the same span in the original.
