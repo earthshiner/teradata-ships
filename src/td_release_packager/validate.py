@@ -630,7 +630,11 @@ def _collect_package_prereqs(source_dir: str) -> set:
             if f.startswith(".") or f.startswith("_"):
                 continue
             ext = os.path.splitext(f)[1].lower()
-            if ext not in (".db", ".usr", ".sql", ".ddl"):
+            # Generic SQL-bearing extensions can also host CREATE
+            # DATABASE / CREATE USER. ``.bteq`` and ``.btq`` are
+            # included for legacy Teradata codebases that use those
+            # extensions for pure-SQL scripts.
+            if ext not in (".db", ".usr", ".sql", ".ddl", ".bteq", ".btq"):
                 continue
 
             file_path = os.path.join(root, f)
@@ -750,6 +754,14 @@ def validate_directory(
                 ".jar",  # legacy passthrough — see ingest convention
                 ".dcl",
                 ".usr",
+                # BTEQ-style extensions used by legacy Teradata
+                # codebases. Treated as generic SQL — content can be
+                # any DDL type (TABLE, VIEW, ...). Without these in
+                # the allowlist, inspect skips the files entirely
+                # and reports zero issues even when there are real
+                # rule violations to catch.
+                ".bteq",
+                ".btq",
             ):
                 files.append(os.path.join(root, f))
 

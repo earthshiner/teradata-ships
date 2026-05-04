@@ -611,12 +611,22 @@ def _discover_files(source_dir: str, file_patterns: List[str] = None) -> List[st
             ".fsvr",
             ".sto",
             ".sjr",  # SQLJ Runtime install script (SHIPS convention)
-            # NOTE: ``.jar``, ``.c``, ``.h`` are NOT in this include
-            # list. Binary artefacts come into the payload via the
-            # binary-harvest path (driven by SQL EXTERNAL NAME and
-            # CALL SQLJ.INSTALL_JAR references), not as standalone
-            # discovered files. Including them here would trigger
-            # spurious "unclassified" warnings for every binary
+            # BTEQ-style extensions. Many legacy Teradata codebases
+            # name their CREATE TABLE / CREATE VIEW scripts ``.bteq``
+            # or ``.btq`` even when the body is pure SQL with no BTEQ
+            # commands. Without these in the include list the harvest
+            # silently skips the entire file and the project ends up
+            # with no tables or views — a particularly opaque failure
+            # mode because the discovery counts look "0" rather than
+            # "wrong".
+            ".bteq",
+            ".btq",
+            # NOTE: ``.jar``, ``.c``, ``.h``, ``.cpp``, ``.cc``, ``.cxx``
+            # are NOT in this include list. Binary artefacts come into
+            # the payload via the binary-harvest path (driven by SQL
+            # EXTERNAL NAME and CALL SQLJ.INSTALL_JAR references), not
+            # as standalone discovered files. Including them here would
+            # trigger spurious "unclassified" warnings for every binary
             # sitting alongside a SQL script.
             ".usr",
         ]
