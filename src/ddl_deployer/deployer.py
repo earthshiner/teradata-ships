@@ -896,8 +896,47 @@ def deploy_single(cursor, ddl_text: str, dry_run: bool = False) -> ObjectDeployR
 # EXPLAIN parser rejects with Error 3706 "Invalid SQL Statement".
 # Functions, views, tables, triggers, macros, and all other
 # DDL types support EXPLAIN normally.
+# Object types that are exempt from EXPLAIN validation. Two reasons
+# an object type ends up here:
+#
+#   TECHNICAL:  Teradata EXPLAIN rejects the SQL form the deployer
+#               produces. Stored procedures compile as a unit via
+#               ``EXPLAIN PROCEDURE`` (not ``EXPLAIN CREATE PROCEDURE``)
+#               and the full body contains multiple statements separated
+#               by semicolons that EXPLAIN rejects with Error 3706.
+#
+#   STRUCTURAL: Validating via EXPLAIN would always produce a false
+#               failure because the database state the check depends on
+#               cannot exist during a dry run.
+#
+#               DATABASE and USER creation is the canonical case:
+#               ``CREATE DATABASE CHILD FROM PARENT`` requires PARENT
+#               to exist on the target at EXPLAIN time. When both
+#               PARENT and CHILD are being created by the same package
+#               (a common hierarchy), PARENT will not yet exist on the
+#               target — but deploying it to make EXPLAIN work would
+#               break the dry-run contract (DDL is auto-commit;
+#               there is no rollback path). The result would be a
+#               guaranteed false failure for every child in the
+#               hierarchy, making the report untrustworthy.
+#
+#               Preflight already validates the meaningful checks for
+#               DATABASE/USER: the deploying user has CREATE
+#               DATABASE/USER rights on the parent, and the parent
+#               exists (flagging "will be created by this package"
+#               when appropriate). EXPLAIN adds nothing beyond what
+#               preflight already covers and what the topological
+#               ordering in _order.txt guarantees.
+#
+# These objects appear as ``PREREQ_EXEMPT`` in the EXPLAIN report
+# rather than FAILED or SKIPPED, so the DBA can see at a glance
+# that they were intentionally not EXPLAINed and why.
 _EXPLAIN_SKIP_TYPES = {
-    ObjectType.PROCEDURE,
+    ObjectType.PROCEDURE,  # technical — see comment above
+}
+_PREREQ_EXEMPT_TYPES = {
+    ObjectType.DATABASE,
+    ObjectType.USER,
 }
 
 
@@ -1033,7 +1072,7 @@ def explain_package(
             failed += 1
             continue
 
-        # -- Skip excluded types --
+        # -- Skip technical EXPLAIN-incompatible types --
         if parsed.object_type in _EXPLAIN_SKIP_TYPES:
             logger.info(
                 "  ○ NOT APPLICABLE: %s %s [%s]",
@@ -1052,6 +1091,41 @@ def explain_package(
                     message=(
                         f"EXPLAIN not applicable to "
                         f"{parsed.object_type.value} — skipped."
+                    ),
+                )
+            )
+            skipped += 1
+            continue
+
+        # -- Prereq-exempt types (DATABASE, USER) --
+        # Running EXPLAIN on CREATE DATABASE CHILD FROM PARENT requires
+        # PARENT to exist on the target. When the package creates both
+        # (common in hierarchy deployments), PARENT won't exist at
+        # EXPLAIN time — resulting in guaranteed false failures.
+        # Preflight already validates rights + parent existence.
+        # The topological ordering in _order.txt guarantees correct
+        # deploy sequence. EXPLAIN here adds false noise, not safety.
+        if parsed.object_type in _PREREQ_EXEMPT_TYPES:
+            logger.info(
+                "  ○ PREREQ_EXEMPT: %s %s [%s]",
+                parsed.object_type.value,
+                parsed.qualified_name,
+                basename,
+            )
+            results.append(
+                ObjectDeployResult(
+                    database_name=parsed.database_name,
+                    object_name=parsed.object_name,
+                    object_type=parsed.object_type,
+                    state=DeployState.SKIPPED,
+                    ddl_file=basename,
+                    deploy_intent=parsed.deploy_intent,
+                    message=(
+                        f"PREREQ_EXEMPT: {parsed.object_type.value} creation "
+                        f"validated by preflight (rights + parent existence). "
+                        f"EXPLAIN would fail for in-package hierarchies where "
+                        f"the parent does not yet exist on the target — this "
+                        f"is a guaranteed false failure, not a real error."
                     ),
                 )
             )
