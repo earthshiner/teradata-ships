@@ -514,6 +514,52 @@ class TestIngestDirectory:
 
         assert result.multiset_injected == 1
 
+    def test_ingest_sqlj_install_script_uses_sjr_extension(
+        self, tmp_path, tmp_project
+    ):
+        """A SQL file containing CALL SQLJ.INSTALL_JAR(...) is classified as
+        JAR but the staged file gets ``.sjr`` (SQLJ Runtime install
+        script), NOT ``.jar``. The latter is reserved for actual binary
+        Java archives.
+
+        Regression test for the GCFR_UT_Install_Jar.ddl case where a
+        legacy DDL extension was being remapped to ``.jar``,
+        misleadingly suggesting a binary archive.
+        """
+        src = tmp_path / "source"
+        src.mkdir()
+        # User's actual file contents (anonymised). Source extension
+        # is .ddl (legacy) — SHIPS reclassifies based on content.
+        (src / "GCFR_UT_Install_Jar.ddl").write_text(
+            "DATABASE $GCFR_P_UT;\n"
+            "\n"
+            "CALL SQLJ.INSTALL_JAR("
+            "'CJ!../JAVA/JAR/ExecLargeSqlJ.jar', "
+            "'JAR_EXECUTE_LARGE_SQL', 0);\n"
+            "\n"
+            "CALL SQLJ.INSTALL_JAR("
+            "'CJ!../JAVA/JAR/ExecLargeNOSSqlJ.jar', "
+            "'JAR_EXECUTE_LARGE_NOS_SQL', 0);\n",
+            encoding="utf-8",
+        )
+
+        result = ingest_directory(
+            str(src),
+            str(tmp_project),
+            detect_tokens=False,
+        )
+
+        assert result.classified == 1
+        # Classification stays "JAR" — that's the semantic type
+        assert result.files_placed[0][2] == "JAR"
+        # ...but the staged file extension is .sjr, not .jar
+        dest_path = result.files_placed[0][1]
+        assert dest_path.endswith(".sjr"), (
+            f"Expected .sjr extension; got {dest_path}"
+        )
+        # And it lives under DDL/jar_install (not DDL/JARs)
+        assert "jar_install" in dest_path.replace("\\", "/")
+
     def test_ingest_missing_source_raises(self, tmp_project):
         """Missing source directory raises FileNotFoundError."""
         with pytest.raises(FileNotFoundError):
