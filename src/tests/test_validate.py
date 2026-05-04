@@ -754,6 +754,49 @@ class TestValidateDirectory:
         deploy_issues = [i for i in result.issues if i.rule == "deploy_intent"]
         assert deploy_issues == []
 
+    def test_dynamic_sql_string_literals_do_not_trigger_rules(self, tmp_path):
+        """Regression test for GCFR_FF_TPTExportTmpTbl_Build pattern:
+        a stored procedure that builds CREATE TABLE statements as
+        runtime SQL strings (``'CREATE MULTISET TABLE '||...``) was
+        firing two spurious warnings:
+
+          - ``[set_multiset]``: matched 'CREATE TABLE' inside the
+            string literal as if it were real DDL needing MULTISET.
+          - ``[extension]``: classified the file as TABLE due to
+            the same literal-keyword match, then warned that .spl
+            isn't .tbl.
+
+        Both fixed by stripping string literals before pattern
+        matching, plus reordering validate's classifier so
+        PROCEDURE is checked before TABLE."""
+        ddl_dir = tmp_path / "DDL" / "procedures"
+        ddl_dir.mkdir(parents=True)
+        (ddl_dir / "{{X}}.foo.spl").write_text(
+            "CREATE PROCEDURE {{X}}.foo (IN iName VARCHAR(128))\n"
+            "MAIN:\n"
+            "BEGIN\n"
+            "    DECLARE vSQL VARCHAR(1000);\n"
+            "    SET vSQL = 'DROP TABLE ' || iName;\n"
+            "    SET vSQL = 'CREATE MULTISET TABLE ' || iName "
+            "|| ' (id INT)';\n"
+            "    SET vSQL = 'CREATE TABLE ' || iName "
+            "|| ' (id INT)';  /* no MULTISET in this literal */\n"
+            "    CALL DBC.SysExecSQL(:vSQL);\n"
+            "END MAIN;\n",
+            encoding="utf-8",
+        )
+
+        result = validate_directory(str(tmp_path))
+
+        relevant = [i for i in result.issues if "foo.spl" in i.file]
+        # The two specific warnings the user reported must NOT fire
+        bug_rules = {"set_multiset", "extension"}
+        triggered = {i.rule for i in relevant if i.rule in bug_rules}
+        assert triggered == set(), (
+            f"String-literal CREATE TABLE triggered: {triggered}. "
+            f"All issues: {[(i.rule, i.message) for i in relevant]}"
+        )
+
     def test_block_comment_keywords_do_not_trigger_rules(self, tmp_path):
         """Regression test for the GCFR_FF_IMGTableDelta_Create.spl
         report: a procedure with a multi-line ``/* purpose: ... */``
