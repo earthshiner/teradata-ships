@@ -212,13 +212,30 @@ class IngestResult:
     Outcome of ingesting DDL files into a project.
 
     Attributes:
-        total_files:       Files scanned in source directory.
-        classified:        Successfully classified and placed.
-        unclassified:      Could not determine object type.
-        token_candidates:  Hardcoded names detected as token candidates.
-        files_placed:      List of (source, destination, type) tuples.
-        warnings:          Non-fatal issues.
-        errors:            Fatal issues.
+        total_files:           Files scanned in source directory.
+        classified:            Successfully classified and placed.
+        unclassified:          Could not determine object type.
+        token_candidates:      Hardcoded names detected as token candidates.
+        files_placed:          List of (source, destination, type) tuples.
+        warnings:              Non-fatal issues.
+        errors:                Fatal issues.
+        classification_warnings:
+                               Per-file diagnostics from the rich
+                               classifier — filename mismatches,
+                               unrecognised externals, etc. Surfaced
+                               in the harvest banner so users can act
+                               on them at harvest time.
+        external_references:   Map of staged-file path to the list of
+                               external file references discovered
+                               (C source/header paths for FUNCTION_C,
+                               JAR aliases for PROCEDURE_JAVA). The
+                               deployer can use this to bundle / order
+                               dependencies.
+        subtypes:              Map of staged-file path to its rich
+                               sub-type (FUNCTION_C, PROCEDURE_JAVA,
+                               etc.). Files without a sub-type are
+                               omitted; the base type lives in
+                               files_placed.
     """
 
     total_files: int = 0
@@ -232,6 +249,9 @@ class IngestResult:
     warnings: List[str] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
     unclassified_files: List[str] = field(default_factory=list)
+    classification_warnings: List[str] = field(default_factory=list)
+    external_references: Dict[str, List[str]] = field(default_factory=dict)
+    subtypes: Dict[str, str] = field(default_factory=dict)
 
 
 def ingest_directory(
@@ -300,6 +320,8 @@ def ingest_directory(
             # processed and placed as a separate eponymous file.
             statements = _split_multi_statement(raw_content, src_path)
 
+            from td_release_packager.classifier import classify, base_type
+
             for content in statements:
                 # Strip comments for safe classification and name
                 # extraction — prevents false matches from DDL keywords
@@ -308,13 +330,22 @@ def ingest_directory(
                 # Original content is preserved for file output.
                 clean = _strip_comments(content)
 
-                # -- Classify --
-                obj_type = _classify_ddl(clean)
+                # -- Classify (rich) --
+                # Pass the source path so the classifier can detect
+                # filename-vs-content mismatches and surface them in
+                # the per-file warnings.
+                classification = classify(path=src_path, content=clean)
+                obj_subtype = classification.type
+                obj_type = base_type(obj_subtype)
+                # Surface filename-mismatch and unrecognised-external
+                # warnings to the harvest banner for user attention.
+                rel_path = os.path.relpath(src_path, source_dir)
+                for w in classification.warnings:
+                    result.classification_warnings.append(f"{rel_path}: {w}")
+
                 if obj_type is None:
                     result.unclassified += 1
-                    result.unclassified_files.append(
-                        os.path.relpath(src_path, source_dir)
-                    )
+                    result.unclassified_files.append(rel_path)
                     result.warnings.append(
                         f"Could not classify: {os.path.basename(src_path)}"
                     )
@@ -455,13 +486,25 @@ def ingest_directory(
                     f.write(content)
 
                 result.classified += 1
+                rel_dest = os.path.relpath(dest_path, project_dir)
                 result.files_placed.append(
                     (
                         os.path.relpath(src_path, source_dir),
-                        os.path.relpath(dest_path, project_dir),
+                        rel_dest,
                         obj_type,
                     )
                 )
+                # Record sub-type + external refs against the staged
+                # destination path so downstream stages (deployer,
+                # explain) can resolve them. Only persist sub-types
+                # when they differ from the base — keeps the dict
+                # focused on dialect distinctions.
+                if obj_subtype is not None and obj_subtype != obj_type:
+                    result.subtypes[rel_dest] = obj_subtype
+                if classification.related_files:
+                    result.external_references[rel_dest] = list(
+                        classification.related_files
+                    )
 
                 logger.debug(
                     "Ingested: %s → %s (%s)",
@@ -717,20 +760,26 @@ def _strip_comments(content: str) -> str:
 
 def _classify_ddl(content: str) -> Optional[str]:
     """
-    Classify DDL content by object type.
+    Classify DDL content by object type — backward-compat shim.
 
-    Tests patterns in specificity order.
+    Delegates to ``td_release_packager.classifier.classify`` and
+    returns the BASE type so existing call sites that index into
+    ``_TYPE_TO_SUBDIR`` / ``_TYPE_TO_EXT`` keep working. Callers
+    that want sub-types (FUNCTION_C, PROCEDURE_JAVA), confidence,
+    external references, or filename-mismatch warnings should call
+    ``classifier.classify(path, content)`` directly.
 
     Args:
         content: The DDL file content.
 
     Returns:
-        Object type string, or None if unclassifiable.
+        Base object type string (TABLE, VIEW, FUNCTION, PROCEDURE,
+        ...), or None if unclassifiable.
     """
-    for pattern, obj_type in _CLASSIFY_PATTERNS:
-        if pattern.search(content):
-            return obj_type
-    return None
+    from td_release_packager.classifier import classify, base_type
+
+    result = classify(path="", content=content)
+    return base_type(result.type)
 
 
 def _extract_qualified_name(content: str) -> Tuple[Optional[str], Optional[str]]:

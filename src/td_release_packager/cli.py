@@ -898,6 +898,44 @@ def _cmd_ingest(args):
             for w in result.warnings:
                 print(f"    ⚠ {w}")
 
+        # -- Classification warnings (from the rich classifier) --
+        # Filename mismatches and unrecognised externals get their
+        # own section so they don't drown in the generic warnings
+        # list. These are the "you're going to want to act on this"
+        # diagnostics — surface them prominently.
+        if result.classification_warnings:
+            print("\n  Classification warnings:")
+            for w in result.classification_warnings:
+                print(f"    ⚠ {w}")
+
+        # -- Sub-types detected --
+        # Show counts per sub-type so users see at a glance how
+        # many C UDFs / Java procedures the harvester recognised.
+        if result.subtypes:
+            from collections import Counter
+
+            subtype_counts = Counter(result.subtypes.values())
+            print("\n  Sub-types detected:")
+            for subtype, count in sorted(subtype_counts.items()):
+                print(f"    {subtype:20s} {count}")
+
+        # -- External references --
+        # FUNCTION_C → .c/.h paths; PROCEDURE_JAVA → JAR alias.
+        # Capped to keep banner short — full list is in the
+        # decisions.json once item 4 of the orchestrator wires
+        # ingest into the recording context.
+        if result.external_references:
+            print("\n  External references discovered:")
+            for staged_path, refs in sorted(
+                result.external_references.items()
+            )[:5]:
+                print(f"    {staged_path}")
+                for ref in refs:
+                    print(f"        → {ref}")
+            extra = len(result.external_references) - 5
+            if extra > 0:
+                print(f"    ... and {extra} more file(s) with externals.")
+
         if result.errors:
             print("\n  Errors:")
             for e in result.errors:
