@@ -54,7 +54,13 @@ DEFAULT_RULES: Dict[str, str] = {
     "deploy_intent": "ERROR",
     "one_object": "WARNING",
     "eponymous": "WARNING",
-    "extension": "WARNING",
+    # Extension is ERROR, not WARNING. A staged file whose
+    # extension disagrees with its content is the package and the
+    # metadata lying to each other — the deployer and any
+    # automation reading the payload have to be able to TRUST that
+    # *.tbl contains a table, *.spl contains a procedure, etc.
+    # Catching the lie at inspect time is the whole point.
+    "extension": "ERROR",
     "type_suffix": "ERROR",
     "hardcoded_name": "WARNING",
     "keyword_case": "WARNING",
