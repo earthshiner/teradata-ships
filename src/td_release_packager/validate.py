@@ -391,6 +391,38 @@ _LEADING_REPLACE_RE = re.compile(
 # -- Token detection --
 _TOKEN_RE = re.compile(r"\{\{([A-Za-z_][A-Za-z0-9_-]*)\}\}")
 
+# -- Comment stripping ------------------------------------------
+# Position-preserving: each comment character becomes a space
+# (newlines preserved), so line numbers in error messages remain
+# accurate when checks scan the cleaned content.
+#
+# Why this matters: rules like one_object, db_qualifier, multiset,
+# eponymous, and extension all run regex patterns against the file
+# content. Without comment stripping, words like "truncates" or
+# "CREATE TABLE" appearing inside ``/* purpose: ... */`` block
+# headers (extremely common in real DDL files) cause spurious
+# warnings — the rules think there are extra DDL statements,
+# extra unqualified references, and so on.
+
+
+def _strip_sql_comments(content: str) -> str:
+    """Replace SQL block and line comments with same-length spaces.
+
+    Block comments (``/* ... */``) and line comments (``-- ...``)
+    are blanked character-for-character. Newlines are preserved so
+    line numbers in any subsequent error messages stay correct.
+    """
+    def _blank(m: "re.Match") -> str:
+        text = m.group(0)
+        return "".join(" " if c != "\n" else "\n" for c in text)
+
+    # Block comments first — line comments inside block comments
+    # get blanked along with the surrounding /* */ characters.
+    no_block = re.sub(r"/\*.*?\*/", _blank, content, flags=re.DOTALL)
+    no_line = re.sub(r"--[^\n]*", _blank, no_block)
+    return no_line
+
+
 # -- Multi-DDL-statement detection --
 # Counts ONLY DDL/DCL statements that "create or change an object" —
 # the verbs the one-object-per-file discipline cares about.
@@ -606,26 +638,33 @@ def validate_directory(
         rel_path = os.path.relpath(file_path, source_dir)
         file_issues = []
 
+        # Strip SQL comments BEFORE running content checks so that
+        # words like "CREATE TABLE" appearing inside /* purpose: */
+        # block headers don't trigger DDL pattern matches. The
+        # stripper preserves newlines so line numbers in any rule's
+        # error message remain accurate.
+        clean = _strip_sql_comments(content)
+
         # -- Run all checks, collect raw issues --
-        file_issues.extend(_check_db_qualifier(rel_path, content))
-        file_issues.extend(_check_multiset(rel_path, content))
-        file_issues.extend(_check_deploy_intent(rel_path, content, strict))
-        file_issues.extend(_check_view_macro_self_reference(rel_path, content))
-        file_issues.extend(_check_one_object(rel_path, content))
-        file_issues.extend(_check_eponymous(rel_path, content, file_path))
-        file_issues.extend(_check_extension(rel_path, content, file_path))
-        file_issues.extend(_check_type_suffixes(rel_path, content))
-        file_issues.extend(_check_hardcoded_names(rel_path, content))
-        file_issues.extend(_check_keyword_case(rel_path, content))
-        file_issues.extend(_check_leading_commas(rel_path, content))
+        file_issues.extend(_check_db_qualifier(rel_path, clean))
+        file_issues.extend(_check_multiset(rel_path, clean))
+        file_issues.extend(_check_deploy_intent(rel_path, clean, strict))
+        file_issues.extend(_check_view_macro_self_reference(rel_path, clean))
+        file_issues.extend(_check_one_object(rel_path, clean))
+        file_issues.extend(_check_eponymous(rel_path, clean, file_path))
+        file_issues.extend(_check_extension(rel_path, clean, file_path))
+        file_issues.extend(_check_type_suffixes(rel_path, clean))
+        file_issues.extend(_check_hardcoded_names(rel_path, clean))
+        file_issues.extend(_check_keyword_case(rel_path, clean))
+        file_issues.extend(_check_leading_commas(rel_path, clean))
         file_issues.extend(
-            _check_object_placement(rel_path, content, file_path, placement)
+            _check_object_placement(rel_path, clean, file_path, placement)
         )
         file_issues.extend(
-            _check_public_grant_on_tables(rel_path, content, file_path, placement)
+            _check_public_grant_on_tables(rel_path, clean, file_path, placement)
         )
         file_issues.extend(
-            _check_unmapped_grants(rel_path, content, file_path, placement)
+            _check_unmapped_grants(rel_path, clean, file_path, placement)
         )
 
         # -- Apply rule config: remap severity or drop OFF rules --
