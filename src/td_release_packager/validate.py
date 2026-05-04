@@ -604,11 +604,14 @@ def _normalise_prereq_name(raw: str) -> str:
 def _collect_package_prereqs(source_dir: str) -> set:
     """Pre-pass: collect databases / users CREATEd within the package.
 
-    Walks ``source_dir`` for files that can plausibly host a CREATE
-    DATABASE / CREATE USER statement (``.db``, ``.usr``, plus the
-    generic ``.sql`` / ``.ddl``) and extracts the created name. The
-    resulting set powers the per-file ``intra_package_dependency``
-    check.
+    Walks ``source_dir`` for files that can plausibly host a
+    ``CREATE DATABASE`` / ``CREATE USER`` statement and extracts the
+    created name. The candidate-extension list comes from the
+    central discovery resolver, so any project-specific extension
+    declared in ``ships.yaml``'s ``discovery.extensions`` block is
+    honoured here too — without this, a ``CREATE DATABASE`` in a
+    custom-extension file would silently bypass Phase 1's
+    intra_package_dependency rule.
 
     Comments are stripped before matching so a CREATE DATABASE
     appearing inside a header block is not treated as real DDL.
@@ -622,6 +625,9 @@ def _collect_package_prereqs(source_dir: str) -> set:
         prerequisite-creation statements — in which case the
         per-file rule is silently inactive.
     """
+    from td_release_packager.discovery import resolve_harvest_extensions
+
+    candidate_extensions = resolve_harvest_extensions(project_dir=source_dir)
     prereqs: set = set()
 
     for root, dirs, filenames in os.walk(source_dir):
@@ -630,11 +636,7 @@ def _collect_package_prereqs(source_dir: str) -> set:
             if f.startswith(".") or f.startswith("_"):
                 continue
             ext = os.path.splitext(f)[1].lower()
-            # Generic SQL-bearing extensions can also host CREATE
-            # DATABASE / CREATE USER. ``.bteq`` and ``.btq`` are
-            # included for legacy Teradata codebases that use those
-            # extensions for pure-SQL scripts.
-            if ext not in (".db", ".usr", ".sql", ".ddl", ".bteq", ".btq"):
+            if ext not in candidate_extensions:
                 continue
 
             file_path = os.path.join(root, f)
@@ -724,7 +726,18 @@ def validate_directory(
     # in the same package. Empty set => rule is silently inactive.
     package_prereqs = _collect_package_prereqs(source_dir)
 
-    # Discover files
+    # Discover files. Uses the central resolver so any project-
+    # specific extensions declared in ships.yaml's
+    # ``discovery.extensions`` block are picked up automatically.
+    # ``.jar`` is legacy passthrough — see ingest convention; it's
+    # added on top of the resolver's set so existing packages with
+    # bare .jar references still get linted even though discovery
+    # itself excludes binaries.
+    from td_release_packager.discovery import resolve_harvest_extensions
+
+    extensions = set(resolve_harvest_extensions(project_dir=source_dir))
+    extensions.add(".jar")
+
     files = []
     for root, dirs, filenames in os.walk(source_dir):
         dirs.sort()
@@ -732,37 +745,7 @@ def validate_directory(
             if f.startswith(".") or f.startswith("_"):
                 continue
             ext = os.path.splitext(f)[1].lower()
-            if ext in (
-                ".tbl",
-                ".viw",
-                ".spl",
-                ".mcr",
-                ".fnc",
-                ".trg",
-                ".jix",
-                ".idx",
-                ".db",
-                ".sql",
-                ".ddl",
-                ".map",
-                ".rol",
-                ".prf",
-                ".auth",
-                ".fsvr",
-                ".sto",
-                ".sjr",
-                ".jar",  # legacy passthrough — see ingest convention
-                ".dcl",
-                ".usr",
-                # BTEQ-style extensions used by legacy Teradata
-                # codebases. Treated as generic SQL — content can be
-                # any DDL type (TABLE, VIEW, ...). Without these in
-                # the allowlist, inspect skips the files entirely
-                # and reports zero issues even when there are real
-                # rule violations to catch.
-                ".bteq",
-                ".btq",
-            ):
+            if ext in extensions:
                 files.append(os.path.join(root, f))
 
     result.files_scanned = len(files)
