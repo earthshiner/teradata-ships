@@ -456,3 +456,65 @@ class TestBuildPackageAutoSplitTokenised:
         # Manifests still tied via release_group + requires.
         assert main_manifest.release_group == prereqs_manifest.release_group
         assert main_manifest.requires == [os.path.basename(prereqs_archive)]
+
+
+# ---------------------------------------------------------------
+# Prereq _order.txt uses resolved filenames (not tokens)
+# ---------------------------------------------------------------
+
+
+class TestPrereqOrderResolvedNames:
+    """After build_package runs, the _order.txt inside the prereqs zip
+    must reference the RESOLVED filenames (e.g. PDE_D01_00.db), not
+    the token-form filenames ({{BASE_NODE}}.db) that the harvest wrote.
+    The deployer reads _order.txt to find files; tokenised names would
+    make all entries appear missing."""
+
+    def test_order_txt_uses_resolved_names(self, tmp_project, tmp_path):
+        payload = tmp_project / "payload" / "database"
+        # Two databases where CHILD depends on PARENT.
+        # Alphabetically CHILD sorts before PARENT (B < P) -- so without
+        # dependency ordering, the wrong file would deploy first.
+        (payload / "pre-requisites" / "databases" / "{{CHILD_DB}}.db").write_text(
+            "CREATE DATABASE {{CHILD_DB}} FROM {{PARENT_DB}} AS PERM=0;\n",
+            encoding="utf-8",
+        )
+        (payload / "pre-requisites" / "databases" / "{{PARENT_DB}}.db").write_text(
+            "CREATE DATABASE {{PARENT_DB}} FROM DBC AS PERM=0;\n",
+            encoding="utf-8",
+        )
+
+        # Resolve {{CHILD_DB}} → B_CHILD, {{PARENT_DB}} → P_PARENT
+        # so B_CHILD sorts before P_PARENT alphabetically but must deploy after.
+        props = _properties_for(
+            "DEV", tmp_path,
+            CHILD_DB="B_CHILD",
+            PARENT_DB="P_PARENT",
+        )
+        config = BuildConfig(
+            source_dir=str(tmp_project),
+            environment="DEV",
+            package_name="ships_test",
+            properties_file=str(props),
+            build_number=1,
+            output_dir=str(tmp_path),
+        )
+
+        (main_pair, _companion) = build_package(config)
+        archive = main_pair[0]
+
+        # _order.txt must be present in the prereqs phase of the archive.
+        order_txt = _read_zip_member(archive, "01_pre_requisites/_order.txt")
+
+        # Must use RESOLVED names, not token names.
+        assert "{{PARENT_DB}}" not in order_txt
+        assert "{{CHILD_DB}}" not in order_txt
+        assert "P_PARENT" in order_txt
+        assert "B_CHILD" in order_txt
+
+        # Parent must appear BEFORE child — the whole point of ordering.
+        parent_pos = order_txt.find("P_PARENT")
+        child_pos = order_txt.find("B_CHILD")
+        assert parent_pos < child_pos, (
+            "Parent database must appear before child in _order.txt"
+        )
