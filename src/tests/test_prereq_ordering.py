@@ -108,10 +108,10 @@ class TestEmitPrereqOrder:
             encoding="utf-8",
         )
 
-        ordered = _emit_prereq_order(str(prereq))
+        r = _emit_prereq_order(str(prereq))
 
-        parent_idx = ordered.index("databases/A_PARENT.db")
-        child_idx = ordered.index("databases/B_CHILD.db")
+        parent_idx = r.ordered.index("databases/A_PARENT.db")
+        child_idx = r.ordered.index("databases/B_CHILD.db")
         assert parent_idx < child_idx
 
     def test_three_level_chain(self, tmp_path):
@@ -129,11 +129,11 @@ class TestEmitPrereqOrder:
             encoding="utf-8",
         )
 
-        ordered = _emit_prereq_order(str(prereq))
+        r = _emit_prereq_order(str(prereq))
 
-        assert ordered.index("databases/A_GRANDPARENT.db") \
-             < ordered.index("databases/B_PARENT.db") \
-             < ordered.index("databases/C_CHILD.db")
+        assert r.ordered.index("databases/A_GRANDPARENT.db") \
+             < r.ordered.index("databases/B_PARENT.db") \
+             < r.ordered.index("databases/C_CHILD.db")
 
     def test_user_dependent_on_database(self, tmp_path):
         """A user whose parent database is in the same package: DB first."""
@@ -146,10 +146,10 @@ class TestEmitPrereqOrder:
             encoding="utf-8",
         )
 
-        ordered = _emit_prereq_order(str(prereq))
+        r = _emit_prereq_order(str(prereq))
 
-        db_idx = ordered.index("databases/ParentDB.db")
-        usr_idx = ordered.index("users/ChildUser.usr")
+        db_idx = r.ordered.index("databases/ParentDB.db")
+        usr_idx = r.ordered.index("users/ChildUser.usr")
         assert db_idx < usr_idx
 
     def test_external_parent_not_in_package(self, tmp_path):
@@ -161,9 +161,9 @@ class TestEmitPrereqOrder:
             "CREATE DATABASE MyDB FROM DBC AS PERM=0;", encoding="utf-8"
         )
 
-        ordered = _emit_prereq_order(str(prereq))
+        r = _emit_prereq_order(str(prereq))
 
-        assert ordered == ["databases/MyDB.db"]
+        assert r.ordered == ["databases/MyDB.db"]
 
     def test_order_txt_written(self, tmp_path):
         """``_order.txt`` is written to prereq_dir root."""
@@ -190,8 +190,9 @@ class TestEmitPrereqOrder:
 
     def test_empty_prereq_dir_returns_empty(self, tmp_path):
         prereq = _make_prereq_dir(tmp_path)
-        ordered = _emit_prereq_order(str(prereq))
-        assert ordered == []
+        r = _emit_prereq_order(str(prereq))
+        assert r.ordered == []
+        assert r.unresolvable == []
 
     def test_all_files_included_in_order(self, tmp_path):
         """Every file placed is represented in the ordering."""
@@ -205,9 +206,42 @@ class TestEmitPrereqOrder:
             sub, name = rel.split("/")
             (prereq / sub / name).write_text(ddl, encoding="utf-8")
 
-        ordered = _emit_prereq_order(str(prereq))
+        r = _emit_prereq_order(str(prereq))
 
-        assert set(ordered) == {"databases/A.db", "databases/B.db", "users/U.usr"}
+        assert set(r.ordered) == {"databases/A.db", "databases/B.db", "users/U.usr"}
+
+    def test_no_from_clause_reported_as_unresolvable(self, tmp_path):
+        """A file with no FROM clause is included in the ordering but
+        listed as unresolvable. We cannot guarantee its position is
+        correct — we warn so the DBA can verify manually."""
+        prereq = _make_prereq_dir(tmp_path)
+        (prereq / "databases" / "Mystery.db").write_text(
+            "CREATE DATABASE Mystery AS PERM=0;",  # no FROM clause
+            encoding="utf-8",
+        )
+
+        r = _emit_prereq_order(str(prereq))
+
+        assert len(r.unresolvable) == 1
+        assert "Mystery.db" in r.unresolvable[0][0]
+        # Still in the ordered list so the deployer runs it.
+        assert any("Mystery.db" in p for p in r.ordered)
+
+    def test_unresolvable_warning_appears_in_order_txt(self, tmp_path):
+        """The WARNING block appears in _order.txt so the DBA sees
+        the caveat when they inspect the file. We cannot silently
+        pretend the order is correct when we don't know."""
+        prereq = _make_prereq_dir(tmp_path)
+        (prereq / "databases" / "Mystery.db").write_text(
+            "CREATE DATABASE Mystery AS PERM=0;",
+            encoding="utf-8",
+        )
+
+        _emit_prereq_order(str(prereq))
+
+        content = (prereq / "_order.txt").read_text(encoding="utf-8")
+        assert "WARNING" in content
+        assert "Mystery.db" in content
 
 
 # ---------------------------------------------------------------
@@ -299,3 +333,26 @@ class TestIngestProducesPrereqOrder:
             / "payload" / "database" / "pre-requisites" / "_order.txt"
         )
         assert not order_file.exists()
+
+    def test_unresolvable_file_produces_harvest_warning(self, tmp_path):
+        """When a DATABASE file has no FROM clause, a classification
+        warning appears in the harvest result so the DBA knows the
+        ordering cannot be guaranteed. Acknowledging the limit is
+        more honest than silently placing the file and hoping for
+        the best."""
+        project = _make_project(tmp_path)
+        source = tmp_path / "source"
+        source.mkdir()
+        (source / "Mystery.db").write_text(
+            "CREATE DATABASE Mystery AS PERM=0;\n",  # no FROM clause
+            encoding="utf-8",
+        )
+
+        result = ingest_directory(str(source), str(project), detect_tokens=False)
+
+        unresolvable_warnings = [
+            w for w in result.classification_warnings
+            if "UNRESOLVED" in w
+        ]
+        assert len(unresolvable_warnings) == 1
+        assert "Mystery.db" in unresolvable_warnings[0]
