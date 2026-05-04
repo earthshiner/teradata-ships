@@ -223,16 +223,35 @@ EXTENSION_TO_EXPECTED: Dict[str, Optional[Set[str]]] = {
 
 #: Compiled patterns paired with their detected type. Specific
 #: patterns must come first — the first match wins.
+#:
+#: All verbs are anchored to the **start of a SQL statement**
+#: via ``^\s*`` plus ``re.MULTILINE``. Anchoring exists to prevent
+#: a verb appearing inside another statement (e.g. ``GRANT CREATE
+#: PROCEDURE ON db TO user``) being mistaken for the file's primary
+#: object. Without the anchor, that file classifies as PROCEDURE
+#: (the substring ``CREATE PROCEDURE`` matches mid-line) instead
+#: of GRANT — and lands in ``DDL/procedures/<name>.spl``, miles from
+#: where the operator expects to find a permissions script.
+#:
+#: Multi-line bodies (CREATE PROCEDURE ... BEGIN ... END;) still
+#: match because the ``^\s*CREATE PROCEDURE`` anchor only requires
+#: line-leading position for the OPENING verb — the body that
+#: follows can span any number of lines.
+_STMT_FLAGS = re.IGNORECASE | re.MULTILINE
 _CLASSIFY_PATTERNS: List[Tuple[re.Pattern, str]] = [
     # Indexes (most specific first)
-    (re.compile(r"CREATE\s+JOIN\s+INDEX\b", re.I), "JOIN_INDEX"),
-    (re.compile(r"CREATE\s+HASH\s+INDEX\b", re.I), "HASH_INDEX"),
-    (re.compile(r"CREATE\s+(?:UNIQUE\s+)?INDEX\b", re.I), "INDEX"),
-    # SCRIPT_TABLE_OPERATOR (uses FUNCTION syntax but with TABLE OPERATOR)
+    (re.compile(r"^\s*CREATE\s+JOIN\s+INDEX\b", _STMT_FLAGS), "JOIN_INDEX"),
+    (re.compile(r"^\s*CREATE\s+HASH\s+INDEX\b", _STMT_FLAGS), "HASH_INDEX"),
+    (re.compile(r"^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\b", _STMT_FLAGS), "INDEX"),
+    # SCRIPT_TABLE_OPERATOR (uses FUNCTION syntax but with TABLE OPERATOR).
+    # DOTALL is needed for the ``.*?`` to span the FUNCTION header onto
+    # the line containing TABLE OPERATOR; the leading ^\s* still anchors
+    # the opening CREATE/REPLACE FUNCTION to a line start.
     (
         re.compile(
-            r"(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b.*?TABLE\s+OPERATOR",
-            re.I | re.DOTALL,
+            r"^\s*(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b"
+            r".*?TABLE\s+OPERATOR",
+            re.IGNORECASE | re.MULTILINE | re.DOTALL,
         ),
         "SCRIPT_TABLE_OPERATOR",
     ),
@@ -241,46 +260,54 @@ _CLASSIFY_PATTERNS: List[Tuple[re.Pattern, str]] = [
     # matched first). The pattern below catches both.
     (
         re.compile(
-            r"(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b",
-            re.I,
+            r"^\s*(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b",
+            _STMT_FLAGS,
         ),
         "FUNCTION",
     ),
     # PROCEDURE sub-types — sub-typing via post-process LANGUAGE check
-    (re.compile(r"(?:CREATE|REPLACE)\s+PROCEDURE\b", re.I), "PROCEDURE"),
+    (re.compile(r"^\s*(?:CREATE|REPLACE)\s+PROCEDURE\b", _STMT_FLAGS), "PROCEDURE"),
     # Standard DDL objects
     (
         re.compile(
-            r"(?:CREATE|REPLACE)\s+(?:MULTISET|SET)?\s*"
+            r"^\s*(?:CREATE|REPLACE)\s+(?:MULTISET|SET)?\s*"
             r"(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?"
             r"(?:TRACE\s+)?TABLE\b",
-            re.I,
+            _STMT_FLAGS,
         ),
         "TABLE",
     ),
-    (re.compile(r"(?:CREATE|REPLACE)\s+VIEW\b", re.I), "VIEW"),
-    (re.compile(r"(?:CREATE\s+|REPLACE\s+)MACRO\b", re.I), "MACRO"),
-    (re.compile(r"(?:CREATE|REPLACE)\s+TRIGGER\b", re.I), "TRIGGER"),
+    (re.compile(r"^\s*(?:CREATE|REPLACE)\s+VIEW\b", _STMT_FLAGS), "VIEW"),
+    (re.compile(r"^\s*(?:CREATE\s+|REPLACE\s+)MACRO\b", _STMT_FLAGS), "MACRO"),
+    (re.compile(r"^\s*(?:CREATE|REPLACE)\s+TRIGGER\b", _STMT_FLAGS), "TRIGGER"),
     # Pre-requisites
-    (re.compile(r"CREATE\s+DATABASE\b", re.I), "DATABASE"),
-    (re.compile(r"CREATE\s+USER\b", re.I), "USER"),
+    (re.compile(r"^\s*CREATE\s+DATABASE\b", _STMT_FLAGS), "DATABASE"),
+    (re.compile(r"^\s*CREATE\s+USER\b", _STMT_FLAGS), "USER"),
     # System-scoped objects
-    (re.compile(r"CREATE\s+MAP\b", re.I), "MAP"),
-    (re.compile(r"CREATE\s+PROFILE\b", re.I), "PROFILE"),
-    (re.compile(r"CREATE\s+ROLE\b", re.I), "ROLE"),
-    (re.compile(r"CREATE\s+AUTHORIZATION\b", re.I), "AUTHORIZATION"),
-    (re.compile(r"CREATE\s+FOREIGN\s+SERVER\b", re.I), "FOREIGN_SERVER"),
+    (re.compile(r"^\s*CREATE\s+MAP\b", _STMT_FLAGS), "MAP"),
+    (re.compile(r"^\s*CREATE\s+PROFILE\b", _STMT_FLAGS), "PROFILE"),
+    (re.compile(r"^\s*CREATE\s+ROLE\b", _STMT_FLAGS), "ROLE"),
+    (re.compile(r"^\s*CREATE\s+AUTHORIZATION\b", _STMT_FLAGS), "AUTHORIZATION"),
+    (re.compile(r"^\s*CREATE\s+FOREIGN\s+SERVER\b", _STMT_FLAGS), "FOREIGN_SERVER"),
     # JAR install scripts
     (
-        re.compile(r"CALL\s+SQLJ\s*\.\s*(?:INSTALL_JAR|REPLACE_JAR)\s*\(", re.I),
+        re.compile(
+            r"^\s*CALL\s+SQLJ\s*\.\s*(?:INSTALL_JAR|REPLACE_JAR)\s*\(",
+            _STMT_FLAGS,
+        ),
         "JAR",
     ),
     # Metadata + statistics
-    (re.compile(r"\bCOMMENT\s+ON\b", re.I), "COMMENT"),
-    (re.compile(r"\bCOLLECT\s+STATISTICS\b", re.I), "STATISTICS"),
-    # DCL (least specific)
-    (re.compile(r"\bGRANT\b", re.I), "GRANT"),
-    (re.compile(r"\bREVOKE\b", re.I), "REVOKE"),
+    (re.compile(r"^\s*COMMENT\s+ON\b", _STMT_FLAGS), "COMMENT"),
+    (re.compile(r"^\s*COLLECT\s+STATISTICS\b", _STMT_FLAGS), "STATISTICS"),
+    # DCL (least specific). Anchoring matters MORE here than for the
+    # CREATE/REPLACE patterns — a real procedure body can legally
+    # contain a string literal like ``EXECUTE IMMEDIATE 'GRANT ...'``,
+    # which is stripped by the caller, but if any GRANT survived in
+    # the body we'd still avoid mis-classifying because the GRANT
+    # verb wouldn't be at line-start.
+    (re.compile(r"^\s*GRANT\b", _STMT_FLAGS), "GRANT"),
+    (re.compile(r"^\s*REVOKE\b", _STMT_FLAGS), "REVOKE"),
 ]
 
 

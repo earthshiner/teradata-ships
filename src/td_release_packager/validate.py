@@ -323,46 +323,81 @@ _EXPECTED_EXT = {
 
 # -- Classification patterns (mirrors classifier.py order) --
 #
-# CRITICAL ORDERING NOTE: PROCEDURE / FUNCTION / MACRO MUST come
-# before TABLE. Stored procedures often contain dynamic-SQL string
-# literals like ``'CREATE MULTISET TABLE '||...`` for runtime
-# table creation. Even with string-literal stripping enabled, the
-# defense-in-depth ordering means a procedure file always
-# classifies as PROCEDURE — not as TABLE due to a string-literal
-# match further down.
+# All verbs are anchored to the **start of a SQL statement** via
+# ``^\s*`` plus ``re.MULTILINE``. Without the anchor, a file like
+# ``GRANT CREATE PROCEDURE, ALTER PROCEDURE ON db TO user;`` would
+# misclassify as PROCEDURE because the substring ``CREATE PROCEDURE``
+# matches mid-line. With the anchor, only the line-leading verb wins.
+#
+# CRITICAL ORDERING NOTE: PROCEDURE / FUNCTION / MACRO are still
+# checked before TABLE. Anchoring covers most of the dynamic-SQL
+# defence cases, but the ordering is kept as belt-and-braces against
+# pathological multi-statement files.
+_VAL_STMT_FLAGS = re.IGNORECASE | re.MULTILINE
 _CLASSIFY_PATTERNS = [
-    (re.compile(r"CREATE\s+JOIN\s+INDEX\b", re.I), "JOIN_INDEX"),
-    (re.compile(r"CREATE\s+HASH\s+INDEX\b", re.I), "HASH_INDEX"),
-    (re.compile(r"CREATE\s+(?:UNIQUE\s+)?INDEX\b", re.I), "INDEX"),
+    (re.compile(r"^\s*CREATE\s+JOIN\s+INDEX\b", _VAL_STMT_FLAGS), "JOIN_INDEX"),
+    (re.compile(r"^\s*CREATE\s+HASH\s+INDEX\b", _VAL_STMT_FLAGS), "HASH_INDEX"),
+    (re.compile(r"^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\b", _VAL_STMT_FLAGS), "INDEX"),
     (
         re.compile(
-            r"(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b.*?TABLE\s+OPERATOR",
-            re.I | re.DOTALL,
+            r"^\s*(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b"
+            r".*?TABLE\s+OPERATOR",
+            re.IGNORECASE | re.MULTILINE | re.DOTALL,
         ),
         "SCRIPT_TABLE_OPERATOR",
     ),
-    # Procedure-style first — these have bodies that can contain
-    # string-literal SQL building CREATE TABLE etc.
-    (re.compile(r"(?:CREATE\s+|REPLACE\s+)PROCEDURE\b", re.I), "PROCEDURE"),
+    # Procedure-style first — defence in depth alongside the line-start
+    # anchor; procedure bodies can contain dynamic-SQL string literals
+    # building CREATE TABLE etc.
     (
-        re.compile(r"(?:CREATE\s+|REPLACE\s+)(?:SPECIFIC\s+)?FUNCTION\b", re.I),
+        re.compile(r"^\s*(?:CREATE|REPLACE)\s+PROCEDURE\b", _VAL_STMT_FLAGS),
+        "PROCEDURE",
+    ),
+    (
+        re.compile(
+            r"^\s*(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b",
+            _VAL_STMT_FLAGS,
+        ),
         "FUNCTION",
     ),
-    (re.compile(r"(?:CREATE\s+|REPLACE\s+)MACRO\b", re.I), "MACRO"),
-    (re.compile(r"(?:CREATE|REPLACE)\s+TRIGGER\b", re.I), "TRIGGER"),
+    (
+        re.compile(r"^\s*(?:CREATE|REPLACE)\s+MACRO\b", _VAL_STMT_FLAGS),
+        "MACRO",
+    ),
+    (
+        re.compile(r"^\s*(?:CREATE|REPLACE)\s+TRIGGER\b", _VAL_STMT_FLAGS),
+        "TRIGGER",
+    ),
     # Plain DDL types — only reached if no procedural type matched.
     (
         re.compile(
-            r"(?:CREATE|REPLACE)\s+(?:MULTISET|SET)?\s*(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?(?:TRACE\s+)?TABLE\b",
-            re.I,
+            r"^\s*(?:CREATE|REPLACE)\s+(?:MULTISET|SET)?\s*"
+            r"(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?"
+            r"(?:TRACE\s+)?TABLE\b",
+            _VAL_STMT_FLAGS,
         ),
         "TABLE",
     ),
-    (re.compile(r"(?:CREATE|REPLACE)\s+VIEW\b", re.I), "VIEW"),
-    (re.compile(r"CREATE\s+MAP\b", re.I), "MAP"),
-    (re.compile(r"CREATE\s+AUTHORIZATION\b", re.I), "AUTHORIZATION"),
-    (re.compile(r"CREATE\s+FOREIGN\s+SERVER\b", re.I), "FOREIGN_SERVER"),
-    (re.compile(r"CALL\s+SQLJ\s*\.\s*(?:INSTALL_JAR|REPLACE_JAR)\s*\(", re.I), "JAR"),
+    (
+        re.compile(r"^\s*(?:CREATE|REPLACE)\s+VIEW\b", _VAL_STMT_FLAGS),
+        "VIEW",
+    ),
+    (re.compile(r"^\s*CREATE\s+MAP\b", _VAL_STMT_FLAGS), "MAP"),
+    (
+        re.compile(r"^\s*CREATE\s+AUTHORIZATION\b", _VAL_STMT_FLAGS),
+        "AUTHORIZATION",
+    ),
+    (
+        re.compile(r"^\s*CREATE\s+FOREIGN\s+SERVER\b", _VAL_STMT_FLAGS),
+        "FOREIGN_SERVER",
+    ),
+    (
+        re.compile(
+            r"^\s*CALL\s+SQLJ\s*\.\s*(?:INSTALL_JAR|REPLACE_JAR)\s*\(",
+            _VAL_STMT_FLAGS,
+        ),
+        "JAR",
+    ),
 ]
 
 # -- System-scope types: no database qualifier, no tokens expected --
