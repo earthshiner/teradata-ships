@@ -25,6 +25,7 @@ import os
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from td_release_packager.legacy_placeholders import (
@@ -563,6 +564,27 @@ def ingest_directory(
     if detect_tokens:
         result.token_candidates = _build_token_candidates(all_db_names)
 
+    # -- Emit pre-requisite deployment order --
+    # After all DATABASE and USER files are placed, compute a
+    # topological ordering based on their FROM <parent> dependencies
+    # and write _order.txt so the deployer processes parents first.
+    # Without this, a child database or user can be deployed before
+    # its parent exists on the target, causing the deploy to fail.
+    prereq_placed = any(
+        obj_type in ("DATABASE", "USER")
+        for _, _, obj_type in result.files_placed
+    )
+    if prereq_placed:
+        prereq_dir = os.path.join(payload_base, "pre-requisites")
+        if os.path.isdir(prereq_dir):
+            ordered = _emit_prereq_order(prereq_dir)
+            if ordered:
+                logger.info(
+                    "Pre-requisites: dependency-ordered %d file(s) → "
+                    "pre-requisites/_order.txt",
+                    len(ordered),
+                )
+
     logger.info(
         "Ingest complete: %d classified, %d unclassified, "
         "%d overwritten, %d skipped (existing), "
@@ -934,6 +956,143 @@ def _extract_specific_function_name(
 # in the SHIPS context and must be stripped before packaging so
 # the deployer can parse the underlying SQL.
 _BTEQ_LINE_RE = re.compile(r"^\s*\.[A-Za-z][^\n]*$", re.MULTILINE)
+
+# -- Pre-requisite parent extraction ----------------------------
+# Teradata syntax:
+#   CREATE DATABASE x FROM y AS ...
+#   CREATE USER     x FROM y AS ...
+# The FROM clause names the parent database/user, which must
+# physically exist on the target BEFORE x can be created. Multiple
+# objects may form a hierarchy (y1 → y2 → y3 → DBC), so the
+# deployer must process them in dependency order. This regex
+# extracts the names so we can topologically sort the payload files.
+_PREREQ_FROM_RE = re.compile(
+    r"^\s*CREATE\s+(?:DATABASE|USER)\s+"
+    r"(\{\{[A-Za-z_]\w*\}\}|['\"]?[A-Za-z_]\w*['\"]?)"  # name: {{TOKEN}}, 'quoted', or bare
+    r"\s+FROM\s+"
+    r"(\{\{[A-Za-z_]\w*\}\}|['\"]?[A-Za-z_]\w*['\"]?)",  # parent: same
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _extract_prereq_parent(content: str) -> Optional[Tuple[str, str]]:
+    """Extract (object_name, parent_name) from a CREATE DATABASE/USER statement.
+
+    Teradata creates databases and users under a parent via the ``FROM``
+    clause. The parent must already exist on the target. This function
+    extracts both names so harvest can compute the correct deployment
+    order across all files in the prereqs phase.
+
+    Args:
+        content: Cleaned (BTEQ-stripped) content of a ``.db`` or ``.usr``
+                 file.
+
+    Returns:
+        ``(name, parent)`` tuple, both as upper-cased strings so
+        comparison is case-insensitive (Teradata identifiers are
+        case-insensitive by default). ``None`` when no FROM clause is
+        found (e.g. the file may have incomplete DDL).
+    """
+    m = _PREREQ_FROM_RE.search(content)
+    if not m:
+        return None
+    name = m.group(1).strip("'\"").upper()
+    parent = m.group(2).strip("'\"").upper()
+    return (name, parent)
+
+
+def _emit_prereq_order(prereq_dir: str) -> List[str]:
+    """Topologically sort pre-requisite files by their FROM dependencies
+    and write ``_order.txt`` into ``prereq_dir``.
+
+    Reads every ``.db`` and ``.usr`` file in ``prereq_dir/databases/``
+    and ``prereq_dir/users/``, extracts the ``CREATE ... FROM <parent>``
+    dependency for each, and produces a topological ordering where every
+    parent deploys before its child.
+
+    Files whose parent is NOT found in the package (parent already exists
+    on the target) are treated as having no in-package dependency and are
+    scheduled first.
+
+    The ordering is written to ``prereq_dir/_order.txt`` with relative
+    paths (``databases/X.db``, ``users/Y.usr``) compatible with the
+    deployer's ``read_order_file`` helper.
+
+    Args:
+        prereq_dir: Absolute path to the ``pre-requisites/`` directory
+                    inside the SHIPS project payload.
+
+    Returns:
+        Ordered list of relative paths (relative to ``prereq_dir``).
+        Empty list when no prereq files were found.
+    """
+    # Collect relative_path, upper-cased name, upper-cased parent
+    entries: list = []
+    for subdir in ("databases", "users"):
+        sub_path = os.path.join(prereq_dir, subdir)
+        if not os.path.isdir(sub_path):
+            continue
+        for filename in sorted(os.listdir(sub_path)):
+            if filename.startswith("_") or filename.startswith("."):
+                continue
+            fp = os.path.join(sub_path, filename)
+            try:
+                content = Path(fp).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            dep = _extract_prereq_parent(content)
+            rel_path = f"{subdir}/{filename}"
+            if dep:
+                name, parent = dep
+                entries.append((rel_path, name, parent))
+            else:
+                entries.append((rel_path, None, None))
+
+    if not entries:
+        return []
+
+    # Build name → relative-path index
+    name_to_rel: dict = {
+        name: rel
+        for rel, name, _ in entries
+        if name is not None
+    }
+
+    # Build adjacency (rel_path → rel_path_of_parent, if in-package)
+    parent_map: dict = {}
+    for rel, name, parent in entries:
+        if parent is not None and parent in name_to_rel:
+            parent_map[rel] = name_to_rel[parent]
+
+    # DFS-based topological sort — visits parent before child
+    ordered: list = []
+    visited: set = set()
+
+    def _visit(rel: str) -> None:
+        if rel in visited:
+            return
+        visited.add(rel)
+        if rel in parent_map:
+            _visit(parent_map[rel])
+        ordered.append(rel)
+
+    for rel, _, _ in entries:
+        _visit(rel)
+
+    # Write _order.txt
+    order_path = os.path.join(prereq_dir, "_order.txt")
+    with open(order_path, "w", encoding="utf-8") as fh:
+        fh.write("# _order.txt — pre-requisites deployment order\n")
+        fh.write("# Generated by SHIPS harvest: parents before children\n")
+        fh.write("# (derived from CREATE DATABASE/USER FROM <parent>)\n")
+        fh.write("#\n")
+        for rel in ordered:
+            fh.write(rel + "\n")
+
+    logger.info(
+        "Pre-requisites order: wrote _order.txt (%d files)", len(ordered)
+    )
+    return ordered
 
 
 def _strip_bteq_commands(content: str) -> Tuple[str, int]:
