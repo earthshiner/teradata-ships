@@ -132,7 +132,9 @@ def _resolve_filename(
     return new_filename
 
 
-def build_package(config: BuildConfig) -> Tuple[str, BuildManifest]:
+def build_package(
+    config: BuildConfig,
+) -> Tuple[Tuple[str, BuildManifest], Optional[Tuple[str, BuildManifest]]]:
     """
     Build a release package from source files and environment properties.
 
@@ -141,7 +143,15 @@ def build_package(config: BuildConfig) -> Tuple[str, BuildManifest]:
                 package name, build number, and properties file.
 
     Returns:
-        Tuple of (archive_path, BuildManifest).
+        ``((main_archive, main_manifest), companion)`` where
+        ``companion`` is either ``None`` (single-zip build, no auto-
+        split needed) or ``(prereqs_archive, prereqs_manifest)`` for
+        an auto-split build.
+
+        The shape is always a 2-tuple — callers always know there is
+        either one archive (companion=None) or a paired bundle
+        (companion populated). When a companion is returned, deploy
+        order is **prereqs first, then main**.
 
     Raises:
         FileNotFoundError: If source directory or properties file missing.
@@ -340,21 +350,284 @@ def build_package(config: BuildConfig) -> Tuple[str, BuildManifest]:
     # -- Phase 11: Generate shell wrappers --
     _generate_shell_wrappers(pkg_dir)
 
-    # -- Phase 12: Archive --
-    archive_path = _archive_package(pkg_dir, config.archive_format)
+    # -- Phase 12: Auto-split decision (intra_package_dependency Phase 2) --
+    # When the populated package contains BOTH prerequisite-creation
+    # statements (CREATE DATABASE / USER) AND objects that depend on
+    # them, emit two archives: a prereqs zip and a main zip. The
+    # split closes the EXPLAIN false-error case at the package layer
+    # so the user never has to fix it manually.
+    if _is_auto_split_needed(pkg_dir):
+        (main_pair, prereqs_pair) = _split_into_paired_packages(
+            pkg_dir, manifest, config.archive_format
+        )
+        main_archive, main_manifest = main_pair
+        prereqs_archive, _prereqs_manifest = prereqs_pair
+        logger.info("Auto-split: prereqs → %s", prereqs_archive)
+        logger.info("Auto-split: main    → %s", main_archive)
+        return (main_pair, prereqs_pair)
 
-    # -- Phase 13: Generate SHA-256 checksum sidecar --
+    # -- Phase 13 (single-zip path): Archive + checksum --
+    archive_path = _archive_package(pkg_dir, config.archive_format)
     checksum_path = _generate_checksum(archive_path)
 
     logger.info("Package built: %s", archive_path)
     logger.info("Checksum:      %s", checksum_path)
 
-    return (archive_path, manifest)
+    return ((archive_path, manifest), None)
 
 
 # ---------------------------------------------------------------
 # Internal — Source discovery
 # ---------------------------------------------------------------
+
+
+# ---------------------------------------------------------------
+# Auto-split for intra-package prereqs (Phase 2)
+# ---------------------------------------------------------------
+#
+# Phase 1 of the intra_package_dependency work added an inspect rule
+# that flags packages mixing CREATE DATABASE / USER with objects
+# living in those databases. Phase 2 makes the package stage emit
+# TWO zips when that pattern is detected — a prereqs zip and a main
+# zip — so the user never has to split manually.
+#
+# Decision is post-build: walk the populated package's payload/ dir
+# and check whether 01_pre_requisites/ has files AND any other phase
+# also has files. When both are true, split. When either is empty,
+# the original single-zip path is preserved with zero overhead.
+
+# Phases that go in the prereqs zip when a split happens. Currently
+# only DATABASE / USER (01_pre_requisites). ROLE and other system-
+# scope objects stay with the dependants in the main zip — Phase 1
+# does not flag role-grant intra-package deps yet, so Phase 2 does
+# not split on them either.
+_PREREQ_PHASES = ("01_pre_requisites",)
+
+# Phases that stay in the main zip on a split. Listed explicitly
+# rather than computed-by-exclusion so a future phase added to
+# DeployPhase doesn't silently change split behaviour — adding it
+# here is a deliberate decision.
+_MAIN_PHASES = (
+    "00_system",
+    "02_dcl",
+    "03_ddl",
+    "04_dml",
+    "05_post_install",
+)
+
+
+def _phase_has_files(payload_dir: str, phase_name: str) -> bool:
+    """True when ``payload/<phase_name>/`` contains at least one file.
+
+    Hidden files and ``.gitkeep`` placeholders are ignored — they exist
+    purely to preserve empty directories in source control. Walks
+    recursively so files in sub-directories (e.g. ``DDL/tables/X.tbl``)
+    count.
+    """
+    phase_path = os.path.join(payload_dir, phase_name)
+    if not os.path.isdir(phase_path):
+        return False
+    for _root, _dirs, files in os.walk(phase_path):
+        for f in files:
+            if f.startswith(".") or f == ".gitkeep":
+                continue
+            return True
+    return False
+
+
+def _is_auto_split_needed(pkg_dir: str) -> bool:
+    """Decide whether the populated package warrants an auto-split.
+
+    Split when ``payload/01_pre_requisites/`` is populated AND at
+    least one other phase directory is populated. Either condition
+    alone keeps the original single-zip flow:
+
+      - No prereqs in the package    → nothing to split off.
+      - No dependants in the package → splitting would leave an
+                                       empty main zip.
+
+    Both conditions together → emit a paired prereqs + main bundle.
+    """
+    payload_dir = os.path.join(pkg_dir, "payload")
+    has_prereqs = any(_phase_has_files(payload_dir, p) for p in _PREREQ_PHASES)
+    has_dependants = any(_phase_has_files(payload_dir, p) for p in _MAIN_PHASES)
+    return has_prereqs and has_dependants
+
+
+def _compute_phase_inventory(pkg_dir: str) -> Dict[str, int]:
+    """Recount payload files per phase after the split has moved them.
+
+    The pre-split inventory captured by ``_copy_payload`` covers the
+    whole payload, but each half of an auto-split pair only ships a
+    subset of phases. Walk the post-split tree and recount so the
+    BUILD.json in each archive reports exactly what that archive
+    contains.
+    """
+    inventory: Dict[str, int] = {}
+    payload_dir = os.path.join(pkg_dir, "payload")
+    if not os.path.isdir(payload_dir):
+        return inventory
+    for phase in os.listdir(payload_dir):
+        phase_path = os.path.join(payload_dir, phase)
+        if not os.path.isdir(phase_path):
+            continue
+        count = 0
+        for _root, _dirs, files in os.walk(phase_path):
+            for f in files:
+                if f.startswith(".") or f == ".gitkeep":
+                    continue
+                count += 1
+        if count:
+            inventory[phase] = count
+    return inventory
+
+
+def _empty_phase_subtree(pkg_dir: str, phase_name: str):
+    """Remove every file under ``payload/<phase_name>/`` but keep the
+    top-level directory so the deployer's phase walk still finds it.
+
+    Used by the auto-split flow: the prereqs zip empties non-prereq
+    phases; the main zip empties prereq phases. The empty directories
+    are preserved because the deployer iterates known phases by name
+    and we don't want a missing dir to look like a corrupted package.
+    """
+    phase_path = os.path.join(pkg_dir, "payload", phase_name)
+    if not os.path.isdir(phase_path):
+        return
+    for entry in os.listdir(phase_path):
+        target = os.path.join(phase_path, entry)
+        if os.path.isdir(target):
+            shutil.rmtree(target)
+        else:
+            os.remove(target)
+
+
+def _split_into_paired_packages(
+    pkg_dir: str,
+    manifest: BuildManifest,
+    archive_format: str,
+) -> Tuple[Tuple[str, BuildManifest], Tuple[str, BuildManifest]]:
+    """Partition a fully-built package into a prereqs + main pair.
+
+    Both halves get a complete copy of the package infrastructure
+    (config/, lib/, deploy.py, README.txt) so each is independently
+    deployable. Only the payload phases are partitioned: the prereqs
+    zip keeps ``01_pre_requisites`` and empties every other phase;
+    the main zip does the inverse.
+
+    Both BUILD.json manifests are rewritten to:
+      - share the same ``release_group`` (= the main archive basename)
+      - declare their ``role`` ("prereqs" or "main")
+      - have the main zip's ``requires`` list name the prereqs zip,
+        making the deploy ordering programmatically discoverable
+      - report the post-split ``phase_inventory`` and ``file_count``
+        so each manifest reflects what its archive actually ships
+
+    Args:
+        pkg_dir:        The fully-populated single-package directory.
+                        Will be transformed in-place into the MAIN
+                        package; a sibling directory is created for
+                        the prereqs package.
+        manifest:       The single-package manifest produced by the
+                        normal build flow. Will be mutated to become
+                        the main manifest.
+        archive_format: 'zip' or 'tar.gz'. Determines the suffix on
+                        the requires reference and on both archives.
+
+    Returns:
+        ``((main_archive, main_manifest), (prereqs_archive, prereqs_manifest))``.
+        Both archives have a ``.sha256`` sidecar generated. The
+        in-memory directories are cleaned up by ``_archive_package``.
+    """
+    parent_dir = os.path.dirname(pkg_dir)
+    main_basename = os.path.basename(pkg_dir)
+
+    # Insert "prereqs" before "BUILD" — keeps both filenames easy to
+    # eyeball as a pair in a directory listing.
+    if "_BUILD_" not in main_basename:
+        # Defensive: should never happen given the canonical naming
+        # in build_package, but if it does, fall back to a suffix.
+        prereqs_basename = main_basename + "_prereqs"
+    else:
+        prereqs_basename = main_basename.replace(
+            "_BUILD_", "_prereqs_BUILD_", 1
+        )
+    prereqs_pkg_dir = os.path.join(parent_dir, prereqs_basename)
+
+    # The release_group ID = the main archive's basename. Derivable
+    # from filename (eyeball), embedded in both manifests
+    # (programmatic), and the requires list adds the third tie.
+    release_group = main_basename
+
+    # 1. Clone the main package wholesale → prereqs sibling. Then we
+    #    selectively empty payload phases on each side.
+    shutil.copytree(pkg_dir, prereqs_pkg_dir)
+
+    # 2. Main: drop the prereq phases.
+    for phase in _PREREQ_PHASES:
+        _empty_phase_subtree(pkg_dir, phase)
+
+    # 3. Prereqs: drop the dependant phases.
+    for phase in _MAIN_PHASES:
+        _empty_phase_subtree(prereqs_pkg_dir, phase)
+
+    # 4. Recompute inventories for each half so BUILD.json reflects
+    #    what the archive actually ships, not the pre-split union.
+    main_inventory = _compute_phase_inventory(pkg_dir)
+    prereqs_inventory = _compute_phase_inventory(prereqs_pkg_dir)
+
+    archive_ext = "tar.gz" if archive_format == "tar.gz" else "zip"
+    prereqs_archive_filename = f"{prereqs_basename}.{archive_ext}"
+    main_archive_filename = f"{main_basename}.{archive_ext}"
+
+    # 5. Mutate the supplied manifest into the MAIN manifest.
+    manifest.package_filename = main_archive_filename
+    manifest.phase_inventory = main_inventory
+    manifest.file_count = sum(main_inventory.values())
+    manifest.release_group = release_group
+    manifest.role = "main"
+    manifest.requires = [prereqs_archive_filename]
+
+    # 6. Build the PREREQS manifest as a near-copy with role flipped.
+    prereqs_manifest = BuildManifest(
+        build_number=manifest.build_number,
+        environment=manifest.environment,
+        package_name=manifest.package_name,
+        package_filename=prereqs_archive_filename,
+        timestamp=manifest.timestamp,
+        author=manifest.author,
+        description=manifest.description,
+        source_commit=manifest.source_commit,
+        token_count=manifest.token_count,  # pre-split count covers both halves
+        file_count=sum(prereqs_inventory.values()),
+        phase_inventory=prereqs_inventory,
+        tokens_resolved=dict(manifest.tokens_resolved),
+        warnings=list(manifest.warnings),
+        release_group=release_group,
+        role="prereqs",
+        requires=[],
+    )
+
+    # 7. Re-write BUILD.json on both sides.
+    for target_pkg_dir, target_manifest in (
+        (pkg_dir, manifest),
+        (prereqs_pkg_dir, prereqs_manifest),
+    ):
+        manifest_path = os.path.join(target_pkg_dir, "BUILD.json")
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(
+                target_manifest.__dict__, f, indent=2, ensure_ascii=False
+            )
+
+    # 8. Archive both. The deploy-first half (prereqs) is archived
+    #    first so the on-disk creation order matches the deploy order
+    #    — mostly cosmetic but it makes the build log read naturally.
+    prereqs_archive = _archive_package(prereqs_pkg_dir, archive_format)
+    _generate_checksum(prereqs_archive)
+    main_archive = _archive_package(pkg_dir, archive_format)
+    _generate_checksum(main_archive)
+
+    return ((main_archive, manifest), (prereqs_archive, prereqs_manifest))
 
 
 def _find_payload_dir(source_dir: str) -> str:
