@@ -391,9 +391,19 @@ _LEADING_REPLACE_RE = re.compile(
 # -- Token detection --
 _TOKEN_RE = re.compile(r"\{\{([A-Za-z_][A-Za-z0-9_-]*)\}\}")
 
-# -- Multi-statement detection --
+# -- Multi-DDL-statement detection --
+# Counts ONLY DDL/DCL statements that "create or change an object" —
+# the verbs the one-object-per-file discipline cares about.
+#
+# Deliberately EXCLUDES INSERT / UPDATE / DELETE / MERGE because
+# those are DML and they appear legitimately inside procedure /
+# trigger / function bodies. Including them caused false positives
+# for any real procedure with IF/ELSE branches doing INSERT and
+# UPDATE — the body's DML count would push the file over the
+# one-object threshold even though it contains exactly one DDL
+# statement (the CREATE PROCEDURE).
 _STATEMENT_START_RE = re.compile(
-    r"^\s*(?:CREATE|REPLACE|DROP|GRANT|REVOKE|ALTER|INSERT|UPDATE|DELETE|MERGE)\b",
+    r"^\s*(?:CREATE|REPLACE|DROP|GRANT|REVOKE|ALTER)\b",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -893,10 +903,16 @@ def _check_view_macro_self_reference(
 
 
 def _check_one_object(rel_path: str, content: str) -> List[ValidationIssue]:
-    """Check that the file contains only one DDL statement."""
+    """
+    Check that the file contains only one DDL statement.
+
+    Counts top-level DDL/DCL verbs (CREATE / REPLACE / DROP /
+    GRANT / REVOKE / ALTER). DML verbs like INSERT / UPDATE /
+    DELETE / MERGE are NOT counted — they appear legitimately
+    inside procedure and trigger bodies.
+    """
     matches = _STATEMENT_START_RE.findall(content)
-    # Filter out sub-statements inside procedures (BEGIN...END blocks)
-    if len(matches) > 2:
+    if len(matches) > 1:
         return [
             ValidationIssue(
                 file=rel_path,
