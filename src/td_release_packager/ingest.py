@@ -101,55 +101,14 @@ _TYPE_TO_SUBDIR = {
     "C_HEADER": "DDL/functions",
 }
 
-# -- Classification patterns (order matters — specific before general) --
-_CLASSIFY_PATTERNS = [
-    # Indexes (most specific first)
-    (re.compile(r"CREATE\s+JOIN\s+INDEX\b", re.I), "JOIN_INDEX"),
-    (re.compile(r"CREATE\s+HASH\s+INDEX\b", re.I), "HASH_INDEX"),
-    (re.compile(r"CREATE\s+(?:UNIQUE\s+)?INDEX\b", re.I), "INDEX"),
-    # Script Table Operator (before FUNCTION — it uses FUNCTION syntax
-    # but with TABLE OPERATOR in the body)
-    (
-        re.compile(
-            r"(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b.*?TABLE\s+OPERATOR",
-            re.I | re.DOTALL,
-        ),
-        "SCRIPT_TABLE_OPERATOR",
-    ),
-    # Standard DDL objects
-    (
-        re.compile(
-            r"(?:CREATE|REPLACE)\s+(?:MULTISET|SET)?\s*(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?(?:TRACE\s+)?TABLE\b",
-            re.I,
-        ),
-        "TABLE",
-    ),
-    (re.compile(r"(?:CREATE|REPLACE)\s+VIEW\b", re.I), "VIEW"),
-    (re.compile(r"(?:CREATE\s+|REPLACE\s+)MACRO\b", re.I), "MACRO"),
-    (re.compile(r"(?:CREATE\s+|REPLACE\s+)PROCEDURE\b", re.I), "PROCEDURE"),
-    (
-        re.compile(r"(?:CREATE\s+|REPLACE\s+)(?:SPECIFIC\s+)?FUNCTION\b", re.I),
-        "FUNCTION",
-    ),
-    (re.compile(r"(?:CREATE|REPLACE)\s+TRIGGER\b", re.I), "TRIGGER"),
-    # Pre-requisites (environment-scoped)
-    (re.compile(r"CREATE\s+DATABASE\b", re.I), "DATABASE"),
-    (re.compile(r"CREATE\s+USER\b", re.I), "USER"),
-    # System-scoped objects
-    (re.compile(r"CREATE\s+MAP\b", re.I), "MAP"),
-    (re.compile(r"CREATE\s+PROFILE\b", re.I), "PROFILE"),
-    (re.compile(r"CREATE\s+ROLE\b", re.I), "ROLE"),
-    (re.compile(r"CREATE\s+AUTHORIZATION\b", re.I), "AUTHORIZATION"),
-    (re.compile(r"CREATE\s+FOREIGN\s+SERVER\b", re.I), "FOREIGN_SERVER"),
-    # JAR installation (CALL SQLJ.INSTALL_JAR / SQLJ.REPLACE_JAR)
-    (re.compile(r"CALL\s+SQLJ\s*\.\s*(?:INSTALL_JAR|REPLACE_JAR)\s*\(", re.I), "JAR"),
-    # Metadata and statistics (produced by multi-statement splitting)
-    (re.compile(r"\bCOMMENT\s+ON\b", re.I), "COMMENT"),
-    (re.compile(r"\bCOLLECT\s+STATISTICS\b", re.I), "STATISTICS"),
-    # DCL (least specific — GRANT/REVOKE match single keywords)
-    (re.compile(r"\bGRANT\b", re.I), "GRANT"),
-    (re.compile(r"\bREVOKE\b", re.I), "REVOKE"),
-]
+# -- Classification patterns: removed --
+#
+# Historic duplicate of classifier.py's pattern table. ingest no
+# longer references it -- every classification call goes through
+# ``td_release_packager.classifier.classify`` (see _classify_ddl
+# below). Removing the duplicate eliminates the risk of the two
+# tables drifting out of sync (which they did, until the
+# start-of-statement anchoring fix exposed the divergence).
 
 # -- Qualified name extraction patterns --
 # Matches both literal names (Database.Object) and tokenised names
