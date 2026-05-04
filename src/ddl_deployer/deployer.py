@@ -182,6 +182,11 @@ def deploy_package(
                 "*.usr",
                 "*.rol",
                 "*.prf",
+                # SQLJ install scripts. Without this pattern, the
+                # binary-harvested .sjr files were silently dropped
+                # from the deploy plan, so JAR-binary procedures
+                # found no installed JAR at deploy time.
+                "*.sjr",
                 "*.sql",
             ]
         ddl_files = []
