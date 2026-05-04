@@ -392,35 +392,14 @@ _LEADING_REPLACE_RE = re.compile(
 _TOKEN_RE = re.compile(r"\{\{([A-Za-z_][A-Za-z0-9_-]*)\}\}")
 
 # -- Comment stripping ------------------------------------------
-# Position-preserving: each comment character becomes a space
-# (newlines preserved), so line numbers in error messages remain
-# accurate when checks scan the cleaned content.
-#
-# Why this matters: rules like one_object, db_qualifier, multiset,
-# eponymous, and extension all run regex patterns against the file
-# content. Without comment stripping, words like "truncates" or
-# "CREATE TABLE" appearing inside ``/* purpose: ... */`` block
-# headers (extremely common in real DDL files) cause spurious
-# warnings — the rules think there are extra DDL statements,
-# extra unqualified references, and so on.
+# Imported from the shared sql_text module so validate, ingest,
+# and builder all use the same position-preserving implementation.
+# Without comment stripping, regex content scans match keywords
+# inside /* ... */ header comments and trigger spurious warnings.
 
-
-def _strip_sql_comments(content: str) -> str:
-    """Replace SQL block and line comments with same-length spaces.
-
-    Block comments (``/* ... */``) and line comments (``-- ...``)
-    are blanked character-for-character. Newlines are preserved so
-    line numbers in any subsequent error messages stay correct.
-    """
-    def _blank(m: "re.Match") -> str:
-        text = m.group(0)
-        return "".join(" " if c != "\n" else "\n" for c in text)
-
-    # Block comments first — line comments inside block comments
-    # get blanked along with the surrounding /* */ characters.
-    no_block = re.sub(r"/\*.*?\*/", _blank, content, flags=re.DOTALL)
-    no_line = re.sub(r"--[^\n]*", _blank, no_block)
-    return no_line
+from td_release_packager.sql_text import (
+    strip_comments_preserving_positions as _strip_sql_comments,
+)
 
 
 # -- Multi-DDL-statement detection --

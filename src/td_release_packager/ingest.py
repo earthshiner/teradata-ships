@@ -922,10 +922,37 @@ def _extract_specific_function_name(
 
 
 def _inject_multiset(content: str) -> Tuple[str, bool]:
-    """Inject MULTISET if neither SET nor MULTISET is specified."""
-    if _HAS_SET_MULTISET_RE.search(content):
+    """Inject MULTISET if neither SET nor MULTISET is specified.
+
+    Comment-stripped content is used for BOTH the detection and the
+    injection-position lookup. Without stripping, a header comment
+    containing ``CREATE TABLE`` would match before the real DDL and
+    MULTISET would get injected into the comment instead of into
+    the actual CREATE statement.
+    """
+    from td_release_packager.sql_text import (
+        strip_comments_preserving_positions,
+    )
+
+    cleaned = strip_comments_preserving_positions(content)
+
+    if _HAS_SET_MULTISET_RE.search(cleaned):
         return (content, False)
-    modified = _INJECT_MULTISET_RE.sub(r"\1MULTISET \2", content, count=1)
+
+    m = _INJECT_MULTISET_RE.search(cleaned)
+    if m is None:
+        return (content, False)
+
+    # Position-preserving strip means non-comment characters in
+    # cleaned occupy the same offsets as in the original — so the
+    # match span [m.start():m.end()] in cleaned identifies the
+    # exact CREATE...TABLE substring in the original. Apply the
+    # substitution to that span, leaving comments untouched.
+    head = content[: m.start()]
+    matched = content[m.start() : m.end()]
+    tail = content[m.end() :]
+    new_matched = _INJECT_MULTISET_RE.sub(r"\1MULTISET \2", matched, count=1)
+    modified = head + new_matched + tail
     return (modified, modified != content)
 
 
@@ -933,8 +960,12 @@ def _inject_replace_view(content: str) -> Tuple[str, bool]:
     """
     Convert CREATE VIEW to REPLACE VIEW for idempotency.
 
-    If the DDL already uses REPLACE VIEW,
-    no change is made.
+    If the DDL already uses REPLACE VIEW, no change is made.
+
+    Comment-stripped content is used for detection and position
+    lookup so that ``CREATE VIEW`` appearing inside a header
+    comment doesn't get rewritten to ``REPLACE VIEW`` (corrupting
+    the comment and missing the real CREATE further down).
 
     Args:
         content: The view DDL content.
@@ -942,11 +973,25 @@ def _inject_replace_view(content: str) -> Tuple[str, bool]:
     Returns:
         Tuple of (modified_content, was_injected).
     """
-    if _HAS_REPLACE_VIEW_RE.search(content):
+    from td_release_packager.sql_text import (
+        strip_comments_preserving_positions,
+    )
+
+    cleaned = strip_comments_preserving_positions(content)
+
+    if _HAS_REPLACE_VIEW_RE.search(cleaned):
         return (content, False)
 
-    if _CREATE_VIEW_RE.search(content):
-        modified = _CREATE_VIEW_RE.sub("REPLACE VIEW", content, count=1)
+    m = _CREATE_VIEW_RE.search(cleaned)
+    if m is None:
+        return (content, False)
+
+    head = content[: m.start()]
+    matched = content[m.start() : m.end()]
+    tail = content[m.end() :]
+    new_matched = _CREATE_VIEW_RE.sub("REPLACE VIEW", matched, count=1)
+    modified = head + new_matched + tail
+    if modified != content:
         return (modified, True)
 
     return (content, False)

@@ -342,6 +342,52 @@ class TestInjectMultiset:
         assert injected is True
         assert "CREATE MULTISET GLOBAL TEMPORARY TRACE TABLE" in result
 
+    def test_create_table_inside_block_comment_is_ignored(self):
+        """Regression: a /* */ header comment containing 'CREATE
+        TABLE' must not be mistaken for the real DDL. MULTISET
+        should be injected into the actual CREATE statement, not
+        into the comment, and the comment's text must survive
+        the rewrite untouched."""
+        ddl = (
+            "/* This procedure parents the inner CREATE TABLE\n"
+            "   for the staging area. */\n"
+            "CREATE TABLE MyDB.Stage (Id INT);\n"
+        )
+        result, injected = _inject_multiset(ddl)
+        assert injected is True
+        # Real CREATE TABLE got the MULTISET
+        assert "CREATE MULTISET TABLE MyDB.Stage" in result
+        # Comment text is intact — not modified
+        assert "parents the inner CREATE TABLE" in result
+        # No spurious MULTISET in the comment
+        assert "CREATE MULTISET TABLE\n" not in result.split(
+            "CREATE MULTISET TABLE MyDB.Stage"
+        )[0]
+
+    def test_create_table_inside_line_comment_is_ignored(self):
+        """Same regression but with -- line comment instead of /* */."""
+        ddl = (
+            "-- TODO: remove the old CREATE TABLE pattern below\n"
+            "CREATE TABLE MyDB.Stage (Id INT);\n"
+        )
+        result, injected = _inject_multiset(ddl)
+        assert injected is True
+        assert "CREATE MULTISET TABLE MyDB.Stage" in result
+        # Comment unchanged
+        assert "-- TODO: remove the old CREATE TABLE pattern below" in result
+
+    def test_set_inside_comment_does_not_block_injection(self):
+        """A comment that happens to contain 'SET' or 'MULTISET'
+        must not cause the detector to think the file already
+        has the modifier — it would skip injection erroneously."""
+        ddl = (
+            "/* MULTISET tables are required by team policy. */\n"
+            "CREATE TABLE MyDB.Stage (Id INT);\n"
+        )
+        result, injected = _inject_multiset(ddl)
+        assert injected is True
+        assert "CREATE MULTISET TABLE MyDB.Stage" in result
+
 
 # ---------------------------------------------------------------
 # _inject_replace_view
@@ -368,6 +414,21 @@ class TestInjectReplaceView:
         """Non-view DDL is left unchanged."""
         result, injected = _inject_replace_view(ddl_create_table)
         assert injected is False
+
+    def test_create_view_inside_comment_is_ignored(self):
+        """Regression: a comment mentioning 'CREATE VIEW' must
+        not be rewritten to 'REPLACE VIEW'. The real DDL gets
+        the rewrite; the comment stays intact."""
+        ddl = (
+            "/* Replaces the older CREATE VIEW pattern. */\n"
+            "CREATE VIEW MyDB.V AS SELECT 1;\n"
+        )
+        result, injected = _inject_replace_view(ddl)
+        assert injected is True
+        # Real CREATE VIEW rewritten
+        assert "REPLACE VIEW MyDB.V" in result
+        # Comment preserved verbatim
+        assert "Replaces the older CREATE VIEW pattern." in result
 
 
 # ---------------------------------------------------------------
