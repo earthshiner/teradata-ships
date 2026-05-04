@@ -188,6 +188,14 @@ def deploy_package(
                 # found no installed JAR at deploy time.
                 "*.sjr",
                 "*.sql",
+                # BTEQ-style extensions used by legacy Teradata
+                # codebases that name their pure-SQL CREATE TABLE /
+                # CREATE VIEW scripts ``.bteq`` or ``.btq``.
+                # Without these patterns, glob discovery silently
+                # drops them and the deploy plan ships missing the
+                # underlying objects.
+                "*.bteq",
+                "*.btq",
             ]
         ddl_files = []
         for pattern in file_patterns:

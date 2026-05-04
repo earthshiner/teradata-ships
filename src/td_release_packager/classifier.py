@@ -206,6 +206,13 @@ EXTENSION_TO_EXPECTED: Dict[str, Optional[Set[str]]] = {
     ".sql": None,
     ".ddl": None,
     ".dml": None,
+    # BTEQ-style extensions. Legacy Teradata codebases sometimes
+    # name pure-SQL scripts ``.bteq`` / ``.btq`` even when there
+    # are no actual BTEQ commands in the body. Treat them as
+    # generic so a CREATE TABLE in foo.bteq classifies as TABLE
+    # without firing a filename-mismatch warning.
+    ".bteq": None,
+    ".btq": None,
 }
 
 
