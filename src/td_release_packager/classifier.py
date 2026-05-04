@@ -394,14 +394,52 @@ def extract_jar_alias(external_body: str) -> Optional[str]:
     return external_body.split(":", 1)[0].strip()
 
 
+#: Match the path portion of CALL SQLJ.INSTALL_JAR/REPLACE_JAR.
+#: Captures the full quoted argument so we can extract the path
+#: from inside the ``CJ!path`` form.
+_SQLJ_INSTALL_RE = re.compile(
+    r"CALL\s+SQLJ\s*\.\s*(?:INSTALL_JAR|REPLACE_JAR)\s*\(\s*"
+    r"'([^']+)'",
+    re.I,
+)
+
+
+def extract_sqlj_jar_paths(content: str) -> List[str]:
+    """Extract ``'CJ!path'`` filesystem paths from SQLJ install
+    scripts.
+
+    For each ``CALL SQLJ.INSTALL_JAR('CJ!path/to/X.jar', ...)``
+    statement, returns the path portion (everything after the
+    leading ``CJ!``). Multiple INSTALL_JAR calls in one file all
+    contribute. Order is preserved.
+    """
+    paths: List[str] = []
+    for m in _SQLJ_INSTALL_RE.finditer(content):
+        arg = m.group(1)
+        # The CJ!-prefixed form is the documented one. Anything
+        # else (e.g. a server-side path with no prefix) is left
+        # alone — caller decides whether to warn.
+        if arg.upper().startswith("CJ!"):
+            paths.append(arg[3:])
+        else:
+            paths.append(arg)
+    return paths
+
+
 def extract_externals(content: str, type_hint: str) -> List[str]:
-    """Extract external references for FUNCTION_C / PROCEDURE_JAVA.
+    """Extract external references for FUNCTION_C / PROCEDURE_JAVA / JAR.
 
     Returns:
-        For FUNCTION_C: list of .c/.h paths.
-        For PROCEDURE_JAVA: single-element list with the JAR alias.
+        For FUNCTION_C: list of .c/.h paths from EXTERNAL NAME.
+        For PROCEDURE_JAVA: single-element list with the JAR alias
+                            from EXTERNAL NAME.
+        For JAR (SQLJ install script): list of binary paths from
+                            CALL SQLJ.INSTALL_JAR's CJ!path argument.
         Empty list otherwise.
     """
+    if type_hint == "JAR":
+        return extract_sqlj_jar_paths(content)
+
     m = _EXTERNAL_NAME_RE.search(content)
     if m is None:
         return []
@@ -504,7 +542,7 @@ def classify(path: str, content: str) -> ClassificationResult:
         result.type = base
 
     # Stage 3: extract external references where relevant
-    if result.type in ("FUNCTION_C", "PROCEDURE_JAVA"):
+    if result.type in ("FUNCTION_C", "PROCEDURE_JAVA", "JAR"):
         result.related_files = extract_externals(content, result.type)
         if result.type == "FUNCTION_C" and not result.related_files:
             result.warnings.append(
@@ -515,6 +553,12 @@ def classify(path: str, content: str) -> ClassificationResult:
             result.warnings.append(
                 "PROCEDURE_JAVA detected but no JAR alias resolved "
                 "from EXTERNAL NAME clause."
+            )
+        if result.type == "JAR" and not result.related_files:
+            result.warnings.append(
+                "JAR install script detected but no CJ!path "
+                "binary references resolved — the deployer won't "
+                "have any JAR file to install."
             )
 
     # Stage 4: filename consistency check

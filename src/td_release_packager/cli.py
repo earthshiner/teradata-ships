@@ -936,6 +936,26 @@ def _cmd_ingest(args):
             if extra > 0:
                 print(f"    ... and {extra} more file(s) with externals.")
 
+        # -- Binary artefacts physically copied into the payload --
+        # JAR archives (for SQLJ install) and C source/header files
+        # (for C UDFs) get copied alongside their SQL scripts so
+        # the deployer can ship them. Show counts per kind plus a
+        # sample.
+        if result.binaries_placed:
+            from collections import Counter
+
+            kind_counts = Counter(k for _, _, k in result.binaries_placed)
+            print("\n  Binary artefacts copied into payload:")
+            for kind, count in sorted(kind_counts.items()):
+                print(f"    {kind:14s} {count}")
+            print()
+            for src, dest, kind in result.binaries_placed[:5]:
+                print(f"    {kind}  {os.path.basename(src)}")
+                print(f"      → {dest}")
+            extra = len(result.binaries_placed) - 5
+            if extra > 0:
+                print(f"    ... and {extra} more binary file(s).")
+
         if result.errors:
             print("\n  Errors:")
             for e in result.errors:

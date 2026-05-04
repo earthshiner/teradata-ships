@@ -252,6 +252,10 @@ class IngestResult:
     classification_warnings: List[str] = field(default_factory=list)
     external_references: Dict[str, List[str]] = field(default_factory=dict)
     subtypes: Dict[str, str] = field(default_factory=dict)
+    #: Binary artefacts physically copied into the payload —
+    #: list of (source_abs_path, dest_rel_path, kind) tuples.
+    #: kind is JAR_BINARY / C_SOURCE / C_HEADER / etc.
+    binaries_placed: List[Tuple[str, str, str]] = field(default_factory=list)
 
 
 def ingest_directory(
@@ -481,6 +485,41 @@ def ingest_directory(
                             dest_name,
                         )
 
+                # -- Harvest binary dependencies BEFORE writing --
+                # FUNCTION_C and JAR install scripts reference
+                # binary files (.c/.h, .jar) that the deployer
+                # needs alongside. Resolve, copy, and rewrite the
+                # paths so the deployed script's references are
+                # sibling-relative.
+                if obj_subtype in ("FUNCTION_C", "JAR") and classification.related_files:
+                    from td_release_packager.binary_harvester import (
+                        harvest_binaries,
+                    )
+
+                    harvest_dest_dir = os.path.dirname(dest_path)
+                    bh_result = harvest_binaries(
+                        content=content,
+                        related_paths=classification.related_files,
+                        source_file_path=src_path,
+                        destination_dir=harvest_dest_dir,
+                    )
+                    content = bh_result.rewritten_content
+
+                    # Track each successfully copied binary
+                    for dep in bh_result.copied:
+                        rel_bin_dest = os.path.relpath(
+                            dep.destination_path, project_dir
+                        )
+                        result.binaries_placed.append(
+                            (dep.source_path, rel_bin_dest, dep.kind)
+                        )
+
+                    # Surface any missing-binary warnings
+                    for w in bh_result.warnings:
+                        result.classification_warnings.append(
+                            f"{os.path.relpath(src_path, source_dir)}: {w}"
+                        )
+
                 # -- Write normalised content --
                 with open(dest_path, "w", encoding="utf-8") as f:
                     f.write(content)
@@ -572,10 +611,14 @@ def _discover_files(source_dir: str, file_patterns: List[str] = None) -> List[st
             ".fsvr",
             ".sto",
             ".sjr",  # SQLJ Runtime install script (SHIPS convention)
-            ".jar",  # legacy / passthrough — defensive, e.g. older codebases
+            # NOTE: ``.jar``, ``.c``, ``.h`` are NOT in this include
+            # list. Binary artefacts come into the payload via the
+            # binary-harvest path (driven by SQL EXTERNAL NAME and
+            # CALL SQLJ.INSTALL_JAR references), not as standalone
+            # discovered files. Including them here would trigger
+            # spurious "unclassified" warnings for every binary
+            # sitting alongside a SQL script.
             ".usr",
-            ".c",
-            ".h",
         ]
 
     files = []
