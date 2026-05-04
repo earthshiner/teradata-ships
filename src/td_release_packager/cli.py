@@ -1452,11 +1452,33 @@ def _cmd_build(args):
     )
 
     try:
-        archive_path, manifest = build_package(config)
+        (main_pair, companion_pair) = build_package(config)
+        archive_path, manifest = main_pair
 
         print(f"\n{'=' * 64}")
         print("  ✓ Package built successfully")
         print(f"{'=' * 64}")
+
+        # -- Auto-split banner (intra_package_dependency Phase 2) --
+        # When the build produced a paired prereqs + main bundle,
+        # surface BOTH archives and the explicit deploy order before
+        # the per-archive details. The user should never have to
+        # interpret which to deploy first.
+        if companion_pair is not None:
+            prereqs_archive, prereqs_manifest = companion_pair
+            print(
+                "  Auto-split: this source contains both CREATE DATABASE/USER\n"
+                "  statements and objects that depend on them. Two archives\n"
+                "  were emitted so deploy --explain can validate each cleanly."
+            )
+            print()
+            print("  Deploy order:")
+            print(f"    1. {os.path.basename(prereqs_archive)}")
+            print(f"    2. {os.path.basename(archive_path)}")
+            print()
+            print(f"  release_group: {manifest.release_group}")
+            print()
+
         print(f"  Archive:     {archive_path}")
         print(f"  Environment: {manifest.environment}")
         print(f"  Build:       {manifest.build_number}")
@@ -1466,6 +1488,16 @@ def _cmd_build(args):
 
         for phase, count in sorted(manifest.phase_inventory.items()):
             print(f"    {phase}: {count} file(s)")
+
+        # -- Companion archive details (paired build only) --
+        if companion_pair is not None:
+            prereqs_archive, prereqs_manifest = companion_pair
+            print()
+            print(f"  Companion (deploy first): {prereqs_archive}")
+            print(f"  Files:                    {prereqs_manifest.file_count}")
+            print(f"{'=' * 64}")
+            for phase, count in sorted(prereqs_manifest.phase_inventory.items()):
+                print(f"    {phase}: {count} file(s)")
 
         if manifest.warnings:
             print("\n  Warnings:")

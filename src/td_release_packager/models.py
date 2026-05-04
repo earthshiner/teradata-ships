@@ -187,6 +187,25 @@ class BuildManifest:
         phase_inventory:  Count of files per phase.
         tokens_resolved:  Dict of token_name → resolved_value.
         warnings:         Build-time warnings.
+        release_group:    Shared identifier for paired packages
+                          emitted by an auto-split build (Phase 2 of
+                          the intra_package_dependency work). Empty
+                          string for single-zip builds. Both halves
+                          of an auto-split pair share the same
+                          release_group, derived from the main zip's
+                          basename so a DBA can grep for it across
+                          the releases dir.
+        role:             Marks this archive's role within an auto-
+                          split pair. ``"prereqs"`` for the zip
+                          containing CREATE DATABASE / CREATE USER
+                          statements, ``"main"`` for the zip
+                          containing dependants, ``""`` for single-
+                          zip builds (no split occurred).
+        requires:         Names of sibling archives that must be
+                          deployed BEFORE this one. The main zip in
+                          an auto-split pair lists the prereqs zip
+                          here; the prereqs zip's list is empty.
+                          Empty for single-zip builds.
     """
 
     build_number: str
@@ -202,6 +221,9 @@ class BuildManifest:
     phase_inventory: Dict[str, int] = field(default_factory=dict)
     tokens_resolved: Dict[str, str] = field(default_factory=dict)
     warnings: List[str] = field(default_factory=list)
+    release_group: str = ""
+    role: str = ""
+    requires: List[str] = field(default_factory=list)
 
 
 @dataclass
