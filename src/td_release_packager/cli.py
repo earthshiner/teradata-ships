@@ -222,6 +222,8 @@ def main():
         _cmd_import_legacy(args)
     elif args.command == "decompose-names":
         _cmd_decompose_names(args)
+    elif args.command == "bootstrap-properties":
+        _cmd_bootstrap_properties(args)
     else:
         parser.print_help()
         sys.exit(1)
@@ -372,23 +374,27 @@ def _print_harvest_next_steps(
     *,
     generated_token_map_path: Optional[str],
     substitutions_applied: bool,
+    already_tokenised: bool = False,
 ) -> None:
     """
     Print a context-aware Next Steps banner after harvest.
 
-    Three flows, three distinct next-step lists:
+    Four flows, four distinct next-step lists:
 
-      A. ``--generate-token-map`` was used. The map was just written
-         but no substitutions are in the source yet. The user needs
-         to review it, bootstrap a .properties file from it, and
-         re-harvest with ``--token-map`` to apply.
+      A. ``--generate-token-map`` was used AND literals were found.
+         Token map was written; substitutions not yet applied. User
+         needs to review the map, bootstrap properties, re-harvest
+         to apply, then validate + package.
 
       B. ``--token-map`` (or ``--apply-tokens``) was provided.
-         Substitutions are now in the source. The user just needs
-         to verify their .properties file and package.
+         Substitutions baked into the source. User just validates
+         and packages.
 
-      C. Plain harvest with no token activity. Same as flow B —
-         substitutions either weren't needed or aren't ready yet.
+      C. Plain harvest, no token activity. Same as flow B.
+
+      D. ``--generate-token-map`` was used but NO literals found.
+         The source is already tokenised — user skips the token-map
+         dance entirely and goes straight to bootstrap-properties.
 
     Args:
         args: The parsed CLI args (used for ``args.project``).
@@ -397,6 +403,10 @@ def _print_harvest_next_steps(
             was generated this run.
         substitutions_applied: True if harvest applied substitutions
             via ``--token-map`` or ``--apply-tokens`` this run.
+        already_tokenised: True when ``--generate-token-map`` was
+            requested but the source had no literals to map. The
+            source is already in the end-state — route to
+            bootstrap-properties.
     """
     from typing import List
 
@@ -404,9 +414,26 @@ def _print_harvest_next_steps(
     print("  Next Steps")
     print("=" * 64)
 
-    steps: List[str] = []
     project = args.project
     has_props = _project_has_env_properties(project)
+
+    # Lead with stage label + state line so the user knows where
+    # they are before they see the steps. Same shape across all
+    # four flows.
+    print()
+    print("  You are here:  [H] Harvest complete")
+    if already_tokenised:
+        state = "source already tokenised; .properties not yet defined"
+    elif generated_token_map_path:
+        state = "literals scanned; token map written; substitutions NOT applied"
+    elif substitutions_applied:
+        state = "source tokenised via --token-map; substitutions applied"
+    else:
+        state = "source ingested; no token activity this run"
+    print(f"  Project state: {state}")
+    print()
+
+    steps: List[str] = []
 
     # Quality-gate block — appears in every flow before packaging.
     # 'inspect' is part of the canonical S-H-I-P-S workflow;
@@ -456,7 +483,43 @@ def _print_harvest_next_steps(
             f"         --output releases/"
         )
 
-    if generated_token_map_path is not None:
+    if already_tokenised:
+        # Flow D — source already uses {{TOKEN}} references. Skip
+        # the token map entirely and bootstrap properties directly
+        # from the tokens the source already references.
+        bootstrap_cmd_parts = [
+            f"     python -m td_release_packager bootstrap-properties \\\n"
+            f"         --source {project} \\\n"
+            f"         --env DEV"
+        ]
+        if not has_props:
+            steps.append(
+                f"1. Bootstrap a .properties file from the tokens the\n"
+                f"   source already references:\n"
+                f"\n"
+                f"{bootstrap_cmd_parts[0]}\n"
+                f"\n"
+                f"   Output: a 7-section .properties scaffold under\n"
+                f"   {project}\\config\\properties\\DEV.properties\n"
+                f"   with every {{{{TOKEN}}}} parked in section 8\n"
+                f"   for you to re-section by cut-and-paste."
+            )
+        else:
+            steps.append(
+                f"1. (Optional) Refresh the existing .properties scaffold\n"
+                f"   to pick up any newly-referenced tokens:\n"
+                f"\n"
+                f"{bootstrap_cmd_parts[0]} --force\n"
+                f"\n"
+                f"   --force is required because the file already exists.\n"
+                f"   Existing values for still-referenced tokens are\n"
+                f"   preserved; new tokens are added to section 8."
+            )
+        steps.append(_quality_gates_step(2))
+        steps.append(_verify_props_step(3))
+        steps.append(_package_step(4))
+
+    elif generated_token_map_path is not None:
         # Flow A — token map was just written, substitutions not applied
         steps.append(
             f"1. Review the generated token map:\n"
@@ -546,6 +609,20 @@ def _cmd_decompose_names(args):
     if args.verbose:
         argv.append("-v")
     sys.exit(decomposer_main(argv))
+
+
+def _cmd_bootstrap_properties(args):
+    """Dispatch to td_release_packager.properties_bootstrapper.main()."""
+    from td_release_packager.properties_bootstrapper import main as bootstrap_main
+
+    argv = ["--source", args.source, "--env", args.env]
+    if args.output_dir:
+        argv.extend(["--output-dir", args.output_dir])
+    if args.force:
+        argv.append("--force")
+    if args.verbose:
+        argv.append("-v")
+    sys.exit(bootstrap_main(argv))
 
 
 # ---------------------------------------------------------------
@@ -796,14 +873,16 @@ def _cmd_ingest(args):
 
         elif generate_map and not result.token_candidates:
             # User asked for a token map but no hardcoded names were
-            # detected. Tell them clearly rather than silently
-            # producing nothing.
+            # detected. The most common cause is that the source is
+            # ALREADY TOKENISED — the end-state most users have to
+            # work toward. Tell them clearly, and route them to
+            # bootstrap-properties (the third bootstrap path) since
+            # they no longer need a token map at all.
             print(
-                "\n  ⚠ No hardcoded database names detected — no token map generated.\n"
-                "    The source DDL appears to be already tokenised, or the\n"
-                "    qualified-reference detector didn't recognise the literal\n"
-                "    syntax. If you expected literals to be present, check that\n"
-                "    they're written as DATABASE_NAME.OBJECT_NAME (not unqualified)."
+                "\n  ✓ No hardcoded database names detected.\n"
+                "    The source DDL appears to be already tokenised — you're at\n"
+                "    the end-state most projects have to work toward. Skip the\n"
+                "    token map and go straight to .properties bootstrap below."
             )
 
         elif result.token_candidates and not apply_tokens:
@@ -827,13 +906,14 @@ def _cmd_ingest(args):
         print(f"{'=' * 64}\n")
 
         # -- Next Steps banner --
-        # Three distinct flows produce three distinct sets of next
+        # Four distinct flows produce four distinct sets of next
         # steps. Get the recommendation right per flow so the user
         # isn't left guessing.
         _print_harvest_next_steps(
             args=args,
             generated_token_map_path=generated_token_map_path,
             substitutions_applied=bool(apply_tokens),
+            already_tokenised=(generate_map and not result.token_candidates),
         )
 
     except FileNotFoundError as e:
@@ -1894,6 +1974,43 @@ def _build_parser():
         help="Output directory (default: current). Files written under "
         "<output-dir>/properties/<env>.properties and "
         "<output-dir>/decomposition_report.md.",
+    )
+
+    # -- bootstrap-properties --
+    bp = subs.add_parser(
+        "bootstrap-properties",
+        help="Generate a .properties scaffold for an already-tokenised "
+        "project. Use when the source already references "
+        "{{TOKEN}} but no .properties file exists yet.",
+        description="Scan an already-tokenised SHIPS project for "
+        "{{TOKEN}} references and emit a 7-section .properties "
+        "scaffold with every referenced token parked in section 8 "
+        "for the user to re-section. Closes the third bootstrap "
+        "path: when there's nothing to convert (no literals, no "
+        "legacy script) you just need a starting .properties skeleton.",
+    )
+    bp.add_argument(
+        "--source",
+        required=True,
+        help="SHIPS project directory (with payload/ already harvested).",
+    )
+    bp.add_argument(
+        "--env",
+        required=True,
+        help="Target environment name (DEV / TST / PRD).",
+    )
+    bp.add_argument(
+        "--output-dir",
+        default=None,
+        help="Output directory; .properties written under "
+        "<output-dir>/properties/<env>.properties. Defaults to "
+        "<source>/config.",
+    )
+    bp.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing .properties file at the target. "
+        "Without this, the tool refuses to clobber.",
     )
 
     return parser
