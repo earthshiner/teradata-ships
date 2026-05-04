@@ -249,3 +249,96 @@ class TestDuplicateClassifierTablesMatch:
         # the schema-object types). The expected outcome is that
         # NOTHING matches — the GRANT file simply isn't an object.
         assert type_for is None
+
+
+# ---------------------------------------------------------------
+# The second GCFR regression: GRANT with a single CREATE PROCEDURE
+# privilege landing as ``ON.dcl`` (the harvester picked ``ON`` as
+# the eponymous object name).
+# ---------------------------------------------------------------
+
+
+GCFR_ON_DCL_FILE = (
+    ".IF ERRORCODE <> 0 THEN .GOTO ERR\n"
+    "\n"
+    "GRANT CREATE PROCEDURE ON $GCFR_P_PP TO $ADMIN_USER;\n"
+)
+
+
+class TestGrantSinglePrivilegeOnFile:
+    """The second GCFR reproducer: a GRANT statement with exactly
+    one CREATE PROCEDURE privilege made the eponymous-rename
+    extractor capture ``ON`` (the next token after PROCEDURE) as
+    the object name. Result: file harvested as ``ON.dcl`` and
+    inspect's db_qualifier rule complained about ``Object 'ON'
+    missing database qualifier``."""
+
+    def test_classifier_returns_grant(self):
+        result = classify("any.dcl", GCFR_ON_DCL_FILE)
+        assert result.type == "GRANT"
+
+    def test_eponymous_extractor_returns_no_name(self):
+        from td_release_packager.eponymous_rename import extract_eponymous_name
+
+        # Pre-fix: returned ('ON.spl', 'ON', 'PROCEDURE') -- the
+        # rename then staged the file as ON.spl. Post-fix: returns
+        # None because no anchored DDL verb matches the file.
+        assert extract_eponymous_name(GCFR_ON_DCL_FILE) is None
+
+    def test_db_qualifier_rule_does_not_misfire(self):
+        from td_release_packager.validate import _check_db_qualifier
+
+        # Pre-fix: _QUALIFIED_NAME_RE captured 'ON' as the object
+        # name (no database qualifier) and raised a db_qualifier
+        # ERROR. Post-fix: the anchored regex doesn't match and
+        # the rule exits cleanly.
+        issues = _check_db_qualifier("ON.dcl", GCFR_ON_DCL_FILE)
+        assert all(i.rule != "db_qualifier" for i in issues)
+
+
+# ---------------------------------------------------------------
+# Latent shadowing fix: validate.py used to define a local
+# _strip_sql_comments that shadowed the imported variant. The local
+# function only stripped SQL comments, not string literals -- so
+# dynamic-SQL strings like ``'CREATE TABLE'`` inside procedure
+# bodies could still trigger qualifier / multiset warnings.
+# ---------------------------------------------------------------
+
+
+class TestStripCommentsAlsoStripsStringLiterals:
+    """validate.py's ``_strip_sql_comments`` is the imported
+    ``strip_comments_and_string_literals`` (no local override).
+    A regression here means dynamic-SQL string literals leak into
+    rule scans again."""
+
+    def test_strip_function_blanks_string_literals(self):
+        from td_release_packager.validate import _strip_sql_comments
+
+        # The literal 'CREATE TABLE foo' must be blanked, not just
+        # the comment around it.
+        content = "SET vSQL = 'CREATE TABLE foo';"
+        cleaned = _strip_sql_comments(content)
+        assert "CREATE TABLE" not in cleaned
+
+    def test_procedure_with_create_table_in_string_literal_no_set_multiset(
+        self, tmp_path
+    ):
+        """End-to-end: a procedure whose body builds a CREATE TABLE
+        via dynamic SQL must NOT trigger set_multiset."""
+        from td_release_packager.validate import validate_directory
+
+        ddl_dir = tmp_path / "DDL" / "procedures"
+        ddl_dir.mkdir(parents=True)
+        (ddl_dir / "MyDb.foo.spl").write_text(
+            "CREATE PROCEDURE MyDb.foo (IN iName VARCHAR(128))\n"
+            "BEGIN\n"
+            "    DECLARE vSQL VARCHAR(1000);\n"
+            "    SET vSQL = 'CREATE TABLE ' || iName || ' (id INT)';\n"
+            "    CALL DBC.SysExecSQL(:vSQL);\n"
+            "END;\n",
+            encoding="utf-8",
+        )
+
+        result = validate_directory(str(tmp_path))
+        triggered = {i.rule for i in result.issues if "foo.spl" in i.file}
+        assert "set_multiset" not in triggered
