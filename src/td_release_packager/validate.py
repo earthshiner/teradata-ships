@@ -391,9 +391,30 @@ _LEADING_REPLACE_RE = re.compile(
 # -- Token detection --
 _TOKEN_RE = re.compile(r"\{\{([A-Za-z_][A-Za-z0-9_-]*)\}\}")
 
-# -- Multi-statement detection --
+# -- Comment stripping ------------------------------------------
+# Imported from the shared sql_text module so validate, ingest,
+# and builder all use the same position-preserving implementation.
+# Without comment stripping, regex content scans match keywords
+# inside /* ... */ header comments and trigger spurious warnings.
+
+from td_release_packager.sql_text import (
+    strip_comments_preserving_positions as _strip_sql_comments,
+)
+
+
+# -- Multi-DDL-statement detection --
+# Counts ONLY DDL/DCL statements that "create or change an object" —
+# the verbs the one-object-per-file discipline cares about.
+#
+# Deliberately EXCLUDES INSERT / UPDATE / DELETE / MERGE because
+# those are DML and they appear legitimately inside procedure /
+# trigger / function bodies. Including them caused false positives
+# for any real procedure with IF/ELSE branches doing INSERT and
+# UPDATE — the body's DML count would push the file over the
+# one-object threshold even though it contains exactly one DDL
+# statement (the CREATE PROCEDURE).
 _STATEMENT_START_RE = re.compile(
-    r"^\s*(?:CREATE|REPLACE|DROP|GRANT|REVOKE|ALTER|INSERT|UPDATE|DELETE|MERGE)\b",
+    r"^\s*(?:CREATE|REPLACE|DROP|GRANT|REVOKE|ALTER)\b",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -596,26 +617,33 @@ def validate_directory(
         rel_path = os.path.relpath(file_path, source_dir)
         file_issues = []
 
+        # Strip SQL comments BEFORE running content checks so that
+        # words like "CREATE TABLE" appearing inside /* purpose: */
+        # block headers don't trigger DDL pattern matches. The
+        # stripper preserves newlines so line numbers in any rule's
+        # error message remain accurate.
+        clean = _strip_sql_comments(content)
+
         # -- Run all checks, collect raw issues --
-        file_issues.extend(_check_db_qualifier(rel_path, content))
-        file_issues.extend(_check_multiset(rel_path, content))
-        file_issues.extend(_check_deploy_intent(rel_path, content, strict))
-        file_issues.extend(_check_view_macro_self_reference(rel_path, content))
-        file_issues.extend(_check_one_object(rel_path, content))
-        file_issues.extend(_check_eponymous(rel_path, content, file_path))
-        file_issues.extend(_check_extension(rel_path, content, file_path))
-        file_issues.extend(_check_type_suffixes(rel_path, content))
-        file_issues.extend(_check_hardcoded_names(rel_path, content))
-        file_issues.extend(_check_keyword_case(rel_path, content))
-        file_issues.extend(_check_leading_commas(rel_path, content))
+        file_issues.extend(_check_db_qualifier(rel_path, clean))
+        file_issues.extend(_check_multiset(rel_path, clean))
+        file_issues.extend(_check_deploy_intent(rel_path, clean, strict))
+        file_issues.extend(_check_view_macro_self_reference(rel_path, clean))
+        file_issues.extend(_check_one_object(rel_path, clean))
+        file_issues.extend(_check_eponymous(rel_path, clean, file_path))
+        file_issues.extend(_check_extension(rel_path, clean, file_path))
+        file_issues.extend(_check_type_suffixes(rel_path, clean))
+        file_issues.extend(_check_hardcoded_names(rel_path, clean))
+        file_issues.extend(_check_keyword_case(rel_path, clean))
+        file_issues.extend(_check_leading_commas(rel_path, clean))
         file_issues.extend(
-            _check_object_placement(rel_path, content, file_path, placement)
+            _check_object_placement(rel_path, clean, file_path, placement)
         )
         file_issues.extend(
-            _check_public_grant_on_tables(rel_path, content, file_path, placement)
+            _check_public_grant_on_tables(rel_path, clean, file_path, placement)
         )
         file_issues.extend(
-            _check_unmapped_grants(rel_path, content, file_path, placement)
+            _check_unmapped_grants(rel_path, clean, file_path, placement)
         )
 
         # -- Apply rule config: remap severity or drop OFF rules --
@@ -893,10 +921,16 @@ def _check_view_macro_self_reference(
 
 
 def _check_one_object(rel_path: str, content: str) -> List[ValidationIssue]:
-    """Check that the file contains only one DDL statement."""
+    """
+    Check that the file contains only one DDL statement.
+
+    Counts top-level DDL/DCL verbs (CREATE / REPLACE / DROP /
+    GRANT / REVOKE / ALTER). DML verbs like INSERT / UPDATE /
+    DELETE / MERGE are NOT counted — they appear legitimately
+    inside procedure and trigger bodies.
+    """
     matches = _STATEMENT_START_RE.findall(content)
-    # Filter out sub-statements inside procedures (BEGIN...END blocks)
-    if len(matches) > 2:
+    if len(matches) > 1:
         return [
             ValidationIssue(
                 file=rel_path,
