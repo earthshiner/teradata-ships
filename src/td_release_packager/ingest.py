@@ -577,12 +577,23 @@ def ingest_directory(
     if prereq_placed:
         prereq_dir = os.path.join(payload_base, "pre-requisites")
         if os.path.isdir(prereq_dir):
-            ordered = _emit_prereq_order(prereq_dir)
-            if ordered:
+            prereq_result = _emit_prereq_order(prereq_dir)
+            if prereq_result.ordered:
                 logger.info(
                     "Pre-requisites: dependency-ordered %d file(s) → "
                     "pre-requisites/_order.txt",
-                    len(ordered),
+                    len(prereq_result.ordered),
+                )
+            # Surface unresolvable files as harvest warnings.
+            # We cannot guarantee alphabetical order is correct for
+            # files whose FROM <parent> clause is missing or
+            # unreadable. The DBA must verify these manually.
+            for rel, reason in prereq_result.unresolvable:
+                result.classification_warnings.append(
+                    f"pre-requisites/{rel}: deployment order UNRESOLVED "
+                    f"({reason}). Cannot guarantee this file deploys after "
+                    f"its parent. Add a FROM <parent_db_or_user> clause to "
+                    f"the source DDL to enable automatic ordering."
                 )
 
     logger.info(
@@ -1001,7 +1012,7 @@ def _extract_prereq_parent(content: str) -> Optional[Tuple[str, str]]:
     return (name, parent)
 
 
-def _emit_prereq_order(prereq_dir: str) -> List[str]:
+def _emit_prereq_order(prereq_dir: str) -> "PrereqOrderResult":
     """Topologically sort pre-requisite files by their FROM dependencies
     and write ``_order.txt`` into ``prereq_dir``.
 
@@ -1010,9 +1021,16 @@ def _emit_prereq_order(prereq_dir: str) -> List[str]:
     dependency for each, and produces a topological ordering where every
     parent deploys before its child.
 
-    Files whose parent is NOT found in the package (parent already exists
-    on the target) are treated as having no in-package dependency and are
-    scheduled first.
+    **Ordering guarantee:** only files whose ``FROM <parent>`` clause is
+    parseable are guaranteed to deploy after their parent. Files where
+    the dependency cannot be determined (missing or unreadable ``FROM``
+    clause) are placed first in alphabetical order — which may or may
+    not be correct. The caller receives a list of unresolvable files in
+    ``result.unresolvable`` so the harvest banner can warn the user.
+
+    You cannot rely on alphabetical ordering being correct: site naming
+    conventions vary and naming a child after its parent (so it sorts
+    later) is a convention, not something SHIPS can enforce.
 
     The ordering is written to ``prereq_dir/_order.txt`` with relative
     paths (``databases/X.db``, ``users/Y.usr``) compatible with the
@@ -1023,9 +1041,19 @@ def _emit_prereq_order(prereq_dir: str) -> List[str]:
                     inside the SHIPS project payload.
 
     Returns:
-        Ordered list of relative paths (relative to ``prereq_dir``).
-        Empty list when no prereq files were found.
+        ``PrereqOrderResult`` with the ordered paths and any files
+        whose dependencies could not be resolved. Empty when no
+        prereq files were found.
     """
+    from dataclasses import dataclass as _dc, field as _field
+
+    @_dc
+    class PrereqOrderResult:
+        ordered: list = _field(default_factory=list)
+        unresolvable: list = _field(default_factory=list)  # (rel_path, reason)
+
+    result = PrereqOrderResult()
+
     # Collect relative_path, upper-cased name, upper-cased parent
     entries: list = []
     for subdir in ("databases", "users"):
@@ -1046,10 +1074,21 @@ def _emit_prereq_order(prereq_dir: str) -> List[str]:
                 name, parent = dep
                 entries.append((rel_path, name, parent))
             else:
+                # No FROM clause found — we cannot determine the
+                # deployment dependency for this file. It will be
+                # placed first (alphabetically relative to other
+                # unresolvable files) but there is no guarantee this
+                # is correct.
+                result.unresolvable.append(
+                    (
+                        rel_path,
+                        "no CREATE DATABASE/USER FROM <parent> clause found",
+                    )
+                )
                 entries.append((rel_path, None, None))
 
     if not entries:
-        return []
+        return result
 
     # Build name → relative-path index
     name_to_rel: dict = {
@@ -1079,20 +1118,32 @@ def _emit_prereq_order(prereq_dir: str) -> List[str]:
     for rel, _, _ in entries:
         _visit(rel)
 
+    result.ordered = ordered
+
     # Write _order.txt
     order_path = os.path.join(prereq_dir, "_order.txt")
     with open(order_path, "w", encoding="utf-8") as fh:
         fh.write("# _order.txt — pre-requisites deployment order\n")
         fh.write("# Generated by SHIPS harvest: parents before children\n")
         fh.write("# (derived from CREATE DATABASE/USER FROM <parent>)\n")
+        if result.unresolvable:
+            fh.write("#\n")
+            fh.write("# WARNING: the following files have no parseable FROM clause.\n")
+            fh.write("# Their position in this file is alphabetical and may be\n")
+            fh.write("# INCORRECT if they depend on other prereqs in this package.\n")
+            fh.write("# Verify manually or add the FROM <parent> clause to source.\n")
+            for rel, _ in result.unresolvable:
+                fh.write(f"#   {rel}\n")
         fh.write("#\n")
         for rel in ordered:
             fh.write(rel + "\n")
 
     logger.info(
-        "Pre-requisites order: wrote _order.txt (%d files)", len(ordered)
+        "Pre-requisites order: wrote _order.txt (%d files, %d unresolvable)",
+        len(ordered),
+        len(result.unresolvable),
     )
-    return ordered
+    return result
 
 
 def _strip_bteq_commands(content: str) -> Tuple[str, int]:
