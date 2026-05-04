@@ -253,7 +253,7 @@ class TestCLI:
         sed_file.write_text("s/$A/one/g\ns/&&B&&/two/g\n", encoding="utf-8")
 
         rc = importer.main(
-            [str(sed_file), "--env", "DEV", "--output-dir", str(tmp_path)]
+            ["--script", str(sed_file), "--env", "DEV", "--output-dir", str(tmp_path)]
         )
         assert rc == 0
 
@@ -273,7 +273,8 @@ class TestCLI:
     def test_missing_input_returns_nonzero(self, tmp_path, capsys):
         """A non-existent input file returns rc=1 with a stderr message."""
         rc = importer.main(
-            [str(tmp_path / "nope.sh"), "--env", "DEV", "--output-dir", str(tmp_path)]
+            ["--script", str(tmp_path / "nope.sh"), "--env", "DEV",
+             "--output-dir", str(tmp_path)]
         )
         assert rc == 1
         captured = capsys.readouterr()
@@ -285,7 +286,7 @@ class TestCLI:
         sed_file.write_text("# only comments\n# no rules here\n", encoding="utf-8")
 
         rc = importer.main(
-            [str(sed_file), "--env", "DEV", "--output-dir", str(tmp_path)]
+            ["--script", str(sed_file), "--env", "DEV", "--output-dir", str(tmp_path)]
         )
         assert rc == 1
         captured = capsys.readouterr()
@@ -354,7 +355,8 @@ class TestRealWorldRoundTrip:
         sed_file.write_text(_PAUL_LEGACY_SED, encoding="utf-8")
 
         rc = importer.main(
-            [str(sed_file), "--env", "DEV", "--output-dir", str(tmp_path)]
+            ["--script", str(sed_file), "--env", "DEV",
+             "--output-dir", str(tmp_path)]
         )
         assert rc == 0
 
