@@ -559,6 +559,28 @@ class TestCheckExtension:
         assert len(issues) == 1
         assert ".viw" in issues[0].message
 
+    def test_extension_mismatch_is_error_severity_end_to_end(self, tmp_path):
+        """Through ``validate_directory``, an extension mismatch is
+        ERROR severity (default rule config). The deployer and any
+        automation reading the payload need to TRUST that a .tbl
+        file contains a TABLE, .spl contains a PROCEDURE, etc. —
+        a mismatch is the metadata lying."""
+        ddl_dir = tmp_path / "DDL" / "tables"
+        ddl_dir.mkdir(parents=True)
+        # File is named .sql but contains a CREATE TABLE
+        (ddl_dir / "MyDB.T.sql").write_text(
+            "CREATE TABLE MyDB.T (id INT);", encoding="utf-8"
+        )
+
+        result = validate_directory(str(tmp_path))
+
+        ext_issues = [i for i in result.issues if i.rule == "extension"]
+        assert len(ext_issues) == 1
+        assert ext_issues[0].severity == "ERROR"
+        # And the run is failed (errors > 0 => not passed)
+        assert result.errors >= 1
+        assert not result.passed
+
 
 # ---------------------------------------------------------------
 # _check_type_suffixes
