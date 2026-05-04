@@ -699,22 +699,26 @@ _CLASSIFY_PATTERNS = [
 _NAME_FRAG = r'(?:"[^"]+"|[A-Za-z_]\w*|\{\{[A-Za-z_]\w*\}\})'
 _QUAL_NAME = _NAME_FRAG + r"(?:\." + _NAME_FRAG + r")?"
 
+# Anchored — see classifier.py for the GRANT-with-CREATE-PROCEDURE
+# regression rationale. The capture group would otherwise greedily
+# claim ``ON`` as the object name when scanning a GRANT statement.
 _QUALIFIED_NAME_RE = re.compile(
-    r"(?:CREATE|REPLACE)\s+(?:MULTISET\s+|SET\s+)?"
+    r"^\s*(?:CREATE|REPLACE)\s+(?:MULTISET\s+|SET\s+)?"
     r"(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?"
     r"(?:TRACE\s+)?"
     r"(?:SPECIFIC\s+)?"
     r"(?:TABLE|VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER|"
     r"JOIN\s+INDEX|HASH\s+INDEX)\s+"
     r"(" + _QUAL_NAME + r")",
-    re.IGNORECASE,
+    re.IGNORECASE | re.MULTILINE,
 )
 
-# Base function name (from header, not SPECIFIC clause)
+# Base function name (from header, not SPECIFIC clause).
+# Anchored — see _QUALIFIED_NAME_RE.
 _FUNCTION_HEADER_RE = re.compile(
-    r"(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\s+"
+    r"^\s*(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\s+"
     r"(" + _QUAL_NAME + r")",
-    re.IGNORECASE,
+    re.IGNORECASE | re.MULTILINE,
 )
 
 # SPECIFIC clause inside function body
