@@ -69,6 +69,15 @@ DEFAULT_RULES: Dict[str, str] = {
     "view_macro_self_reference": "ERROR",
     "public_grant_on_tables": "WARNING",
     "review_unmapped_grants": "WARNING",
+    # intra_package_dependency is ERROR by default. A package that
+    # contains both ``CREATE DATABASE x`` and objects living in
+    # ``x`` cannot be validated with ``deploy --explain`` — the
+    # database does not exist on the target at the moment EXPLAIN
+    # runs, so every dependent object reports a noisy false error.
+    # Catching the structural mistake at inspect time keeps the
+    # explain report accurate-or-silent (never noisy-but-eventually-
+    # correct).
+    "intra_package_dependency": "ERROR",
 }
 
 # -- Valid severity values --
@@ -203,6 +212,17 @@ def generate_default_config() -> str:
         "# external service, etc.). System databases (DBC, SYSLIB,",
         "# TDStats, etc.) are auto-excluded.",
         f"review_unmapped_grants={DEFAULT_RULES['review_unmapped_grants']}",
+        "",
+        "# Cross-file structural rules",
+        "# intra_package_dependency: an object lives in a database/user",
+        "# that is CREATEd elsewhere in this same package. SHIPS uses",
+        "# EXPLAIN-based dry-run validation against the live target —",
+        "# but the prerequisite database doesn't exist on the target",
+        "# yet, so EXPLAIN of dependent objects fails. Fix structurally:",
+        "# emit CREATE DATABASE/USER as a separate prerequisites package",
+        "# deployed first, OR remove the CREATE DATABASE/USER from this",
+        "# package if the database already exists in the target.",
+        f"intra_package_dependency={DEFAULT_RULES['intra_package_dependency']}",
     ]
     return "\n".join(lines) + "\n"
 
@@ -408,6 +428,50 @@ _LEADING_REPLACE_RE = re.compile(
 # -- Token detection --
 _TOKEN_RE = re.compile(r"\{\{([A-Za-z_][A-Za-z0-9_-]*)\}\}")
 
+# -- intra_package_dependency rule helpers ----------------------
+#
+# The rule needs two pieces of information that the existing
+# regexes do not provide together:
+#
+#   1. The names of databases / users CREATEd inside the package
+#      (so we can recognise them when they appear as qualifiers).
+#   2. The qualifier portion of a CREATE TABLE / VIEW / etc.
+#      written in tokenised form -- e.g. ``CREATE TABLE
+#      {{MY_DB}}.foo``. The general-purpose ``_QUALIFIED_NAME_RE``
+#      above does not accept ``{{TOKEN}}`` in the database slot,
+#      so we provide a token-aware variant scoped to this rule.
+
+# Identifier shape: bare ident, quoted ident, or {{TOKEN}}
+_PREREQ_IDENT_FRAG = (
+    r'(?:\{\{[A-Za-z_][A-Za-z0-9_-]*\}\}|"[^"]+"|[A-Za-z_]\w*)'
+)
+
+# CREATE DATABASE <name> | CREATE USER <name>
+_CREATE_DATABASE_NAME_RE = re.compile(
+    r"\bCREATE\s+DATABASE\s+(" + _PREREQ_IDENT_FRAG + r")",
+    re.IGNORECASE,
+)
+_CREATE_USER_NAME_RE = re.compile(
+    r"\bCREATE\s+USER\s+(" + _PREREQ_IDENT_FRAG + r")",
+    re.IGNORECASE,
+)
+
+# Token-aware qualified-name extractor. Mirrors the structure of
+# ``_QUALIFIED_NAME_RE`` above but accepts ``{{TOKEN}}`` in the
+# database slot and REQUIRES a two-part qualified name.
+_INTRA_QUALIFIED_NAME_RE = re.compile(
+    r"(?:CREATE|REPLACE)\s+(?:MULTISET\s+|SET\s+)?"
+    r"(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?"
+    r"(?:TRACE\s+)?"
+    r"(?:SPECIFIC\s+)?"
+    r"(?:TABLE|VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER|"
+    r"JOIN\s+INDEX|HASH\s+INDEX)\s+"
+    r"(?P<dbpart>" + _PREREQ_IDENT_FRAG + r")"
+    r"\s*\.\s*"
+    r"(?P<objpart>" + _PREREQ_IDENT_FRAG + r")",
+    re.IGNORECASE,
+)
+
 # -- Comment stripping ------------------------------------------
 # Imported from the shared sql_text module so validate, ingest,
 # and builder all use the same position-preserving implementation.
@@ -525,6 +589,70 @@ def _extract_grant_database(target: str) -> str:
     return target.strip()
 
 
+def _normalise_prereq_name(raw: str) -> str:
+    """Strip surrounding double quotes and upper-case a prereq name.
+
+    Token forms (``{{MY_DB}}``) are preserved verbatim — comparison
+    is then literal so a tokenised ``CREATE DATABASE {{X}}`` matches a
+    tokenised ``CREATE TABLE {{X}}.foo``. Quoted bare names lose their
+    quotes so ``"MyDb"`` and ``MyDb`` compare equal under
+    Teradata's case-insensitive identifier rules.
+    """
+    name = raw.strip()
+    if name.startswith('"') and name.endswith('"'):
+        name = name[1:-1]
+    return name.upper()
+
+
+def _collect_package_prereqs(source_dir: str) -> set:
+    """Pre-pass: collect databases / users CREATEd within the package.
+
+    Walks ``source_dir`` for files that can plausibly host a CREATE
+    DATABASE / CREATE USER statement (``.db``, ``.usr``, plus the
+    generic ``.sql`` / ``.ddl``) and extracts the created name. The
+    resulting set powers the per-file ``intra_package_dependency``
+    check.
+
+    Comments are stripped before matching so a CREATE DATABASE
+    appearing inside a header block is not treated as real DDL.
+
+    Args:
+        source_dir: Directory walked by ``validate_directory``.
+
+    Returns:
+        Set of normalised (upper-cased, token-preserving) database
+        and user names. Empty set when the package contains no
+        prerequisite-creation statements — in which case the
+        per-file rule is silently inactive.
+    """
+    prereqs: set = set()
+
+    for root, dirs, filenames in os.walk(source_dir):
+        dirs.sort()
+        for f in sorted(filenames):
+            if f.startswith(".") or f.startswith("_"):
+                continue
+            ext = os.path.splitext(f)[1].lower()
+            if ext not in (".db", ".usr", ".sql", ".ddl"):
+                continue
+
+            file_path = os.path.join(root, f)
+            try:
+                with open(file_path, "r", encoding="utf-8") as fh:
+                    content = fh.read()
+            except (OSError, UnicodeDecodeError):
+                continue
+
+            clean = _strip_sql_comments(content)
+            for regex in (_CREATE_DATABASE_NAME_RE, _CREATE_USER_NAME_RE):
+                for match in regex.finditer(clean):
+                    name = _normalise_prereq_name(match.group(1))
+                    if name:
+                        prereqs.add(name)
+
+    return prereqs
+
+
 @dataclass
 class ValidationIssue:
     """A single validation finding."""
@@ -588,6 +716,12 @@ def validate_directory(
         }
 
     result = ValidationResult()
+
+    # -- Pre-pass: collect package-internal prerequisite names --
+    # Used by the intra_package_dependency rule to decide whether
+    # an object's qualifier database / user is created elsewhere
+    # in the same package. Empty set => rule is silently inactive.
+    package_prereqs = _collect_package_prereqs(source_dir)
 
     # Discover files
     files = []
@@ -661,6 +795,11 @@ def validate_directory(
         )
         file_issues.extend(
             _check_unmapped_grants(rel_path, clean, file_path, placement)
+        )
+        file_issues.extend(
+            _check_intra_package_dependency(
+                rel_path, clean, file_path, package_prereqs
+            )
         )
 
         # -- Apply rule config: remap severity or drop OFF rules --
@@ -1518,6 +1657,98 @@ def _check_unmapped_grants(
         )
 
     return issues
+
+
+# ---------------------------------------------------------------
+# intra_package_dependency rule
+# ---------------------------------------------------------------
+
+
+def _check_intra_package_dependency(
+    rel_path: str,
+    content: str,
+    file_path: str,
+    package_prereqs: set,
+) -> List[ValidationIssue]:
+    """Flag objects that live in a database CREATEd by the same package.
+
+    SHIPS validates packages with ``deploy --explain``, which runs
+    ``EXPLAIN <ddl>`` against the live target. EXPLAIN of
+    ``CREATE TABLE x.foo`` requires database ``x`` to already exist
+    on the target — but if the same package also contains
+    ``CREATE DATABASE x``, that statement has not yet been deployed
+    when the dependant is explained, and Teradata DDL is auto-commit
+    so a transactional dry-run is impossible.
+
+    The fix is structural: prerequisites belong in their own
+    package, deployed first. This rule surfaces the misplacement at
+    inspect time so the explain report stays accurate-or-silent
+    rather than noisy-but-eventually-correct.
+
+    Args:
+        rel_path:        Relative path of the file under check.
+        content:         File content (already comment-stripped by
+                         the dispatcher).
+        file_path:       Absolute path. Used to skip prereq files
+                         themselves (``.db`` / ``.usr``) — those
+                         CREATE the database and are never the
+                         dependant.
+        package_prereqs: Upper-cased set of database / user names
+                         CREATEd within this package, produced by
+                         ``_collect_package_prereqs``.
+
+    Returns:
+        Empty list when the rule does not apply (no prereqs in the
+        package, or this file is the prereq, or the qualifier does
+        not match a prereq). Otherwise a single ValidationIssue
+        pointing at the qualifier with a fix-it message.
+    """
+    # Empty prereq set → rule is silently inactive (no false positives
+    # for packages that don't include any CREATE DATABASE/USER).
+    if not package_prereqs:
+        return []
+
+    # The prereq files themselves are never the dependant. Skip them
+    # explicitly even though the qualified-name regex would not match
+    # CREATE DATABASE/USER — defence in depth against misclassified
+    # files (e.g. a stray ``.db`` containing CREATE TABLE).
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext in (".db", ".usr"):
+        return []
+
+    match = _INTRA_QUALIFIED_NAME_RE.search(content)
+    if not match:
+        return []
+
+    db_part_raw = match.group("dbpart").strip()
+    db_normalised = _normalise_prereq_name(db_part_raw)
+    if db_normalised not in package_prereqs:
+        return []
+
+    line_num = content[: match.start("dbpart")].count("\n") + 1
+
+    return [
+        ValidationIssue(
+            file=rel_path,
+            rule="intra_package_dependency",
+            severity="ERROR",
+            line=line_num,
+            message=(
+                f"Object lives in database '{db_part_raw}' which is "
+                f"CREATEd elsewhere in the same package. SHIPS uses "
+                f"EXPLAIN-based dry-run validation against the live "
+                f"target — but the prerequisite database does not "
+                f"exist on the target until that earlier statement "
+                f"is deployed (Teradata DDL is auto-commit, so "
+                f"transactional dry-run is not possible). Fix: "
+                f"split the package — emit CREATE DATABASE/USER as "
+                f"a separate prerequisites package deployed first, "
+                f"OR remove the CREATE DATABASE/USER from this "
+                f"package if the database already exists in the "
+                f"target environment."
+            ),
+        )
+    ]
 
 
 # ---------------------------------------------------------------

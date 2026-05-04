@@ -29,6 +29,8 @@ from td_release_packager.validate import (
     _check_hardcoded_names,
     _check_keyword_case,
     _check_leading_commas,
+    _check_intra_package_dependency,
+    _collect_package_prereqs,
     validate_directory,
     read_inspect_config,
     generate_default_config,
@@ -1164,3 +1166,377 @@ class TestRuleConfigIntegration:
         result = validate_directory(str(tmp_path))
 
         assert result.files_scanned == 1
+
+
+# ---------------------------------------------------------------
+# _collect_package_prereqs
+# ---------------------------------------------------------------
+
+
+class TestCollectPackagePrereqs:
+    """Tests for the prereq pre-pass that powers intra_package_dependency."""
+
+    def test_empty_directory_returns_empty_set(self, tmp_path):
+        """A directory with no DDL returns an empty set."""
+        assert _collect_package_prereqs(str(tmp_path)) == set()
+
+    def test_create_database_in_db_file(self, tmp_path):
+        """CREATE DATABASE in a .db file is collected."""
+        prereq_dir = tmp_path / "pre-requisites" / "databases"
+        prereq_dir.mkdir(parents=True)
+        (prereq_dir / "MyDB.db").write_text(
+            "CREATE DATABASE MyDB AS PERMANENT = 1024 SPOOL = 1024;",
+            encoding="utf-8",
+        )
+
+        prereqs = _collect_package_prereqs(str(tmp_path))
+
+        assert prereqs == {"MYDB"}
+
+    def test_create_user_in_usr_file(self, tmp_path):
+        """CREATE USER in a .usr file is collected."""
+        prereq_dir = tmp_path / "pre-requisites" / "users"
+        prereq_dir.mkdir(parents=True)
+        (prereq_dir / "MyUser.usr").write_text(
+            'CREATE USER MyUser AS PERM = 0 PASSWORD = "x";',
+            encoding="utf-8",
+        )
+
+        prereqs = _collect_package_prereqs(str(tmp_path))
+
+        assert prereqs == {"MYUSER"}
+
+    def test_tokenised_database_name_preserved(self, tmp_path):
+        """Tokens are preserved verbatim so tokenised dependants match."""
+        prereq_dir = tmp_path / "pre-requisites" / "databases"
+        prereq_dir.mkdir(parents=True)
+        (prereq_dir / "{{MY_DB}}.db").write_text(
+            "CREATE DATABASE {{MY_DB}} AS PERMANENT = 1024;",
+            encoding="utf-8",
+        )
+
+        prereqs = _collect_package_prereqs(str(tmp_path))
+
+        # Token is uppercased but braces survive verbatim.
+        assert prereqs == {"{{MY_DB}}"}
+
+    def test_quoted_database_name_unquoted_and_uppercased(self, tmp_path):
+        """Quoted identifiers are normalised — quotes stripped, upper-cased."""
+        prereq_dir = tmp_path / "pre-requisites" / "databases"
+        prereq_dir.mkdir(parents=True)
+        (prereq_dir / "Quoted.db").write_text(
+            'CREATE DATABASE "MyDB" AS PERMANENT = 1024;',
+            encoding="utf-8",
+        )
+
+        prereqs = _collect_package_prereqs(str(tmp_path))
+
+        assert prereqs == {"MYDB"}
+
+    def test_create_database_in_comment_ignored(self, tmp_path):
+        """A CREATE DATABASE inside a comment is not collected."""
+        prereq_dir = tmp_path / "pre-requisites" / "databases"
+        prereq_dir.mkdir(parents=True)
+        (prereq_dir / "RealDB.db").write_text(
+            "/* historical: was CREATE DATABASE OldDB */\n"
+            "CREATE DATABASE RealDB AS PERMANENT = 1024;\n",
+            encoding="utf-8",
+        )
+
+        prereqs = _collect_package_prereqs(str(tmp_path))
+
+        # Only RealDB — the commented-out OldDB is ignored.
+        assert prereqs == {"REALDB"}
+
+    def test_files_with_unrelated_extensions_skipped(self, tmp_path):
+        """Files with extensions other than .db/.usr/.sql/.ddl are skipped."""
+        ddl_dir = tmp_path / "DDL" / "tables"
+        ddl_dir.mkdir(parents=True)
+        # Bury a CREATE DATABASE inside a .tbl file — should NOT be picked
+        # up because .tbl is not a prereq-bearing extension.
+        (ddl_dir / "MyDB.T.tbl").write_text(
+            "CREATE DATABASE Sneaky AS PERMANENT = 1;\n"
+            "CREATE TABLE MyDB.T (Id INT);",
+            encoding="utf-8",
+        )
+
+        assert _collect_package_prereqs(str(tmp_path)) == set()
+
+
+# ---------------------------------------------------------------
+# _check_intra_package_dependency
+# ---------------------------------------------------------------
+
+
+class TestCheckIntraPackageDependency:
+    """Unit tests for the per-file intra_package_dependency check."""
+
+    def test_no_prereqs_returns_no_issues(self):
+        """An empty prereq set means the rule is silently inactive."""
+        ddl = "CREATE MULTISET TABLE MyDB.T (Id INT);"
+        issues = _check_intra_package_dependency("t.tbl", ddl, "t.tbl", set())
+        assert issues == []
+
+    def test_object_in_prereq_database_flagged(self):
+        """Object whose qualifier matches a package-created DB is flagged."""
+        ddl = "CREATE MULTISET TABLE MyDB.T (Id INT);"
+        issues = _check_intra_package_dependency(
+            "t.tbl", ddl, "t.tbl", {"MYDB"}
+        )
+        assert len(issues) == 1
+        assert issues[0].rule == "intra_package_dependency"
+        assert issues[0].severity == "ERROR"
+        assert "MyDB" in issues[0].message
+        assert issues[0].line == 1
+
+    def test_object_in_external_database_passes(self):
+        """Object in a database NOT created in the package is not flagged."""
+        ddl = "CREATE MULTISET TABLE ExternalDB.T (Id INT);"
+        issues = _check_intra_package_dependency(
+            "t.tbl", ddl, "t.tbl", {"MYDB"}
+        )
+        assert issues == []
+
+    def test_tokenised_object_in_tokenised_prereq_flagged(self):
+        """Tokenised CREATE TABLE {{X}}.foo against prereq {{X}} is flagged."""
+        ddl = "CREATE MULTISET TABLE {{MY_DB}}.T (Id INT);"
+        issues = _check_intra_package_dependency(
+            "t.tbl", ddl, "t.tbl", {"{{MY_DB}}"}
+        )
+        assert len(issues) == 1
+        assert "{{MY_DB}}" in issues[0].message
+
+    def test_quoted_qualifier_matches_unquoted_prereq(self):
+        """Quoted "MyDB" qualifier matches prereq MYDB after normalisation."""
+        ddl = 'CREATE MULTISET TABLE "MyDB".T (Id INT);'
+        issues = _check_intra_package_dependency(
+            "t.tbl", ddl, "t.tbl", {"MYDB"}
+        )
+        assert len(issues) == 1
+
+    def test_database_file_itself_not_flagged(self):
+        """The .db file CREATEing the database is never the dependant."""
+        ddl = "CREATE DATABASE MyDB AS PERMANENT = 1024;"
+        issues = _check_intra_package_dependency(
+            "MyDB.db", ddl, "MyDB.db", {"MYDB"}
+        )
+        assert issues == []
+
+    def test_user_file_itself_not_flagged(self):
+        """The .usr file CREATEing the user is never the dependant."""
+        ddl = "CREATE USER MyUser AS PERM = 0;"
+        issues = _check_intra_package_dependency(
+            "MyUser.usr", ddl, "MyUser.usr", {"MYUSER"}
+        )
+        assert issues == []
+
+    def test_view_in_prereq_database_flagged(self):
+        """A view in a prereq-created database is also flagged."""
+        ddl = "CREATE VIEW {{V_DB}}.MyView AS SELECT 1;"
+        issues = _check_intra_package_dependency(
+            "v.viw", ddl, "v.viw", {"{{V_DB}}"}
+        )
+        assert len(issues) == 1
+
+    def test_procedure_in_prereq_database_flagged(self):
+        """A procedure in a prereq-created database is flagged."""
+        ddl = (
+            "CREATE PROCEDURE {{P_DB}}.sp_X()\n"
+            "BEGIN\n"
+            "    SET v = 1;\n"
+            "END;"
+        )
+        issues = _check_intra_package_dependency(
+            "p.spl", ddl, "p.spl", {"{{P_DB}}"}
+        )
+        assert len(issues) == 1
+
+    def test_unqualified_object_not_flagged(self):
+        """Unqualified objects do not match — db_qualifier owns that case."""
+        ddl = "CREATE TABLE Customer (Id INT);"
+        issues = _check_intra_package_dependency(
+            "t.tbl", ddl, "t.tbl", {"MYDB"}
+        )
+        assert issues == []
+
+    def test_line_number_points_at_qualifier(self):
+        """Reported line is the line containing the qualifier."""
+        ddl = (
+            "/* header comment */\n"  # line 1
+            "/* second line */\n"  # line 2
+            "CREATE MULTISET TABLE\n"  # line 3
+            "  MyDB.T (Id INT);"  # line 4
+        )
+        issues = _check_intra_package_dependency(
+            "t.tbl", ddl, "t.tbl", {"MYDB"}
+        )
+        assert len(issues) == 1
+        assert issues[0].line == 4
+
+
+# ---------------------------------------------------------------
+# Integration tests through validate_directory
+# ---------------------------------------------------------------
+
+
+class TestIntraPackageDependencyIntegration:
+    """End-to-end tests for the intra_package_dependency rule via
+    validate_directory — checks the pre-pass and dispatcher wiring."""
+
+    def test_create_database_plus_table_in_same_package_flagged(self, tmp_path):
+        """The headline case Paul reported: CREATE DATABASE x +
+        CREATE TABLE x.foo in the same package fires an ERROR."""
+        prereq_dir = tmp_path / "pre-requisites" / "databases"
+        prereq_dir.mkdir(parents=True)
+        (prereq_dir / "MyDB.db").write_text(
+            "CREATE DATABASE MyDB AS PERMANENT = 1024;",
+            encoding="utf-8",
+        )
+        ddl_dir = tmp_path / "DDL" / "tables"
+        ddl_dir.mkdir(parents=True)
+        (ddl_dir / "MyDB.Customer.tbl").write_text(
+            "CREATE MULTISET TABLE MyDB.Customer (Id INTEGER);",
+            encoding="utf-8",
+        )
+
+        result = validate_directory(str(tmp_path))
+
+        intra_issues = [
+            i for i in result.issues if i.rule == "intra_package_dependency"
+        ]
+        assert len(intra_issues) == 1
+        assert intra_issues[0].severity == "ERROR"
+        assert "MyDB.Customer.tbl" in intra_issues[0].file
+        assert not result.passed
+
+    def test_objects_in_external_database_pass(self, tmp_path):
+        """A package containing only objects (no CREATE DATABASE) does
+        not trigger the rule even if the qualifier database happens to
+        share a name with something elsewhere."""
+        ddl_dir = tmp_path / "DDL" / "tables"
+        ddl_dir.mkdir(parents=True)
+        (ddl_dir / "MyDB.Customer.tbl").write_text(
+            "CREATE MULTISET TABLE MyDB.Customer (Id INTEGER);",
+            encoding="utf-8",
+        )
+
+        result = validate_directory(str(tmp_path))
+
+        intra_issues = [
+            i for i in result.issues if i.rule == "intra_package_dependency"
+        ]
+        assert intra_issues == []
+
+    def test_tokenised_pair_flagged_end_to_end(self, tmp_path):
+        """Tokenised CREATE DATABASE + tokenised dependants match through
+        the full pipeline."""
+        prereq_dir = tmp_path / "pre-requisites" / "databases"
+        prereq_dir.mkdir(parents=True)
+        (prereq_dir / "{{T_DB}}.db").write_text(
+            "CREATE DATABASE {{T_DB}} AS PERMANENT = 1024;",
+            encoding="utf-8",
+        )
+        ddl_dir = tmp_path / "DDL" / "tables"
+        ddl_dir.mkdir(parents=True)
+        (ddl_dir / "Customer.tbl").write_text(
+            "CREATE MULTISET TABLE {{T_DB}}.Customer (Id INTEGER);",
+            encoding="utf-8",
+        )
+
+        result = validate_directory(str(tmp_path))
+
+        intra_issues = [
+            i for i in result.issues if i.rule == "intra_package_dependency"
+        ]
+        assert len(intra_issues) == 1
+        assert "{{T_DB}}" in intra_issues[0].message
+
+    def test_database_file_itself_not_flagged_end_to_end(self, tmp_path):
+        """The CREATE DATABASE file passes the rule (it IS the prereq)."""
+        prereq_dir = tmp_path / "pre-requisites" / "databases"
+        prereq_dir.mkdir(parents=True)
+        (prereq_dir / "MyDB.db").write_text(
+            "CREATE DATABASE MyDB AS PERMANENT = 1024;",
+            encoding="utf-8",
+        )
+
+        result = validate_directory(str(tmp_path))
+
+        intra_issues = [
+            i for i in result.issues if i.rule == "intra_package_dependency"
+        ]
+        # The CREATE DATABASE file is the prereq — it must not flag itself.
+        assert intra_issues == []
+
+    def test_create_user_plus_dependant_object_flagged(self, tmp_path):
+        """CREATE USER also creates a database in Teradata; objects in
+        that user's database fire the rule too."""
+        prereq_dir = tmp_path / "pre-requisites" / "users"
+        prereq_dir.mkdir(parents=True)
+        (prereq_dir / "MyUser.usr").write_text(
+            'CREATE USER MyUser AS PERM = 1024 PASSWORD = "x";',
+            encoding="utf-8",
+        )
+        ddl_dir = tmp_path / "DDL" / "tables"
+        ddl_dir.mkdir(parents=True)
+        (ddl_dir / "MyUser.Audit.tbl").write_text(
+            "CREATE MULTISET TABLE MyUser.Audit (Id INTEGER);",
+            encoding="utf-8",
+        )
+
+        result = validate_directory(str(tmp_path))
+
+        intra_issues = [
+            i for i in result.issues if i.rule == "intra_package_dependency"
+        ]
+        assert len(intra_issues) == 1
+        assert "MyUser" in intra_issues[0].message
+
+    def test_rule_can_be_disabled_via_config(self, tmp_path):
+        """Setting the rule to OFF silences it even when violated."""
+        prereq_dir = tmp_path / "pre-requisites" / "databases"
+        prereq_dir.mkdir(parents=True)
+        (prereq_dir / "MyDB.db").write_text(
+            "CREATE DATABASE MyDB AS PERMANENT = 1024;",
+            encoding="utf-8",
+        )
+        ddl_dir = tmp_path / "DDL" / "tables"
+        ddl_dir.mkdir(parents=True)
+        (ddl_dir / "MyDB.Customer.tbl").write_text(
+            "CREATE MULTISET TABLE MyDB.Customer (Id INTEGER);",
+            encoding="utf-8",
+        )
+
+        rules = dict(DEFAULT_RULES)
+        rules["intra_package_dependency"] = "OFF"
+        result = validate_directory(str(tmp_path), rules_config=rules)
+
+        intra_issues = [
+            i for i in result.issues if i.rule == "intra_package_dependency"
+        ]
+        assert intra_issues == []
+
+    def test_rule_can_be_softened_to_warning(self, tmp_path):
+        """Setting the rule to WARNING demotes it from ERROR."""
+        prereq_dir = tmp_path / "pre-requisites" / "databases"
+        prereq_dir.mkdir(parents=True)
+        (prereq_dir / "MyDB.db").write_text(
+            "CREATE DATABASE MyDB AS PERMANENT = 1024;",
+            encoding="utf-8",
+        )
+        ddl_dir = tmp_path / "DDL" / "tables"
+        ddl_dir.mkdir(parents=True)
+        (ddl_dir / "MyDB.Customer.tbl").write_text(
+            "CREATE MULTISET TABLE MyDB.Customer (Id INTEGER);",
+            encoding="utf-8",
+        )
+
+        rules = dict(DEFAULT_RULES)
+        rules["intra_package_dependency"] = "WARNING"
+        result = validate_directory(str(tmp_path), rules_config=rules)
+
+        intra_issues = [
+            i for i in result.issues if i.rule == "intra_package_dependency"
+        ]
+        assert len(intra_issues) == 1
+        assert intra_issues[0].severity == "WARNING"
