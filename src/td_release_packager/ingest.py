@@ -27,6 +27,10 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+from td_release_packager.legacy_placeholders import (
+    LegacyPlaceholderFinding,
+    find_legacy_placeholders,
+)
 from td_release_packager.token_engine import _TOKEN_RE, find_malformed_tokens
 
 logger = logging.getLogger(__name__)
@@ -215,6 +219,14 @@ class IngestResult:
     #: list of (source_abs_path, dest_rel_path, kind) tuples.
     #: kind is JAR_BINARY / C_SOURCE / C_HEADER / etc.
     binaries_placed: List[Tuple[str, str, str]] = field(default_factory=list)
+    #: Non-SHIPS substitution placeholders detected in source
+    #: ($VAR, ${VAR}, &&VAR&&). Populated by harvest so callers can
+    #: surface a banner naming the syntax + remediation tool. Empty
+    #: list when the source uses only SHIPS {{TOKEN}} form (or no
+    #: substitution at all).
+    legacy_placeholders: List["LegacyPlaceholderFinding"] = field(
+        default_factory=list
+    )
 
 
 def ingest_directory(
@@ -280,6 +292,16 @@ def ingest_directory(
             raw_content = _read_file(src_path)
             if raw_content is None:
                 continue  # Binary file
+
+            # -- Detect non-SHIPS placeholders ($VAR, &&VAR&&, etc.)
+            # Recorded into the result so the harvest banner can
+            # surface them; does NOT block the harvest itself.
+            # Detection runs against the raw file (not per-statement)
+            # so a placeholder appearing only in a header survives
+            # to the banner.
+            result.legacy_placeholders.extend(
+                find_legacy_placeholders(raw_content, src_path)
+            )
 
             # -- Split multi-statement files into individual DDL --
             # A file like create_databases.sql with 5 CREATE DATABASE
