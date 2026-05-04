@@ -763,18 +763,48 @@ def _cmd_ingest(args):
                 map_path, token_map, result.token_candidates, env_prefix or "(none)"
             )
             generated_token_map_path = map_path
-            print(f"\n  Token map generated: {map_path}")
-            print(f"  Mappings:           {len(token_map)}")
+
+            # Header — prominent path so it's the first thing the
+            # user sees in the token-map block, before any per-
+            # mapping listing pushes it off-screen.
+            print()
+            print("  +-- Token map ----------------------------------------------+")
+            print(f"  |   Path:     {map_path}")
+            print(f"  |   Mappings: {len(token_map)}")
             if env_prefix:
-                print(f"  Prefix stripped:    {env_prefix}")
+                print(f"  |   Prefix:   {env_prefix} (stripped from token names)")
             else:
-                print("  No --env-prefix:    full names used as tokens")
-            for literal, token in sorted(token_map.items()):
+                print("  |   Prefix:   none (full names used as tokens)")
+            print("  +------------------------------------------------------------+")
+
+            # Sample of mappings — capped to keep the output short.
+            # Anything past the cap stays in the file; the user can
+            # cat / open the path printed above to see them all.
+            CAP = 10
+            sorted_mappings = sorted(token_map.items())
+            print(f"\n  Sample mappings (showing {min(CAP, len(token_map))} of {len(token_map)}):")
+            for literal, token in sorted_mappings[:CAP]:
                 files = result.token_candidates.get(literal, [])
                 print(f"    {literal} → {token}  ({len(files)} refs)")
-            # Detailed next-action guidance is consolidated into the
-            # Next Steps banner below — keep this block focused on
-            # reporting what was just done.
+            if len(token_map) > CAP:
+                print(f"    ... {len(token_map) - CAP} more — see the file above.")
+
+            # Footer — repeat the path as the LAST line of the block
+            # so even if the listing is long the user finds it again
+            # right above the Next Steps banner.
+            print(f"\n  ✓ Token map written to: {map_path}")
+
+        elif generate_map and not result.token_candidates:
+            # User asked for a token map but no hardcoded names were
+            # detected. Tell them clearly rather than silently
+            # producing nothing.
+            print(
+                "\n  ⚠ No hardcoded database names detected — no token map generated.\n"
+                "    The source DDL appears to be already tokenised, or the\n"
+                "    qualified-reference detector didn't recognise the literal\n"
+                "    syntax. If you expected literals to be present, check that\n"
+                "    they're written as DATABASE_NAME.OBJECT_NAME (not unqualified)."
+            )
 
         elif result.token_candidates and not apply_tokens:
             print("\n  Token candidates (hardcoded database names):")
