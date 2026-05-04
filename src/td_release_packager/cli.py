@@ -592,10 +592,25 @@ def _print_harvest_next_steps(
 
 
 def _cmd_import_legacy(args):
-    """Dispatch to td_release_packager.legacy_importer.main()."""
+    """Dispatch to td_release_packager.legacy_importer.main().
+
+    Two input modes (mutually exclusive at the argparse layer):
+    ``--script`` consumes an existing sed substitution script;
+    ``--scan-source`` walks a source DDL tree and auto-discovers
+    placeholders. Either resolves into the same shape of artefacts
+    (``.properties`` + ``legacy_migration.sed``) -- the latter mode
+    additionally writes ``scan_report.md``.
+    """
     from td_release_packager.legacy_importer import main as importer_main
 
-    argv = [args.input, "--env", args.env, "--output-dir", args.output_dir]
+    argv: list = []
+    if args.script:
+        argv.extend(["--script", args.script])
+    else:
+        argv.extend(["--scan-source", args.scan_source])
+        if args.project:
+            argv.extend(["--project", args.project])
+    argv.extend(["--env", args.env, "--output-dir", args.output_dir])
     if args.verbose:
         argv.append("-v")
     sys.exit(importer_main(argv))
@@ -2175,19 +2190,43 @@ def _build_parser():
     # -- import-legacy --
     il = subs.add_parser(
         "import-legacy",
-        help="Import a pre-SHIPS sed substitution script. "
-        "Emits a .properties file (token values) + a sed migration "
-        "script (legacy markers → {{TOKEN}}).",
-        description="Import a pre-SHIPS sed substitution script and "
-        "produce two artefacts that bootstrap a SHIPS project: "
-        "(1) a flat .properties file with token values, and "
-        "(2) a sed migration script that converts legacy markers "
-        "($VAR, ${VAR}, &&VAR&&) in source files to the SHIPS "
-        "{{TOKEN}} convention.",
+        help="Bootstrap a SHIPS project from legacy substitutions. "
+        "Two input modes: --script (existing sed file) or "
+        "--scan-source (auto-discover placeholders in a source tree).",
+        description="Bootstrap a SHIPS project from legacy "
+        "substitutions. Two mutually exclusive input modes: "
+        "--script consumes an existing sed substitution script "
+        "(s/$VAR/value/g rules); --scan-source walks a source DDL "
+        "tree and auto-discovers $VAR / ${VAR} / &&VAR&& "
+        "placeholders. Both modes emit a .properties file (token "
+        "values) and a sed migration script (legacy markers → "
+        "{{TOKEN}}). --scan-source additionally writes "
+        "scan_report.md, an audit detail of every discovered token.",
+    )
+    il_mode = il.add_mutually_exclusive_group(required=True)
+    il_mode.add_argument(
+        "--script",
+        metavar="SED_FILE",
+        help="Path to a legacy sed substitution script. Use this "
+        "when your project's pre-SHIPS build harness already has a "
+        "sed file defining (marker, value) pairs.",
+    )
+    il_mode.add_argument(
+        "--scan-source",
+        metavar="SOURCE_DIR",
+        help="Walk a source DDL directory and auto-discover non-SHIPS "
+        "placeholders ($VAR, ${VAR}, &&VAR&&). Use this when the "
+        "project has placeholders embedded in source but no sed "
+        "file to point at -- the .properties values come out empty "
+        "for you to fill in, and the migration sed converts every "
+        "discovered marker to its {{TOKEN}} form. NOTE: expects a "
+        "DIRECTORY (the root of your source DDL), not a single file.",
     )
     il.add_argument(
-        "input",
-        help="Path to the legacy sed substitution script.",
+        "--project",
+        help="Optional SHIPS project root. When supplied, the discovery "
+        "resolver consults the project's ships.yaml for any extra "
+        "extensions to scan. Only meaningful with --scan-source.",
     )
     il.add_argument(
         "--env",
@@ -2199,7 +2238,8 @@ def _build_parser():
         default=".",
         help="Output directory (default: current). Files written under "
         "<output-dir>/properties/<env>.properties and "
-        "<output-dir>/legacy_migration.sed.",
+        "<output-dir>/legacy_migration.sed. In --scan-source mode an "
+        "additional <output-dir>/scan_report.md is also written.",
     )
 
     # -- decompose-names --

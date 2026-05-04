@@ -455,3 +455,107 @@ class TestScanSourceCLI:
 
         with pytest.raises(SystemExit):
             importer.main(["--env", "DEV", "--output-dir", str(tmp_path)])
+
+
+# ---------------------------------------------------------------
+# CLI dispatcher wiring (td_release_packager subcommand layer)
+# ---------------------------------------------------------------
+#
+# These tests go through ``td_release_packager.cli.main()`` rather
+# than ``legacy_importer.main()`` directly. Regression-pinning the
+# subcommand argparse layer -- when --scan-source was first added,
+# the standalone script's parser was updated but the
+# td_release_packager subcommand's parser wasn't, so
+# ``python -m td_release_packager import-legacy --scan-source ...``
+# rejected the unknown argument.
+
+
+class TestCLIDispatcherScanSource:
+    """``python -m td_release_packager import-legacy --scan-source``
+    must reach the importer end-to-end."""
+
+    def _invoke_cli(self, argv):
+        """Run the package-level CLI's main() and capture exit code."""
+        import sys
+
+        import pytest
+
+        from td_release_packager.cli import main
+
+        old_argv = sys.argv
+        sys.argv = ["td_release_packager"] + argv
+        try:
+            with pytest.raises(SystemExit) as ei:
+                main()
+            return int(ei.value.code) if ei.value.code is not None else 0
+        finally:
+            sys.argv = old_argv
+
+    def test_scan_source_via_subcommand(self, tmp_path, capsys):
+        source = tmp_path / "src"
+        source.mkdir()
+        (source / "x.tbl").write_text(
+            "CREATE TABLE $UTL_T.X (Id INT);", encoding="utf-8"
+        )
+        out = tmp_path / "out"
+
+        rc = self._invoke_cli(
+            [
+                "import-legacy",
+                "--scan-source", str(source),
+                "--env", "DEV",
+                "--output-dir", str(out),
+            ]
+        )
+        capsys.readouterr()  # discard stdout
+
+        assert rc == 0
+        assert (out / "properties" / "DEV.properties").exists()
+        assert (out / "legacy_migration.sed").exists()
+        assert (out / "scan_report.md").exists()
+
+    def test_script_via_subcommand(self, tmp_path, capsys):
+        sed_file = tmp_path / "legacy.sh"
+        sed_file.write_text("s/$A/one/g\n", encoding="utf-8")
+        out = tmp_path / "out"
+
+        rc = self._invoke_cli(
+            [
+                "import-legacy",
+                "--script", str(sed_file),
+                "--env", "DEV",
+                "--output-dir", str(out),
+            ]
+        )
+        capsys.readouterr()
+
+        assert rc == 0
+        assert (out / "properties" / "DEV.properties").exists()
+        assert (out / "legacy_migration.sed").exists()
+        # --script mode does NOT emit scan_report.md.
+        assert not (out / "scan_report.md").exists()
+
+    def test_subcommand_rejects_both_modes(self, tmp_path):
+        """Argparse mutual exclusion at the subcommand layer too."""
+        sed = tmp_path / "legacy.sh"
+        sed.write_text("s/$A/x/g\n", encoding="utf-8")
+        source = tmp_path / "src"
+        source.mkdir()
+
+        rc = self._invoke_cli(
+            [
+                "import-legacy",
+                "--script", str(sed),
+                "--scan-source", str(source),
+                "--env", "DEV",
+                "--output-dir", str(tmp_path),
+            ]
+        )
+        # Argparse exits 2 on mutual-exclusion violation.
+        assert rc == 2
+
+    def test_subcommand_rejects_neither_mode(self, tmp_path):
+        rc = self._invoke_cli(
+            ["import-legacy", "--env", "DEV", "--output-dir", str(tmp_path)]
+        )
+        assert rc == 2
