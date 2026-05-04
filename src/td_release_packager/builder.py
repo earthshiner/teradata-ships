@@ -1522,17 +1522,54 @@ def main():
             cursor.connection.close()
 
 
+_PHASE_SUBDIR_ORDERS = {{
+    "00_system": {{
+        "maps": 0, "roles": 1, "profiles": 2,
+        "authorizations": 3, "foreign_servers": 4,
+    }},
+    "02_dcl": {{"roles": 0, "users": 1, "inter_db": 2}},
+    "03_ddl": {{
+        "tables": 10, "join_indexes": 11, "hash_indexes": 11,
+        "secondary_indexes": 12, "views": 20, "macros": 21,
+        "jar_install": 22, "procedures": 23, "functions": 24,
+        "script_table_operators": 25, "triggers": 30,
+    }},
+}}
+
+
 def discover_files(phase_path):
-    """Discover all SQL files in a phase directory, ordered by sub-directory then name."""
-    files = []
+    """Discover SQL files in a phase, ordered by the phase's
+    sub-directory map then alphabetically within each sub-directory.
+
+    Sub-dirs not in the map (e.g. user-added folders) sort to the
+    end alphabetically. Without this map, alphabetical traversal
+    deploys procedures (P) before tables (T) and jar_install (J)
+    after functions (F) -- both wrong in the absence of an
+    explicit _waves.txt or _order.txt.
+    """
+    phase_name = os.path.basename(phase_path.rstrip(os.sep))
+    order_map = _PHASE_SUBDIR_ORDERS.get(phase_name, {{}})
+
+    files_by_subdir = {{}}
     for root, dirs, filenames in os.walk(phase_path):
-        dirs.sort()  # Alphabetical sub-directory traversal
+        dirs.sort()
         for f in sorted(filenames):
             if f.startswith("_") or f.startswith("."):
                 continue  # Skip control files
             full = os.path.join(root, f)
-            files.append(full)
-    return files
+            rel = os.path.relpath(full, phase_path)
+            top_subdir = rel.replace(os.sep, "/").split("/", 1)[0]
+            files_by_subdir.setdefault(top_subdir, []).append(full)
+
+    def subdir_key(name):
+        # Known sub-dirs sort by their order index; unknown ones
+        # sort to the end alphabetically (sentinel = 9999).
+        return (order_map.get(name, 9999), name)
+
+    out = []
+    for subdir in sorted(files_by_subdir.keys(), key=subdir_key):
+        out.extend(files_by_subdir[subdir])
+    return out
 
 
 def read_order_file(order_path, base_dir):

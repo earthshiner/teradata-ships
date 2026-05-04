@@ -82,6 +82,17 @@ SYSTEM_SUBDIR_ORDER = {
 
 # -- Sub-directory ordering within the DDL phase --
 # Objects within DDL deploy in this sequence.
+#
+# JAR install scripts MUST come before procedures: PROCEDURE
+# LANGUAGE JAVA bodies reference an installed JAR by alias via
+# ``EXTERNAL NAME 'jar_alias:com.x.Foo.bar'``. CALL SQLJ.INSTALL_JAR
+# is what registers that alias on the target. Deploying a Java
+# procedure before its install script fails with "JAR not found".
+#
+# Functions follow procedures because Teradata FUNCTION can be
+# LANGUAGE C (binary inlined via EXTERNAL NAME 'CS!path/...'),
+# and the .c/.h companions are sibling files in functions/, not
+# a separate jar_install path.
 DDL_SUBDIR_ORDER = {
     "tables": 10,
     "join_indexes": 11,
@@ -89,9 +100,9 @@ DDL_SUBDIR_ORDER = {
     "secondary_indexes": 12,
     "views": 20,
     "macros": 21,
-    "procedures": 22,
-    "functions": 23,
-    "jar_install": 24,
+    "jar_install": 22,
+    "procedures": 23,
+    "functions": 24,
     "script_table_operators": 25,
     "triggers": 30,
 }

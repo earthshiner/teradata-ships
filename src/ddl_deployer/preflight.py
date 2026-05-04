@@ -9,10 +9,18 @@ Runs lightweight checks BEFORE any DDL is executed:
                           rights on each target database?
     4. Perm space        — Is there free permanent space available
                           in each target database?
+    5. JAR alias coverage — Every PROCEDURE LANGUAGE JAVA in the
+                          package references a JAR alias. The alias
+                          must be installed by some jar_install
+                          script in the same package. Catches the
+                          "binary in payload but unused" failure
+                          mode where a procedure ships without its
+                          install script.
 
 Pre-flight is mandatory and runs automatically before every
 deployment. It catches the most common failures (wrong permissions,
-missing database, no space) without touching any data.
+missing database, no space, missing JAR install) without touching
+any data.
 
 Note on access rights:
     Uses DBC.AllRightsV which resolves both direct grants and
@@ -24,6 +32,7 @@ Note on access rights:
 
 import logging
 import os
+import re
 from typing import Dict, List, Set
 
 from ddl_deployer.ddl_parser import parse_ddl_file
@@ -237,6 +246,17 @@ def run_preflight(
     for db_name in sorted(space_databases):
         space_checks = _check_perm_space(cursor, db_name, warn_space_below_pct)
         checks.extend(space_checks)
+
+    # -- Phase 5: JAR alias coverage --
+    # PROCEDURE LANGUAGE JAVA bodies reference an installed JAR by
+    # alias via ``EXTERNAL NAME 'jar_alias:com.x.Foo.bar'``. The
+    # alias must be installed by some CALL SQLJ.INSTALL_JAR earlier
+    # in the deploy. When the binary harvester landed (2026-05-04)
+    # the install scripts started shipping with the package, but
+    # without a coverage check a procedure could still ship without
+    # its install script and silently fail at deploy time.
+    jar_checks = _check_jar_alias_coverage(parsed_ddls)
+    checks.extend(jar_checks)
 
     # -- Tally results --
     errors = sum(1 for c in checks if not c.passed and c.severity == "ERROR")
@@ -602,3 +622,142 @@ def _format_bytes(num_bytes: int) -> str:
             return f"{num_bytes:.1f} {unit}"
         num_bytes /= 1024.0
     return f"{num_bytes:.1f} EB"
+
+
+# ---------------------------------------------------------------
+# Internal — JAR alias coverage check (Phase 5)
+# ---------------------------------------------------------------
+#
+# Patterns mirror the ones in
+# ``td_release_packager.classifier.extract_externals`` (deliberately
+# duplicated rather than imported — the deployer is a runtime
+# component embedded inside packages and cannot import the build
+# tool).
+
+# CALL SQLJ.INSTALL_JAR('CJ!path/to/X.jar', 'jar_alias', 0);
+#                        ^arg1: binary path  ^arg2: alias
+_INSTALL_JAR_RE = re.compile(
+    r"CALL\s+SQLJ\s*\.\s*(?:INSTALL_JAR|REPLACE_JAR)\s*\(\s*"
+    r"'[^']*'\s*,\s*'([^']+)'",
+    re.IGNORECASE,
+)
+
+# EXTERNAL NAME 'jar_alias:com.x.Foo.bar'
+# Captures the alias before the first colon.
+_EXTERNAL_NAME_JAR_RE = re.compile(
+    r"EXTERNAL\s+NAME\s+'([^':]+):[^']+'",
+    re.IGNORECASE,
+)
+
+# LANGUAGE JAVA marker — Teradata's keyword for Java external
+# routines. Used to scope the alias-extraction to procedures that
+# actually need a JAR (versus LANGUAGE C / SQL which use other
+# external-reference shapes).
+_LANGUAGE_JAVA_RE = re.compile(r"\bLANGUAGE\s+JAVA\b", re.IGNORECASE)
+
+
+def _extract_installed_aliases(parsed_ddls: List[ParsedDDL]) -> Set[str]:
+    """Aliases registered by SQLJ.INSTALL_JAR / REPLACE_JAR scripts.
+
+    Walks parsed DDLs of type ``ObjectType.JAR`` and pulls the
+    second argument from each ``CALL SQLJ.INSTALL_JAR(...)``. Returns
+    the upper-cased alias set so the lookup is case-insensitive
+    (Teradata identifier rules).
+    """
+    aliases: Set[str] = set()
+    for parsed in parsed_ddls:
+        if parsed.object_type != ObjectType.JAR:
+            continue
+        for match in _INSTALL_JAR_RE.finditer(parsed.ddl_text):
+            aliases.add(match.group(1).upper())
+    return aliases
+
+
+def _extract_referenced_aliases(
+    parsed_ddls: List[ParsedDDL],
+) -> List[tuple]:
+    """JAR aliases referenced by Java procedures.
+
+    Returns a list of ``(parsed_ddl, alias)`` tuples — one per
+    EXTERNAL NAME reference found in a procedure whose body
+    contains LANGUAGE JAVA. The original ParsedDDL is kept so the
+    failing check can name the offending file.
+    """
+    references: List[tuple] = []
+    for parsed in parsed_ddls:
+        if parsed.object_type != ObjectType.PROCEDURE:
+            continue
+        if not _LANGUAGE_JAVA_RE.search(parsed.ddl_text):
+            continue
+        for match in _EXTERNAL_NAME_JAR_RE.finditer(parsed.ddl_text):
+            references.append((parsed, match.group(1).upper()))
+    return references
+
+
+def _check_jar_alias_coverage(
+    parsed_ddls: List[ParsedDDL],
+) -> List[PreflightCheck]:
+    """Verify every Java procedure's JAR alias is installed in-package.
+
+    The check is local to the package: it does NOT consult the live
+    target. A pre-existing JAR on the target satisfies the runtime,
+    but this preflight assumes the package is meant to be self-
+    contained (carry its own install script). If a project chooses
+    to rely on a pre-installed JAR, the rule fires and the operator
+    can either add the install script or stub it out — either way
+    the relationship is now visible in the report.
+
+    Args:
+        parsed_ddls: All successfully-parsed DDL files in the package.
+
+    Returns:
+        One PreflightCheck per Java procedure. Coverage failures are
+        ERROR severity so the deploy is gated; passes are recorded
+        as INFO so the report shows the jar_install→procedure pairing
+        explicitly.
+    """
+    references = _extract_referenced_aliases(parsed_ddls)
+    if not references:
+        return []  # No Java procedures — rule is silently inactive.
+
+    installed = _extract_installed_aliases(parsed_ddls)
+    checks: List[PreflightCheck] = []
+
+    for parsed, alias in references:
+        filename = os.path.basename(parsed.file_path)
+        if alias in installed:
+            checks.append(
+                PreflightCheck(
+                    check_name="jar_alias_coverage",
+                    passed=True,
+                    database=parsed.database_name or "(system)",
+                    message=(
+                        f"{filename}: JAR alias '{alias}' is installed "
+                        f"by a CALL SQLJ.INSTALL_JAR script in this "
+                        f"package."
+                    ),
+                    severity="INFO",
+                )
+            )
+        else:
+            installed_summary = (
+                ", ".join(sorted(installed)) if installed else "(none)"
+            )
+            checks.append(
+                PreflightCheck(
+                    check_name="jar_alias_coverage",
+                    passed=False,
+                    database=parsed.database_name or "(system)",
+                    message=(
+                        f"{filename}: PROCEDURE LANGUAGE JAVA references "
+                        f"JAR alias '{alias}' but no jar_install script "
+                        f"in this package installs that alias. Installed "
+                        f"aliases: {installed_summary}. Either add the "
+                        f"corresponding CALL SQLJ.INSTALL_JAR script to "
+                        f"the package, or remove this procedure if the "
+                        f"JAR is meant to be installed by another release."
+                    ),
+                )
+            )
+
+    return checks
