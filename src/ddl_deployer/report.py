@@ -291,6 +291,20 @@ def _html_head(result, now, mode):
   .action-item:last-child {{ border-bottom: none; }}
   .action-item .path-short {{ color: #6C757D; font-size: 12px; }}
   .action-item .path-full {{ display: none; }}
+  /* Collapsible action-item groups */
+  .action-group {{ margin: 0 -20px; padding: 0 20px; }}
+  .action-group + .action-group {{ border-top: 1px solid rgba(0,0,0,0.08); margin-top: 6px; padding-top: 6px; }}
+  .action-group > summary {{
+    cursor: pointer; font-size: 13px; font-weight: 600;
+    padding: 6px 0; list-style: none; user-select: none;
+  }}
+  .action-group > summary::-webkit-details-marker {{ display: none; }}
+  .action-group > summary::before {{
+    content: "\25B8"; display: inline-block;
+    margin-right: 6px; transition: transform 0.15s ease; color: {_ORANGE};
+  }}
+  .action-group[open] > summary::before {{ transform: rotate(90deg); }}
+  .action-group > summary:hover {{ opacity: 0.8; }}
   .no-actions {{ background: #D4EDDA; border-color: #C3E6CB; border-radius: 6px;
                  padding: 12px 20px; margin-bottom: 20px; color: #155724; }}
   .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
@@ -455,31 +469,33 @@ def _shorten_path(text: str) -> str:
 
 
 def _html_action_items(result, provenance: Optional[ProvenanceDocument] = None):
-    """Action items section — SKIPPED and FAILED objects needing attention."""
-    items = []
+    """Action items section — SKIPPED and FAILED objects, grouped and collapsible.
+
+    FAILED items are shown expanded by default (they need attention).
+    SKIPPED items are collapsed by default — the DBA can open the group
+    to inspect them, but they don't drown the report when there are
+    hundreds of expected skips (prereq-exempt, not-applicable, etc.).
+    """
+    failed_items = []
+    skipped_items = []
 
     for obj in result.results:
         if obj.state == DeployState.FAILED:
-            # Show source file so the DBA knows where to look
             source = ""
             if hasattr(obj, "ddl_file") and obj.ddl_file:
                 source = (
                     f' <span class="mono" style="font-size:12px">'
                     f"[{obj.ddl_file}]</span>"
                 )
-
-            # Show provenance — which project file to edit
             origin = _lookup_provenance(getattr(obj, "ddl_file", None), provenance)
             provenance_html = ""
             if origin:
                 provenance_html = (
-                    f'<div style="font-size:11px;color:#6C757D;'
-                    f'margin-top:4px">'
+                    f'<div style="font-size:11px;color:#6C757D;margin-top:4px">'
                     f'✎ Edit source: <span class="mono">{origin}</span>'
                     f"</div>"
                 )
-
-            items.append(
+            failed_items.append(
                 f'<div class="action-item err">'
                 f"<strong>FAILED:</strong> {_display_name(obj)} "
                 f"({obj.object_type.value}) — "
@@ -487,31 +503,24 @@ def _html_action_items(result, provenance: Optional[ProvenanceDocument] = None):
                 f"{provenance_html}"
                 f"</div>"
             )
+
         elif obj.state == DeployState.SKIPPED:
-            # Build detail from the actual result, not a hardcoded template.
-            # Blockers (schema incompatibility) take priority if present,
-            # then the deployer's message, then a generic fallback.
             if obj.blockers:
                 detail = "; ".join(obj.blockers)
             elif obj.message:
                 detail = obj.message
             else:
                 detail = "Skipped (no further detail)"
-
-            # Backup line only for objects that actually have one
             backup_note = ""
             if obj.backup_table:
                 backup_note = f" Backup preserved as {obj.backup_table}."
-
-            # Source file for traceability
             source = ""
             if hasattr(obj, "ddl_file") and obj.ddl_file:
                 source = (
                     f' <span class="mono" style="font-size:12px">'
                     f"[{obj.ddl_file}]</span>"
                 )
-
-            items.append(
+            skipped_items.append(
                 f'<div class="action-item warn">'
                 f"<strong>SKIPPED:</strong> {_display_name(obj)} "
                 f"({obj.object_type.value}) — "
@@ -519,7 +528,9 @@ def _html_action_items(result, provenance: Optional[ProvenanceDocument] = None):
                 f"</div>"
             )
 
-    if not items:
+    total = len(failed_items) + len(skipped_items)
+
+    if total == 0:
         if getattr(result, "is_noop_redeploy", False):
             prior_count = len(getattr(result, "prior_completed", []))
             return (
@@ -532,13 +543,59 @@ def _html_action_items(result, provenance: Optional[ProvenanceDocument] = None):
             )
         return '<div class="no-actions">No action items — all objects deployed successfully.</div>'
 
-    has_errors = any(o.state == DeployState.FAILED for o in result.results)
+    has_errors = bool(failed_items)
     css_class = "action-items has-errors" if has_errors else "action-items"
 
-    return (
-        f'<div class="{css_class}">'
-        f"<h3>Action Items ({len(items)})</h3>" + "\n".join(items) + "</div>"
-    )
+    parts = [f'<div class="{css_class}"><h3>Action Items ({total})</h3>']
+
+    # -- FAILED group: open by default so the DBA sees them immediately --
+    if failed_items:
+        n = len(failed_items)
+        parts.append(
+            f'<details class="action-group" open>'
+            f'<summary class="err">✗ {n} Failed — requires attention</summary>'
+            + "\n".join(failed_items)
+            + "</details>"
+        )
+
+    # -- SKIPPED group: collapsed by default --
+    # May contain hundreds of PREREQ_EXEMPT, not-applicable, etc.
+    # The DBA can expand to inspect but doesn't have to wade through them.
+    if skipped_items:
+        n = len(skipped_items)
+        # Build a compact sub-summary showing counts by skip reason.
+        # Groups: PREREQ_EXEMPT, NOT_APPLICABLE, ALREADY_DEPLOYED, other.
+        prereq_count = sum(
+            1 for o in result.results
+            if o.state == DeployState.SKIPPED
+            and "PREREQ_EXEMPT" in (o.message or "")
+        )
+        not_app_count = sum(
+            1 for o in result.results
+            if o.state == DeployState.SKIPPED
+            and "not applicable" in (o.message or "").lower()
+            and "PREREQ_EXEMPT" not in (o.message or "")
+        )
+        other_count = n - prereq_count - not_app_count
+
+        sub_parts = []
+        if prereq_count:
+            sub_parts.append(f"{prereq_count} prereq-exempt")
+        if not_app_count:
+            sub_parts.append(f"{not_app_count} not applicable")
+        if other_count:
+            sub_parts.append(f"{other_count} other")
+        sub = f" ({', '.join(sub_parts)})" if sub_parts else ""
+
+        parts.append(
+            f'<details class="action-group">'
+            f"<summary>○ {n} Skipped{sub} — click to expand</summary>"
+            + "\n".join(skipped_items)
+            + "</details>"
+        )
+
+    parts.append("</div>")
+    return "\n".join(parts)
 
 
 def _html_summary(result, mode):
