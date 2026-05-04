@@ -742,17 +742,18 @@ def _inject_multiset_in_file(file_path: str):
         file_path: Path to the resolved .tbl file.
     """
     from td_release_packager.sql_text import (
-        strip_comments_preserving_positions,
+        strip_comments_and_string_literals,
     )
 
     with open(file_path, "r", encoding="utf-8") as f:
         content = f.read()
 
-    # Use comment-stripped content for BOTH detection and the
-    # position lookup. A header comment like "/* serves as parent
-    # for the inner CREATE TABLE */" would otherwise match the
-    # injection pattern before the real CREATE statement.
-    cleaned = strip_comments_preserving_positions(content)
+    # Strip BOTH comments AND string literals before detection /
+    # position lookup. Comment-only stripping wasn't enough — a
+    # CHECK constraint like ``CHECK (col IN ('CREATE TABLE'))``
+    # or any other literal containing the keyword would otherwise
+    # be matched as the injection target.
+    cleaned = strip_comments_and_string_literals(content)
 
     if _HAS_SET_MULTISET_RE.search(cleaned):
         return  # Already has SET or MULTISET

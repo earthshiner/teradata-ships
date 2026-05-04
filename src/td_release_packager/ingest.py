@@ -931,10 +931,13 @@ def _inject_multiset(content: str) -> Tuple[str, bool]:
     the actual CREATE statement.
     """
     from td_release_packager.sql_text import (
-        strip_comments_preserving_positions,
+        strip_comments_and_string_literals,
     )
 
-    cleaned = strip_comments_preserving_positions(content)
+    # Strip BOTH comments AND string literals. Procedures sometimes
+    # build dynamic SQL like ``'CREATE TABLE '||...`` — we must not
+    # match the keyword inside the literal as if it were real DDL.
+    cleaned = strip_comments_and_string_literals(content)
 
     if _HAS_SET_MULTISET_RE.search(cleaned):
         return (content, False)
@@ -974,10 +977,10 @@ def _inject_replace_view(content: str) -> Tuple[str, bool]:
         Tuple of (modified_content, was_injected).
     """
     from td_release_packager.sql_text import (
-        strip_comments_preserving_positions,
+        strip_comments_and_string_literals,
     )
 
-    cleaned = strip_comments_preserving_positions(content)
+    cleaned = strip_comments_and_string_literals(content)
 
     if _HAS_REPLACE_VIEW_RE.search(cleaned):
         return (content, False)

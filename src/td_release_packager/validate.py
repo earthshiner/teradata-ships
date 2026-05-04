@@ -54,7 +54,13 @@ DEFAULT_RULES: Dict[str, str] = {
     "deploy_intent": "ERROR",
     "one_object": "WARNING",
     "eponymous": "WARNING",
-    "extension": "WARNING",
+    # Extension is ERROR, not WARNING. A staged file whose
+    # extension disagrees with its content is the package and the
+    # metadata lying to each other — the deployer and any
+    # automation reading the payload have to be able to TRUST that
+    # *.tbl contains a table, *.spl contains a procedure, etc.
+    # Catching the lie at inspect time is the whole point.
+    "extension": "ERROR",
     "type_suffix": "ERROR",
     "hardcoded_name": "WARNING",
     "keyword_case": "WARNING",
@@ -298,7 +304,15 @@ _EXPECTED_EXT = {
     "SCRIPT_TABLE_OPERATOR": ".sto",
 }
 
-# -- Classification patterns (reuse from ingest) --
+# -- Classification patterns (mirrors classifier.py order) --
+#
+# CRITICAL ORDERING NOTE: PROCEDURE / FUNCTION / MACRO MUST come
+# before TABLE. Stored procedures often contain dynamic-SQL string
+# literals like ``'CREATE MULTISET TABLE '||...`` for runtime
+# table creation. Even with string-literal stripping enabled, the
+# defense-in-depth ordering means a procedure file always
+# classifies as PROCEDURE — not as TABLE due to a string-literal
+# match further down.
 _CLASSIFY_PATTERNS = [
     (re.compile(r"CREATE\s+JOIN\s+INDEX\b", re.I), "JOIN_INDEX"),
     (re.compile(r"CREATE\s+HASH\s+INDEX\b", re.I), "HASH_INDEX"),
@@ -310,6 +324,16 @@ _CLASSIFY_PATTERNS = [
         ),
         "SCRIPT_TABLE_OPERATOR",
     ),
+    # Procedure-style first — these have bodies that can contain
+    # string-literal SQL building CREATE TABLE etc.
+    (re.compile(r"(?:CREATE\s+|REPLACE\s+)PROCEDURE\b", re.I), "PROCEDURE"),
+    (
+        re.compile(r"(?:CREATE\s+|REPLACE\s+)(?:SPECIFIC\s+)?FUNCTION\b", re.I),
+        "FUNCTION",
+    ),
+    (re.compile(r"(?:CREATE\s+|REPLACE\s+)MACRO\b", re.I), "MACRO"),
+    (re.compile(r"(?:CREATE|REPLACE)\s+TRIGGER\b", re.I), "TRIGGER"),
+    # Plain DDL types — only reached if no procedural type matched.
     (
         re.compile(
             r"(?:CREATE|REPLACE)\s+(?:MULTISET|SET)?\s*(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?(?:TRACE\s+)?TABLE\b",
@@ -318,13 +342,6 @@ _CLASSIFY_PATTERNS = [
         "TABLE",
     ),
     (re.compile(r"(?:CREATE|REPLACE)\s+VIEW\b", re.I), "VIEW"),
-    (re.compile(r"(?:CREATE\s+|REPLACE\s+)MACRO\b", re.I), "MACRO"),
-    (re.compile(r"(?:CREATE\s+|REPLACE\s+)PROCEDURE\b", re.I), "PROCEDURE"),
-    (
-        re.compile(r"(?:CREATE\s+|REPLACE\s+)(?:SPECIFIC\s+)?FUNCTION\b", re.I),
-        "FUNCTION",
-    ),
-    (re.compile(r"(?:CREATE|REPLACE)\s+TRIGGER\b", re.I), "TRIGGER"),
     (re.compile(r"CREATE\s+MAP\b", re.I), "MAP"),
     (re.compile(r"CREATE\s+AUTHORIZATION\b", re.I), "AUTHORIZATION"),
     (re.compile(r"CREATE\s+FOREIGN\s+SERVER\b", re.I), "FOREIGN_SERVER"),
@@ -398,7 +415,7 @@ _TOKEN_RE = re.compile(r"\{\{([A-Za-z_][A-Za-z0-9_-]*)\}\}")
 # inside /* ... */ header comments and trigger spurious warnings.
 
 from td_release_packager.sql_text import (
-    strip_comments_preserving_positions as _strip_sql_comments,
+    strip_comments_and_string_literals as _strip_sql_comments,
 )
 
 
