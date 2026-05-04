@@ -292,7 +292,9 @@ _EXPECTED_EXT = {
     "PROFILE": ".prf",
     "AUTHORIZATION": ".auth",
     "FOREIGN_SERVER": ".fsvr",
-    "JAR": ".jar",
+    # SQLJ install scripts use ``.sjr`` — see ingest._TYPE_TO_EXTENSION
+    # for the rationale. Keep these two maps in sync.
+    "JAR": ".sjr",
     "SCRIPT_TABLE_OPERATOR": ".sto",
 }
 
@@ -575,7 +577,8 @@ def validate_directory(
                 ".auth",
                 ".fsvr",
                 ".sto",
-                ".jar",
+                ".sjr",
+                ".jar",  # legacy passthrough — see ingest convention
                 ".dcl",
                 ".usr",
             ):

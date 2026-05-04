@@ -50,7 +50,12 @@ _TYPE_TO_EXT = {
     "REVOKE": ".dcl",
     "COMMENT": ".cmt",
     "STATISTICS": ".stt",
-    "JAR": ".jar",
+    # SQLJ install scripts. Convention: ``.sjr`` (SQLJ Runtime
+    # install script). Deliberately NOT ``.jar`` — these files are
+    # SQL scripts that CALL SQLJ.INSTALL_JAR(...), not binary Java
+    # archives. ``.jar`` stays reserved for actual binary JARs if a
+    # future deployment shipped them alongside the install scripts.
+    "JAR": ".sjr",
     "SCRIPT_TABLE_OPERATOR": ".sto",
     # System-scoped objects
     "MAP": ".map",
@@ -81,7 +86,9 @@ _TYPE_TO_SUBDIR = {
     "REVOKE": "DCL/inter_db",
     "COMMENT": "DDL/comments",
     "STATISTICS": "DDL/statistics",
-    "JAR": "DDL/JARs",
+    # SQLJ install scripts go under DDL/jar_install — clearer than
+    # the older DDL/JARs which suggested binary archives.
+    "JAR": "DDL/jar_install",
     "SCRIPT_TABLE_OPERATOR": "DDL/script_table_operators",
     # System-scoped objects (00_system phase)
     "MAP": "system/maps",
@@ -521,7 +528,8 @@ def _discover_files(source_dir: str, file_patterns: List[str] = None) -> List[st
             ".auth",
             ".fsvr",
             ".sto",
-            ".jar",
+            ".sjr",  # SQLJ Runtime install script (SHIPS convention)
+            ".jar",  # legacy / passthrough — defensive, e.g. older codebases
             ".usr",
             ".c",
             ".h",
