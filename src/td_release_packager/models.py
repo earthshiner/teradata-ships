@@ -91,7 +91,7 @@ DDL_SUBDIR_ORDER = {
     "macros": 21,
     "procedures": 22,
     "functions": 23,
-    "JARs": 24,
+    "jar_install": 24,
     "script_table_operators": 25,
     "triggers": 30,
 }
