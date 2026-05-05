@@ -653,7 +653,9 @@ def _score_confidence(
 
     # Sub-types are HIGH when an explicit LANGUAGE clause confirmed
     # them, MEDIUM when defaulted.
-    explicit_subtype = any("→ FUNCTION_C" in e or "→ PROCEDURE_JAVA" in e for e in evidence)
+    explicit_subtype = any(
+        "→ FUNCTION_C" in e or "→ PROCEDURE_JAVA" in e for e in evidence
+    )
     defaulted_subtype = any(
         "no LANGUAGE C" in e or "no LANGUAGE JAVA" in e for e in evidence
     )

@@ -13,9 +13,6 @@ Covers:
 
 from __future__ import annotations
 
-from pathlib import Path
-
-import pytest
 
 from td_release_packager import legacy_importer as importer
 from td_release_packager.token_engine import read_properties
@@ -65,16 +62,12 @@ class TestParseSedSubstitutions:
 
     def test_sed_escaped_slash_in_value(self):
         """`\\/` in the value unescapes to a literal `/`."""
-        subs = importer.parse_sed_substitutions(
-            "s/$PATH/usr\\/local\\/bin/g\n"
-        )
+        subs = importer.parse_sed_substitutions("s/$PATH/usr\\/local\\/bin/g\n")
         assert subs[0].value == "usr/local/bin"
 
     def test_value_with_sql_paren_type(self):
         """SQL type expressions with parens parse without issue."""
-        subs = importer.parse_sed_substitutions(
-            "s/&&TS_TYPE&&/TIMESTAMP(6)/g\n"
-        )
+        subs = importer.parse_sed_substitutions("s/&&TS_TYPE&&/TIMESTAMP(6)/g\n")
         assert subs[0].value == "TIMESTAMP(6)"
 
     def test_value_with_quotes_and_punctuation(self):
@@ -86,9 +79,7 @@ class TestParseSedSubstitutions:
 
     def test_blank_lines_skipped(self):
         """Blank lines do not produce substitutions."""
-        subs = importer.parse_sed_substitutions(
-            "\ns/$A/1/g\n\n\ns/$B/2/g\n\n"
-        )
+        subs = importer.parse_sed_substitutions("\ns/$A/1/g\n\n\ns/$B/2/g\n\n")
         assert [s.var_name for s in subs] == ["A", "B"]
 
     def test_comments_skipped(self):
@@ -104,9 +95,7 @@ class TestParseSedSubstitutions:
         import logging
 
         with caplog.at_level(logging.WARNING):
-            subs = importer.parse_sed_substitutions(
-                "echo hello\ns/$A/1/g\n"
-            )
+            subs = importer.parse_sed_substitutions("echo hello\ns/$A/1/g\n")
 
         assert len(subs) == 1
         assert subs[0].var_name == "A"
@@ -273,8 +262,14 @@ class TestCLI:
     def test_missing_input_returns_nonzero(self, tmp_path, capsys):
         """A non-existent input file returns rc=1 with a stderr message."""
         rc = importer.main(
-            ["--script", str(tmp_path / "nope.sh"), "--env", "DEV",
-             "--output-dir", str(tmp_path)]
+            [
+                "--script",
+                str(tmp_path / "nope.sh"),
+                "--env",
+                "DEV",
+                "--output-dir",
+                str(tmp_path),
+            ]
         )
         assert rc == 1
         captured = capsys.readouterr()
@@ -355,8 +350,7 @@ class TestRealWorldRoundTrip:
         sed_file.write_text(_PAUL_LEGACY_SED, encoding="utf-8")
 
         rc = importer.main(
-            ["--script", str(sed_file), "--env", "DEV",
-             "--output-dir", str(tmp_path)]
+            ["--script", str(sed_file), "--env", "DEV", "--output-dir", str(tmp_path)]
         )
         assert rc == 0
 

@@ -90,7 +90,7 @@ def _list_zip_phase_files(archive_path: str, phase: str) -> list:
             idx = name.find(prefix)
             if idx == -1:
                 continue
-            tail = name[idx + len(prefix):]
+            tail = name[idx + len(prefix) :]
             if not tail:
                 continue  # the directory entry itself
             out.append(tail)
@@ -487,7 +487,8 @@ class TestPrereqOrderResolvedNames:
         # Resolve {{CHILD_DB}} → B_CHILD, {{PARENT_DB}} → P_PARENT
         # so B_CHILD sorts before P_PARENT alphabetically but must deploy after.
         props = _properties_for(
-            "DEV", tmp_path,
+            "DEV",
+            tmp_path,
             CHILD_DB="B_CHILD",
             PARENT_DB="P_PARENT",
         )

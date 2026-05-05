@@ -47,9 +47,7 @@ class TestGrantWithProcedurePrivileges:
         """The .spl extension says PROCEDURE but content is GRANT --
         warn so the operator can rename the source file."""
         result = classify("Step_03_AssignPermissions.spl", GCFR_GRANT_FILE)
-        mismatch_warnings = [
-            w for w in result.warnings if "Filename mismatch" in w
-        ]
+        mismatch_warnings = [w for w in result.warnings if "Filename mismatch" in w]
         assert len(mismatch_warnings) == 1
         assert "GRANT" in mismatch_warnings[0]
 

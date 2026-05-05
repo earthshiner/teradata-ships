@@ -559,9 +559,7 @@ def _split_into_paired_packages(
         # in build_package, but if it does, fall back to a suffix.
         prereqs_basename = main_basename + "_prereqs"
     else:
-        prereqs_basename = main_basename.replace(
-            "_BUILD_", "_prereqs_BUILD_", 1
-        )
+        prereqs_basename = main_basename.replace("_BUILD_", "_prereqs_BUILD_", 1)
     prereqs_pkg_dir = os.path.join(parent_dir, prereqs_basename)
 
     # The release_group ID = the main archive's basename. Derivable
@@ -625,9 +623,7 @@ def _split_into_paired_packages(
     ):
         manifest_path = os.path.join(target_pkg_dir, "BUILD.json")
         with open(manifest_path, "w", encoding="utf-8") as f:
-            json.dump(
-                target_manifest.__dict__, f, indent=2, ensure_ascii=False
-            )
+            json.dump(target_manifest.__dict__, f, indent=2, ensure_ascii=False)
 
     # 8. Archive both. The deploy-first half (prereqs) is archived
     #    first so the on-disk creation order matches the deploy order

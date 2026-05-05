@@ -486,9 +486,7 @@ _TOKEN_RE = re.compile(r"\{\{([A-Za-z_][A-Za-z0-9_-]*)\}\}")
 #      so we provide a token-aware variant scoped to this rule.
 
 # Identifier shape: bare ident, quoted ident, or {{TOKEN}}
-_PREREQ_IDENT_FRAG = (
-    r'(?:\{\{[A-Za-z_][A-Za-z0-9_-]*\}\}|"[^"]+"|[A-Za-z_]\w*)'
-)
+_PREREQ_IDENT_FRAG = r'(?:\{\{[A-Za-z_][A-Za-z0-9_-]*\}\}|"[^"]+"|[A-Za-z_]\w*)'
 
 # CREATE DATABASE <name> | CREATE USER <name>
 # Anchored — without ``^\s*`` a GRANT statement listing ``CREATE
@@ -840,9 +838,7 @@ def validate_directory(
             _check_unmapped_grants(rel_path, clean, file_path, placement)
         )
         file_issues.extend(
-            _check_intra_package_dependency(
-                rel_path, clean, file_path, package_prereqs
-            )
+            _check_intra_package_dependency(rel_path, clean, file_path, package_prereqs)
         )
 
         # -- Apply rule config: remap severity or drop OFF rules --

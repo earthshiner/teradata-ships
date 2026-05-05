@@ -46,9 +46,7 @@ logger = logging.getLogger(__name__)
 
 # Matches  s/LHS/RHS/[flags]
 # The LHS and RHS may contain escaped slashes (\/).
-_SED_RULE_RE = re.compile(
-    r"^s/((?:[^/\\]|\\.)*?)/((?:[^/\\]|\\.)*)/([a-zA-Z]*)\s*$"
-)
+_SED_RULE_RE = re.compile(r"^s/((?:[^/\\]|\\.)*?)/((?:[^/\\]|\\.)*)/([a-zA-Z]*)\s*$")
 
 
 @dataclass(frozen=True)
@@ -241,9 +239,7 @@ def migrate_source_directory(
             result.files_changed += 1
             result.changed_files.append(file_path)
             for raw_lhs, count in hits.items():
-                result.rule_hits[raw_lhs] = (
-                    result.rule_hits.get(raw_lhs, 0) + count
-                )
+                result.rule_hits[raw_lhs] = result.rule_hits.get(raw_lhs, 0) + count
 
             if not dry_run:
                 Path(file_path).write_text(new_content, encoding="utf-8")
@@ -293,7 +289,8 @@ def main(argv=None):
         help="Preview what would change without writing any files.",
     )
     p.add_argument(
-        "-v", "--verbose",
+        "-v",
+        "--verbose",
         action="store_true",
         help="Verbose logging.",
     )
@@ -350,16 +347,19 @@ def main(argv=None):
     print()
     print("=" * 64)
     print(f"  Files scanned:  {result.files_scanned}")
-    print(f"  {'Would change' if args.dry_run else 'Changed'}:      {result.files_changed}")
+    print(
+        f"  {'Would change' if args.dry_run else 'Changed'}:      {result.files_changed}"
+    )
     if result.files_skipped:
         print(f"  Skipped:        {result.files_skipped} (binary or unreadable)")
 
     if result.rule_hits:
         print()
         print("  Substitutions made:")
-        for raw_lhs, count in sorted(result.rule_hits.items(),
-                                     key=lambda kv: -kv[1]):
-            token = "{{" + re.sub(r"^\\?\$\{?|(\}?)$|\^|&&", "", raw_lhs).rstrip("&") + "}}"
+        for raw_lhs, count in sorted(result.rule_hits.items(), key=lambda kv: -kv[1]):
+            token = (
+                "{{" + re.sub(r"^\\?\$\{?|(\}?)$|\^|&&", "", raw_lhs).rstrip("&") + "}}"
+            )
             print(f"    {raw_lhs:30s} → {token}  ({count}×)")
 
     if args.dry_run and result.files_changed:

@@ -89,9 +89,7 @@ class TestDefaultFilePatternsIncludeSjr:
 def _make_jar_install(alias: str, *, jar_path: str = "lib/foo.jar") -> ParsedDDL:
     """Build a minimal ParsedDDL of type JAR carrying a CALL
     SQLJ.INSTALL_JAR statement with the given alias."""
-    text = (
-        f"CALL SQLJ.INSTALL_JAR('CJ!{jar_path}', '{alias}', 0);"
-    )
+    text = f"CALL SQLJ.INSTALL_JAR('CJ!{jar_path}', '{alias}', 0);"
     return ParsedDDL(
         file_path=f"{alias}.sjr",
         ddl_text=text,
@@ -104,9 +102,7 @@ def _make_jar_install(alias: str, *, jar_path: str = "lib/foo.jar") -> ParsedDDL
     )
 
 
-def _make_java_procedure(
-    db: str, name: str, *, alias: str
-) -> ParsedDDL:
+def _make_java_procedure(db: str, name: str, *, alias: str) -> ParsedDDL:
     """Build a minimal ParsedDDL of type PROCEDURE referencing a JAR
     alias via EXTERNAL NAME inside a LANGUAGE JAVA body."""
     text = (
@@ -129,12 +125,7 @@ def _make_java_procedure(
 
 def _make_spl_procedure(db: str, name: str) -> ParsedDDL:
     """A regular SPL procedure (no LANGUAGE JAVA, no JAR ref)."""
-    text = (
-        f"CREATE PROCEDURE {db}.{name} ()\n"
-        f"BEGIN\n"
-        f"    SET v = 1;\n"
-        f"END;\n"
-    )
+    text = f"CREATE PROCEDURE {db}.{name} ()\nBEGIN\n    SET v = 1;\nEND;\n"
     return ParsedDDL(
         file_path=f"{db}.{name}.spl",
         ddl_text=text,
@@ -155,9 +146,7 @@ class TestExtractInstalledAliases:
         assert _extract_installed_aliases([]) == set()
 
     def test_single_install_jar(self):
-        installed = _extract_installed_aliases(
-            [_make_jar_install("MyJar")]
-        )
+        installed = _extract_installed_aliases([_make_jar_install("MyJar")])
         assert installed == {"MYJAR"}
 
     def test_multiple_install_jars(self):
@@ -222,9 +211,7 @@ class TestJarAliasCoverage:
     def test_no_java_procedures_silent(self):
         """No Java procedures in the package → rule is silently
         inactive (no checks emitted, the report stays uncluttered)."""
-        checks = _check_jar_alias_coverage(
-            [_make_spl_procedure("MyDb", "PlainSpl")]
-        )
+        checks = _check_jar_alias_coverage([_make_spl_procedure("MyDb", "PlainSpl")])
         assert checks == []
 
     def test_alias_installed_emits_info_pass(self):
@@ -234,10 +221,12 @@ class TestJarAliasCoverage:
 
         The message normalises the alias to upper-case (Teradata
         identifier rules), so we compare upper-cased."""
-        checks = _check_jar_alias_coverage([
-            _make_jar_install("MyJar"),
-            _make_java_procedure("MyDb", "myProc", alias="MyJar"),
-        ])
+        checks = _check_jar_alias_coverage(
+            [
+                _make_jar_install("MyJar"),
+                _make_java_procedure("MyDb", "myProc", alias="MyJar"),
+            ]
+        )
         assert len(checks) == 1
         check = checks[0]
         assert check.passed is True
@@ -248,10 +237,12 @@ class TestJarAliasCoverage:
         """When the procedure's alias is not installed by anything in
         the package, the check fails ERROR-severity and names the
         missing alias plus what IS installed."""
-        checks = _check_jar_alias_coverage([
-            _make_jar_install("OtherJar"),
-            _make_java_procedure("MyDb", "myProc", alias="MyJar"),
-        ])
+        checks = _check_jar_alias_coverage(
+            [
+                _make_jar_install("OtherJar"),
+                _make_java_procedure("MyDb", "myProc", alias="MyJar"),
+            ]
+        )
         # One pass for the install script's own existence is NOT
         # emitted (only procedure-side checks fire), so we should
         # see exactly one entry — the failing reference.
@@ -267,9 +258,11 @@ class TestJarAliasCoverage:
         """When the package contains a Java procedure but no install
         script at all, the message says 'Installed aliases: (none)'
         — clearer than a bare empty list."""
-        checks = _check_jar_alias_coverage([
-            _make_java_procedure("MyDb", "myProc", alias="MyJar"),
-        ])
+        checks = _check_jar_alias_coverage(
+            [
+                _make_java_procedure("MyDb", "myProc", alias="MyJar"),
+            ]
+        )
         assert len(checks) == 1
         assert checks[0].passed is False
         assert "(none)" in checks[0].message
@@ -278,21 +271,25 @@ class TestJarAliasCoverage:
         """Teradata identifiers are case-insensitive — an INSTALL_JAR
         with alias 'MyJar' must satisfy a procedure referencing
         'MYJAR' (and vice versa)."""
-        checks = _check_jar_alias_coverage([
-            _make_jar_install("MyJar"),
-            _make_java_procedure("Db", "p", alias="MYJAR"),
-        ])
+        checks = _check_jar_alias_coverage(
+            [
+                _make_jar_install("MyJar"),
+                _make_java_procedure("Db", "p", alias="MYJAR"),
+            ]
+        )
         assert len(checks) == 1
         assert checks[0].passed is True
 
     def test_multiple_procedures_one_install(self):
         """A single install script can satisfy multiple procedures —
         each procedure produces its own (passing) check."""
-        checks = _check_jar_alias_coverage([
-            _make_jar_install("SharedJar"),
-            _make_java_procedure("Db", "p1", alias="SharedJar"),
-            _make_java_procedure("Db", "p2", alias="SharedJar"),
-        ])
+        checks = _check_jar_alias_coverage(
+            [
+                _make_jar_install("SharedJar"),
+                _make_java_procedure("Db", "p1", alias="SharedJar"),
+                _make_java_procedure("Db", "p2", alias="SharedJar"),
+            ]
+        )
         assert len(checks) == 2
         assert all(c.passed for c in checks)
 
@@ -300,11 +297,13 @@ class TestJarAliasCoverage:
         """Two procedures, only one with a matching install — the
         report carries both outcomes, one INFO pass and one ERROR
         fail."""
-        checks = _check_jar_alias_coverage([
-            _make_jar_install("InstalledJar"),
-            _make_java_procedure("Db", "good", alias="InstalledJar"),
-            _make_java_procedure("Db", "bad", alias="MissingJar"),
-        ])
+        checks = _check_jar_alias_coverage(
+            [
+                _make_jar_install("InstalledJar"),
+                _make_java_procedure("Db", "good", alias="InstalledJar"),
+                _make_java_procedure("Db", "bad", alias="MissingJar"),
+            ]
+        )
         assert len(checks) == 2
         passed = [c for c in checks if c.passed]
         failed = [c for c in checks if not c.passed]

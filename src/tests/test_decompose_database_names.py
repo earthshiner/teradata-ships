@@ -16,7 +16,6 @@ Covers:
 
 from __future__ import annotations
 
-from pathlib import Path
 
 import pytest
 
@@ -44,8 +43,7 @@ class TestReadInputFile:
         """token_map.conf format: extracts LHS only."""
         f = tmp_path / "token_map.conf"
         f.write_text(
-            "PDE_DEV_00={{PARENT_NODE}}\n"
-            "PDE_DEV_00_MDL_0_T={{MDL_T}}\n",
+            "PDE_DEV_00={{PARENT_NODE}}\nPDE_DEV_00_MDL_0_T={{MDL_T}}\n",
             encoding="utf-8",
         )
 
@@ -56,11 +54,7 @@ class TestReadInputFile:
     def test_skips_blank_and_comment_lines(self, tmp_path):
         f = tmp_path / "names.txt"
         f.write_text(
-            "# header comment\n"
-            "\n"
-            "PDE_DEV_00\n"
-            "# trailing comment\n"
-            "PDE_DEV_00_MDL_0_T\n",
+            "# header comment\n\nPDE_DEV_00\n# trailing comment\nPDE_DEV_00_MDL_0_T\n",
             encoding="utf-8",
         )
         assert decomp.read_input_file(str(f)) == ["PDE_DEV_00", "PDE_DEV_00_MDL_0_T"]
@@ -323,10 +317,12 @@ class TestFormatPropertiesFile:
         result = decomp.decompose_all(["PDE_DEV_00_MDL_0_T"])
         # Manually inject a duplicate decomposed entry
         result.decomposed.append(result.decomposed[0])
-        result.collisions = {"MDL_T": [
-            "PDE_DEV_00_MDL_0_T",
-            "PDE_DEV_00_MDL_0_T",
-        ]}
+        result.collisions = {
+            "MDL_T": [
+                "PDE_DEV_00_MDL_0_T",
+                "PDE_DEV_00_MDL_0_T",
+            ]
+        }
         out = decomp.format_properties_file("DEV", result)
         assert "# WARN collision" in out
 
@@ -365,9 +361,7 @@ class TestFormatDecompositionReport:
 class TestCLI:
     def test_writes_both_artefacts(self, tmp_path):
         names_file = tmp_path / "names.txt"
-        names_file.write_text(
-            "PDE_DEV_00\nPDE_DEV_00_MDL_0_T\n", encoding="utf-8"
-        )
+        names_file.write_text("PDE_DEV_00\nPDE_DEV_00_MDL_0_T\n", encoding="utf-8")
 
         rc = decomp.main(
             [str(names_file), "--env", "DEV", "--output-dir", str(tmp_path)]
@@ -378,8 +372,7 @@ class TestCLI:
 
     def test_missing_input_returns_nonzero(self, tmp_path, capsys):
         rc = decomp.main(
-            [str(tmp_path / "nope.txt"), "--env", "DEV",
-             "--output-dir", str(tmp_path)]
+            [str(tmp_path / "nope.txt"), "--env", "DEV", "--output-dir", str(tmp_path)]
         )
         assert rc == 1
         captured = capsys.readouterr()
@@ -388,9 +381,7 @@ class TestCLI:
     def test_empty_input_returns_nonzero(self, tmp_path, capsys):
         f = tmp_path / "empty.txt"
         f.write_text("# only comments\n", encoding="utf-8")
-        rc = decomp.main(
-            [str(f), "--env", "DEV", "--output-dir", str(tmp_path)]
-        )
+        rc = decomp.main([str(f), "--env", "DEV", "--output-dir", str(tmp_path)])
         assert rc == 1
         captured = capsys.readouterr()
         assert "no literal database names" in captured.err
@@ -475,9 +466,7 @@ class TestRealisticGCFRRoundTrip:
         """The generated .properties file resolves cleanly end-to-end,
         and the resolved values match the original literals."""
         names_file = tmp_path / "names.txt"
-        names_file.write_text(
-            "\n".join(_REALISTIC_GCFR_NAMES) + "\n", encoding="utf-8"
-        )
+        names_file.write_text("\n".join(_REALISTIC_GCFR_NAMES) + "\n", encoding="utf-8")
 
         rc = decomp.main(
             [str(names_file), "--env", "DEV", "--output-dir", str(tmp_path)]

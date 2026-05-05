@@ -461,9 +461,7 @@ def _shorten_path(text: str) -> str:
     def _replace(m):
         full = m.group(0)
         basename = m.group(1)
-        return (
-            f'<span class="path-short" title="{full}">{basename}</span>'
-        )
+        return f'<span class="path-short" title="{full}">{basename}</span>'
 
     return _PATH_RE.sub(_replace, text)
 
@@ -566,12 +564,13 @@ def _html_action_items(result, provenance: Optional[ProvenanceDocument] = None):
         # Build a compact sub-summary showing counts by skip reason.
         # Groups: PREREQ_EXEMPT, NOT_APPLICABLE, ALREADY_DEPLOYED, other.
         prereq_count = sum(
-            1 for o in result.results
-            if o.state == DeployState.SKIPPED
-            and "PREREQ_EXEMPT" in (o.message or "")
+            1
+            for o in result.results
+            if o.state == DeployState.SKIPPED and "PREREQ_EXEMPT" in (o.message or "")
         )
         not_app_count = sum(
-            1 for o in result.results
+            1
+            for o in result.results
             if o.state == DeployState.SKIPPED
             and "not applicable" in (o.message or "").lower()
             and "PREREQ_EXEMPT" not in (o.message or "")

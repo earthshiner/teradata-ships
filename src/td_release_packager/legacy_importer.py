@@ -74,9 +74,9 @@ class Substitution:
     """
 
     original_marker: str  # e.g. "$ADMIN_USER" or "&&DATE_FORMAT&&"
-    var_name: str         # e.g. "ADMIN_USER"
-    value: str            # e.g. "GCFR_APPL_ADMIN_USER"
-    line_number: int      # 1-based, for diagnostics
+    var_name: str  # e.g. "ADMIN_USER"
+    value: str  # e.g. "GCFR_APPL_ADMIN_USER"
+    line_number: int  # 1-based, for diagnostics
 
 
 @dataclass
@@ -112,9 +112,7 @@ class ScanResult:
 
     substitutions: List[Substitution] = field(default_factory=list)
     var_counts: Dict[str, int] = field(default_factory=dict)
-    var_to_files: Dict[str, List[Tuple[str, int]]] = field(
-        default_factory=dict
-    )
+    var_to_files: Dict[str, List[Tuple[str, int]]] = field(default_factory=dict)
     var_to_syntaxes: Dict[str, set] = field(default_factory=dict)
     files_scanned: int = 0
     files_with_placeholders: int = 0
@@ -126,9 +124,7 @@ class ScanResult:
 # Captures: 1 = pattern (legacy marker), 2 = replacement (value).
 # Trailing flags ([gpiI...]) are accepted but ignored — we do not
 # preserve sed semantics, only mine the (marker, value) pair.
-_SED_RULE_RE = re.compile(
-    r"^s/((?:[^/\\]|\\.)*?)/((?:[^/\\]|\\.)*)/[a-zA-Z]*\s*$"
-)
+_SED_RULE_RE = re.compile(r"^s/((?:[^/\\]|\\.)*?)/((?:[^/\\]|\\.)*)/[a-zA-Z]*\s*$")
 
 
 # Legacy marker patterns. Each extracts VAR_NAME from the sed pattern.
@@ -436,9 +432,9 @@ def scan_source_directory(
                 result.var_counts[finding.var_name] = (
                     result.var_counts.get(finding.var_name, 0) + 1
                 )
-                result.var_to_syntaxes.setdefault(
-                    finding.var_name, set()
-                ).add(finding.syntax)
+                result.var_to_syntaxes.setdefault(finding.var_name, set()).add(
+                    finding.syntax
+                )
                 samples = result.var_to_files.setdefault(finding.var_name, [])
                 if len(samples) < _SAMPLE_LIMIT:
                     samples.append((file_path, finding.line))
@@ -501,8 +497,7 @@ def scan_format_properties_file(env: str, scan: ScanResult) -> str:
             sample_str = f", sample: {os.path.basename(sample_path)}:{sample_line}"
 
         body_lines.append(
-            f"# {sub.var_name}: {count} occurrences "
-            f"({'/'.join(syntaxes)}{sample_str})"
+            f"# {sub.var_name}: {count} occurrences ({'/'.join(syntaxes)}{sample_str})"
         )
         body_lines.append(f"{sub.var_name}=")
 
@@ -566,9 +561,7 @@ def scan_format_report(scan: ScanResult, source_dir: str) -> str:
         return "\n".join(lines) + "\n"
 
     # Order: most frequent first, then alphabetical.
-    sorted_vars = sorted(
-        scan.var_counts.items(), key=lambda kv: (-kv[1], kv[0])
-    )
+    sorted_vars = sorted(scan.var_counts.items(), key=lambda kv: (-kv[1], kv[0]))
 
     lines.append("## Tokens by frequency")
     lines.append("")
@@ -722,9 +715,7 @@ def _run_script_mode(args) -> int:
     properties_path = properties_dir / f"{args.env}.conf"
     migration_path = output_dir / "legacy_migration.sed"
 
-    properties_path.write_text(
-        format_properties_file(args.env, subs), encoding="utf-8"
-    )
+    properties_path.write_text(format_properties_file(args.env, subs), encoding="utf-8")
     migration_path.write_text(format_migration_sed(subs), encoding="utf-8")
 
     unique_tokens = len({s.var_name for s in subs})
@@ -772,8 +763,8 @@ def _run_scan_mode(args) -> int:
     if not scan.substitutions:
         print(
             f"  Scanned {scan.files_scanned} file(s) under {source_dir}.",
-            f"  No legacy placeholders found -- the source is already in",
-            f"  SHIPS-canonical form (or contains no placeholders at all).",
+            "  No legacy placeholders found -- the source is already in",
+            "  SHIPS-canonical form (or contains no placeholders at all).",
             sep="\n",
         )
         return 0
@@ -792,9 +783,7 @@ def _run_scan_mode(args) -> int:
     migration_path.write_text(
         format_migration_sed(scan.substitutions), encoding="utf-8"
     )
-    report_path.write_text(
-        scan_format_report(scan, str(source_dir)), encoding="utf-8"
-    )
+    report_path.write_text(scan_format_report(scan, str(source_dir)), encoding="utf-8")
 
     print("=" * 64)
     print(f"  Scanned {scan.files_scanned} file(s) under {source_dir}")

@@ -360,9 +360,10 @@ class TestInjectMultiset:
         # Comment text is intact — not modified
         assert "parents the inner CREATE TABLE" in result
         # No spurious MULTISET in the comment
-        assert "CREATE MULTISET TABLE\n" not in result.split(
-            "CREATE MULTISET TABLE MyDB.Stage"
-        )[0]
+        assert (
+            "CREATE MULTISET TABLE\n"
+            not in result.split("CREATE MULTISET TABLE MyDB.Stage")[0]
+        )
 
     def test_create_table_inside_line_comment_is_ignored(self):
         """Same regression but with -- line comment instead of /* */."""
@@ -616,14 +617,10 @@ class TestIngestDirectory:
         jar_dir.mkdir(parents=True)
         (jar_dir / "ExecLargeSqlJ.jar").write_bytes(b"jar-bytes-here")
 
-        result = ingest_directory(
-            str(src), str(tmp_project), detect_tokens=False
-        )
+        result = ingest_directory(str(src), str(tmp_project), detect_tokens=False)
 
         # SQL placed under DDL/jar_install/ as a .sjr
-        assert any(
-            "jar_install" in dest for _, dest, _ in result.files_placed
-        )
+        assert any("jar_install" in dest for _, dest, _ in result.files_placed)
 
         # Binary recorded
         assert len(result.binaries_placed) == 1
@@ -633,21 +630,19 @@ class TestIngestDirectory:
 
         # Binary physically copied into the project
         from pathlib import Path
+
         assert (Path(tmp_project) / bin_dest).exists()
         assert (Path(tmp_project) / bin_dest).read_bytes() == b"jar-bytes-here"
 
         # The install script's path was rewritten to ./X.jar form
         sql_dest = next(
-            dest for _, dest, _ in result.files_placed
-            if "jar_install" in dest
+            dest for _, dest, _ in result.files_placed if "jar_install" in dest
         )
         sql_text = (Path(tmp_project) / sql_dest).read_text(encoding="utf-8")
         assert "../JAVA/JAR/" not in sql_text
         assert "./ExecLargeSqlJ.jar" in sql_text
 
-    def test_ingest_harvests_c_source_alongside_function(
-        self, tmp_path, tmp_project
-    ):
+    def test_ingest_harvests_c_source_alongside_function(self, tmp_path, tmp_project):
         """End-to-end: a C UDF references .c/.h files in a sibling
         directory. After harvest both should be in DDL/functions/
         with the function's EXTERNAL NAME path rewritten."""
@@ -665,9 +660,7 @@ class TestIngestDirectory:
         (c_dir / "foo.c").write_bytes(b"int foo(int x) { return x; }")
         (c_dir / "foo.h").write_bytes(b"int foo(int);")
 
-        result = ingest_directory(
-            str(src), str(tmp_project), detect_tokens=False
-        )
+        result = ingest_directory(str(src), str(tmp_project), detect_tokens=False)
 
         # Two binaries copied (.c + .h)
         kinds = [k for _, _, k in result.binaries_placed]
@@ -676,21 +669,18 @@ class TestIngestDirectory:
 
         # Both physically present in the function destination dir
         from pathlib import Path
+
         for bin_src, bin_dest, _ in result.binaries_placed:
             assert (Path(tmp_project) / bin_dest).exists()
 
         # Function content has rewritten paths
-        fnc_dest = next(
-            dest for _, dest, t in result.files_placed if t == "FUNCTION"
-        )
+        fnc_dest = next(dest for _, dest, t in result.files_placed if t == "FUNCTION")
         fnc_text = (Path(tmp_project) / fnc_dest).read_text(encoding="utf-8")
         assert "../C/" not in fnc_text
         assert "./foo.c" in fnc_text
         assert "./foo.h" in fnc_text
 
-    def test_ingest_warns_when_binary_reference_is_missing(
-        self, tmp_path, tmp_project
-    ):
+    def test_ingest_warns_when_binary_reference_is_missing(self, tmp_path, tmp_project):
         """JAR install script that points at a non-existent binary
         should produce a classification warning so the user knows
         the deployer will fail."""
@@ -702,16 +692,12 @@ class TestIngestDirectory:
             encoding="utf-8",
         )
 
-        result = ingest_directory(
-            str(src), str(tmp_project), detect_tokens=False
-        )
+        result = ingest_directory(str(src), str(tmp_project), detect_tokens=False)
 
         # No binary placed — there was nothing to copy
         assert result.binaries_placed == []
         # But a warning fired
-        assert any(
-            "not found" in w for w in result.classification_warnings
-        )
+        assert any("not found" in w for w in result.classification_warnings)
 
     def test_ingest_records_subtypes_for_c_udf(self, tmp_path, tmp_project):
         """A C UDF is classified as FUNCTION_C and the sub-type
@@ -727,9 +713,7 @@ class TestIngestDirectory:
         )
         (src / "foo.fnc").write_text(ddl, encoding="utf-8")
 
-        result = ingest_directory(
-            str(src), str(tmp_project), detect_tokens=False
-        )
+        result = ingest_directory(str(src), str(tmp_project), detect_tokens=False)
 
         assert result.classified == 1
         # base type is FUNCTION (preserved for backward compat)
@@ -742,9 +726,7 @@ class TestIngestDirectory:
         assert any(p.endswith("foo.c") for p in refs)
         assert any(p.endswith("foo.h") for p in refs)
 
-    def test_ingest_records_subtype_for_java_procedure(
-        self, tmp_path, tmp_project
-    ):
+    def test_ingest_records_subtype_for_java_procedure(self, tmp_path, tmp_project):
         """A Java procedure is classified as PROCEDURE_JAVA and the
         JAR alias is recorded in external_references."""
         src = tmp_path / "source"
@@ -757,21 +739,15 @@ class TestIngestDirectory:
         )
         (src / "foo.spl").write_text(ddl, encoding="utf-8")
 
-        result = ingest_directory(
-            str(src), str(tmp_project), detect_tokens=False
-        )
+        result = ingest_directory(str(src), str(tmp_project), detect_tokens=False)
 
         assert result.classified == 1
         assert result.files_placed[0][2] == "PROCEDURE"
         staged = result.files_placed[0][1]
         assert result.subtypes.get(staged) == "PROCEDURE_JAVA"
-        assert result.external_references.get(staged) == [
-            "jar_execute_large_sql"
-        ]
+        assert result.external_references.get(staged) == ["jar_execute_large_sql"]
 
-    def test_ingest_surfaces_filename_mismatch_warning(
-        self, tmp_path, tmp_project
-    ):
+    def test_ingest_surfaces_filename_mismatch_warning(self, tmp_path, tmp_project):
         """A file named .tbl whose content is CREATE VIEW gets
         classified as VIEW (content wins) but a classification
         warning is surfaced for the user."""
@@ -782,16 +758,12 @@ class TestIngestDirectory:
             "CREATE VIEW x.v AS SELECT 1;", encoding="utf-8"
         )
 
-        result = ingest_directory(
-            str(src), str(tmp_project), detect_tokens=False
-        )
+        result = ingest_directory(str(src), str(tmp_project), detect_tokens=False)
 
         # Content wins
         assert result.files_placed[0][2] == "VIEW"
         # Warning surfaced
-        assert any(
-            "Filename mismatch" in w for w in result.classification_warnings
-        )
+        assert any("Filename mismatch" in w for w in result.classification_warnings)
 
     def test_ingest_no_classification_warnings_for_clean_files(
         self, tmp_path, tmp_project
@@ -800,18 +772,12 @@ class TestIngestDirectory:
         no classification warnings."""
         src = tmp_path / "source"
         src.mkdir()
-        (src / "ok.tbl").write_text(
-            "CREATE TABLE x.t (id INT);", encoding="utf-8"
-        )
+        (src / "ok.tbl").write_text("CREATE TABLE x.t (id INT);", encoding="utf-8")
 
-        result = ingest_directory(
-            str(src), str(tmp_project), detect_tokens=False
-        )
+        result = ingest_directory(str(src), str(tmp_project), detect_tokens=False)
         assert result.classification_warnings == []
 
-    def test_ingest_sqlj_install_script_uses_sjr_extension(
-        self, tmp_path, tmp_project
-    ):
+    def test_ingest_sqlj_install_script_uses_sjr_extension(self, tmp_path, tmp_project):
         """A SQL file containing CALL SQLJ.INSTALL_JAR(...) is classified as
         JAR but the staged file gets ``.sjr`` (SQLJ Runtime install
         script), NOT ``.jar``. The latter is reserved for actual binary
@@ -849,15 +815,11 @@ class TestIngestDirectory:
         assert result.files_placed[0][2] == "JAR"
         # ...but the staged file extension is .sjr, not .jar
         dest_path = result.files_placed[0][1]
-        assert dest_path.endswith(".sjr"), (
-            f"Expected .sjr extension; got {dest_path}"
-        )
+        assert dest_path.endswith(".sjr"), f"Expected .sjr extension; got {dest_path}"
         # And it lives under DDL/jar_install (not DDL/JARs)
         assert "jar_install" in dest_path.replace("\\", "/")
 
-    def test_ingest_splits_multistatement_ddl_and_grant(
-        self, tmp_path, tmp_project
-    ):
+    def test_ingest_splits_multistatement_ddl_and_grant(self, tmp_path, tmp_project):
         """A file with CREATE TABLE followed by GRANT splits into
         two destinations — TABLE under DDL/tables, GRANT under
         DCL/inter_db. Pre-existing splitter behaviour, captured here
@@ -866,14 +828,11 @@ class TestIngestDirectory:
         src = tmp_path / "raw"
         src.mkdir()
         (src / "compound.ddl").write_text(
-            "CREATE MULTISET TABLE x.t (id INT);\n"
-            "GRANT SELECT ON x.t TO ROLE READER;",
+            "CREATE MULTISET TABLE x.t (id INT);\nGRANT SELECT ON x.t TO ROLE READER;",
             encoding="utf-8",
         )
 
-        result = ingest_directory(
-            str(src), str(tmp_project), detect_tokens=False
-        )
+        result = ingest_directory(str(src), str(tmp_project), detect_tokens=False)
 
         types = sorted(t for _, _, t in result.files_placed)
         assert types == ["GRANT", "TABLE"]
@@ -900,9 +859,7 @@ class TestIngestDirectory:
             encoding="utf-8",
         )
 
-        result = ingest_directory(
-            str(src), str(tmp_project), detect_tokens=False
-        )
+        result = ingest_directory(str(src), str(tmp_project), detect_tokens=False)
 
         assert result.classified == 1
         assert result.files_placed[0][2] == "PROCEDURE"

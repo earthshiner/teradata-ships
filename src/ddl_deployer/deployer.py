@@ -942,10 +942,10 @@ _PREREQ_EXEMPT_TYPES = {
     # _order.txt guarantees sequence.
     ObjectType.DATABASE,
     ObjectType.USER,
-    ObjectType.ROLE,    # CREATE ROLE has no EXPLAIN form (Error 3706)
-    ObjectType.GRANT,   # GRANTs on in-package databases always fail
-                        # EXPLAIN (Error 3802 "database does not exist")
-                        # when the database is itself created by this package
+    ObjectType.ROLE,  # CREATE ROLE has no EXPLAIN form (Error 3706)
+    ObjectType.GRANT,  # GRANTs on in-package databases always fail
+    # EXPLAIN (Error 3802 "database does not exist")
+    # when the database is itself created by this package
 }
 
 

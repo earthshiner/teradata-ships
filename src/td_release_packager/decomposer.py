@@ -76,8 +76,8 @@ class CompositionRoots:
 
     env_prefix: str
     ships_env: str
-    instance: str          # may be "" if grammar has no instance segment
-    security_tier: str     # defaults to "0" if no tier observed
+    instance: str  # may be "" if grammar has no instance segment
+    security_tier: str  # defaults to "0" if no tier observed
 
 
 @dataclass(frozen=True)
@@ -111,12 +111,7 @@ class DecomposedName:
             return f"{{{{ENV_PREFIX}}}}_{{{{SHIPS_ENV}}}}_{self.layer}"
         if self.kind and self.security_tier:
             # Full leaf form
-            return (
-                "{{PARENT_NODE}}_"
-                f"{self.layer}_"
-                "{{SECURITY_TIER}}_"
-                f"{self.kind}"
-            )
+            return f"{{{{PARENT_NODE}}}}_{self.layer}_{{{{SECURITY_TIER}}}}_{self.kind}"
         # Node form (no tier, no kind)
         return "{{PARENT_NODE}}_" + self.layer
 
@@ -163,9 +158,7 @@ def read_input_file(path: str) -> List[str]:
 
     raw_lines = p.read_text(encoding="utf-8").splitlines()
     data = [
-        ln.strip()
-        for ln in raw_lines
-        if ln.strip() and not ln.strip().startswith("#")
+        ln.strip() for ln in raw_lines if ln.strip() and not ln.strip().startswith("#")
     ]
 
     if not data:
@@ -259,8 +252,12 @@ def infer_composition_roots(
     if not names:
         return (
             CompositionRoots("", "", "", "0"),
-            {"env_prefix": "LOW", "ships_env": "LOW",
-             "instance": "LOW", "security_tier": "LOW"},
+            {
+                "env_prefix": "LOW",
+                "ships_env": "LOW",
+                "instance": "LOW",
+                "security_tier": "LOW",
+            },
         )
 
     parts_list = [n.split("_") for n in names]
@@ -269,16 +266,12 @@ def infer_composition_roots(
     # ENV_PREFIX (pos 0)
     env_prefix, env_ratio = _majority_at_position(parts_list, 0)
     env_prefix = env_prefix or ""
-    confidence["env_prefix"] = (
-        _confidence_for_ratio(env_ratio) if env_prefix else "LOW"
-    )
+    confidence["env_prefix"] = _confidence_for_ratio(env_ratio) if env_prefix else "LOW"
 
     # SHIPS_ENV (pos 1)
     ships_env, ships_ratio = _majority_at_position(parts_list, 1)
     ships_env = ships_env or ""
-    confidence["ships_env"] = (
-        _confidence_for_ratio(ships_ratio) if ships_env else "LOW"
-    )
+    confidence["ships_env"] = _confidence_for_ratio(ships_ratio) if ships_env else "LOW"
 
     # INSTANCE (pos 2) — only accept if the dominant value looks
     # like a 2+ digit number. Otherwise this codebase has no
@@ -308,9 +301,7 @@ def infer_composition_roots(
 
     if tier_counter and leaf_total:
         security_tier, tier_count = tier_counter.most_common(1)[0]
-        confidence["security_tier"] = _confidence_for_ratio(
-            tier_count / leaf_total
-        )
+        confidence["security_tier"] = _confidence_for_ratio(tier_count / leaf_total)
     else:
         security_tier = "0"
         confidence["security_tier"] = "LOW"
@@ -331,9 +322,7 @@ def infer_composition_roots(
 # ---------------------------------------------------------------
 
 
-def decompose_name(
-    name: str, roots: CompositionRoots
-) -> Optional[DecomposedName]:
+def decompose_name(name: str, roots: CompositionRoots) -> Optional[DecomposedName]:
     """
     Decompose one literal name against the grammar.
 
@@ -350,7 +339,7 @@ def decompose_name(
     if not name.startswith(expected_prefix):
         return None
 
-    rest = name[len(expected_prefix):]
+    rest = name[len(expected_prefix) :]
     if not rest:
         return None
 
@@ -480,9 +469,7 @@ def format_properties_file(env: str, result: DecompositionResult) -> str:
     # Section 2 content
     section_2_lines: List[str] = []
     if roots.instance:
-        section_2_lines.append(
-            "PARENT_NODE={{ENV_PREFIX}}_{{SHIPS_ENV}}_{{INSTANCE}}"
-        )
+        section_2_lines.append("PARENT_NODE={{ENV_PREFIX}}_{{SHIPS_ENV}}_{{INSTANCE}}")
         section_2_lines.append("")
 
     # Group by token_name to handle collisions deterministically.
@@ -689,7 +676,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     print("=" * 64)
     print(f"  Decomposed {len(names)} literal name(s) from {args.input}")
     print("=" * 64)
-    print(f"  Composition roots:")
+    print("  Composition roots:")
     print(
         f"    ENV_PREFIX={result.roots.env_prefix}  "
         f"({result.confidence.get('env_prefix', '?')})"
