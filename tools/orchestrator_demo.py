@@ -120,15 +120,14 @@ def main() -> None:
 
         for path in (
             "stages.generate.strict",  # CLI wins
-            "stages.harvest.strict",   # project wins
-            "stages.harvest.on_error", # project wins
+            "stages.harvest.strict",  # project wins
+            "stages.harvest.on_error",  # project wins
             "stages.scaffold.strict",  # default falls through
-            "stages.package.on_error", # default falls through
+            "stages.package.on_error",  # default falls through
         ):
             r = cascade.resolve(path)
             print(
-                f"  {path:<32} = {str(r.value):<6} "
-                f"[{r.source.value}: {r.source_path}]"
+                f"  {path:<32} = {str(r.value):<6} [{r.source.value}: {r.source_path}]"
             )
 
         # -------------------------------------------------- 3. decisions

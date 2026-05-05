@@ -43,7 +43,7 @@ _INVALID_VALUE_CHARS = re.compile(r"[\[\]{}]")
 
 def _validate_property_values(
     tokens: Dict[str, str],
-    properties_path: str = "",
+    env_config_path: str = "",
     phase: str = "raw",
 ) -> List[str]:
     """
@@ -60,7 +60,7 @@ def _validate_property_values(
 
     Args:
         tokens:          Dictionary of token_name → value.
-        properties_path: Path to properties file (for error messages).
+        env_config_path: Path to properties file (for error messages).
         phase:           'raw' (before resolution) or 'resolved'.
 
     Returns:
@@ -85,7 +85,7 @@ def _validate_property_values(
                     f"Token '{name}': value contains '=' — likely "
                     f"two properties lines merged. "
                     f"Found '{prefix}=' in value '{value}'. "
-                    f"Check {properties_path} for a missing line break."
+                    f"Check {env_config_path} for a missing line break."
                 )
 
         # -- Invalid characters in resolved values --
@@ -118,7 +118,7 @@ def _validate_property_values(
     return errors
 
 
-def read_env_config(properties_path: str) -> Dict[str, str]:
+def read_env_config(env_config_path: str) -> Dict[str, str]:
     """
     Read a .conf file into a token dictionary.
 
@@ -132,7 +132,7 @@ def read_env_config(properties_path: str) -> Dict[str, str]:
     keys use the last-defined value (with a warning).
 
     Args:
-        properties_path: Path to the .conf file.
+        env_config_path: Path to the .conf file.
 
     Returns:
         Dictionary of token_name → value.
@@ -140,11 +140,11 @@ def read_env_config(properties_path: str) -> Dict[str, str]:
     Raises:
         FileNotFoundError: If the properties file does not exist.
     """
-    if not os.path.exists(properties_path):
-        raise FileNotFoundError(f"Config file not found: {properties_path}")
+    if not os.path.exists(env_config_path):
+        raise FileNotFoundError(f"Config file not found: {env_config_path}")
 
     tokens = {}
-    with open(properties_path, "r", encoding="utf-8") as f:
+    with open(env_config_path, "r", encoding="utf-8") as f:
         for lineno, line in enumerate(f, 1):
             stripped = line.strip()
 
@@ -179,12 +179,12 @@ def read_env_config(properties_path: str) -> Dict[str, str]:
 
             tokens[name] = value
 
-    logger.info("Read %d tokens from %s", len(tokens), properties_path)
+    logger.info("Read %d tokens from %s", len(tokens), env_config_path)
 
     # Validate raw values (before resolution) — catches merged lines
     raw_errors = _validate_property_values(
         tokens,
-        properties_path,
+        env_config_path,
         phase="raw",
     )
     if raw_errors:
@@ -192,7 +192,7 @@ def read_env_config(properties_path: str) -> Dict[str, str]:
         raise ValueError(
             f"Config file has {len(raw_errors)} error(s):\n"
             f"  {error_list}\n\n"
-            f"File: {properties_path}"
+            f"File: {env_config_path}"
         )
 
     # Resolve internal references: {{TOKEN}} within values
@@ -202,7 +202,7 @@ def read_env_config(properties_path: str) -> Dict[str, str]:
     # and unresolved references
     resolved_errors = _validate_property_values(
         tokens,
-        properties_path,
+        env_config_path,
         phase="resolved",
     )
     if resolved_errors:
@@ -211,7 +211,7 @@ def read_env_config(properties_path: str) -> Dict[str, str]:
             f"Config file has {len(resolved_errors)} error(s) "
             f"after token resolution:\n"
             f"  {error_list}\n\n"
-            f"File: {properties_path}"
+            f"File: {env_config_path}"
         )
 
     return tokens

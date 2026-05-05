@@ -1,5 +1,5 @@
 """
-test_properties_bootstrapper.py — Tests for the third bootstrap
+test_env_config_bootstrapper.py — Tests for the third bootstrap
 path (already-tokenised source → .conf scaffold).
 
 Covers:
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from td_release_packager import properties_bootstrapper as boot
+from td_release_packager import env_config_bootstrapper as boot
 from td_release_packager.token_engine import read_env_config
 
 
@@ -127,13 +127,13 @@ class TestBootstrapPropertiesFile:
             {"a.tbl": "CREATE TABLE {{BASE_T}}.a (id INT);\n"},
         )
 
-        result = boot.bootstrap_properties_file(
+        result = boot.bootstrap_env_config_file(
             project_dir=str(project),
             env="DEV",
             output_dir=str(project / "config"),
         )
 
-        props_path = Path(result["properties_path"])
+        props_path = Path(result["env_config_path"])
         assert props_path.exists()
         assert "BASE_T=" in props_path.read_text(encoding="utf-8")
         assert result["overwrote"] is False
@@ -145,14 +145,14 @@ class TestBootstrapPropertiesFile:
             {"a.tbl": "CREATE TABLE {{BASE_T}}.a (id INT);\n"},
         )
         # First run creates it
-        boot.bootstrap_properties_file(
+        boot.bootstrap_env_config_file(
             project_dir=str(project),
             env="DEV",
             output_dir=str(project / "config"),
         )
         # Second run without --force should raise
         with pytest.raises(FileExistsError):
-            boot.bootstrap_properties_file(
+            boot.bootstrap_env_config_file(
                 project_dir=str(project),
                 env="DEV",
                 output_dir=str(project / "config"),
@@ -170,7 +170,7 @@ class TestBootstrapPropertiesFile:
         props_path = props_dir / "DEV.conf"
         props_path.write_text("BASE_T=existing_value\n", encoding="utf-8")
 
-        result = boot.bootstrap_properties_file(
+        result = boot.bootstrap_env_config_file(
             project_dir=str(project),
             env="DEV",
             output_dir=str(config_dir),
@@ -194,7 +194,7 @@ class TestBootstrapPropertiesFile:
             "OLD_TOKEN=v1\nNEW_TOKEN=v2\n", encoding="utf-8"
         )
 
-        result = boot.bootstrap_properties_file(
+        result = boot.bootstrap_env_config_file(
             project_dir=str(project),
             env="DEV",
             output_dir=str(config_dir),
@@ -206,7 +206,7 @@ class TestBootstrapPropertiesFile:
 
     def test_missing_project_raises(self, tmp_path):
         with pytest.raises(NotADirectoryError):
-            boot.bootstrap_properties_file(
+            boot.bootstrap_env_config_file(
                 project_dir=str(tmp_path / "nope"),
                 env="DEV",
             )
@@ -236,7 +236,7 @@ class TestMain:
         )
         assert rc == 0
         captured = capsys.readouterr()
-        assert "bootstrap-properties" in captured.out
+        assert "bootstrap-env-config" in captured.out
         assert "Next Steps" in captured.out
 
     def test_main_returns_1_when_clobber_blocked(self, tmp_path, capsys):
@@ -286,14 +286,14 @@ class TestRoundTrip:
             },
         )
 
-        result = boot.bootstrap_properties_file(
+        result = boot.bootstrap_env_config_file(
             project_dir=str(project),
             env="DEV",
             output_dir=str(project / "config"),
         )
 
         # The file is parseable. Tokens have empty values.
-        tokens = read_env_config(result["properties_path"])
+        tokens = read_env_config(result["env_config_path"])
         assert tokens.get("BASE_T") == ""
         assert tokens.get("GCFR_T") == ""
 
@@ -302,12 +302,12 @@ class TestRoundTrip:
             tmp_path,
             {"a.tbl": "CREATE TABLE {{X}}.a (id INT);\n"},
         )
-        result = boot.bootstrap_properties_file(
+        result = boot.bootstrap_env_config_file(
             project_dir=str(project),
             env="DEV",
             output_dir=str(project / "config"),
         )
-        text = Path(result["properties_path"]).read_text(encoding="utf-8")
+        text = Path(result["env_config_path"]).read_text(encoding="utf-8")
         for n in range(1, 8):
             assert f"# {n}." in text, f"section {n} missing"
         # Section 8 (Imported) is the destination for the scanned tokens

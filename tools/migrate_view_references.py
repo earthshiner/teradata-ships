@@ -63,8 +63,10 @@ from td_release_packager.object_placement import (  # noqa: E402
 # Data structures
 # ---------------------------------------------------------------------------
 
+
 class Replacement(NamedTuple):
     """A single replacement within a file."""
+
     line_number: int
     original: str
     rewritten: str
@@ -74,6 +76,7 @@ class Replacement(NamedTuple):
 
 class FileResult(NamedTuple):
     """Migration result for a single file."""
+
     path: Path
     replacements: List[Replacement]
     error: Optional[str]
@@ -101,19 +104,19 @@ class FileResult(NamedTuple):
 # responsible for skipping comments and string literals.
 _IDENT_OR_TOKEN = r'(\{\{[A-Za-z_]\w*\}\}|"?[A-Za-z_]\w*"?)'
 _QUALIFIED_REF_PATTERN = re.compile(
-    r'(?<![.\w])'                    # Not preceded by dot or word char
-    + _IDENT_OR_TOKEN +              # Group 1: database name
-    r'\.'                            # Literal dot separator
-    + _IDENT_OR_TOKEN +              # Group 2: object name
-    r'(?![.\w])',                     # Not followed by dot or word char
+    r"(?<![.\w])"  # Not preceded by dot or word char
+    + _IDENT_OR_TOKEN  # Group 1: database name
+    + r"\."  # Literal dot separator
+    + _IDENT_OR_TOKEN  # Group 2: object name
+    + r"(?![.\w])",  # Not followed by dot or word char
     re.IGNORECASE,
 )
 
 # Pattern to detect line comments
-_LINE_COMMENT_PATTERN = re.compile(r'--.*$', re.MULTILINE)
+_LINE_COMMENT_PATTERN = re.compile(r"--.*$", re.MULTILINE)
 
 # Pattern to detect block comments (non-greedy, handles multi-line)
-_BLOCK_COMMENT_PATTERN = re.compile(r'/\*.*?\*/', re.DOTALL)
+_BLOCK_COMMENT_PATTERN = re.compile(r"/\*.*?\*/", re.DOTALL)
 
 # Pattern to detect single-quoted string literals
 _STRING_LITERAL_PATTERN = re.compile(r"'(?:[^']|'')*'")
@@ -176,12 +179,13 @@ def _line_number_at(text: str, position: int) -> int:
     Returns:
         1-based line number.
     """
-    return text[:position].count('\n') + 1
+    return text[:position].count("\n") + 1
 
 
 # ---------------------------------------------------------------------------
 # File processing
 # ---------------------------------------------------------------------------
+
 
 def process_file(
     file_path: Path,
@@ -201,7 +205,7 @@ def process_file(
         FileResult with the list of replacements made (or error).
     """
     try:
-        original_text = file_path.read_text(encoding='utf-8')
+        original_text = file_path.read_text(encoding="utf-8")
     except Exception as e:
         return FileResult(
             path=file_path,
@@ -240,16 +244,18 @@ def process_file(
         if raw_db.startswith('"'):
             new_ref = f'"{views_db}".{raw_obj}'
         else:
-            new_ref = f'{views_db}.{raw_obj}'
+            new_ref = f"{views_db}.{raw_obj}"
 
         line_num = _line_number_at(original_text, match.start())
-        replacements.append(Replacement(
-            line_number=line_num,
-            original=match.group(0),
-            rewritten=new_ref,
-            db_original=db_name,
-            db_rewritten=views_db,
-        ))
+        replacements.append(
+            Replacement(
+                line_number=line_num,
+                original=match.group(0),
+                rewritten=new_ref,
+                db_original=db_name,
+                db_rewritten=views_db,
+            )
+        )
 
     return FileResult(
         path=file_path,
@@ -273,7 +279,7 @@ def apply_replacements(file_path: Path, replacements: List[Replacement]) -> str:
     Returns:
         The modified file content.
     """
-    text = file_path.read_text(encoding='utf-8')
+    text = file_path.read_text(encoding="utf-8")
 
     # Apply replacements in reverse line order to preserve positions
     sorted_reps = sorted(replacements, key=lambda r: r.line_number, reverse=True)
@@ -289,6 +295,7 @@ def apply_replacements(file_path: Path, replacements: List[Replacement]) -> str:
 # ---------------------------------------------------------------------------
 # Config loading
 # ---------------------------------------------------------------------------
+
 
 def load_placement_config(config_path: Path) -> ObjectPlacement:
     """
@@ -319,7 +326,7 @@ def load_placement_config(config_path: Path) -> ObjectPlacement:
         sys.exit(1)
 
     try:
-        with open(config_path, 'r', encoding='utf-8') as f:
+        with open(config_path, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f)
     except Exception as e:
         print(f"ERROR: Failed to parse {config_path}: {e}", file=sys.stderr)
@@ -334,9 +341,11 @@ def load_placement_config(config_path: Path) -> ObjectPlacement:
 
     # Detect the old wrapped format (pre-rename ships.yml shape) and
     # give a clear migration message rather than a cryptic engine error.
-    if isinstance(config, dict) \
-            and 'object_placement' in config \
-            and 'strategy' not in config:
+    if (
+        isinstance(config, dict)
+        and "object_placement" in config
+        and "strategy" not in config
+    ):
         print(
             f"ERROR: {config_path} uses the old wrapped format.\n"
             "  Move the contents of the 'object_placement:' key to "
@@ -363,6 +372,7 @@ def load_placement_config(config_path: Path) -> ObjectPlacement:
 # File discovery
 # ---------------------------------------------------------------------------
 
+
 def find_view_files(search_dir: Path) -> List[Path]:
     """
     Recursively find all ``.viw`` files in *search_dir*.
@@ -373,12 +383,13 @@ def find_view_files(search_dir: Path) -> List[Path]:
     Returns:
         Sorted list of ``.viw`` file paths.
     """
-    return sorted(search_dir.rglob('*.viw'))
+    return sorted(search_dir.rglob("*.viw"))
 
 
 # ---------------------------------------------------------------------------
 # Reporting
 # ---------------------------------------------------------------------------
+
 
 def print_report(
     results: List[FileResult],
@@ -424,12 +435,8 @@ def print_report(
                 f"    Line {rep.line_number:>4d}: "
                 f"{rep.db_original} → {rep.db_rewritten}"
             )
-            print(
-                f"              {rep.original}"
-            )
-            print(
-                f"           →  {rep.rewritten}"
-            )
+            print(f"              {rep.original}")
+            print(f"           →  {rep.rewritten}")
         print()
 
     # Summary
@@ -449,6 +456,7 @@ def print_report(
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     """
     Entry point for the migration script.
@@ -457,7 +465,7 @@ def main() -> None:
     each file, and optionally applies changes.
     """
     parser = argparse.ArgumentParser(
-        prog='migrate_view_references',
+        prog="migrate_view_references",
         description=(
             "Rewrite .viw files so AI-Native Data Product views read\n"
             "from the 1:1 locking view layer instead of directly from\n"
@@ -503,55 +511,52 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        '--config',
+        "--config",
         type=Path,
-        default=Path('object_placement.yaml'),
-        metavar='FILE',
-        help=(
-            'Path to object_placement.yaml. '
-            '(default: ./object_placement.yaml)'
-        ),
+        default=Path("object_placement.yaml"),
+        metavar="FILE",
+        help=("Path to object_placement.yaml. (default: ./object_placement.yaml)"),
     )
     parser.add_argument(
-        '--dir',
+        "--dir",
         type=Path,
-        default=Path('.'),
-        metavar='DIR',
+        default=Path("."),
+        metavar="DIR",
         help=(
-            'Root directory to scan recursively for .viw files. '
-            '(default: current directory)'
+            "Root directory to scan recursively for .viw files. "
+            "(default: current directory)"
         ),
     )
 
     # -- Output mode (mutually exclusive) --
     output_group = parser.add_mutually_exclusive_group()
     output_group.add_argument(
-        '--dry-run',
-        action='store_true',
+        "--dry-run",
+        action="store_true",
         help=(
-            'Preview mode. Show which references would be rewritten '
-            'and in which files, without modifying anything on disk.'
+            "Preview mode. Show which references would be rewritten "
+            "and in which files, without modifying anything on disk."
         ),
     )
     output_group.add_argument(
-        '--output',
+        "--output",
         type=Path,
         default=None,
-        metavar='DIR',
+        metavar="DIR",
         help=(
-            'Write modified files to this directory, preserving the '
-            'relative path structure from --dir. Unmodified files are '
-            'also copied so the output is a complete set. The output '
-            'directory is created if it does not exist.'
+            "Write modified files to this directory, preserving the "
+            "relative path structure from --dir. Unmodified files are "
+            "also copied so the output is a complete set. The output "
+            "directory is created if it does not exist."
         ),
     )
     output_group.add_argument(
-        '--in-place',
-        action='store_true',
+        "--in-place",
+        action="store_true",
         help=(
-            'Edit source files directly. This is destructive — the '
-            'original content is overwritten with no backup. Consider '
-            'using --dry-run first to preview changes.'
+            "Edit source files directly. This is destructive — the "
+            "original content is overwritten with no backup. Consider "
+            "using --dry-run first to preview changes."
         ),
     )
     args = parser.parse_args()
@@ -570,7 +575,7 @@ def main() -> None:
     print(f"  Placement engine: {placement}")
 
     # Check strategy is appropriate
-    if placement.strategy == 'colocated' and not placement.locking_views:
+    if placement.strategy == "colocated" and not placement.locking_views:
         print(
             "\n  INFO: Strategy is 'colocated' with locking_views=false.\n"
             "  No database reference rewriting is needed.",
@@ -596,10 +601,8 @@ def main() -> None:
         # Edit source files directly
         for result in results:
             if result.replacements and not result.error:
-                new_content = apply_replacements(
-                    result.path, result.replacements
-                )
-                result.path.write_text(new_content, encoding='utf-8')
+                new_content = apply_replacements(result.path, result.replacements)
+                result.path.write_text(new_content, encoding="utf-8")
 
     elif args.output is not None:
         # Write to output directory, preserving relative paths.
@@ -618,15 +621,13 @@ def main() -> None:
             dest.parent.mkdir(parents=True, exist_ok=True)
 
             if result.replacements:
-                new_content = apply_replacements(
-                    result.path, result.replacements
-                )
-                dest.write_text(new_content, encoding='utf-8')
+                new_content = apply_replacements(result.path, result.replacements)
+                dest.write_text(new_content, encoding="utf-8")
             else:
                 # Copy unmodified file verbatim
                 dest.write_text(
-                    result.path.read_text(encoding='utf-8'),
-                    encoding='utf-8',
+                    result.path.read_text(encoding="utf-8"),
+                    encoding="utf-8",
                 )
 
     # Print report
@@ -642,5 +643,5 @@ def main() -> None:
         print("  Run with --output DIR or --in-place to apply.\n")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

@@ -123,7 +123,7 @@ def tmp_project(tmp_path):
 
 
 @pytest.fixture
-def sample_properties_file(tmp_path):
+def sample_env_config_file(tmp_path):
     """
     Create a sample .conf file with token definitions.
 

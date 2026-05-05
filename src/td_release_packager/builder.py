@@ -183,9 +183,9 @@ def build_package(
         raise FileNotFoundError(f"Source directory not found: {config.source_dir}")
 
     # -- Phase 1: Read token values --
-    token_values = read_env_config(config.properties_file)
+    token_values = read_env_config(config.env_config_file)
     logger.info(
-        "Loaded %d token values from %s", len(token_values), config.properties_file
+        "Loaded %d token values from %s", len(token_values), config.env_config_file
     )
 
     # -- Phase 2: Scan source for token references --
