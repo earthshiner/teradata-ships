@@ -52,7 +52,7 @@ class TestScanWritesDecisionsManifest:
             ddl_content="CREATE TABLE {{STD_DATABASE}}.demo (id INT);\n",
         )
 
-        _cmd_scan(Namespace(source=str(project), properties=None))
+        _cmd_scan(Namespace(source=str(project), env_config=None))
 
         data = _read_decisions(project)
         assert data["schema_version"] == 1
@@ -69,7 +69,7 @@ class TestScanWritesDecisionsManifest:
             ddl_content="CREATE TABLE {{X}}.demo (id INT);\n",
         )
 
-        _cmd_scan(Namespace(source=str(project), properties=None))
+        _cmd_scan(Namespace(source=str(project), env_config=None))
 
         stage = _read_decisions(project)["runs"][0]["stages"][0]
         assert "source" in stage["config_resolved"]
@@ -77,7 +77,7 @@ class TestScanWritesDecisionsManifest:
         assert stage["config_resolved"]["source"]["source"] == "layer-5"
         assert stage["config_resolved"]["source"]["source_path"] == "cli"
         # properties was None — recorded as null with same provenance
-        assert stage["config_resolved"]["properties"]["value"] is None
+        assert stage["config_resolved"]["env_config"]["value"] is None
 
     def test_records_inputs_and_outputs(self, tmp_path):
         project = _make_project(
@@ -85,7 +85,7 @@ class TestScanWritesDecisionsManifest:
             ddl_content="CREATE TABLE {{A}}.x (id INT); -- {{B}}\n",
         )
 
-        _cmd_scan(Namespace(source=str(project), properties=None))
+        _cmd_scan(Namespace(source=str(project), env_config=None))
 
         stage = _read_decisions(project)["runs"][0]["stages"][0]
         # inputs include the resolved scan_directory
@@ -112,7 +112,7 @@ class TestScanRecordsValidationIssues:
         props.parent.mkdir(parents=True)
         props.write_text("DEFINED=value\n", encoding="utf-8")
 
-        _cmd_scan(Namespace(source=str(project), properties=str(props)))
+        _cmd_scan(Namespace(source=str(project), env_config=str(props)))
         capsys.readouterr()  # discard stdout
 
         stage = _read_decisions(project)["runs"][0]["stages"][0]
@@ -134,7 +134,7 @@ class TestScanRecordsValidationIssues:
         props.parent.mkdir(parents=True)
         props.write_text("USED=v1\nUNUSED=v2\n", encoding="utf-8")
 
-        _cmd_scan(Namespace(source=str(project), properties=str(props)))
+        _cmd_scan(Namespace(source=str(project), env_config=str(props)))
         capsys.readouterr()
 
         stage = _read_decisions(project)["runs"][0]["stages"][0]
@@ -154,7 +154,7 @@ class TestScanRecordsValidationIssues:
         _cmd_scan(
             Namespace(
                 source=str(project),
-                properties=str(project / "nonexistent.conf"),
+                env_config=str(project / "nonexistent.conf"),
             )
         )
         capsys.readouterr()
@@ -176,8 +176,8 @@ class TestScanAppendsAcrossRuns:
             ddl_content="CREATE TABLE {{X}}.demo (id INT);\n",
         )
 
-        _cmd_scan(Namespace(source=str(project), properties=None))
-        _cmd_scan(Namespace(source=str(project), properties=None))
+        _cmd_scan(Namespace(source=str(project), env_config=None))
+        _cmd_scan(Namespace(source=str(project), env_config=None))
         capsys.readouterr()
 
         data = _read_decisions(project)
@@ -205,7 +205,7 @@ class TestScanSkipsManifestForNonProjectDirectories:
             "CREATE TABLE {{X}}.demo (id INT);\n", encoding="utf-8"
         )
 
-        _cmd_scan(Namespace(source=str(loose_dir), properties=None))
+        _cmd_scan(Namespace(source=str(loose_dir), env_config=None))
         capsys.readouterr()
 
         # Stdout still works; decisions.json must NOT have appeared
@@ -218,7 +218,7 @@ class TestScanSkipsManifestForNonProjectDirectories:
         proj.mkdir()
         (proj / "ships.yaml").write_text("# minimal\n", encoding="utf-8")
 
-        _cmd_scan(Namespace(source=str(proj), properties=None))
+        _cmd_scan(Namespace(source=str(proj), env_config=None))
         capsys.readouterr()
 
         assert (proj / "decisions.json").exists()

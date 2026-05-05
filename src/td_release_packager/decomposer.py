@@ -659,7 +659,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     result = decompose_all(names)
 
     output_dir = Path(args.output_dir)
-    properties_dir = output_dir / "properties"
+    properties_dir = output_dir / "env"
     properties_dir.mkdir(parents=True, exist_ok=True)
 
     properties_path = properties_dir / f"{args.env}.conf"

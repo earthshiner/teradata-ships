@@ -15,7 +15,7 @@ import os
 import pytest
 
 from td_release_packager.token_engine import (
-    read_properties,
+    read_env_config,
     _resolve_internal_references,
     scan_tokens_in_file,
     scan_tokens_in_directory,
@@ -30,7 +30,7 @@ from td_release_packager.token_engine import (
 
 
 # ---------------------------------------------------------------
-# read_properties
+# read_env_config
 # ---------------------------------------------------------------
 
 
@@ -42,7 +42,7 @@ class TestReadProperties:
         props = tmp_path / "test.properties"
         props.write_text("FOO=bar\nBAZ=qux\n", encoding="utf-8")
 
-        result = read_properties(str(props))
+        result = read_env_config(str(props))
 
         assert result["FOO"] == "bar"
         assert result["BAZ"] == "qux"
@@ -55,7 +55,7 @@ class TestReadProperties:
             encoding="utf-8",
         )
 
-        result = read_properties(str(props))
+        result = read_env_config(str(props))
 
         assert result == {"TOKEN": "value"}
 
@@ -64,7 +64,7 @@ class TestReadProperties:
         props = tmp_path / "test.properties"
         props.write_text("CONN=host=myserver;port=1025\n", encoding="utf-8")
 
-        result = read_properties(str(props))
+        result = read_env_config(str(props))
 
         assert result["CONN"] == "host=myserver;port=1025"
 
@@ -73,7 +73,7 @@ class TestReadProperties:
         props = tmp_path / "test.properties"
         props.write_text("  TOKEN  =  value with spaces  \n", encoding="utf-8")
 
-        result = read_properties(str(props))
+        result = read_env_config(str(props))
 
         assert result["TOKEN"] == "value with spaces"
 
@@ -82,21 +82,21 @@ class TestReadProperties:
         props = tmp_path / "test.properties"
         props.write_text("TOKEN=first\nTOKEN=second\n", encoding="utf-8")
 
-        result = read_properties(str(props))
+        result = read_env_config(str(props))
 
         assert result["TOKEN"] == "second"
 
     def test_missing_file_raises(self, tmp_path):
         """FileNotFoundError raised for non-existent properties file."""
         with pytest.raises(FileNotFoundError):
-            read_properties(str(tmp_path / "missing.properties"))
+            read_env_config(str(tmp_path / "missing.properties"))
 
     def test_line_without_equals_skipped(self, tmp_path):
         """Lines without '=' are skipped with a warning."""
         props = tmp_path / "test.properties"
         props.write_text("VALID=yes\nbad line no equals\n", encoding="utf-8")
 
-        result = read_properties(str(props))
+        result = read_env_config(str(props))
 
         assert result == {"VALID": "yes"}
 
@@ -105,7 +105,7 @@ class TestReadProperties:
         props = tmp_path / "test.properties"
         props.write_text("=orphan_value\nVALID=yes\n", encoding="utf-8")
 
-        result = read_properties(str(props))
+        result = read_env_config(str(props))
 
         assert result == {"VALID": "yes"}
 
@@ -124,7 +124,7 @@ class TestReadProperties:
             encoding="utf-8",
         )
 
-        result = read_properties(str(props))
+        result = read_env_config(str(props))
 
         assert result["TS_TYPE"] == "TIMESTAMP(6)"
         assert result["TIME_TYPE"] == "TIME(6)"
@@ -142,7 +142,7 @@ class TestReadProperties:
         props.write_text("BROKEN={{UNDEFINED}}\n", encoding="utf-8")
 
         with pytest.raises(ValueError, match=r"after token resolution"):
-            read_properties(str(props))
+            read_env_config(str(props))
 
 
 # ---------------------------------------------------------------
@@ -436,7 +436,7 @@ class TestSubstituteFile:
 
 
 # ---------------------------------------------------------------
-# Integration: read_properties with internal references
+# Integration: read_env_config with internal references
 # ---------------------------------------------------------------
 
 
@@ -445,7 +445,7 @@ class TestPropertiesIntegration:
 
     def test_env_topology_resolution(self, sample_properties_file):
         """Properties with {{ENV_PREFIX}} and {{SHIPS_PROJECT}} resolve correctly."""
-        tokens = read_properties(str(sample_properties_file))
+        tokens = read_env_config(str(sample_properties_file))
 
         assert tokens["SHIPS_ENV"] == "DEV"
         assert tokens["ENV_PREFIX"] == "A_D01"

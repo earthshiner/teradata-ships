@@ -40,7 +40,7 @@ from td_release_packager.models import (
 )
 from td_release_packager.token_engine import (
     format_malformed_tokens_report,
-    read_properties,
+    read_env_config,
     scan_malformed_tokens_in_directory,
     scan_tokens_in_directory,
     substitute_tokens,
@@ -183,7 +183,7 @@ def build_package(
         raise FileNotFoundError(f"Source directory not found: {config.source_dir}")
 
     # -- Phase 1: Read token values --
-    token_values = read_properties(config.properties_file)
+    token_values = read_env_config(config.properties_file)
     logger.info(
         "Loaded %d token values from %s", len(token_values), config.properties_file
     )

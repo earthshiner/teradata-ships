@@ -118,7 +118,7 @@ def _validate_property_values(
     return errors
 
 
-def read_properties(properties_path: str) -> Dict[str, str]:
+def read_env_config(properties_path: str) -> Dict[str, str]:
     """
     Read a .properties file into a token dictionary.
 

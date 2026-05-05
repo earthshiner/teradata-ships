@@ -53,7 +53,7 @@ python -m td_release_packager analyze --source ./projects/MyProject \
 python -m td_release_packager package \
     --source ./projects/MyProject \
     --env DEV --name MyProject \
-    --properties config/properties/DEV.properties \
+    --env-config config/env/DEV.conf \
     --output releases/
 
 # Ship (deploy)

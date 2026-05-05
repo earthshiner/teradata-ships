@@ -6,7 +6,7 @@ deployment frameworks) and produces two artefacts that bootstrap a
 SHIPS project from chaos:
 
     1. <env>.conf — token name → value, ready for use at
-       ``package`` time. Drop this in ``config/properties/`` next to
+       ``package`` time. Drop this in ``config/env/`` next to
        your DEV/TST/PRD files.
 
     2. legacy_migration.sed — a sed script that converts legacy
@@ -36,7 +36,7 @@ Usage::
         --output-dir ./MyProject/config
 
     # Files written:
-    #   ./MyProject/config/properties/DEV.conf
+    #   ./MyProject/config/env/DEV.conf
     #   ./MyProject/config/legacy_migration.sed
 
 Author: Paul / Teradata Field Engineering
@@ -240,7 +240,7 @@ def format_properties_file(env: str, subs: List[Substitution]) -> str:
     paste rather than open-the-template-and-compare.
 
     Duplicate keys keep the last-defined value (consistent with
-    ``read_properties``). A ``# WARN`` comment is emitted on the
+    ``read_env_config``). A ``# WARN`` comment is emitted on the
     line where the override happens so the conflict is obvious.
     """
     from td_release_packager.properties_scaffold import render_scaffold
@@ -709,7 +709,7 @@ def _run_script_mode(args) -> int:
         return 1
 
     output_dir = Path(args.output_dir)
-    properties_dir = output_dir / "properties"
+    properties_dir = output_dir / "env"
     properties_dir.mkdir(parents=True, exist_ok=True)
 
     properties_path = properties_dir / f"{args.env}.conf"
@@ -740,7 +740,7 @@ def _run_script_mode(args) -> int:
     )
     print()
     print(f"  3. Review and section {properties_path}")
-    print("     against config/properties/DEV.conf as a structural template.")
+    print("     against config/env/DEV.conf as a structural template.")
     print("=" * 64)
 
     return 0
@@ -770,7 +770,7 @@ def _run_scan_mode(args) -> int:
         return 0
 
     output_dir = Path(args.output_dir)
-    properties_dir = output_dir / "properties"
+    properties_dir = output_dir / "env"
     properties_dir.mkdir(parents=True, exist_ok=True)
 
     properties_path = properties_dir / f"{args.env}.conf"
