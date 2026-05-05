@@ -89,9 +89,7 @@ class TestScanSourceDirectory:
 
         # Single var_count entry showing the combined total.
         assert result.var_counts == {"UTL_T": 3}
-        assert result.var_to_syntaxes["UTL_T"] == {
-            "dollar", "dollar-braced", "amp-amp"
-        }
+        assert result.var_to_syntaxes["UTL_T"] == {"dollar", "dollar-braced", "amp-amp"}
 
     def test_substitutions_ordered_by_frequency_desc(self, tmp_path):
         """The most-impactful tokens (highest occurrence count) sort
@@ -122,9 +120,7 @@ class TestScanSourceDirectory:
         """Files in nested sub-directories are discovered."""
         sub = tmp_path / "sub" / "deep"
         sub.mkdir(parents=True)
-        (sub / "x.tbl").write_text(
-            "CREATE TABLE $UTL_T.A (Id INT);", encoding="utf-8"
-        )
+        (sub / "x.tbl").write_text("CREATE TABLE $UTL_T.A (Id INT);", encoding="utf-8")
 
         result = importer.scan_source_directory(str(tmp_path))
 
@@ -231,9 +227,7 @@ class TestScanFormatPropertiesFile:
         assert out.count("UTL_T=") == 1
 
     def test_value_is_empty_user_fills(self, tmp_path):
-        scan = _scan_with(
-            tmp_path, {"a.tbl": "CREATE TABLE $UTL_T.A (Id INT);"}
-        )
+        scan = _scan_with(tmp_path, {"a.tbl": "CREATE TABLE $UTL_T.A (Id INT);"})
         out = importer.scan_format_properties_file("DEV", scan)
 
         # Empty value -- "UTL_T=" with nothing after the equals.
@@ -297,9 +291,7 @@ class TestScanFormatReport:
         assert "Distinct tokens: 1" in out
 
     def test_per_token_table_present(self, tmp_path):
-        scan = _scan_with(
-            tmp_path, {"a.tbl": "CREATE TABLE $UTL_T.A (Id INT);"}
-        )
+        scan = _scan_with(tmp_path, {"a.tbl": "CREATE TABLE $UTL_T.A (Id INT);"})
         out = importer.scan_format_report(scan, str(tmp_path))
 
         assert "Tokens by frequency" in out
@@ -307,9 +299,7 @@ class TestScanFormatReport:
         assert "`UTL_T`" in out
 
     def test_empty_scan_produces_no_findings_message(self, tmp_path):
-        scan = _scan_with(
-            tmp_path, {"clean.tbl": "CREATE TABLE {{T_DB}}.X (Id INT);"}
-        )
+        scan = _scan_with(tmp_path, {"clean.tbl": "CREATE TABLE {{T_DB}}.X (Id INT);"})
         out = importer.scan_format_report(scan, str(tmp_path))
 
         assert "No placeholders found" in out
@@ -334,9 +324,12 @@ class TestScanSourceCLI:
 
         rc = importer.main(
             [
-                "--scan-source", str(source),
-                "--env", "DEV",
-                "--output-dir", str(out_dir),
+                "--scan-source",
+                str(source),
+                "--env",
+                "DEV",
+                "--output-dir",
+                str(out_dir),
             ]
         )
 
@@ -355,15 +348,16 @@ class TestScanSourceCLI:
 
         importer.main(
             [
-                "--scan-source", str(source),
-                "--env", "DEV",
-                "--output-dir", str(out_dir),
+                "--scan-source",
+                str(source),
+                "--env",
+                "DEV",
+                "--output-dir",
+                str(out_dir),
             ]
         )
 
-        props = (out_dir / "properties" / "DEV.conf").read_text(
-            encoding="utf-8"
-        )
+        props = (out_dir / "properties" / "DEV.conf").read_text(encoding="utf-8")
         assert "UTL_T=" in props
 
     def test_migration_sed_covers_all_syntaxes(self, tmp_path):
@@ -383,9 +377,12 @@ class TestScanSourceCLI:
 
         importer.main(
             [
-                "--scan-source", str(source),
-                "--env", "DEV",
-                "--output-dir", str(out_dir),
+                "--scan-source",
+                str(source),
+                "--env",
+                "DEV",
+                "--output-dir",
+                str(out_dir),
             ]
         )
 
@@ -406,9 +403,12 @@ class TestScanSourceCLI:
 
         rc = importer.main(
             [
-                "--scan-source", str(source),
-                "--env", "DEV",
-                "--output-dir", str(out_dir),
+                "--scan-source",
+                str(source),
+                "--env",
+                "DEV",
+                "--output-dir",
+                str(out_dir),
             ]
         )
 
@@ -420,9 +420,12 @@ class TestScanSourceCLI:
     def test_missing_source_dir_returns_one(self, tmp_path, capsys):
         rc = importer.main(
             [
-                "--scan-source", str(tmp_path / "nope"),
-                "--env", "DEV",
-                "--output-dir", str(tmp_path / "out"),
+                "--scan-source",
+                str(tmp_path / "nope"),
+                "--env",
+                "DEV",
+                "--output-dir",
+                str(tmp_path / "out"),
             ]
         )
         assert rc == 1
@@ -443,10 +446,14 @@ class TestScanSourceCLI:
         with pytest.raises(SystemExit):
             importer.main(
                 [
-                    "--script", str(sed),
-                    "--scan-source", str(source),
-                    "--env", "DEV",
-                    "--output-dir", str(tmp_path),
+                    "--script",
+                    str(sed),
+                    "--scan-source",
+                    str(source),
+                    "--env",
+                    "DEV",
+                    "--output-dir",
+                    str(tmp_path),
                 ]
             )
 
@@ -502,9 +509,12 @@ class TestCLIDispatcherScanSource:
         rc = self._invoke_cli(
             [
                 "import-legacy",
-                "--scan-source", str(source),
-                "--env", "DEV",
-                "--output-dir", str(out),
+                "--scan-source",
+                str(source),
+                "--env",
+                "DEV",
+                "--output-dir",
+                str(out),
             ]
         )
         capsys.readouterr()  # discard stdout
@@ -522,9 +532,12 @@ class TestCLIDispatcherScanSource:
         rc = self._invoke_cli(
             [
                 "import-legacy",
-                "--script", str(sed_file),
-                "--env", "DEV",
-                "--output-dir", str(out),
+                "--script",
+                str(sed_file),
+                "--env",
+                "DEV",
+                "--output-dir",
+                str(out),
             ]
         )
         capsys.readouterr()
@@ -545,10 +558,14 @@ class TestCLIDispatcherScanSource:
         rc = self._invoke_cli(
             [
                 "import-legacy",
-                "--script", str(sed),
-                "--scan-source", str(source),
-                "--env", "DEV",
-                "--output-dir", str(tmp_path),
+                "--script",
+                str(sed),
+                "--scan-source",
+                str(source),
+                "--env",
+                "DEV",
+                "--output-dir",
+                str(tmp_path),
             ]
         )
         # Argparse exits 2 on mutual-exclusion violation.

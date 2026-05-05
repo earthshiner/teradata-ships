@@ -10,7 +10,6 @@ file is the place that fails first.
 
 from __future__ import annotations
 
-import pytest
 
 from td_release_packager.orchestrator import issue_codes
 

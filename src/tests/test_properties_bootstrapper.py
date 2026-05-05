@@ -146,13 +146,15 @@ class TestBootstrapPropertiesFile:
         )
         # First run creates it
         boot.bootstrap_properties_file(
-            project_dir=str(project), env="DEV",
+            project_dir=str(project),
+            env="DEV",
             output_dir=str(project / "config"),
         )
         # Second run without --force should raise
         with pytest.raises(FileExistsError):
             boot.bootstrap_properties_file(
-                project_dir=str(project), env="DEV",
+                project_dir=str(project),
+                env="DEV",
                 output_dir=str(project / "config"),
             )
 
@@ -169,8 +171,10 @@ class TestBootstrapPropertiesFile:
         props_path.write_text("BASE_T=existing_value\n", encoding="utf-8")
 
         result = boot.bootstrap_properties_file(
-            project_dir=str(project), env="DEV",
-            output_dir=str(config_dir), force=True,
+            project_dir=str(project),
+            env="DEV",
+            output_dir=str(config_dir),
+            force=True,
         )
 
         assert result["overwrote"] is True
@@ -191,8 +195,10 @@ class TestBootstrapPropertiesFile:
         )
 
         result = boot.bootstrap_properties_file(
-            project_dir=str(project), env="DEV",
-            output_dir=str(config_dir), force=True,
+            project_dir=str(project),
+            env="DEV",
+            output_dir=str(config_dir),
+            force=True,
         )
 
         assert result["unused"] == ["OLD_TOKEN"]
@@ -201,7 +207,8 @@ class TestBootstrapPropertiesFile:
     def test_missing_project_raises(self, tmp_path):
         with pytest.raises(NotADirectoryError):
             boot.bootstrap_properties_file(
-                project_dir=str(tmp_path / "nope"), env="DEV",
+                project_dir=str(tmp_path / "nope"),
+                env="DEV",
             )
 
 
@@ -217,11 +224,16 @@ class TestMain:
             {"a.tbl": "CREATE TABLE {{X}}.a (id INT);\n"},
         )
 
-        rc = boot.main([
-            "--source", str(project),
-            "--env", "DEV",
-            "--output-dir", str(project / "config"),
-        ])
+        rc = boot.main(
+            [
+                "--source",
+                str(project),
+                "--env",
+                "DEV",
+                "--output-dir",
+                str(project / "config"),
+            ]
+        )
         assert rc == 0
         captured = capsys.readouterr()
         assert "bootstrap-properties" in captured.out
@@ -233,16 +245,28 @@ class TestMain:
             {"a.tbl": "CREATE TABLE {{X}}.a (id INT);\n"},
         )
         # Run once
-        boot.main([
-            "--source", str(project), "--env", "DEV",
-            "--output-dir", str(project / "config"),
-        ])
+        boot.main(
+            [
+                "--source",
+                str(project),
+                "--env",
+                "DEV",
+                "--output-dir",
+                str(project / "config"),
+            ]
+        )
         capsys.readouterr()  # drain
         # Run again without --force → rc=1
-        rc = boot.main([
-            "--source", str(project), "--env", "DEV",
-            "--output-dir", str(project / "config"),
-        ])
+        rc = boot.main(
+            [
+                "--source",
+                str(project),
+                "--env",
+                "DEV",
+                "--output-dir",
+                str(project / "config"),
+            ]
+        )
         assert rc == 1
         assert "already exists" in capsys.readouterr().err
 
@@ -263,7 +287,8 @@ class TestRoundTrip:
         )
 
         result = boot.bootstrap_properties_file(
-            project_dir=str(project), env="DEV",
+            project_dir=str(project),
+            env="DEV",
             output_dir=str(project / "config"),
         )
 
@@ -278,7 +303,8 @@ class TestRoundTrip:
             {"a.tbl": "CREATE TABLE {{X}}.a (id INT);\n"},
         )
         result = boot.bootstrap_properties_file(
-            project_dir=str(project), env="DEV",
+            project_dir=str(project),
+            env="DEV",
             output_dir=str(project / "config"),
         )
         text = Path(result["properties_path"]).read_text(encoding="utf-8")

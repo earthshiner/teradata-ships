@@ -98,23 +98,17 @@ class LegacyPlaceholderFinding:
 # excludes mid-identifier dollars (we don't want to flag
 # ``foo$bar`` even though that's an unusual identifier in Teradata).
 # Word-character lookbehind is fixed-width so re engines accept it.
-_DOLLAR_RE = re.compile(
-    r"(?<![A-Za-z0-9_])\$([A-Za-z_]\w*)\b"
-)
+_DOLLAR_RE = re.compile(r"(?<![A-Za-z0-9_])\$([A-Za-z_]\w*)\b")
 
 # ${VAR}  — bash-style braced. Independent regex so the report
 # can distinguish ``$VAR`` from ``${VAR}`` (some sites use both
 # in the same file with different semantics).
-_DOLLAR_BRACED_RE = re.compile(
-    r"\$\{([A-Za-z_]\w*)\}"
-)
+_DOLLAR_BRACED_RE = re.compile(r"\$\{([A-Za-z_]\w*)\}")
 
 # &&VAR&&  — Teradata BTEQ-style variable. The framing is
 # distinctive enough that we don't need a lookbehind/lookahead
 # guard.
-_AMP_AMP_RE = re.compile(
-    r"&&([A-Za-z_]\w*)&&"
-)
+_AMP_AMP_RE = re.compile(r"&&([A-Za-z_]\w*)&&")
 
 
 _PATTERNS = (
@@ -285,21 +279,11 @@ def format_legacy_placeholders_report(
     )
     lines.append(bar)
     lines.append("")
-    lines.append(
-        "  These references use legacy substitution syntax that"
-    )
-    lines.append(
-        "  SHIPS does not substitute at build time. Their qualifier"
-    )
-    lines.append(
-        "  could not be extracted; staged filenames are missing the"
-    )
-    lines.append(
-        "  ``Database.`` prefix and the placeholders will survive"
-    )
-    lines.append(
-        "  into deployed SQL unless converted to ``{{TOKEN}}`` form."
-    )
+    lines.append("  These references use legacy substitution syntax that")
+    lines.append("  SHIPS does not substitute at build time. Their qualifier")
+    lines.append("  could not be extracted; staged filenames are missing the")
+    lines.append("  ``Database.`` prefix and the placeholders will survive")
+    lines.append("  into deployed SQL unless converted to ``{{TOKEN}}`` form.")
     lines.append("")
 
     # By syntax
@@ -310,28 +294,25 @@ def format_legacy_placeholders_report(
         names = by_syntax[syntax]
         total_for_syntax = sum(names.values())
         label = _SYNTAX_LABELS[syntax]
-        sample_names = sorted(
-            names.items(), key=lambda kv: (-kv[1], kv[0])
-        )[:_SAMPLE_NAMES_LIMIT]
+        sample_names = sorted(names.items(), key=lambda kv: (-kv[1], kv[0]))[
+            :_SAMPLE_NAMES_LIMIT
+        ]
         sample_str = ", ".join(name for name, _ in sample_names)
-        suffix = "" if len(names) <= _SAMPLE_NAMES_LIMIT else (
-            f" ... +{len(names) - _SAMPLE_NAMES_LIMIT} more"
+        suffix = (
+            ""
+            if len(names) <= _SAMPLE_NAMES_LIMIT
+            else (f" ... +{len(names) - _SAMPLE_NAMES_LIMIT} more")
         )
         lines.append(
-            f"    {label:<16} {total_for_syntax:>4} occurrences  "
-            f"({sample_str}{suffix})"
+            f"    {label:<16} {total_for_syntax:>4} occurrences  ({sample_str}{suffix})"
         )
     lines.append("")
 
     # By file (top N)
-    sorted_files = sorted(
-        per_file.items(), key=lambda kv: (-kv[1], kv[0])
-    )
+    sorted_files = sorted(per_file.items(), key=lambda kv: (-kv[1], kv[0]))
     sample_files = sorted_files[:_SAMPLE_FILES_LIMIT]
     extra_files = len(sorted_files) - _SAMPLE_FILES_LIMIT
-    lines.append(
-        f"  Affected files (showing {len(sample_files)} of {n_files}):"
-    )
+    lines.append(f"  Affected files (showing {len(sample_files)} of {n_files}):")
     for path, count in sample_files:
         rel = _relativise(path, source_dir)
         lines.append(f"    {rel}  ({count} occurrences)")
@@ -342,38 +323,20 @@ def format_legacy_placeholders_report(
     # Call to action
     lines.append("  Convert these to SHIPS {{TOKEN}} form:")
     lines.append("")
-    lines.append(
-        "    python -m td_release_packager import-legacy \\"
-    )
+    lines.append("    python -m td_release_packager import-legacy \\")
     lines.append("        --scan-source <source_dir> \\")
     lines.append("        --env <ENV> \\")
     lines.append(f"        --output-dir {project_dir_hint}/config")
     lines.append("")
-    lines.append(
-        "  Then re-harvest. The placeholders will be replaced with"
-    )
-    lines.append(
-        "  {{TOKEN}} references and qualifier-bearing object types"
-    )
-    lines.append(
-        "  (TABLE, VIEW, MACRO ...) will land with full"
-    )
-    lines.append(
-        "  Database.Object filenames."
-    )
+    lines.append("  Then re-harvest. The placeholders will be replaced with")
+    lines.append("  {{TOKEN}} references and qualifier-bearing object types")
+    lines.append("  (TABLE, VIEW, MACRO ...) will land with full")
+    lines.append("  Database.Object filenames.")
     lines.append("")
-    lines.append(
-        "  ``import-legacy --scan-source`` is Phase B of this work"
-    )
-    lines.append(
-        "  and ships separately. Until it lands, the existing"
-    )
-    lines.append(
-        "  ``--script <sed_file>`` mode handles the same conversion"
-    )
-    lines.append(
-        "  if your project has a sed-style substitution script."
-    )
+    lines.append("  ``import-legacy --scan-source`` is Phase B of this work")
+    lines.append("  and ships separately. Until it lands, the existing")
+    lines.append("  ``--script <sed_file>`` mode handles the same conversion")
+    lines.append("  if your project has a sed-style substitution script.")
     lines.append(bar)
     lines.append("")
 

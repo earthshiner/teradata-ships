@@ -43,7 +43,7 @@ import logging
 import os
 import shutil
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List
 
 
 logger = logging.getLogger(__name__)
@@ -197,9 +197,7 @@ def copy_binaries(
             continue
 
         if not overwrite and os.path.exists(dep.destination_path):
-            logger.debug(
-                "Destination exists, skipping: %s", dep.destination_path
-            )
+            logger.debug("Destination exists, skipping: %s", dep.destination_path)
             continue
 
         os.makedirs(os.path.dirname(dep.destination_path), exist_ok=True)
@@ -227,9 +225,7 @@ def rewrite_content(content: str, deps: List[BinaryDependency]) -> str:
         return content
 
     # Apply longest replacement first to avoid prefix-overlap.
-    sorted_deps = sorted(
-        deps, key=lambda d: len(d.original_ref), reverse=True
-    )
+    sorted_deps = sorted(deps, key=lambda d: len(d.original_ref), reverse=True)
     out = content
     for dep in sorted_deps:
         out = out.replace(dep.original_ref, dep.new_ref)
