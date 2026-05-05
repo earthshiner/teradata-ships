@@ -686,35 +686,115 @@ class TestCheckKeywordCase:
 
 
 class TestCheckLeadingCommas:
-    """Tests for leading vs trailing comma convention."""
+    """Tests for the configurable comma-style rule."""
 
-    def test_leading_commas_pass(self):
-        """Leading comma style passes."""
-        ddl = (
-            "CREATE TABLE MyDB.T\n"
-            "(\n"
-            "     Id INTEGER\n"
-            "    ,Name VARCHAR(100)\n"
-            "    ,Created DATE\n"
-            ");\n"
-        )
-        issues = _check_leading_commas("t.tbl", ddl)
-        assert issues == []
+    _LEADING = (
+        "CREATE TABLE MyDB.T\n(\n"
+        "     Id INTEGER\n"
+        "    ,Name VARCHAR(100)\n"
+        "    ,Email VARCHAR(200)\n"
+        "    ,Phone VARCHAR(20)\n"
+        "    ,Created DATE\n);\n"
+    )
+    _TRAILING = (
+        "CREATE TABLE MyDB.T (\n"
+        "    Id INTEGER,\n"
+        "    Name VARCHAR(100),\n"
+        "    Email VARCHAR(200),\n"
+        "    Phone VARCHAR(20),\n"
+        "    Created DATE\n);\n"
+    )
 
-    def test_trailing_commas_flagged(self):
-        """Trailing comma style is flagged when count > 3."""
-        ddl = (
-            "CREATE TABLE MyDB.T (\n"
+    # -- leading mode (default) --
+
+    def test_leading_mode_leading_file_passes(self):
+        assert _check_leading_commas("t.tbl", self._LEADING, style="leading") == []
+
+    def test_leading_mode_trailing_file_flagged(self):
+        issues = _check_leading_commas("t.tbl", self._TRAILING, style="leading")
+        assert len(issues) == 1
+        assert issues[0].rule == "comma_style"
+        assert issues[0].severity == "WARNING"
+
+    def test_default_style_is_leading(self):
+        """Calling without style= uses the default (leading)."""
+        issues = _check_leading_commas("t.tbl", self._TRAILING)
+        assert len(issues) == 1
+
+    # -- trailing mode --
+
+    def test_trailing_mode_trailing_file_passes(self):
+        assert _check_leading_commas("t.tbl", self._TRAILING, style="trailing") == []
+
+    def test_trailing_mode_leading_file_flagged(self):
+        issues = _check_leading_commas("t.tbl", self._LEADING, style="trailing")
+        assert len(issues) == 1
+        assert issues[0].rule == "comma_style"
+        assert issues[0].severity == "WARNING"
+
+    def test_trailing_mode_message_explains_convention(self):
+        issues = _check_leading_commas("t.tbl", self._LEADING, style="trailing")
+        assert "trailing commas" in issues[0].message.lower()
+
+    # -- as-per-source mode --
+
+    def test_as_per_source_trailing_file_produces_info(self):
+        """as-per-source emits an INFO finding — not a warning/error."""
+        issues = _check_leading_commas("t.tbl", self._TRAILING, style="as-per-source")
+        assert len(issues) == 1
+        assert issues[0].severity == "INFO"
+        assert issues[0].rule == "comma_style"
+
+    def test_as_per_source_leading_file_also_produces_info(self):
+        issues = _check_leading_commas("t.tbl", self._LEADING, style="as-per-source")
+        assert len(issues) == 1
+        assert issues[0].severity == "INFO"
+
+    def test_as_per_source_message_states_policy(self):
+        issues = _check_leading_commas("t.tbl", self._TRAILING, style="as-per-source")
+        assert "as-per-source" in issues[0].message
+
+    # -- inspect.conf integration --
+
+    def test_comma_style_read_from_config(self, tmp_path):
+        """comma_style in inspect.conf is parsed correctly."""
+        from td_release_packager.validate import read_inspect_config
+        conf = tmp_path / "inspect.conf"
+        conf.write_text("comma_style=trailing\n", encoding="utf-8")
+        rules = read_inspect_config(str(conf))
+        assert rules.get("comma_style") == "trailing"
+
+    def test_invalid_comma_style_rejected(self, tmp_path):
+        """An unrecognised comma_style value falls back to default."""
+        from td_release_packager.validate import read_inspect_config
+        conf = tmp_path / "inspect.conf"
+        conf.write_text("comma_style=sideways\n", encoding="utf-8")
+        rules = read_inspect_config(str(conf))
+        # Invalid value — key should not be stored (falls back to default at call site)
+        assert rules.get("comma_style") is None
+
+    def test_as_per_source_does_not_fail_run(self, tmp_path):
+        """as-per-source emits INFO but does not increment the error/warning
+        count — the run still passes."""
+        from td_release_packager.validate import DEFAULT_RULES, validate_directory
+        ddl_dir = tmp_path / "DDL" / "tables"
+        ddl_dir.mkdir(parents=True)
+        (ddl_dir / "MyDB.T.tbl").write_text(
+            "CREATE MULTISET TABLE {{DB}}.T (\n"
             "    Id INTEGER,\n"
             "    Name VARCHAR(100),\n"
             "    Email VARCHAR(200),\n"
-            "    Phone VARCHAR(20),\n"
-            "    Created DATE\n"
-            ");\n"
+            "    Phone VARCHAR(20)\n"
+            ");\n",
+            encoding="utf-8",
         )
-        issues = _check_leading_commas("t.tbl", ddl)
-        assert len(issues) == 1
-        assert issues[0].rule == "leading_commas"
+        rules = dict(DEFAULT_RULES)
+        rules["comma_style"] = "as-per-source"
+        result = validate_directory(str(tmp_path), rules_config=rules)
+        # INFO issues don't count as errors or warnings
+        assert result.errors == 0
+        assert result.warnings == 0
+        assert result.passed
 
 
 # ---------------------------------------------------------------
@@ -892,13 +972,13 @@ class TestReadInspectConfig:
         """Key=value pairs are read and merged with defaults."""
         conf = tmp_path / "inspect.conf"
         conf.write_text(
-            "leading_commas=OFF\nkeyword_case=OFF\n",
+            "comma_log_level=OFF\nkeyword_case=OFF\n",
             encoding="utf-8",
         )
 
         rules = read_inspect_config(str(conf))
 
-        assert rules["leading_commas"] == "OFF"
+        assert rules["comma_log_level"] == "OFF"
         assert rules["keyword_case"] == "OFF"
         # Defaults preserved for unmentioned rules — verified
         # against DEFAULT_RULES so the test does not duplicate the
@@ -910,25 +990,25 @@ class TestReadInspectConfig:
         """Lines starting with '#' and blank lines are ignored."""
         conf = tmp_path / "inspect.conf"
         conf.write_text(
-            "# This is a comment\n\nleading_commas=OFF\n  \n",
+            "# This is a comment\n\ncomma_log_level=OFF\n  \n",
             encoding="utf-8",
         )
 
         rules = read_inspect_config(str(conf))
 
-        assert rules["leading_commas"] == "OFF"
+        assert rules["comma_log_level"] == "OFF"
 
     def test_case_insensitive_values(self, tmp_path):
         """Severity values are case-insensitive (normalised to uppercase)."""
         conf = tmp_path / "inspect.conf"
         conf.write_text(
-            "leading_commas=off\nkeyword_case=Warning\ntype_suffix=error\n",
+            "comma_log_level=off\nkeyword_case=Warning\ntype_suffix=error\n",
             encoding="utf-8",
         )
 
         rules = read_inspect_config(str(conf))
 
-        assert rules["leading_commas"] == "OFF"
+        assert rules["comma_log_level"] == "OFF"
         assert rules["keyword_case"] == "WARNING"
         assert rules["type_suffix"] == "ERROR"
 
@@ -936,14 +1016,14 @@ class TestReadInspectConfig:
         """Invalid severity values are ignored — default is kept."""
         conf = tmp_path / "inspect.conf"
         conf.write_text(
-            "leading_commas=BANANA\n",
+            "comma_log_level=BANANA\n",
             encoding="utf-8",
         )
 
         rules = read_inspect_config(str(conf))
 
         # Default should be preserved
-        assert rules["leading_commas"] == DEFAULT_RULES["leading_commas"]
+        assert rules["comma_log_level"] == DEFAULT_RULES["comma_log_level"]
 
     def test_custom_rule_accepted(self, tmp_path):
         """Unknown rule names are accepted (future-proofing)."""
@@ -980,12 +1060,17 @@ class TestReadInspectConfig:
 
     def test_default_config_only_references_registered_rules(self):
         """Every rule key in the generated inspect.conf must exist in
-        DEFAULT_RULES. Catches typos and stale entries in the template.
+        either DEFAULT_RULES (severity-valued rules) or _DOMAIN_VALUE_RULES
+        (domain-valued rules like comma_style). Catches typos and stale
+        entries in the template.
 
         Pairs with the test above — together they enforce a bidirectional
-        consistency between DEFAULT_RULES and the inspect.conf template,
+        consistency between the rule registries and the inspect.conf template,
         without either side hard-coding a rule list.
         """
+        from td_release_packager.validate import _DOMAIN_VALUE_RULES
+
+        all_registered = set(DEFAULT_RULES) | set(_DOMAIN_VALUE_RULES)
         content = generate_default_config()
         unregistered = []
         for line in content.splitlines():
@@ -995,25 +1080,26 @@ class TestReadInspectConfig:
             if "=" not in stripped:
                 continue
             rule_name = stripped.split("=", 1)[0].strip()
-            if rule_name not in DEFAULT_RULES:
+            if rule_name not in all_registered:
                 unregistered.append(rule_name)
         assert not unregistered, (
             f"Rules in generate_default_config() output but not "
-            f"in DEFAULT_RULES: {unregistered}"
+            f"in DEFAULT_RULES or _DOMAIN_VALUE_RULES: {unregistered}"
         )
 
     def test_all_default_severities_are_valid(self):
         """Every default severity in DEFAULT_RULES is one of the
-        recognised values. Catches typos like 'WARN' or 'WARMING'."""
-        valid_severities = {"ERROR", "WARNING", "OFF"}
+        recognised values. Derives from _VALID_SEVERITIES so the test
+        stays correct when new severity levels are added."""
+        from td_release_packager.validate import _VALID_SEVERITIES
         invalid = {
             rule: sev
             for rule, sev in DEFAULT_RULES.items()
-            if sev not in valid_severities
+            if sev not in _VALID_SEVERITIES
         }
         assert not invalid, (
             f"Rules in DEFAULT_RULES with invalid severities "
-            f"(must be one of {sorted(valid_severities)}): {invalid}"
+            f"(must be one of {sorted(_VALID_SEVERITIES)}): {invalid}"
         )
 
 
@@ -1086,10 +1172,10 @@ class TestRuleConfigIntegration:
         )
 
         rules = dict(DEFAULT_RULES)
-        rules["leading_commas"] = "OFF"
+        rules["comma_log_level"] = "OFF"
         result = validate_directory(str(tmp_path), rules_config=rules)
 
-        comma_issues = [i for i in result.issues if i.rule == "leading_commas"]
+        comma_issues = [i for i in result.issues if i.rule == "comma_style"]
         assert comma_issues == []
 
     def test_warning_promoted_to_error_in_strict(self, tmp_path):
@@ -1124,10 +1210,10 @@ class TestRuleConfigIntegration:
         )
 
         rules = dict(DEFAULT_RULES)
-        rules["leading_commas"] = "OFF"
+        rules["comma_log_level"] = "OFF"
         result = validate_directory(str(tmp_path), rules_config=rules, strict=True)
 
-        comma_issues = [i for i in result.issues if i.rule == "leading_commas"]
+        comma_issues = [i for i in result.issues if i.rule == "comma_style"]
         assert comma_issues == []
 
     def test_error_override(self, tmp_path):
