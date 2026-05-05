@@ -165,7 +165,7 @@ class TestBootstrapPropertiesFile:
         config_dir = project / "config"
         props_dir = config_dir / "properties"
         props_dir.mkdir(parents=True)
-        props_path = props_dir / "DEV.properties"
+        props_path = props_dir / "DEV.conf"
         props_path.write_text("BASE_T=existing_value\n", encoding="utf-8")
 
         result = boot.bootstrap_properties_file(
@@ -186,7 +186,7 @@ class TestBootstrapPropertiesFile:
         config_dir = project / "config"
         props_dir = config_dir / "properties"
         props_dir.mkdir(parents=True)
-        (props_dir / "DEV.properties").write_text(
+        (props_dir / "DEV.conf").write_text(
             "OLD_TOKEN=v1\nNEW_TOKEN=v2\n", encoding="utf-8"
         )
 
