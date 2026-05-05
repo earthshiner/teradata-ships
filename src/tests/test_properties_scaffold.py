@@ -12,7 +12,7 @@ from __future__ import annotations
 
 
 from td_release_packager import properties_scaffold as scaffold
-from td_release_packager.token_engine import read_properties
+from td_release_packager.token_engine import read_env_config
 
 
 # ---------------------------------------------------------------
@@ -167,7 +167,7 @@ class TestRenderScaffold:
 
     def test_output_loads_through_token_engine(self, tmp_path):
         """End-to-end: scaffold output (with content in section 1)
-        round-trips through read_properties() without errors —
+        round-trips through read_env_config() without errors —
         proving the section comments don't accidentally parse as
         properties."""
         out = scaffold.render_scaffold(
@@ -184,10 +184,10 @@ class TestRenderScaffold:
             final_section_content="ADMIN=alice\nTS_TYPE=TIMESTAMP(6)",
         )
 
-        f = tmp_path / "DEV.properties"
+        f = tmp_path / "DEV.conf"
         f.write_text(out, encoding="utf-8")
 
-        tokens = read_properties(str(f))
+        tokens = read_env_config(str(f))
         assert tokens["SHIPS_ENV"] == "DEV"
         assert tokens["ENV_PREFIX"] == "PDE"
         assert tokens["PARENT_NODE"] == "PDE_DEV_00"

@@ -141,7 +141,7 @@ def _make_project(tmp_path: Path) -> Path:
         "payload/database/DDL/views",
         "payload/database/pre-requisites/databases",
         "payload/database/pre-requisites/users",
-        "config/properties",
+        "config/env",
     ):
         (project / sub).mkdir(parents=True, exist_ok=True)
     (project / ".build_counter").write_text("0\n", encoding="utf-8")

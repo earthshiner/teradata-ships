@@ -59,7 +59,7 @@ python -m td_release_packager inspect --source /projects/OMR --strict
 # [P] Package
 python -m td_release_packager package \
     --source /projects/OMR --env DEV --name OMR \
-    --properties config/properties/DEV.properties \
+    --env-config config/env/DEV.conf \
     --output releases/
 
 # [S] Ship (dry run first, then live)
@@ -123,7 +123,7 @@ For agents operating via the Model Context Protocol, SHIPS commands map directly
         "source": "/projects/OMR",
         "env": "DEV",
         "name": "OMR",
-        "properties": "config/properties/DEV.properties",
+        "env_config": "config/env/DEV.conf",
         "output": "releases/"
     }
 }
@@ -149,7 +149,7 @@ Every artefact SHIPS produces is a contract — a deterministic, reviewable, reu
 |---|---|---|
 | `config/token_map.conf` | Literal → `{{TOKEN}}` mapping | Tokenise DDL without understanding naming conventions |
 | `config/inspect.conf` | Rule severity configuration | Know which rules to enforce |
-| `config/properties/*.properties` | Environment token values | Resolve tokens for any target environment |
+| `config/env/*.properties` | Environment token values | Resolve tokens for any target environment |
 | `_waves.txt` | Dependency-ordered deployment sequence | Deploy in the correct order |
 | `BUILD.json` | Package manifest | Verify build contents and traceability |
 

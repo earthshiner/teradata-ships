@@ -17,7 +17,7 @@ Produces:
     ├── .gitignore
     ├── README.md
     ├── config/
-    │   └── properties/
+    │   └── env/
     │       ├── DEV.conf
     │       ├── TEST.conf
     │       └── PROD.conf
@@ -137,7 +137,7 @@ def _create_directories(project_dir: str):
     """Create the full directory hierarchy."""
     dirs = [
         # Config
-        "config/properties",
+        "config/env",
         # Payload — system-scope objects (00_system phase)
         "payload/database/system/maps",
         "payload/database/system/roles",
@@ -246,9 +246,7 @@ def _generate_properties(
         prefix = env_prefix_map.get(env_upper, env_upper)
         perm, spool = space_map.get(env_upper, ("1e9", "1e9"))
 
-        props_path = os.path.join(
-            project_dir, "config", "properties", f"{env_upper}.conf"
-        )
+        props_path = os.path.join(project_dir, "config", "env", f"{env_upper}.conf")
 
         if skip_existing and os.path.exists(props_path):
             logger.info("Config file exists — skipping: %s", props_path)
@@ -261,7 +259,7 @@ def _generate_properties(
             f.write("# Usage: python -m td_release_packager package \\\n")
             f.write(f"#            --source . --env {env_upper} \\\n")
             f.write(f"#            --name {project_name} \\\n")
-            f.write(f"#            --properties config/properties/{env_upper}.conf\n")
+            f.write(f"#            --env-config config/env/{env_upper}.conf\n")
             f.write("#\n\n")
 
             # -- Section 1: Environment metadata --
@@ -552,7 +550,7 @@ Thumbs.db
 
 # DO track these:
 # .build_counter   — auto-incremented build number (commit this!)
-# config/properties/*.conf — environment token values
+# config/env/*.conf — environment token values
 """
 
     with open(gitignore_path, "w", encoding="utf-8") as f:
@@ -588,12 +586,12 @@ Teradata release project managed by SHIPS (`td_release_packager`).
 
 {env_list}
 
-Config files: `config/properties/<ENV>.conf`
+Config files: `config/env/<ENV>.conf`
 
 ## Project Structure
 
 ```
-config/properties/       — Token values per environment
+config/env/       — Token values per environment
 config/inspect.conf      — Validation rule severities
 object_placement.yaml    — Tables/views database separation strategy
 payload/database/
@@ -614,7 +612,7 @@ package time.
 Scan for token usage:
 ```bash
 python -m td_release_packager scan --source .
-python -m td_release_packager scan --source . --properties config/properties/DEV.conf
+python -m td_release_packager scan --source . --env-config config/env/DEV.conf
 ```
 
 ## Object Placement
@@ -644,7 +642,7 @@ python -m td_release_packager package \\
     --source . \\
     --env DEV \\
     --name {project_name} \\
-    --properties config/properties/DEV.conf \\
+    --env-config config/env/DEV.conf \\
     --output releases/ \\
     --author "Your Name"
 ```
@@ -656,7 +654,7 @@ python -m td_release_packager package \\
     --source . \\
     --env PROD \\
     --name {project_name} \\
-    --properties config/properties/PROD.conf \\
+    --env-config config/env/PROD.conf \\
     --output releases/ \\
     --no-increment
 ```

@@ -248,7 +248,7 @@ class TestIngestPopulatesLegacyPlaceholders:
             "payload/database/DDL/macros",
             "payload/database/DDL/procedures",
             "payload/database/pre-requisites/databases",
-            "config/properties",
+            "config/env",
         ):
             (project / sub).mkdir(parents=True, exist_ok=True)
         (project / ".build_counter").write_text("0\n", encoding="utf-8")

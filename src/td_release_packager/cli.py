@@ -17,7 +17,7 @@ Commands:
 
 Usage:
     python -m td_release_packager scaffold --name MortgagePlatform --output /projects
-    python -m td_release_packager build --source . --env DEV --name create_objects --properties config/properties/DEV.conf
+    python -m td_release_packager build --source . --env DEV --name create_objects --env-config config/env/DEV.conf
     python -m td_release_packager inspect --source . --fix-grants
     python -m td_release_packager scan --source .
     python -m td_release_packager analyze --source . --graph ./output/
@@ -45,7 +45,7 @@ from td_release_packager.token_engine import (
 from td_release_packager.models import BuildConfig
 from td_release_packager.scaffolder import scaffold_project
 from td_release_packager.token_engine import (
-    read_properties,
+    read_env_config,
     scan_tokens_in_directory,
     validate_tokens,
 )
@@ -363,14 +363,14 @@ def _stage_recording(project_dir: str, stage_name: str):
 # ---------------------------------------------------------------
 
 
-def _project_has_env_properties(project_dir: str) -> bool:
-    """True if ``<project>/config/properties/`` contains any
+def _project_has_env_config(project_dir: str) -> bool:
+    """True if ``<project>/config/env/`` contains any
     ``*.conf`` file. Used to pick between the 'bootstrap'
     and 'verify' wording in the harvest banner."""
-    props_dir = os.path.join(project_dir, "config", "properties")
-    if not os.path.isdir(props_dir):
+    env_dir = os.path.join(project_dir, "config", "env")
+    if not os.path.isdir(env_dir):
         return False
-    return any(f.endswith(".conf") for f in os.listdir(props_dir))
+    return any(f.endswith(".conf") for f in os.listdir(env_dir))
 
 
 def _print_harvest_next_steps(
@@ -419,7 +419,7 @@ def _print_harvest_next_steps(
     print("=" * 64)
 
     project = args.project
-    has_props = _project_has_env_properties(project)
+    has_props = _project_has_env_config(project)
 
     # Lead with stage label + state line so the user knows where
     # they are before they see the steps. Same shape across all
@@ -457,7 +457,7 @@ def _print_harvest_next_steps(
             f"\n"
             f"     python -m td_release_packager scan \\\n"
             f"         --source {project} \\\n"
-            f"         --properties config/properties/DEV.conf\n"
+            f"         --env-config config/env/DEV.conf\n"
             f"\n"
             f"   inspect lints the DDL and validates grants;\n"
             f"   analyze produces dependency waves for parallel deploy;\n"
@@ -483,7 +483,7 @@ def _print_harvest_next_steps(
             f"\n"
             f"     python -m td_release_packager package \\\n"
             f"         --source {project} --env DEV --name <name> \\\n"
-            f"         --properties config/properties/DEV.conf \\\n"
+            f"         --env-config config/env/DEV.conf \\\n"
             f"         --output releases/"
         )
 
@@ -504,7 +504,7 @@ def _print_harvest_next_steps(
                 f"{bootstrap_cmd_parts[0]}\n"
                 f"\n"
                 f"   Output: a 7-section .conf scaffold under\n"
-                f"   {project}\\config\\properties\\DEV.conf\n"
+                f"   {project}\\config\\env\\DEV.conf\n"
                 f"   with every {{{{TOKEN}}}} parked in section 8\n"
                 f"   for you to re-section by cut-and-paste."
             )
@@ -543,7 +543,7 @@ def _print_harvest_next_steps(
                 f"         --output-dir {project}\\config\n"
                 f"\n"
                 f"   Output: a 7-section .conf scaffold under\n"
-                f"   {project}\\config\\properties\\DEV.conf\n"
+                f"   {project}\\config\\env\\DEV.conf\n"
                 f"   plus a decomposition_report.md with confidence\n"
                 f"   ratings and outliers."
             )
@@ -760,7 +760,7 @@ def _cmd_scaffold(args):
             print(
                 f"                    --source {project_dir} --env DEV --name {args.name} \\"
             )
-            print("                    --properties config/properties/DEV.conf")
+            print("                    --env-config config/env/DEV.conf")
             print("    [S] Ship      python deploy.py --host <host> --user <user>")
 
         print(f"{'=' * 64}\n")
@@ -1567,20 +1567,20 @@ def _cmd_build(args):
     """Build a release package."""
     # -- Resolve properties file path --
     properties_path = _resolve_path(
-        args.properties,
+        args.env_config,
         relative_to=args.source,
-        label="--properties",
+        label="--env-config",
     )
-    args.properties = properties_path
+    args.env_config = properties_path
 
     # -- Cross-check: --env must match SHIPS_ENV in properties file --
     # The properties file declares its own environment via SHIPS_ENV.
     # This prevents building a DEV-labelled package with PROD tokens.
-    if args.properties and os.path.isfile(args.properties):
+    if args.env_config and os.path.isfile(args.env_config):
         env_upper = args.env.upper()
         declared_env = None
         try:
-            props = read_properties(args.properties)
+            props = read_env_config(args.env_config)
             declared_env = props.get("SHIPS_ENV", "").upper()
         except Exception:
             pass  # File read errors handled later by build_package
@@ -1590,7 +1590,7 @@ def _cmd_build(args):
                 f"\nERROR: Environment mismatch.\n"
                 f"  --env        = {env_upper}\n"
                 f"  SHIPS_ENV    = {declared_env} "
-                f"(declared in {os.path.basename(args.properties)})\n\n"
+                f"(declared in {os.path.basename(args.env_config)})\n\n"
                 f"  The SHIPS_ENV property inside the file must match --env.\n"
                 f"  Either change --env to {declared_env}, or use the correct\n"
                 f"  properties file for {env_upper}.",
@@ -1599,7 +1599,7 @@ def _cmd_build(args):
             sys.exit(1)
         elif not declared_env:
             print(
-                f"  ⚠ No SHIPS_ENV declared in {os.path.basename(args.properties)} "
+                f"  ⚠ No SHIPS_ENV declared in {os.path.basename(args.env_config)} "
                 f"— environment cross-check skipped.",
             )
 
@@ -1639,7 +1639,7 @@ def _cmd_build(args):
         source_dir=args.source,
         environment=args.env.upper(),
         package_name=args.name,
-        properties_file=args.properties,
+        properties_file=args.env_config,
         build_number=build_number,
         output_dir=args.output,
         archive_format=args.format,
@@ -1744,8 +1744,8 @@ def _cmd_scan(args):
         # additional layers without changing downstream consumers.
         stage.set_config_resolved("source", source_dir, "layer-5", "cli")
         stage.set_config_resolved(
-            "properties",
-            args.properties or None,
+            "env_config",
+            args.env_config or None,
             "layer-5",
             "cli",
         )
@@ -1778,9 +1778,9 @@ def _cmd_scan(args):
                 print(f"    {{{{{t}}}}} — used in {len(files)} file(s)")
 
         # Validate against properties if provided
-        if args.properties:
+        if args.env_config:
             try:
-                values = read_properties(args.properties)
+                values = read_env_config(args.env_config)
                 errors, warnings = validate_tokens(values, usage)
 
                 for e in errors:
@@ -1799,7 +1799,7 @@ def _cmd_scan(args):
                         print(f"    ⚠ {w}")
 
                 if not errors and not warnings:
-                    print(f"\n  ✓ All tokens validated against {args.properties}")
+                    print(f"\n  ✓ All tokens validated against {args.env_config}")
 
                 # Stage status: error issues auto-upgrade to "error"
                 # via the recorder; warnings need an explicit set.
@@ -1807,11 +1807,11 @@ def _cmd_scan(args):
                     stage.set_status("warning")
 
             except FileNotFoundError:
-                print(f"\n  ⚠ Config file not found: {args.properties}")
+                print(f"\n  ⚠ Config file not found: {args.env_config}")
                 stage.add_issue(
                     "error",
                     issue_codes.PROPERTIES_NOT_FOUND,
-                    f"Config file not found: {args.properties}",
+                    f"Config file not found: {args.env_config}",
                 )
 
         print()
@@ -2125,7 +2125,7 @@ def _build_parser():
         "--name", required=True, help="Package name (e.g. 'create_objects')."
     )
     bp.add_argument(
-        "--properties", required=True, help="Path to environment .conf file."
+        "--env-config", required=True, help="Path to environment .conf file."
     )
     bp.add_argument(
         "--build-number",
@@ -2159,7 +2159,7 @@ def _build_parser():
     )
     sp.add_argument("--source", required=True, help="Source project directory to scan.")
     sp.add_argument(
-        "--properties", help="Optional properties file to validate against."
+        "--env-config", help="Optional properties file to validate against."
     )
 
     # -- analyze --
