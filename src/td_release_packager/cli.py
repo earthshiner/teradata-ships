@@ -228,8 +228,8 @@ def main():
         _cmd_migrate_source(args)
     elif args.command == "decompose-names":
         _cmd_decompose_names(args)
-    elif args.command == "bootstrap-properties":
-        _cmd_bootstrap_properties(args)
+    elif args.command == "bootstrap-env-config":
+        _cmd_bootstrap_env_config(args)
     else:
         parser.print_help()
         sys.exit(1)
@@ -398,7 +398,7 @@ def _print_harvest_next_steps(
 
       D. ``--generate-token-map`` was used but NO literals found.
          The source is already tokenised — user skips the token-map
-         dance entirely and goes straight to bootstrap-properties.
+         dance entirely and goes straight to bootstrap-env-config.
 
     Args:
         args: The parsed CLI args (used for ``args.project``).
@@ -410,7 +410,7 @@ def _print_harvest_next_steps(
         already_tokenised: True when ``--generate-token-map`` was
             requested but the source had no literals to map. The
             source is already in the end-state — route to
-            bootstrap-properties.
+            bootstrap-env-config.
     """
     from typing import List
 
@@ -492,7 +492,7 @@ def _print_harvest_next_steps(
         # the token map entirely and bootstrap properties directly
         # from the tokens the source already references.
         bootstrap_cmd_parts = [
-            f"     python -m td_release_packager bootstrap-properties \\\n"
+            f"     python -m td_release_packager bootstrap-env-config \\\n"
             f"         --source {project} \\\n"
             f"         --env DEV"
         ]
@@ -644,9 +644,9 @@ def _cmd_decompose_names(args):
     sys.exit(decomposer_main(argv))
 
 
-def _cmd_bootstrap_properties(args):
-    """Dispatch to td_release_packager.properties_bootstrapper.main()."""
-    from td_release_packager.properties_bootstrapper import main as bootstrap_main
+def _cmd_bootstrap_env_config(args):
+    """Dispatch to td_release_packager.env_config_bootstrapper.main()."""
+    from td_release_packager.env_config_bootstrapper import main as bootstrap_main
 
     argv = ["--source", args.source, "--env", args.env]
     if args.output_dir:
@@ -911,7 +911,7 @@ def _cmd_ingest(args):
             # detected. The most common cause is that the source is
             # ALREADY TOKENISED — the end-state most users have to
             # work toward. Tell them clearly, and route them to
-            # bootstrap-properties (the third bootstrap path) since
+            # bootstrap-env-config (the third bootstrap path) since
             # they no longer need a token map at all.
             print(
                 "\n  ✓ No hardcoded database names detected.\n"
@@ -1566,12 +1566,12 @@ def _run_inspect(args, stage, issue_codes) -> int:
 def _cmd_build(args):
     """Build a release package."""
     # -- Resolve properties file path --
-    properties_path = _resolve_path(
+    env_config_path = _resolve_path(
         args.env_config,
         relative_to=args.source,
         label="--env-config",
     )
-    args.env_config = properties_path
+    args.env_config = env_config_path
 
     # -- Cross-check: --env must match SHIPS_ENV in properties file --
     # The properties file declares its own environment via SHIPS_ENV.
@@ -1639,7 +1639,7 @@ def _cmd_build(args):
         source_dir=args.source,
         environment=args.env.upper(),
         package_name=args.name,
-        properties_file=args.env_config,
+        env_config_file=args.env_config,
         build_number=build_number,
         output_dir=args.output,
         archive_format=args.format,
@@ -2327,9 +2327,9 @@ def _build_parser():
         "<output-dir>/decomposition_report.md.",
     )
 
-    # -- bootstrap-properties --
+    # -- bootstrap-env-config --
     bp = subs.add_parser(
-        "bootstrap-properties",
+        "bootstrap-env-config",
         help="Generate a .conf scaffold for an already-tokenised "
         "project. Use when the source already references "
         "{{TOKEN}} but no .conf file exists yet.",

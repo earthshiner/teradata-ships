@@ -441,7 +441,7 @@ def _safe_token_name_for_outlier(literal: str) -> str:
     return f"{sanitised}_LITERAL"
 
 
-def format_properties_file(env: str, result: DecompositionResult) -> str:
+def format_env_config_file(env: str, result: DecompositionResult) -> str:
     """
     Render a SHIPS ``.conf`` file from a decomposition result.
 
@@ -453,7 +453,7 @@ def format_properties_file(env: str, result: DecompositionResult) -> str:
     Outliers — names that didn't match the grammar — go in a final
     section 8 for review and re-categorisation.
     """
-    from td_release_packager.properties_scaffold import render_scaffold
+    from td_release_packager.env_config_scaffold import render_scaffold
 
     roots = result.roots
 
@@ -659,14 +659,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     result = decompose_all(names)
 
     output_dir = Path(args.output_dir)
-    properties_dir = output_dir / "env"
-    properties_dir.mkdir(parents=True, exist_ok=True)
+    env_config_dir = output_dir / "env"
+    env_config_dir.mkdir(parents=True, exist_ok=True)
 
-    properties_path = properties_dir / f"{args.env}.conf"
+    env_config_path = env_config_dir / f"{args.env}.conf"
     report_path = output_dir / "decomposition_report.md"
 
-    properties_path.write_text(
-        format_properties_file(args.env, result), encoding="utf-8"
+    env_config_path.write_text(
+        format_env_config_file(args.env, result), encoding="utf-8"
     )
     report_path.write_text(
         format_decomposition_report(args.env, names, result),
@@ -698,7 +698,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if result.collisions:
         print(f"  Collisions:    {len(result.collisions)}  (see report)")
     print()
-    print(f"  Config:        {properties_path}")
+    print(f"  Config:        {env_config_path}")
     print(f"  Report:        {report_path}")
     print("=" * 64)
 

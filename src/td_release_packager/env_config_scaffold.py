@@ -1,5 +1,5 @@
 """
-properties_scaffold.py — Renders the canonical 7-section
+env_config_scaffold.py — Renders the canonical 7-section
 ``.conf`` template used by SHIPS env files.
 
 The bootstrap tools (``import_legacy``, ``decomposer``) emit
