@@ -307,7 +307,7 @@ python -m td_release_packager package \
 
 ### Token Interpolation in Properties
 
-Properties files support `{{TOKEN}}` references within values:
+Config files support `{{TOKEN}}` references within values:
 
 ```properties
 SHIPS_ENV=PRD

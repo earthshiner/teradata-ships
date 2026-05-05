@@ -157,7 +157,7 @@ class TestFormatPropertiesFile:
         ]
         out = importer.format_properties_file("DEV", subs)
         assert "# WARN duplicate 'A' on line 5" in out
-        # Both values present, last wins per .properties semantics
+        # Both values present, last wins per .conf semantics
         # (file is parsed top-to-bottom, last assignment for a key
         # is the one that survives).
         assert out.count("A=first") == 1
@@ -343,7 +343,7 @@ class TestRealWorldRoundTrip:
         assert by_name["SQL_SECURITY_PRIVILEGE_OPTION"].value == ""
 
     def test_emitted_properties_loads_through_token_engine(self, tmp_path):
-        """Generated .properties file passes the token engine validator
+        """Generated .conf file passes the token engine validator
         end-to-end (parens accepted, no malformed values, no unresolved
         references). This is the proof that the bootstrap is real."""
         sed_file = tmp_path / "legacy.sh"

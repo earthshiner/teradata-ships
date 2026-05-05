@@ -661,7 +661,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--output-dir",
         default=".",
         help="Output directory (default: current). Files are written "
-        "under <output-dir>/properties/<env>.conf and "
+        "under <output-dir>/env/<env>.conf and "
         "<output-dir>/legacy_migration.sed. In --scan-source mode an "
         "additional <output-dir>/scan_report.md is also written.",
     )
@@ -724,7 +724,7 @@ def _run_script_mode(args) -> int:
     print(f"  Imported {len(subs)} substitution(s) from {input_path}")
     print("=" * 64)
     print(f"  Tokens (unique):  {unique_tokens}")
-    print(f"  Properties file:  {properties_path}")
+    print(f"  Config file:  {properties_path}")
     print(f"  Migration sed:    {migration_path}")
     print()
     print("  Next steps:")
@@ -792,7 +792,7 @@ def _run_scan_mode(args) -> int:
     print(f"  Total occurrences:       {scan.total_occurrences}")
     print(f"  Distinct tokens:         {len(scan.var_counts)}")
     print(f"  Sed rules to be emitted: {len(scan.substitutions)}")
-    print(f"  Properties file:         {properties_path}")
+    print(f"  Config file:         {properties_path}")
     print(f"  Migration sed:           {migration_path}")
     print(f"  Audit report:            {report_path}")
     print()
