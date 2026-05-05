@@ -15,7 +15,7 @@ from __future__ import annotations
 
 
 from td_release_packager import legacy_importer as importer
-from td_release_packager.token_engine import read_properties
+from td_release_packager.token_engine import read_env_config
 
 
 # ---------------------------------------------------------------
@@ -246,7 +246,7 @@ class TestCLI:
         )
         assert rc == 0
 
-        props_path = tmp_path / "properties" / "DEV.conf"
+        props_path = tmp_path / "env" / "DEV.conf"
         sed_path = tmp_path / "legacy_migration.sed"
         assert props_path.exists()
         assert sed_path.exists()
@@ -354,8 +354,8 @@ class TestRealWorldRoundTrip:
         )
         assert rc == 0
 
-        props_path = tmp_path / "properties" / "DEV.conf"
-        tokens = read_properties(str(props_path))
+        props_path = tmp_path / "env" / "DEV.conf"
+        tokens = read_env_config(str(props_path))
 
         # Sanity — both literal and SQL-type tokens survived.
         assert tokens["PARENT_NODE"] == "PDE_DEV_00"

@@ -274,7 +274,7 @@ class TestBuilderAbortsOnMalformedTokens:
             encoding="utf-8",
         )
 
-        props = project / "config/properties/DEV.conf"
+        props = project / "config/env/DEV.conf"
         props.write_text(
             "SHIPS_ENV=DEV\nENV_PREFIX=D01\nSHIPS_PROJECT=MP\n"
             "SEM_DATABASE_V=D01_MP_SEM_V\nDBC_DATABASE=DBC\n",
@@ -295,7 +295,7 @@ class TestBuilderAbortsOnMalformedTokens:
                 "DEV",
                 "--name",
                 "Tp",
-                "--properties",
+                "--env-config",
                 str(props),
                 "--output",
                 str(output),
@@ -342,7 +342,7 @@ class TestBuilderAbortsOnMalformedTokens:
             encoding="utf-8",
         )
 
-        props = project / "config/properties/DEV.conf"
+        props = project / "config/env/DEV.conf"
         props.write_text(
             "SHIPS_ENV=DEV\nENV_PREFIX=D01\nSHIPS_PROJECT=MP\n"
             "DOM_DATABASE_V=D01_MP_DOM_V\nDOM_DATABASE_T=D01_MP_DOM_T\n",
@@ -363,7 +363,7 @@ class TestBuilderAbortsOnMalformedTokens:
                 "DEV",
                 "--name",
                 "Tp",
-                "--properties",
+                "--env-config",
                 str(props),
                 "--output",
                 str(output),

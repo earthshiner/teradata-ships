@@ -15,7 +15,7 @@ from argparse import Namespace
 
 from td_release_packager.cli import (
     _print_harvest_next_steps,
-    _project_has_env_properties,
+    _project_has_env_config,
 )
 
 
@@ -24,25 +24,25 @@ from td_release_packager.cli import (
 # ---------------------------------------------------------------
 
 
-class TestProjectHasEnvProperties:
+class TestProjectHasEnvConfig:
     def test_no_config_dir(self, tmp_path):
-        assert _project_has_env_properties(str(tmp_path)) is False
+        assert _project_has_env_config(str(tmp_path)) is False
 
     def test_empty_properties_dir(self, tmp_path):
-        (tmp_path / "config" / "properties").mkdir(parents=True)
-        assert _project_has_env_properties(str(tmp_path)) is False
+        (tmp_path / "config" / "env").mkdir(parents=True)
+        assert _project_has_env_config(str(tmp_path)) is False
 
     def test_one_properties_file(self, tmp_path):
-        d = tmp_path / "config" / "properties"
+        d = tmp_path / "config" / "env"
         d.mkdir(parents=True)
         (d / "DEV.conf").write_text("X=1\n", encoding="utf-8")
-        assert _project_has_env_properties(str(tmp_path)) is True
+        assert _project_has_env_config(str(tmp_path)) is True
 
     def test_other_files_dont_count(self, tmp_path):
-        d = tmp_path / "config" / "properties"
+        d = tmp_path / "config" / "env"
         d.mkdir(parents=True)
         (d / "README.md").write_text("hi\n", encoding="utf-8")
-        assert _project_has_env_properties(str(tmp_path)) is False
+        assert _project_has_env_config(str(tmp_path)) is False
 
 
 # ---------------------------------------------------------------
@@ -60,7 +60,7 @@ class TestFlowA_GenerateTokenMap:
 
     def _run(self, tmp_path, *, has_props: bool):
         if has_props:
-            d = tmp_path / "config" / "properties"
+            d = tmp_path / "config" / "env"
             d.mkdir(parents=True)
             (d / "DEV.conf").write_text("X=1\n", encoding="utf-8")
 
@@ -233,7 +233,7 @@ class TestFlowD_AlreadyTokenised:
         """When a .properties file already exists, bootstrap step
         becomes optional with --force. Flow still ends in
         validate / verify / package."""
-        d = tmp_path / "config" / "properties"
+        d = tmp_path / "config" / "env"
         d.mkdir(parents=True)
         (d / "DEV.conf").write_text("X=1\n", encoding="utf-8")
 

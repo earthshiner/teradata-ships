@@ -64,7 +64,7 @@ class Section:
 
 
 #: The seven canonical sections, in render order.
-#: Mirrors the structure of ``config/properties/DEV.conf``.
+#: Mirrors the structure of ``config/env/DEV.conf``.
 SECTIONS: List[Section] = [
     Section(
         number=1,

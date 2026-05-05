@@ -70,7 +70,7 @@ class ResolvedSetting:
         value:        The effective value used for this run.
         source:       Which layer supplied the value.
         source_path:  Best-effort filesystem origin (e.g. ``ships.yaml``,
-                      ``config/properties/DEV.conf``, or
+                      ``config/env/DEV.conf``, or
                       ``"default"`` / ``"cli"``). Useful in
                       ``decisions.json`` for human review.
     """
@@ -123,7 +123,7 @@ class Cascade:
             cli=parsed_cli_overrides,
             source_paths={
                 LayerSource.LAYER_3_PROJECT: "ships.yaml",
-                LayerSource.LAYER_4_ENV:     "config/properties/DEV.conf",
+                LayerSource.LAYER_4_ENV:     "config/env/DEV.conf",
             },
         )
         strict = cascade.resolve("stages.generate.strict")
@@ -179,7 +179,7 @@ class Cascade:
             LayerSource.LAYER_1_DEFAULTS: "default",
             LayerSource.LAYER_2_TEMPLATE: "template",
             LayerSource.LAYER_3_PROJECT: "ships.yaml",
-            LayerSource.LAYER_4_ENV: "properties",
+            LayerSource.LAYER_4_ENV: "env_config",
             LayerSource.LAYER_5_CLI: "cli",
         }
         if source_paths:
