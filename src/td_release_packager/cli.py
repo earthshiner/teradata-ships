@@ -370,9 +370,7 @@ def _project_has_env_properties(project_dir: str) -> bool:
     props_dir = os.path.join(project_dir, "config", "properties")
     if not os.path.isdir(props_dir):
         return False
-    return any(
-        f.endswith(".conf") for f in os.listdir(props_dir)
-    )
+    return any(f.endswith(".conf") for f in os.listdir(props_dir))
 
 
 def _print_harvest_next_steps(
@@ -894,7 +892,9 @@ def _cmd_ingest(args):
             # cat / open the path printed above to see them all.
             CAP = 10
             sorted_mappings = sorted(token_map.items())
-            print(f"\n  Sample mappings (showing {min(CAP, len(token_map))} of {len(token_map)}):")
+            print(
+                f"\n  Sample mappings (showing {min(CAP, len(token_map))} of {len(token_map)}):"
+            )
             for literal, token in sorted_mappings[:CAP]:
                 files = result.token_candidates.get(literal, [])
                 print(f"    {literal} → {token}  ({len(files)} refs)")
@@ -961,9 +961,7 @@ def _cmd_ingest(args):
         # ingest into the recording context.
         if result.external_references:
             print("\n  External references discovered:")
-            for staged_path, refs in sorted(
-                result.external_references.items()
-            )[:5]:
+            for staged_path, refs in sorted(result.external_references.items())[:5]:
                 print(f"    {staged_path}")
                 for ref in refs:
                     print(f"        → {ref}")
@@ -1551,9 +1549,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
         # only emitted warnings would still report status="success".
         if not overall_ok:
             stage.set_status("error")
-        elif lint_result.warnings or (
-            grant_result and not grant_ok
-        ):
+        elif lint_result.warnings or (grant_result and not grant_ok):
             stage.set_status("warning")
         else:
             stage.set_status("success")
@@ -2287,8 +2283,7 @@ def _build_parser():
         "--source",
         required=True,
         metavar="SOURCE_DIR",
-        help="Root of the source DDL tree to migrate. "
-        "Files are updated in place.",
+        help="Root of the source DDL tree to migrate. Files are updated in place.",
     )
     ms.add_argument(
         "--project",

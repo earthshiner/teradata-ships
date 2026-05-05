@@ -41,8 +41,7 @@ class TestHarvestDiscoversBteq:
     def test_bteq_file_discovered(self, tmp_path):
         f = tmp_path / "MyDB.Customer.bteq"
         f.write_text(
-            "CREATE MULTISET TABLE MyDB.Customer (Id INTEGER) "
-            "PRIMARY INDEX (Id);",
+            "CREATE MULTISET TABLE MyDB.Customer (Id INTEGER) PRIMARY INDEX (Id);",
             encoding="utf-8",
         )
 
@@ -104,8 +103,7 @@ class TestClassifierAcceptsBteq:
     def test_create_table_in_bteq_classifies_as_table(self, tmp_path):
         path = tmp_path / "MyDB.Customer.bteq"
         path.write_text(
-            "CREATE MULTISET TABLE MyDB.Customer (Id INT) "
-            "PRIMARY INDEX (Id);",
+            "CREATE MULTISET TABLE MyDB.Customer (Id INT) PRIMARY INDEX (Id);",
             encoding="utf-8",
         )
 
@@ -114,9 +112,7 @@ class TestClassifierAcceptsBteq:
         assert result.type == "TABLE"
         # No filename-mismatch warning — generic extension means
         # any DDL type is acceptable.
-        mismatch_warnings = [
-            w for w in result.warnings if "Filename mismatch" in w
-        ]
+        mismatch_warnings = [w for w in result.warnings if "Filename mismatch" in w]
         assert mismatch_warnings == []
 
     def test_create_view_in_btq_classifies_as_view(self, tmp_path):

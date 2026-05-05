@@ -15,7 +15,6 @@ Covers:
 
 from __future__ import annotations
 
-import pytest
 
 from td_release_packager import classifier as cls
 
@@ -85,10 +84,7 @@ class TestFunctionSubtypes:
 
     def test_function_sql_default(self):
         """No LANGUAGE clause → SQL function."""
-        ddl = (
-            "CREATE FUNCTION x.add_one (a INT) RETURNS INT "
-            "RETURN a + 1;"
-        )
+        ddl = "CREATE FUNCTION x.add_one (a INT) RETURNS INT RETURN a + 1;"
         r = cls.classify("foo.fnc", ddl)
         assert r.type == "FUNCTION_SQL"
         assert r.base_type == "FUNCTION"
@@ -96,11 +92,7 @@ class TestFunctionSubtypes:
         assert r.confidence == "MEDIUM"
 
     def test_function_sql_explicit_language(self):
-        ddl = (
-            "CREATE FUNCTION x.add_one (a INT) RETURNS INT "
-            "LANGUAGE SQL "
-            "RETURN a + 1;"
-        )
+        ddl = "CREATE FUNCTION x.add_one (a INT) RETURNS INT LANGUAGE SQL RETURN a + 1;"
         r = cls.classify("foo.fnc", ddl)
         assert r.type == "FUNCTION_SQL"
 

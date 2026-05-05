@@ -92,7 +92,9 @@ class TestInspectCleanRun:
     def test_clean_project_writes_success_run(self, tmp_path, capsys):
         project = _make_project(tmp_path)
         # A well-formed multi-set table that satisfies every rule.
-        (project / "payload" / "database" / "DDL" / "tables" / "MyDB.Customer.tbl").write_text(
+        (
+            project / "payload" / "database" / "DDL" / "tables" / "MyDB.Customer.tbl"
+        ).write_text(
             "CREATE MULTISET TABLE {{STD_DB}}.Customer\n"
             "(\n"
             "     Cust_Id INTEGER NOT NULL\n"
@@ -185,8 +187,7 @@ class TestInspectRecordsLintIssues:
         stage = _read_decisions(project)["runs"][0]["stages"][0]
         error_issues = [i for i in stage["issues"] if i["severity"] == "error"]
         assert any(
-            i["code"] == "INSPECT_LINT_VIOLATION"
-            and "[deploy_intent]" in i["message"]
+            i["code"] == "INSPECT_LINT_VIOLATION" and "[deploy_intent]" in i["message"]
             for i in error_issues
         )
         assert stage["status"] == "error"
@@ -208,8 +209,7 @@ class TestInspectRecordsLintIssues:
         stage = _read_decisions(project)["runs"][0]["stages"][0]
         warning_issues = [i for i in stage["issues"] if i["severity"] == "warning"]
         assert any(
-            i["code"] == "INSPECT_LINT_VIOLATION"
-            and "[set_multiset]" in i["message"]
+            i["code"] == "INSPECT_LINT_VIOLATION" and "[set_multiset]" in i["message"]
             for i in warning_issues
         )
         # Warning issues require explicit set_status — verify it stuck.

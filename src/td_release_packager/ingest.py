@@ -225,9 +225,7 @@ class IngestResult:
     #: surface a banner naming the syntax + remediation tool. Empty
     #: list when the source uses only SHIPS {{TOKEN}} form (or no
     #: substitution at all).
-    legacy_placeholders: List["LegacyPlaceholderFinding"] = field(
-        default_factory=list
-    )
+    legacy_placeholders: List["LegacyPlaceholderFinding"] = field(default_factory=list)
 
 
 def ingest_directory(
@@ -477,7 +475,10 @@ def ingest_directory(
                 # needs alongside. Resolve, copy, and rewrite the
                 # paths so the deployed script's references are
                 # sibling-relative.
-                if obj_subtype in ("FUNCTION_C", "JAR") and classification.related_files:
+                if (
+                    obj_subtype in ("FUNCTION_C", "JAR")
+                    and classification.related_files
+                ):
                     from td_release_packager.binary_harvester import (
                         harvest_binaries,
                     )
@@ -571,8 +572,7 @@ def ingest_directory(
     # Without this, a child database or user can be deployed before
     # its parent exists on the target, causing the deploy to fail.
     prereq_placed = any(
-        obj_type in ("DATABASE", "USER")
-        for _, _, obj_type in result.files_placed
+        obj_type in ("DATABASE", "USER") for _, _, obj_type in result.files_placed
     )
     if prereq_placed:
         prereq_dir = os.path.join(payload_base, "pre-requisites")
@@ -1091,11 +1091,7 @@ def _emit_prereq_order(prereq_dir: str) -> "PrereqOrderResult":
         return result
 
     # Build name → relative-path index
-    name_to_rel: dict = {
-        name: rel
-        for rel, name, _ in entries
-        if name is not None
-    }
+    name_to_rel: dict = {name: rel for rel, name, _ in entries if name is not None}
 
     # Build adjacency (rel_path → rel_path_of_parent, if in-package)
     parent_map: dict = {}

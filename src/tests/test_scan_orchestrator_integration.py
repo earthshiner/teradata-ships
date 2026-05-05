@@ -24,7 +24,6 @@ import json
 from argparse import Namespace
 from pathlib import Path
 
-import pytest
 
 from td_release_packager.cli import _cmd_scan
 
@@ -152,10 +151,12 @@ class TestScanRecordsValidationIssues:
             ddl_content="CREATE TABLE {{X}}.demo (id INT);\n",
         )
 
-        _cmd_scan(Namespace(
-            source=str(project),
-            properties=str(project / "nonexistent.conf"),
-        ))
+        _cmd_scan(
+            Namespace(
+                source=str(project),
+                properties=str(project / "nonexistent.conf"),
+            )
+        )
         capsys.readouterr()
 
         stage = _read_decisions(project)["runs"][0]["stages"][0]
@@ -231,21 +232,25 @@ class TestScanSkipsManifestForNonProjectDirectories:
 class TestProjectDetection:
     def test_payload_dir_detected(self, tmp_path):
         from td_release_packager.cli import _looks_like_ships_project
+
         (tmp_path / "payload").mkdir()
         assert _looks_like_ships_project(str(tmp_path)) is True
 
     def test_ships_yaml_detected(self, tmp_path):
         from td_release_packager.cli import _looks_like_ships_project
+
         (tmp_path / "ships.yaml").write_text("# ok\n", encoding="utf-8")
         assert _looks_like_ships_project(str(tmp_path)) is True
 
     def test_neither_marker_means_not_a_project(self, tmp_path):
         from td_release_packager.cli import _looks_like_ships_project
+
         (tmp_path / "random.txt").write_text("x", encoding="utf-8")
         assert _looks_like_ships_project(str(tmp_path)) is False
 
     def test_nonexistent_path_is_not_a_project(self, tmp_path):
         from td_release_packager.cli import _looks_like_ships_project
+
         assert _looks_like_ships_project(str(tmp_path / "nope")) is False
 
 

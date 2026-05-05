@@ -480,20 +480,14 @@ class TestCheckOneObject:
         toward the DDL count — they're DML statements. A file
         with CREATE TABLE followed by INSERT is unusual but not
         a violation of one-object-per-DDL."""
-        ddl = (
-            "CREATE TABLE MyDB.t (a INT);\n"
-            "INSERT INTO MyDB.t VALUES (1);\n"
-        )
+        ddl = "CREATE TABLE MyDB.t (a INT);\nINSERT INTO MyDB.t VALUES (1);\n"
         issues = _check_one_object("seed.tbl", ddl)
         assert issues == []
 
     def test_two_top_level_create_statements_flagged(self):
         """Two real DDL statements (both CREATE) still trip the
         rule — that's the actual one-object violation."""
-        ddl = (
-            "CREATE TABLE MyDB.t1 (a INT);\n"
-            "CREATE TABLE MyDB.t2 (a INT);\n"
-        )
+        ddl = "CREATE TABLE MyDB.t1 (a INT);\nCREATE TABLE MyDB.t2 (a INT);\n"
         issues = _check_one_object("two.sql", ddl)
         assert len(issues) == 1
         assert issues[0].rule == "one_object"
@@ -867,8 +861,7 @@ class TestValidateDirectory:
 
         # Filter to issues for this file only
         relevant = [
-            i for i in result.issues
-            if "GCFR_FF_IMGTableDelta_Create" in i.file
+            i for i in result.issues if "GCFR_FF_IMGTableDelta_Create" in i.file
         ]
         # The buggy rules from the user's report — all should now
         # be silent because the rule patterns no longer see the
@@ -1298,9 +1291,7 @@ class TestCheckIntraPackageDependency:
     def test_object_in_prereq_database_flagged(self):
         """Object whose qualifier matches a package-created DB is flagged."""
         ddl = "CREATE MULTISET TABLE MyDB.T (Id INT);"
-        issues = _check_intra_package_dependency(
-            "t.tbl", ddl, "t.tbl", {"MYDB"}
-        )
+        issues = _check_intra_package_dependency("t.tbl", ddl, "t.tbl", {"MYDB"})
         assert len(issues) == 1
         assert issues[0].rule == "intra_package_dependency"
         assert issues[0].severity == "ERROR"
@@ -1310,34 +1301,26 @@ class TestCheckIntraPackageDependency:
     def test_object_in_external_database_passes(self):
         """Object in a database NOT created in the package is not flagged."""
         ddl = "CREATE MULTISET TABLE ExternalDB.T (Id INT);"
-        issues = _check_intra_package_dependency(
-            "t.tbl", ddl, "t.tbl", {"MYDB"}
-        )
+        issues = _check_intra_package_dependency("t.tbl", ddl, "t.tbl", {"MYDB"})
         assert issues == []
 
     def test_tokenised_object_in_tokenised_prereq_flagged(self):
         """Tokenised CREATE TABLE {{X}}.foo against prereq {{X}} is flagged."""
         ddl = "CREATE MULTISET TABLE {{MY_DB}}.T (Id INT);"
-        issues = _check_intra_package_dependency(
-            "t.tbl", ddl, "t.tbl", {"{{MY_DB}}"}
-        )
+        issues = _check_intra_package_dependency("t.tbl", ddl, "t.tbl", {"{{MY_DB}}"})
         assert len(issues) == 1
         assert "{{MY_DB}}" in issues[0].message
 
     def test_quoted_qualifier_matches_unquoted_prereq(self):
         """Quoted "MyDB" qualifier matches prereq MYDB after normalisation."""
         ddl = 'CREATE MULTISET TABLE "MyDB".T (Id INT);'
-        issues = _check_intra_package_dependency(
-            "t.tbl", ddl, "t.tbl", {"MYDB"}
-        )
+        issues = _check_intra_package_dependency("t.tbl", ddl, "t.tbl", {"MYDB"})
         assert len(issues) == 1
 
     def test_database_file_itself_not_flagged(self):
         """The .db file CREATEing the database is never the dependant."""
         ddl = "CREATE DATABASE MyDB AS PERMANENT = 1024;"
-        issues = _check_intra_package_dependency(
-            "MyDB.db", ddl, "MyDB.db", {"MYDB"}
-        )
+        issues = _check_intra_package_dependency("MyDB.db", ddl, "MyDB.db", {"MYDB"})
         assert issues == []
 
     def test_user_file_itself_not_flagged(self):
@@ -1351,30 +1334,19 @@ class TestCheckIntraPackageDependency:
     def test_view_in_prereq_database_flagged(self):
         """A view in a prereq-created database is also flagged."""
         ddl = "CREATE VIEW {{V_DB}}.MyView AS SELECT 1;"
-        issues = _check_intra_package_dependency(
-            "v.viw", ddl, "v.viw", {"{{V_DB}}"}
-        )
+        issues = _check_intra_package_dependency("v.viw", ddl, "v.viw", {"{{V_DB}}"})
         assert len(issues) == 1
 
     def test_procedure_in_prereq_database_flagged(self):
         """A procedure in a prereq-created database is flagged."""
-        ddl = (
-            "CREATE PROCEDURE {{P_DB}}.sp_X()\n"
-            "BEGIN\n"
-            "    SET v = 1;\n"
-            "END;"
-        )
-        issues = _check_intra_package_dependency(
-            "p.spl", ddl, "p.spl", {"{{P_DB}}"}
-        )
+        ddl = "CREATE PROCEDURE {{P_DB}}.sp_X()\nBEGIN\n    SET v = 1;\nEND;"
+        issues = _check_intra_package_dependency("p.spl", ddl, "p.spl", {"{{P_DB}}"})
         assert len(issues) == 1
 
     def test_unqualified_object_not_flagged(self):
         """Unqualified objects do not match — db_qualifier owns that case."""
         ddl = "CREATE TABLE Customer (Id INT);"
-        issues = _check_intra_package_dependency(
-            "t.tbl", ddl, "t.tbl", {"MYDB"}
-        )
+        issues = _check_intra_package_dependency("t.tbl", ddl, "t.tbl", {"MYDB"})
         assert issues == []
 
     def test_line_number_points_at_qualifier(self):
@@ -1385,9 +1357,7 @@ class TestCheckIntraPackageDependency:
             "CREATE MULTISET TABLE\n"  # line 3
             "  MyDB.T (Id INT);"  # line 4
         )
-        issues = _check_intra_package_dependency(
-            "t.tbl", ddl, "t.tbl", {"MYDB"}
-        )
+        issues = _check_intra_package_dependency("t.tbl", ddl, "t.tbl", {"MYDB"})
         assert len(issues) == 1
         assert issues[0].line == 4
 

@@ -94,8 +94,7 @@ def read_existing_values(properties_path: str) -> Dict[str, str]:
         return dict(read_properties(properties_path))
     except Exception as e:  # noqa: BLE001
         logger.warning(
-            "Could not parse existing properties at %s (%s) — "
-            "treating as empty.",
+            "Could not parse existing properties at %s (%s) — treating as empty.",
             properties_path,
             e,
         )
@@ -107,9 +106,7 @@ def read_existing_values(properties_path: str) -> Dict[str, str]:
 # ---------------------------------------------------------------
 
 
-def format_section_8_body(
-    referenced: Set[str], existing: Dict[str, str]
-) -> str:
+def format_section_8_body(referenced: Set[str], existing: Dict[str, str]) -> str:
     """
     Render the ``KEY=value`` lines that go in section 8 of the
     bootstrap output.
@@ -136,8 +133,7 @@ def format_section_8_body(
     if unused:
         lines.append("")
         lines.append(
-            "# --- UNUSED tokens — defined here but not referenced "
-            "in source. ---"
+            "# --- UNUSED tokens — defined here but not referenced in source. ---"
         )
         lines.append(
             "# Review whether to delete or whether a referencing file is missing."
@@ -160,9 +156,7 @@ def render_bootstrap_properties(
     return render_scaffold(
         env=env,
         generator_label="bootstrap_properties",
-        source_label=(
-            "tokens scanned from already-tokenised project source"
-        ),
+        source_label=("tokens scanned from already-tokenised project source"),
         next_steps=[
             "1. Identify your composition roots from the imported tokens",
             "   below and move them into section 1 with values that match",
@@ -362,7 +356,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     print("=" * 64)
     print()
     print("  You are here: bootstrap-properties complete")
-    print(f"  Project state: tokens scanned, scaffold written, values empty")
+    print("  Project state: tokens scanned, scaffold written, values empty")
     print()
     print("  → Next: edit the .conf file to populate values:")
     print(f"          {result['properties_path']}")
