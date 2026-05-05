@@ -114,7 +114,7 @@ class TestRenderScaffold:
             next_steps=[],
             sections_content={},
         )
-        assert "PRD.properties" in out
+        assert "PRD.conf" in out
 
     def test_source_label_appears_in_header(self):
         out = scaffold.render_scaffold(

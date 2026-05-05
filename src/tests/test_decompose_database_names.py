@@ -373,7 +373,7 @@ class TestCLI:
             [str(names_file), "--env", "DEV", "--output-dir", str(tmp_path)]
         )
         assert rc == 0
-        assert (tmp_path / "properties" / "DEV.properties").exists()
+        assert (tmp_path / "properties" / "DEV.conf").exists()
         assert (tmp_path / "decomposition_report.md").exists()
 
     def test_missing_input_returns_nonzero(self, tmp_path, capsys):
@@ -484,7 +484,7 @@ class TestRealisticGCFRRoundTrip:
         )
         assert rc == 0
 
-        props_path = tmp_path / "properties" / "DEV.properties"
+        props_path = tmp_path / "properties" / "DEV.conf"
         tokens = read_properties(str(props_path))
 
         # Composition roots survived

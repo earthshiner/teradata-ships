@@ -53,7 +53,7 @@ def _properties_for(env: str, tmp_path: Path, **extra) -> Path:
     lines = [f"SHIPS_ENV={env}"]
     for key, value in extra.items():
         lines.append(f"{key}={value}")
-    props_path = tmp_path / f"{env}.properties"
+    props_path = tmp_path / f"{env}.conf"
     props_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return props_path
 
