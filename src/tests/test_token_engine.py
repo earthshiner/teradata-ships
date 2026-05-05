@@ -35,11 +35,11 @@ from td_release_packager.token_engine import (
 
 
 class TestReadProperties:
-    """Tests for reading and parsing .properties files."""
+    """Tests for reading and parsing .conf files."""
 
     def test_basic_key_value(self, tmp_path):
         """Simple KEY=VALUE pairs are read correctly."""
-        props = tmp_path / "test.properties"
+        props = tmp_path / "test.conf"
         props.write_text("FOO=bar\nBAZ=qux\n", encoding="utf-8")
 
         result = read_env_config(str(props))
@@ -49,7 +49,7 @@ class TestReadProperties:
 
     def test_comments_and_blanks_skipped(self, tmp_path):
         """Lines starting with '#' and empty lines are ignored."""
-        props = tmp_path / "test.properties"
+        props = tmp_path / "test.conf"
         props.write_text(
             "# This is a comment\n\nTOKEN=value\n  \n# Another comment\n",
             encoding="utf-8",
@@ -61,7 +61,7 @@ class TestReadProperties:
 
     def test_value_with_equals_sign(self, tmp_path):
         """Values containing '=' are preserved (split on first '=' only)."""
-        props = tmp_path / "test.properties"
+        props = tmp_path / "test.conf"
         props.write_text("CONN=host=myserver;port=1025\n", encoding="utf-8")
 
         result = read_env_config(str(props))
@@ -70,7 +70,7 @@ class TestReadProperties:
 
     def test_whitespace_stripped(self, tmp_path):
         """Leading/trailing whitespace on names and values is stripped."""
-        props = tmp_path / "test.properties"
+        props = tmp_path / "test.conf"
         props.write_text("  TOKEN  =  value with spaces  \n", encoding="utf-8")
 
         result = read_env_config(str(props))
@@ -79,7 +79,7 @@ class TestReadProperties:
 
     def test_duplicate_key_uses_last(self, tmp_path):
         """Duplicate keys use the last-defined value."""
-        props = tmp_path / "test.properties"
+        props = tmp_path / "test.conf"
         props.write_text("TOKEN=first\nTOKEN=second\n", encoding="utf-8")
 
         result = read_env_config(str(props))
@@ -89,11 +89,11 @@ class TestReadProperties:
     def test_missing_file_raises(self, tmp_path):
         """FileNotFoundError raised for non-existent properties file."""
         with pytest.raises(FileNotFoundError):
-            read_env_config(str(tmp_path / "missing.properties"))
+            read_env_config(str(tmp_path / "missing.conf"))
 
     def test_line_without_equals_skipped(self, tmp_path):
         """Lines without '=' are skipped with a warning."""
-        props = tmp_path / "test.properties"
+        props = tmp_path / "test.conf"
         props.write_text("VALID=yes\nbad line no equals\n", encoding="utf-8")
 
         result = read_env_config(str(props))
@@ -102,7 +102,7 @@ class TestReadProperties:
 
     def test_empty_name_skipped(self, tmp_path):
         """Lines with '=' but empty name are skipped."""
-        props = tmp_path / "test.properties"
+        props = tmp_path / "test.conf"
         props.write_text("=orphan_value\nVALID=yes\n", encoding="utf-8")
 
         result = read_env_config(str(props))
@@ -116,7 +116,7 @@ class TestReadProperties:
         CURRENT_TIMESTAMP(6)) are commonplace in Teradata DDL token
         maps. The resolved-value validator must permit them.
         """
-        props = tmp_path / "test.properties"
+        props = tmp_path / "test.conf"
         props.write_text(
             "TS_TYPE=TIMESTAMP(6)\n"
             "TIME_TYPE=TIME(6)\n"
@@ -136,7 +136,7 @@ class TestReadProperties:
         Curly braces remain invalid in resolved values — they would
         indicate either an unresolved reference or a corrupted value.
         """
-        props = tmp_path / "test.properties"
+        props = tmp_path / "test.conf"
         # {{UNDEFINED}} cannot be resolved → braces survive into the
         # resolved value and trigger the validator.
         props.write_text("BROKEN={{UNDEFINED}}\n", encoding="utf-8")

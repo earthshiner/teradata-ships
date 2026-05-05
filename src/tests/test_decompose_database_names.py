@@ -463,7 +463,7 @@ class TestRealisticGCFRRoundTrip:
         assert parent.token_name == "PARENT_NODE"
 
     def test_emitted_properties_loads_through_token_engine(self, tmp_path):
-        """The generated .properties file resolves cleanly end-to-end,
+        """The generated .conf file resolves cleanly end-to-end,
         and the resolved values match the original literals."""
         names_file = tmp_path / "names.txt"
         names_file.write_text("\n".join(_REALISTIC_GCFR_NAMES) + "\n", encoding="utf-8")

@@ -149,7 +149,7 @@ Every artefact SHIPS produces is a contract — a deterministic, reviewable, reu
 |---|---|---|
 | `config/token_map.conf` | Literal → `{{TOKEN}}` mapping | Tokenise DDL without understanding naming conventions |
 | `config/inspect.conf` | Rule severity configuration | Know which rules to enforce |
-| `config/env/*.properties` | Environment token values | Resolve tokens for any target environment |
+| `config/env/*.conf` | Environment token values | Resolve tokens for any target environment |
 | `_waves.txt` | Dependency-ordered deployment sequence | Deploy in the correct order |
 | `BUILD.json` | Package manifest | Verify build contents and traceability |
 
