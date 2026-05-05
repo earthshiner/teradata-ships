@@ -64,7 +64,9 @@ DEFAULT_RULES: Dict[str, str] = {
     "type_suffix": "ERROR",
     "hardcoded_name": "WARNING",
     "keyword_case": "WARNING",
-    "leading_commas": "WARNING",
+    # comma_log_level controls the SEVERITY of a comma-style finding.
+    # Use comma_style to control WHAT is checked (leading/trailing/as-per-source).
+    "comma_log_level": "WARNING",
     "object_placement": "ERROR",
     "view_macro_self_reference": "ERROR",
     "public_grant_on_tables": "WARNING",
@@ -79,7 +81,48 @@ DEFAULT_RULES: Dict[str, str] = {
 }
 
 # -- Valid severity values --
-_VALID_SEVERITIES = {"ERROR", "WARNING", "OFF"}
+# Casing convention: UPPER in config files (inspect.conf), lower in
+# decisions.json / JSON output. The vocab is the same; the casing
+# follows each format's own convention.
+#
+# INFO is intentionally separate from OFF: INFO emits a visible note
+# (e.g. "comma_style=as-per-source: consistency not enforced") that
+# appears in the report and is recorded in decisions.json so the
+# policy is auditable. OFF is completely silent.
+_VALID_SEVERITIES = {"ERROR", "WARNING", "INFO", "OFF"}
+
+# -- Comma style configuration --
+# Two orthogonal keys control comma placement inspection:
+#
+#   comma_style    — WHAT to check (domain-valued, not a severity)
+#     leading        flag files that use trailing commas (default)
+#     trailing       flag files that use leading commas
+#     as-per-source  do not enforce any convention; emit a single
+#                    INFO note so decisions.json records the policy
+#                    explicitly (differs from comma_log_level=OFF
+#                    which is completely silent)
+#
+#   comma_log_level — HOW SEVERELY to report violations (severity-valued)
+#     WARNING  (default)
+#     ERROR    block deployment / fail --strict
+#     OFF      suppress all comma findings including INFO
+DEFAULT_COMMA_STYLE = "leading"
+_VALID_COMMA_STYLES = {"leading", "trailing", "as-per-source"}
+
+# Keys in inspect.conf that take domain values rather than severities.
+# read_inspect_config handles these separately from severity rules.
+_DOMAIN_VALUE_RULES: Dict[str, set] = {
+    "comma_style": _VALID_COMMA_STYLES,
+}
+
+# Maps a domain-value rule name to the severity key that controls
+# how violations from that rule are reported. Used by the dispatch
+# loop in validate_directory so the rule name exposed to the user
+# (comma_style) stays clean while the severity lives in a
+# consistently-named companion key (comma_log_level).
+_RULE_LOG_LEVEL_KEY: Dict[str, str] = {
+    "comma_style": "comma_log_level",
+}
 
 
 def read_inspect_config(config_path: str) -> Dict[str, str]:
@@ -127,6 +170,25 @@ def read_inspect_config(config_path: str) -> Dict[str, str]:
 
             name, value = stripped.split("=", 1)
             name = name.strip().lower()
+
+            # Domain-value rules (e.g. comma_style) accept a specific
+            # vocabulary rather than ERROR/WARNING/OFF.
+            if name in _DOMAIN_VALUE_RULES:
+                value_lower = value.strip().lower()
+                valid = _DOMAIN_VALUE_RULES[name]
+                if value_lower not in valid:
+                    logger.warning(
+                        "inspect.conf line %d: invalid value '%s' "
+                        "for '%s' — expected one of %s. Using default.",
+                        lineno,
+                        value.strip(),
+                        name,
+                        sorted(valid),
+                    )
+                    continue
+                rules[name] = value_lower
+                continue
+
             value = value.strip().upper()
 
             if value not in _VALID_SEVERITIES:
@@ -161,10 +223,16 @@ def generate_default_config() -> str:
         "# what severity. Place this file in config/inspect.conf",
         "# within your project, or pass via --config on the CLI.",
         "#",
-        "# Severity values:",
+        "# Severity values (for rules that accept severities):",
         "#   ERROR   — must fix before deployment (blocks --strict)",
         "#   WARNING — advisory, does not block deployment",
-        "#   OFF     — rule is disabled entirely",
+        "#   INFO    — informational; visible in report and decisions.json",
+        "#             but does not count as a failure. Use for rules that",
+        "#             record a deliberate policy choice rather than a violation.",
+        "#   OFF     — rule is disabled and completely silent",
+        "#",
+        "# Casing note: use UPPER here (config file convention).",
+        "# decisions.json uses lowercase (JSON convention) for the same vocab.",
         "#",
         "# --strict mode promotes all WARNING rules to ERROR.",
         "# OFF rules remain off even in strict mode.",
@@ -183,7 +251,20 @@ def generate_default_config() -> str:
         "# Style rules",
         f"hardcoded_name={DEFAULT_RULES['hardcoded_name']}",
         f"keyword_case={DEFAULT_RULES['keyword_case']}",
-        f"leading_commas={DEFAULT_RULES['leading_commas']}",
+        "#",
+        "# comma_style controls WHAT is checked (domain-valued, not a severity):",
+        "#   leading      (default) — flag files that use trailing commas.",
+        "#   trailing               — flag files that use leading commas.",
+        "#   as-per-source          — no enforcement; one INFO note is emitted",
+        "#                           so decisions.json records this as a deliberate",
+        "#                           policy choice (differs from comma_log_level=OFF",
+        "#                           which is completely silent with no record).",
+        f"comma_style={DEFAULT_COMMA_STYLE}",
+        "#",
+        "# comma_log_level controls HOW SEVERELY violations are reported.",
+        "# Applies when comma_style is 'leading' or 'trailing'.",
+        "# Set to OFF to silence all comma findings including INFO notes.",
+        f"comma_log_level={DEFAULT_RULES['comma_log_level']}",
         "",
         "# Object Placement rules",
         "# object_placement: views must not reference tables databases",
@@ -827,7 +908,13 @@ def validate_directory(
         file_issues.extend(_check_type_suffixes(rel_path, clean))
         file_issues.extend(_check_hardcoded_names(rel_path, clean))
         file_issues.extend(_check_keyword_case(rel_path, clean))
-        file_issues.extend(_check_leading_commas(rel_path, clean))
+        file_issues.extend(
+            _check_leading_commas(
+                rel_path,
+                clean,
+                style=rules_config.get("comma_style", DEFAULT_COMMA_STYLE),
+            )
+        )
         file_issues.extend(
             _check_object_placement(rel_path, clean, file_path, placement)
         )
@@ -849,7 +936,11 @@ def validate_directory(
             if issue.severity == "INFO":
                 filtered_issues.append(issue)
                 continue
-            configured_severity = rules_config.get(issue.rule, "WARNING")
+            # For domain-value rules (e.g. comma_style), severity is
+            # controlled by a companion key (e.g. comma_log_level)
+            # rather than the rule name itself.
+            severity_key = _RULE_LOG_LEVEL_KEY.get(issue.rule, issue.rule)
+            configured_severity = rules_config.get(severity_key, "WARNING")
             if configured_severity == "OFF":
                 continue  # Rule is disabled — drop the issue
             issue.severity = configured_severity
@@ -1278,36 +1369,99 @@ def _check_keyword_case(rel_path: str, content: str) -> List[ValidationIssue]:
     return []
 
 
-def _check_leading_commas(rel_path: str, content: str) -> List[ValidationIssue]:
-    """
-    Check for trailing comma convention (should be leading).
+def _check_leading_commas(
+    rel_path: str,
+    content: str,
+    style: str = DEFAULT_COMMA_STYLE,
+) -> List[ValidationIssue]:
+    """Check comma placement against the configured style convention.
 
-    Looks for lines ending with a comma followed by a column/param
-    definition on the next line. If more trailing commas than leading,
-    reports a warning.
+    Three modes controlled by the ``comma_style`` config key:
+
+    ``leading`` (default)
+        Warns when a file uses trailing commas exclusively. The
+        violation is reported as ``leading_commas`` so its severity
+        can be tuned independently via the ``leading_commas`` rule.
+
+    ``trailing``
+        Warns when a file uses leading commas exclusively — the
+        mirror of ``leading`` mode for teams with the opposite standard.
+
+    ``as-per-source``
+        Does not check comma placement. An INFO finding is emitted
+        once so ``decisions.json`` records that comma consistency was
+        a deliberate policy choice rather than an oversight.
+
+    Args:
+        rel_path: Relative file path (for issue reporting).
+        content:  File content (already comment-stripped by caller).
+        style:    Comma style to enforce. One of the values in
+                  ``_VALID_COMMA_STYLES``. Defaults to
+                  ``DEFAULT_COMMA_STYLE`` ("leading").
+
+    Returns:
+        A list of ValidationIssue (zero or one entry).
     """
+    if style == "as-per-source":
+        # Emit once per-file INFO so the omission is visible in the report
+        # and recorded in decisions.json — not silently swallowed.
+        return [
+            ValidationIssue(
+                file=rel_path,
+                rule="comma_style",
+                severity="INFO",
+                message=(
+                    "comma_style=as-per-source: comma placement not enforced. "
+                    "Files in this project may use either leading or trailing "
+                    "commas — consistency is not mandated."
+                ),
+            )
+        ]
+
     lines = content.split("\n")
     trailing = 0
     leading = 0
 
-    for i, line in enumerate(lines):
+    for line in lines:
         stripped = line.rstrip()
         if stripped.endswith(","):
             trailing += 1
         if stripped.lstrip().startswith(","):
             leading += 1
 
-    # Only report if there's a clear trailing pattern
-    if trailing > 3 and leading == 0:
-        return [
-            ValidationIssue(
-                file=rel_path,
-                rule="leading_commas",
-                severity="WARNING",
-                message=f"{trailing} trailing commas found. "
-                f"Discipline requires leading commas.",
-            )
-        ]
+    if style == "leading":
+        # Warn when the file clearly uses trailing commas and no leading.
+        if trailing > 3 and leading == 0:
+            return [
+                ValidationIssue(
+                    file=rel_path,
+                    rule="comma_style",
+                    severity="WARNING",
+                    message=(
+                        f"{trailing} trailing commas found. "
+                        f"Site convention (comma_style=leading) requires "
+                        f"leading commas. Set comma_style=trailing or "
+                        f"comma_style=as-per-source in inspect.conf to change."
+                    ),
+                )
+            ]
+    elif style == "trailing":
+        # Warn when the file clearly uses leading commas and no trailing.
+        if leading > 3 and trailing == 0:
+            return [
+                ValidationIssue(
+                    file=rel_path,
+                    rule="comma_style",
+                    severity="WARNING",
+                    message=(
+                        f"{leading} leading commas found. "
+                        f"Site convention (comma_style=trailing) requires "
+                        f"trailing commas. Set comma_style=leading or "
+                        f"comma_style=as-per-source in inspect.conf to change."
+                    ),
+                )
+            ]
+
     return []
 
 
