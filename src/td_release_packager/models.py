@@ -155,7 +155,7 @@ class BuildConfig:
         environment:      Target environment name (e.g. 'DEV', 'TEST', 'PROD').
         package_name:     Logical package name (e.g. 'create_objects').
         build_number:     Incrementing build number (zero-padded 4 digits).
-        properties_file:  Path to the environment properties file.
+        env_config_file:  Path to the environment properties file.
         output_dir:       Where to write the package (default: current dir).
         archive_format:   'zip' or 'tar.gz'.
         author:           Builder's name/ID.
@@ -166,7 +166,7 @@ class BuildConfig:
     source_dir: str
     environment: str
     package_name: str
-    properties_file: str
+    env_config_file: str
     build_number: Optional[int] = None
     output_dir: str = "."
     archive_format: str = "zip"

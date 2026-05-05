@@ -222,7 +222,7 @@ def _unescape_sed_value(raw: str) -> str:
 # ---------------------------------------------------------------
 
 
-def format_properties_file(env: str, subs: List[Substitution]) -> str:
+def format_env_config_file(env: str, subs: List[Substitution]) -> str:
     """
     Render a SHIPS ``.conf`` file from substitutions.
 
@@ -243,7 +243,7 @@ def format_properties_file(env: str, subs: List[Substitution]) -> str:
     ``read_env_config``). A ``# WARN`` comment is emitted on the
     line where the override happens so the conflict is obvious.
     """
-    from td_release_packager.properties_scaffold import render_scaffold
+    from td_release_packager.env_config_scaffold import render_scaffold
 
     # Render the imported (key, value) pairs as the body of section 8.
     body_lines: List[str] = []
@@ -463,10 +463,10 @@ def scan_source_directory(
     return result
 
 
-def scan_format_properties_file(env: str, scan: ScanResult) -> str:
+def scan_format_env_config_file(env: str, scan: ScanResult) -> str:
     """Render the .conf file from a scan-source result.
 
-    Differs from ``format_properties_file`` (sed-script mode):
+    Differs from ``format_env_config_file`` (sed-script mode):
 
       - One entry per ``var_name``, NOT one per Substitution.
         Multiple syntaxes for the same logical token (``$UTL_T``,
@@ -479,7 +479,7 @@ def scan_format_properties_file(env: str, scan: ScanResult) -> str:
 
     Values are empty -- the user populates them after import.
     """
-    from td_release_packager.properties_scaffold import render_scaffold
+    from td_release_packager.env_config_scaffold import render_scaffold
 
     body_lines: List[str] = []
     seen_vars: set = set()
@@ -709,13 +709,13 @@ def _run_script_mode(args) -> int:
         return 1
 
     output_dir = Path(args.output_dir)
-    properties_dir = output_dir / "env"
-    properties_dir.mkdir(parents=True, exist_ok=True)
+    env_config_dir = output_dir / "env"
+    env_config_dir.mkdir(parents=True, exist_ok=True)
 
-    properties_path = properties_dir / f"{args.env}.conf"
+    env_config_path = env_config_dir / f"{args.env}.conf"
     migration_path = output_dir / "legacy_migration.sed"
 
-    properties_path.write_text(format_properties_file(args.env, subs), encoding="utf-8")
+    env_config_path.write_text(format_env_config_file(args.env, subs), encoding="utf-8")
     migration_path.write_text(format_migration_sed(subs), encoding="utf-8")
 
     unique_tokens = len({s.var_name for s in subs})
@@ -724,7 +724,7 @@ def _run_script_mode(args) -> int:
     print(f"  Imported {len(subs)} substitution(s) from {input_path}")
     print("=" * 64)
     print(f"  Tokens (unique):  {unique_tokens}")
-    print(f"  Config file:  {properties_path}")
+    print(f"  Config file:  {env_config_path}")
     print(f"  Migration sed:    {migration_path}")
     print()
     print("  Next steps:")
@@ -739,7 +739,7 @@ def _run_script_mode(args) -> int:
         "--source <migrated_src> --project <new_proj>"
     )
     print()
-    print(f"  3. Review and section {properties_path}")
+    print(f"  3. Review and section {env_config_path}")
     print("     against config/env/DEV.conf as a structural template.")
     print("=" * 64)
 
@@ -770,15 +770,15 @@ def _run_scan_mode(args) -> int:
         return 0
 
     output_dir = Path(args.output_dir)
-    properties_dir = output_dir / "env"
-    properties_dir.mkdir(parents=True, exist_ok=True)
+    env_config_dir = output_dir / "env"
+    env_config_dir.mkdir(parents=True, exist_ok=True)
 
-    properties_path = properties_dir / f"{args.env}.conf"
+    env_config_path = env_config_dir / f"{args.env}.conf"
     migration_path = output_dir / "legacy_migration.sed"
     report_path = output_dir / "scan_report.md"
 
-    properties_path.write_text(
-        scan_format_properties_file(args.env, scan), encoding="utf-8"
+    env_config_path.write_text(
+        scan_format_env_config_file(args.env, scan), encoding="utf-8"
     )
     migration_path.write_text(
         format_migration_sed(scan.substitutions), encoding="utf-8"
@@ -792,13 +792,13 @@ def _run_scan_mode(args) -> int:
     print(f"  Total occurrences:       {scan.total_occurrences}")
     print(f"  Distinct tokens:         {len(scan.var_counts)}")
     print(f"  Sed rules to be emitted: {len(scan.substitutions)}")
-    print(f"  Config file:         {properties_path}")
+    print(f"  Config file:         {env_config_path}")
     print(f"  Migration sed:           {migration_path}")
     print(f"  Audit report:            {report_path}")
     print()
     print("  Next steps:")
     print()
-    print(f"  1. Open {properties_path} and fill in values. The")
+    print(f"  1. Open {env_config_path} and fill in values. The")
     print("     comment above each entry shows where the placeholder")
     print("     appears in source.")
     print()

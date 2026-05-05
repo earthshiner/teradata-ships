@@ -28,11 +28,11 @@ class TestProjectHasEnvConfig:
     def test_no_config_dir(self, tmp_path):
         assert _project_has_env_config(str(tmp_path)) is False
 
-    def test_empty_properties_dir(self, tmp_path):
+    def test_empty_env_config_dir(self, tmp_path):
         (tmp_path / "config" / "env").mkdir(parents=True)
         assert _project_has_env_config(str(tmp_path)) is False
 
-    def test_one_properties_file(self, tmp_path):
+    def test_one_env_config_file(self, tmp_path):
         d = tmp_path / "config" / "env"
         d.mkdir(parents=True)
         (d / "DEV.conf").write_text("X=1\n", encoding="utf-8")
@@ -194,11 +194,11 @@ class TestFlowD_AlreadyTokenised:
     """--generate-token-map was used, but no literals were found
     because the source already uses {{TOKEN}} references. Banner
     must skip the token-map dance and route straight to
-    bootstrap-properties."""
+    bootstrap-env-config."""
 
     def test_already_tokenised_no_props_yet(self, tmp_path, capsys):
         """Flow D, no .conf file → 4 steps:
-        bootstrap-properties, validate, verify, package.
+        bootstrap-env-config, validate, verify, package.
         Token map / decompose-names / re-harvest must NOT appear."""
         args = Namespace(project=str(tmp_path))
 
@@ -216,7 +216,7 @@ class TestFlowD_AlreadyTokenised:
         assert "already tokenised" in out
 
         # Flow-D-specific guidance
-        assert "bootstrap-properties" in out
+        assert "bootstrap-env-config" in out
         assert "Bootstrap a .conf file from the tokens" in out
 
         # Must NOT mention token-map activities — we're past that

@@ -131,12 +131,12 @@ class TestParseSedSubstitutions:
 
 
 class TestFormatPropertiesFile:
-    """Tests for format_properties_file()."""
+    """Tests for format_env_config_file()."""
 
     def test_header_includes_env_name(self):
         """The generated banner names the environment."""
         subs = [importer.Substitution("$A", "A", "1", 1)]
-        out = importer.format_properties_file("DEV", subs)
+        out = importer.format_env_config_file("DEV", subs)
         assert "DEV.conf" in out
 
     def test_simple_dump(self):
@@ -145,7 +145,7 @@ class TestFormatPropertiesFile:
             importer.Substitution("$A", "A", "1", 1),
             importer.Substitution("&&B&&", "B", "2", 2),
         ]
-        out = importer.format_properties_file("DEV", subs)
+        out = importer.format_env_config_file("DEV", subs)
         assert "A=1" in out
         assert "B=2" in out
 
@@ -155,7 +155,7 @@ class TestFormatPropertiesFile:
             importer.Substitution("$A", "A", "first", 1),
             importer.Substitution("$A", "A", "second", 5),
         ]
-        out = importer.format_properties_file("DEV", subs)
+        out = importer.format_env_config_file("DEV", subs)
         assert "# WARN duplicate 'A' on line 5" in out
         # Both values present, last wins per .conf semantics
         # (file is parsed top-to-bottom, last assignment for a key
@@ -167,7 +167,7 @@ class TestFormatPropertiesFile:
         """Output must include all 7 canonical sections as
         placeholders so the user can move imports into them."""
         subs = [importer.Substitution("$A", "A", "1", 1)]
-        out = importer.format_properties_file("DEV", subs)
+        out = importer.format_env_config_file("DEV", subs)
 
         for n in range(1, 8):
             assert f"# {n}." in out, f"section {n} header missing"
@@ -179,7 +179,7 @@ class TestFormatPropertiesFile:
         not interleaved with the canonical sections — the whole
         point is to give the user a re-section workflow."""
         subs = [importer.Substitution("$A", "A", "1", 1)]
-        out = importer.format_properties_file("DEV", subs)
+        out = importer.format_env_config_file("DEV", subs)
 
         sec8_pos = out.find("# 8. Imported (UNCATEGORISED)")
         a_pos = out.find("A=1")
@@ -193,7 +193,7 @@ class TestFormatPropertiesFile:
         """Empty sections must carry the 'no entries' hint comment
         so the user knows to populate by moving from section 8."""
         subs = [importer.Substitution("$A", "A", "1", 1)]
-        out = importer.format_properties_file("DEV", subs)
+        out = importer.format_env_config_file("DEV", subs)
         # All seven canonical sections are empty for import-legacy
         assert out.count("no entries") == 7
 

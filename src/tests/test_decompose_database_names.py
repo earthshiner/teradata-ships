@@ -239,12 +239,12 @@ class TestDecomposeAll:
 
 
 class TestFormatPropertiesFile:
-    """Tests for format_properties_file()."""
+    """Tests for format_env_config_file()."""
 
     def test_emits_composition_roots(self):
         names = ["PDE_DEV_00", "PDE_DEV_00_MDL_0_T"]
         result = decomp.decompose_all(names)
-        out = decomp.format_properties_file("DEV", result)
+        out = decomp.format_env_config_file("DEV", result)
 
         assert "SHIPS_ENV=DEV" in out
         assert "ENV_PREFIX=PDE" in out
@@ -255,14 +255,14 @@ class TestFormatPropertiesFile:
     def test_emits_derived_names_in_cascade_form(self):
         names = ["PDE_DEV_00", "PDE_DEV_00_MDL_0_T"]
         result = decomp.decompose_all(names)
-        out = decomp.format_properties_file("DEV", result)
+        out = decomp.format_env_config_file("DEV", result)
 
         assert "MDL_T={{PARENT_NODE}}_MDL_{{SECURITY_TIER}}_T" in out
 
     def test_emits_outliers_with_literal_suffix(self):
         names = ["PDE_DEV_00_MDL_0_T", "GCFR_APPL_ADMIN_USER"]
         result = decomp.decompose_all(names)
-        out = decomp.format_properties_file("DEV", result)
+        out = decomp.format_env_config_file("DEV", result)
 
         assert "GCFR_APPL_ADMIN_USER_LITERAL=GCFR_APPL_ADMIN_USER" in out
 
@@ -271,7 +271,7 @@ class TestFormatPropertiesFile:
         and 2 populated, the rest empty placeholders."""
         names = ["PDE_DEV_00", "PDE_DEV_00_MDL_0_T"]
         result = decomp.decompose_all(names)
-        out = decomp.format_properties_file("DEV", result)
+        out = decomp.format_env_config_file("DEV", result)
 
         for n in range(1, 8):
             assert f"# {n}." in out, f"section {n} header missing"
@@ -281,7 +281,7 @@ class TestFormatPropertiesFile:
         interleaved with sections 1-2."""
         names = ["PDE_DEV_00_MDL_0_T", "EXTERNAL_USER"]
         result = decomp.decompose_all(names)
-        out = decomp.format_properties_file("DEV", result)
+        out = decomp.format_env_config_file("DEV", result)
 
         sec8_pos = out.find("# 8. Outliers")
         outlier_pos = out.find("EXTERNAL_USER_LITERAL=EXTERNAL_USER")
@@ -292,7 +292,7 @@ class TestFormatPropertiesFile:
         """If every name decomposes cleanly, section 8 is omitted."""
         names = ["PDE_DEV_00", "PDE_DEV_00_MDL_0_T", "PDE_DEV_00_MDL_0_V"]
         result = decomp.decompose_all(names)
-        out = decomp.format_properties_file("DEV", result)
+        out = decomp.format_env_config_file("DEV", result)
 
         assert "# 8." not in out
 
@@ -301,7 +301,7 @@ class TestFormatPropertiesFile:
         placeholders for the user to populate from other sources."""
         names = ["PDE_DEV_00", "PDE_DEV_00_MDL_0_T"]
         result = decomp.decompose_all(names)
-        out = decomp.format_properties_file("DEV", result)
+        out = decomp.format_env_config_file("DEV", result)
 
         # 5 empty sections (3, 4, 5, 6, 7) → 5 'no entries' hints
         assert out.count("no entries") == 5
@@ -323,7 +323,7 @@ class TestFormatPropertiesFile:
                 "PDE_DEV_00_MDL_0_T",
             ]
         }
-        out = decomp.format_properties_file("DEV", result)
+        out = decomp.format_env_config_file("DEV", result)
         assert "# WARN collision" in out
 
 

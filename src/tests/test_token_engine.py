@@ -443,9 +443,9 @@ class TestSubstituteFile:
 class TestPropertiesIntegration:
     """End-to-end tests using the sample properties fixture."""
 
-    def test_env_topology_resolution(self, sample_properties_file):
+    def test_env_topology_resolution(self, sample_env_config_file):
         """Properties with {{ENV_PREFIX}} and {{SHIPS_PROJECT}} resolve correctly."""
-        tokens = read_env_config(str(sample_properties_file))
+        tokens = read_env_config(str(sample_env_config_file))
 
         assert tokens["SHIPS_ENV"] == "DEV"
         assert tokens["ENV_PREFIX"] == "A_D01"

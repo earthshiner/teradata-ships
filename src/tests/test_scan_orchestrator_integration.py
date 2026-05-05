@@ -145,7 +145,7 @@ class TestScanRecordsValidationIssues:
         assert stage["status"] == "warning"
         assert _read_decisions(project)["runs"][0]["final_status"] == "warning"
 
-    def test_missing_properties_file_recorded_as_error(self, tmp_path, capsys):
+    def test_missing_env_config_file_recorded_as_error(self, tmp_path, capsys):
         project = _make_project(
             tmp_path,
             ddl_content="CREATE TABLE {{X}}.demo (id INT);\n",
