@@ -64,9 +64,9 @@ DEFAULT_RULES: Dict[str, str] = {
     "type_suffix": "ERROR",
     "hardcoded_name": "WARNING",
     "keyword_case": "WARNING",
-    # leading_commas controls the SEVERITY of a comma-style violation.
-    # Use comma_style (below) to control WHAT is checked.
-    "leading_commas": "WARNING",
+    # comma_log_level controls the SEVERITY of a comma-style finding.
+    # Use comma_style to control WHAT is checked (leading/trailing/as-per-source).
+    "comma_log_level": "WARNING",
     "object_placement": "ERROR",
     "view_macro_self_reference": "ERROR",
     "public_grant_on_tables": "WARNING",
@@ -84,20 +84,20 @@ DEFAULT_RULES: Dict[str, str] = {
 _VALID_SEVERITIES = {"ERROR", "WARNING", "OFF"}
 
 # -- Comma style configuration --
-# Controls WHAT the leading_commas rule checks, independently of the
-# severity at which violations are reported.
+# Two orthogonal keys control comma placement inspection:
 #
-#   leading      (default) — flag files that use trailing commas.
-#                            Violations are reported at the severity set by
-#                            the leading_commas rule (default: WARNING).
-#   trailing               — flag files that use leading commas.
-#                            Useful for teams whose standard is trailing.
-#   as-per-source          — do not enforce any comma convention.
-#                            An INFO finding is still emitted so the
-#                            decisions.json records that comma consistency
-#                            was deliberately not checked, not accidentally
-#                            skipped. Differs from leading_commas=OFF,
-#                            which is silent.
+#   comma_style    — WHAT to check (domain-valued, not a severity)
+#     leading        flag files that use trailing commas (default)
+#     trailing       flag files that use leading commas
+#     as-per-source  do not enforce any convention; emit a single
+#                    INFO note so decisions.json records the policy
+#                    explicitly (differs from comma_log_level=OFF
+#                    which is completely silent)
+#
+#   comma_log_level — HOW SEVERELY to report violations (severity-valued)
+#     WARNING  (default)
+#     ERROR    block deployment / fail --strict
+#     OFF      suppress all comma findings including INFO
 DEFAULT_COMMA_STYLE = "leading"
 _VALID_COMMA_STYLES = {"leading", "trailing", "as-per-source"}
 
@@ -105,6 +105,15 @@ _VALID_COMMA_STYLES = {"leading", "trailing", "as-per-source"}
 # read_inspect_config handles these separately from severity rules.
 _DOMAIN_VALUE_RULES: Dict[str, set] = {
     "comma_style": _VALID_COMMA_STYLES,
+}
+
+# Maps a domain-value rule name to the severity key that controls
+# how violations from that rule are reported. Used by the dispatch
+# loop in validate_directory so the rule name exposed to the user
+# (comma_style) stays clean while the severity lives in a
+# consistently-named companion key (comma_log_level).
+_RULE_LOG_LEVEL_KEY: Dict[str, str] = {
+    "comma_style": "comma_log_level",
 }
 
 
@@ -229,24 +238,19 @@ def generate_default_config() -> str:
         f"hardcoded_name={DEFAULT_RULES['hardcoded_name']}",
         f"keyword_case={DEFAULT_RULES['keyword_case']}",
         "#",
-        "# comma_style controls WHAT the leading_commas rule checks.",
-        "# This is a domain-value key, not a severity — valid values:",
-        "#   leading      (default) — warn if trailing commas are found.",
-        "#                           Paul's engineering discipline; use",
-        "#                           for Teradata shops that follow it.",
-        "#   trailing               — warn if leading commas are found.",
-        "#                           Use for teams with the opposite standard.",
-        "#   as-per-source          — do not enforce any convention.",
-        "#                           An INFO finding is still recorded so",
-        "#                           decisions.json shows this was a deliberate",
-        "#                           policy choice, not an accidental omission.",
-        "#                           Distinct from leading_commas=OFF which is",
-        "#                           completely silent.",
+        "# comma_style controls WHAT is checked (domain-valued, not a severity):",
+        "#   leading      (default) — flag files that use trailing commas.",
+        "#   trailing               — flag files that use leading commas.",
+        "#   as-per-source          — no enforcement; one INFO note is emitted",
+        "#                           so decisions.json records this as a deliberate",
+        "#                           policy choice (differs from comma_log_level=OFF",
+        "#                           which is completely silent with no record).",
         f"comma_style={DEFAULT_COMMA_STYLE}",
         "#",
-        "# leading_commas controls the severity of a comma-style violation",
-        "# (only applies when comma_style is 'leading' or 'trailing').",
-        f"leading_commas={DEFAULT_RULES['leading_commas']}",
+        "# comma_log_level controls HOW SEVERELY violations are reported.",
+        "# Applies when comma_style is 'leading' or 'trailing'.",
+        "# Set to OFF to silence all comma findings including INFO notes.",
+        f"comma_log_level={DEFAULT_RULES['comma_log_level']}",
         "",
         "# Object Placement rules",
         "# object_placement: views must not reference tables databases",
@@ -922,7 +926,11 @@ def validate_directory(
             if issue.severity == "INFO":
                 filtered_issues.append(issue)
                 continue
-            configured_severity = rules_config.get(issue.rule, "WARNING")
+            # For domain-value rules (e.g. comma_style), severity is
+            # controlled by a companion key (e.g. comma_log_level)
+            # rather than the rule name itself.
+            severity_key = _RULE_LOG_LEVEL_KEY.get(issue.rule, issue.rule)
+            configured_severity = rules_config.get(severity_key, "WARNING")
             if configured_severity == "OFF":
                 continue  # Rule is disabled — drop the issue
             issue.severity = configured_severity
@@ -1417,13 +1425,13 @@ def _check_leading_commas(
             return [
                 ValidationIssue(
                     file=rel_path,
-                    rule="leading_commas",
+                    rule="comma_style",
                     severity="WARNING",
                     message=(
                         f"{trailing} trailing commas found. "
-                        f"Site convention requires leading commas. "
-                        f"Set comma_style=trailing or comma_style=as-per-source "
-                        f"in inspect.conf to change this."
+                        f"Site convention (comma_style=leading) requires "
+                        f"leading commas. Set comma_style=trailing or "
+                        f"comma_style=as-per-source in inspect.conf to change."
                     ),
                 )
             ]
@@ -1433,13 +1441,13 @@ def _check_leading_commas(
             return [
                 ValidationIssue(
                     file=rel_path,
-                    rule="leading_commas",
+                    rule="comma_style",
                     severity="WARNING",
                     message=(
                         f"{leading} leading commas found. "
-                        f"Site convention requires trailing commas. "
-                        f"Set comma_style=leading or comma_style=as-per-source "
-                        f"in inspect.conf to change this."
+                        f"Site convention (comma_style=trailing) requires "
+                        f"trailing commas. Set comma_style=leading or "
+                        f"comma_style=as-per-source in inspect.conf to change."
                     ),
                 )
             ]

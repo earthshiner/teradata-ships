@@ -719,7 +719,7 @@ class TestCheckLeadingCommas:
     def test_leading_mode_trailing_file_flagged(self):
         issues = _check_leading_commas("t.tbl", self._TRAILING, style="leading")
         assert len(issues) == 1
-        assert issues[0].rule == "leading_commas"
+        assert issues[0].rule == "comma_style"
         assert issues[0].severity == "WARNING"
 
     def test_default_style_is_leading(self):
@@ -735,7 +735,7 @@ class TestCheckLeadingCommas:
     def test_trailing_mode_leading_file_flagged(self):
         issues = _check_leading_commas("t.tbl", self._LEADING, style="trailing")
         assert len(issues) == 1
-        assert issues[0].rule == "leading_commas"
+        assert issues[0].rule == "comma_style"
         assert issues[0].severity == "WARNING"
 
     def test_trailing_mode_message_explains_convention(self):
@@ -979,13 +979,13 @@ class TestReadInspectConfig:
         """Key=value pairs are read and merged with defaults."""
         conf = tmp_path / "inspect.conf"
         conf.write_text(
-            "leading_commas=OFF\nkeyword_case=OFF\n",
+            "comma_log_level=OFF\nkeyword_case=OFF\n",
             encoding="utf-8",
         )
 
         rules = read_inspect_config(str(conf))
 
-        assert rules["leading_commas"] == "OFF"
+        assert rules["comma_log_level"] == "OFF"
         assert rules["keyword_case"] == "OFF"
         # Defaults preserved for unmentioned rules — verified
         # against DEFAULT_RULES so the test does not duplicate the
@@ -997,25 +997,25 @@ class TestReadInspectConfig:
         """Lines starting with '#' and blank lines are ignored."""
         conf = tmp_path / "inspect.conf"
         conf.write_text(
-            "# This is a comment\n\nleading_commas=OFF\n  \n",
+            "# This is a comment\n\ncomma_log_level=OFF\n  \n",
             encoding="utf-8",
         )
 
         rules = read_inspect_config(str(conf))
 
-        assert rules["leading_commas"] == "OFF"
+        assert rules["comma_log_level"] == "OFF"
 
     def test_case_insensitive_values(self, tmp_path):
         """Severity values are case-insensitive (normalised to uppercase)."""
         conf = tmp_path / "inspect.conf"
         conf.write_text(
-            "leading_commas=off\nkeyword_case=Warning\ntype_suffix=error\n",
+            "comma_log_level=off\nkeyword_case=Warning\ntype_suffix=error\n",
             encoding="utf-8",
         )
 
         rules = read_inspect_config(str(conf))
 
-        assert rules["leading_commas"] == "OFF"
+        assert rules["comma_log_level"] == "OFF"
         assert rules["keyword_case"] == "WARNING"
         assert rules["type_suffix"] == "ERROR"
 
@@ -1023,14 +1023,14 @@ class TestReadInspectConfig:
         """Invalid severity values are ignored — default is kept."""
         conf = tmp_path / "inspect.conf"
         conf.write_text(
-            "leading_commas=BANANA\n",
+            "comma_log_level=BANANA\n",
             encoding="utf-8",
         )
 
         rules = read_inspect_config(str(conf))
 
         # Default should be preserved
-        assert rules["leading_commas"] == DEFAULT_RULES["leading_commas"]
+        assert rules["comma_log_level"] == DEFAULT_RULES["comma_log_level"]
 
     def test_custom_rule_accepted(self, tmp_path):
         """Unknown rule names are accepted (future-proofing)."""
@@ -1178,10 +1178,10 @@ class TestRuleConfigIntegration:
         )
 
         rules = dict(DEFAULT_RULES)
-        rules["leading_commas"] = "OFF"
+        rules["comma_log_level"] = "OFF"
         result = validate_directory(str(tmp_path), rules_config=rules)
 
-        comma_issues = [i for i in result.issues if i.rule == "leading_commas"]
+        comma_issues = [i for i in result.issues if i.rule == "comma_style"]
         assert comma_issues == []
 
     def test_warning_promoted_to_error_in_strict(self, tmp_path):
@@ -1216,10 +1216,10 @@ class TestRuleConfigIntegration:
         )
 
         rules = dict(DEFAULT_RULES)
-        rules["leading_commas"] = "OFF"
+        rules["comma_log_level"] = "OFF"
         result = validate_directory(str(tmp_path), rules_config=rules, strict=True)
 
-        comma_issues = [i for i in result.issues if i.rule == "leading_commas"]
+        comma_issues = [i for i in result.issues if i.rule == "comma_style"]
         assert comma_issues == []
 
     def test_error_override(self, tmp_path):
