@@ -1,5 +1,5 @@
 """
-properties_bootstrapper.py — Bootstrap a SHIPS ``.conf`` file
+env_config_bootstrapper.py — Bootstrap a SHIPS ``.conf`` file
 from an already-tokenised project tree.
 
 Closes the third bootstrap path. The other two assume some form of
@@ -20,7 +20,7 @@ This module:
     2. Optionally reads an existing ``.conf`` file at the
        target path and preserves any values already set.
     3. Renders a 7-section ``.conf`` scaffold via
-       ``properties_scaffold.render_scaffold`` with every referenced
+       ``env_config_scaffold.render_scaffold`` with every referenced
        token parked in section 8 ("Imported (UNCATEGORISED)") for
        the user to re-section by cut-and-paste.
 
@@ -75,9 +75,9 @@ def discover_referenced_tokens(project_dir: str) -> Set[str]:
     return referenced
 
 
-def read_existing_values(properties_path: str) -> Dict[str, str]:
+def read_existing_values(env_config_path: str) -> Dict[str, str]:
     """
-    Read an existing ``.conf`` file at ``properties_path`` and
+    Read an existing ``.conf`` file at ``env_config_path`` and
     return ``{name: value}``. Returns an empty dict if the file does
     not exist. Never raises on a missing file — it's the expected
     case for the first bootstrap run.
@@ -86,16 +86,16 @@ def read_existing_values(properties_path: str) -> Dict[str, str]:
     lines, and the ``=``-after-first-occurrence rule are all
     handled consistently.
     """
-    if not os.path.isfile(properties_path):
+    if not os.path.isfile(env_config_path):
         return {}
     from td_release_packager.token_engine import read_env_config
 
     try:
-        return dict(read_env_config(properties_path))
+        return dict(read_env_config(env_config_path))
     except Exception as e:  # noqa: BLE001
         logger.warning(
             "Could not parse existing properties at %s (%s) — treating as empty.",
-            properties_path,
+            env_config_path,
             e,
         )
         return {}
@@ -144,18 +144,18 @@ def format_section_8_body(referenced: Set[str], existing: Dict[str, str]) -> str
     return "\n".join(lines)
 
 
-def render_bootstrap_properties(
+def render_bootstrap_env_config(
     env: str,
     referenced: Set[str],
     existing: Dict[str, str],
 ) -> str:
     """Render the full 7-section .conf scaffold for the
     bootstrap output."""
-    from td_release_packager.properties_scaffold import render_scaffold
+    from td_release_packager.env_config_scaffold import render_scaffold
 
     return render_scaffold(
         env=env,
-        generator_label="bootstrap_properties",
+        generator_label="bootstrap_env_config",
         source_label=("tokens scanned from already-tokenised project source"),
         next_steps=[
             "1. Identify your composition roots from the imported tokens",
@@ -199,7 +199,7 @@ def render_bootstrap_properties(
 # ---------------------------------------------------------------
 
 
-def bootstrap_properties_file(
+def bootstrap_env_config_file(
     *,
     project_dir: str,
     env: str,
@@ -222,7 +222,7 @@ def bootstrap_properties_file(
 
     Returns:
         Diagnostic dict with the scan/merge results — keys:
-            ``properties_path``, ``referenced``, ``new``, ``unused``,
+            ``env_config_path``, ``referenced``, ``new``, ``unused``,
             ``preserved``, ``overwrote``.
 
     Raises:
@@ -235,15 +235,15 @@ def bootstrap_properties_file(
     referenced = discover_referenced_tokens(project_dir)
 
     output_root = Path(output_dir) if output_dir else Path(project_dir) / "config"
-    properties_dir = output_root / "env"
-    properties_path = properties_dir / f"{env}.conf"
+    env_config_dir = output_root / "env"
+    env_config_path = env_config_dir / f"{env}.conf"
 
-    existing = read_existing_values(str(properties_path))
+    existing = read_existing_values(str(env_config_path))
     overwrote = bool(existing)
 
     if overwrote and not force:
         raise FileExistsError(
-            f"Config file already exists: {properties_path}\n"
+            f"Config file already exists: {env_config_path}\n"
             "  Re-run with --force to overwrite (existing values for "
             "still-referenced tokens will be preserved)."
         )
@@ -252,12 +252,12 @@ def bootstrap_properties_file(
     unused_tokens = sorted(set(existing) - referenced)
     preserved = sorted(referenced & set(existing))
 
-    properties_dir.mkdir(parents=True, exist_ok=True)
-    rendered = render_bootstrap_properties(env, referenced, existing)
-    properties_path.write_text(rendered, encoding="utf-8")
+    env_config_dir.mkdir(parents=True, exist_ok=True)
+    rendered = render_bootstrap_env_config(env, referenced, existing)
+    env_config_path.write_text(rendered, encoding="utf-8")
 
     return {
-        "properties_path": str(properties_path),
+        "env_config_path": str(env_config_path),
         "referenced": sorted(referenced),
         "new": new_tokens,
         "unused": unused_tokens,
@@ -273,7 +273,7 @@ def bootstrap_properties_file(
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="bootstrap_properties",
+        prog="bootstrap_env_config",
         description=__doc__.split("\n\n")[0],
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -317,7 +317,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     try:
-        result = bootstrap_properties_file(
+        result = bootstrap_env_config_file(
             project_dir=args.source,
             env=args.env,
             output_dir=args.output_dir,
@@ -329,9 +329,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # Stage banner — "what just happened"
     print("=" * 64)
-    print(f"  [bootstrap-properties] — {args.env}.conf scaffold written")
+    print(f"  [bootstrap-env-config] — {args.env}.conf scaffold written")
     print("=" * 64)
-    print(f"  Config file: {result['properties_path']}")
+    print(f"  Config file: {result['env_config_path']}")
     print(f"  Tokens referenced in source: {len(result['referenced'])}")
     if result["overwrote"]:
         print(
@@ -355,11 +355,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     print("  Next Steps")
     print("=" * 64)
     print()
-    print("  You are here: bootstrap-properties complete")
+    print("  You are here: bootstrap-env-config complete")
     print("  Project state: tokens scanned, scaffold written, values empty")
     print()
     print("  → Next: edit the .conf file to populate values:")
-    print(f"          {result['properties_path']}")
+    print(f"          {result['env_config_path']}")
     print()
     print("    Open it. Section 8 (Imported) lists every token your source")
     print("    references. Move each one into sections 1-7 by cut-and-paste:")
@@ -377,7 +377,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     print("  → Then validate: ")
     print("      python -m td_release_packager scan \\")
     print(f"          --source {args.source} \\")
-    print(f"          --env-config {result['properties_path']}")
+    print(f"          --env-config {result['env_config_path']}")
     print()
     print(f"{'=' * 64}")
 

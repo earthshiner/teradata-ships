@@ -1,6 +1,6 @@
 """
-test_properties_scaffold.py — Tests for the shared ``.conf``
-scaffold renderer (``td_release_packager.properties_scaffold``).
+test_env_config_scaffold.py — Tests for the shared ``.conf``
+scaffold renderer (``td_release_packager.env_config_scaffold``).
 
 The scaffold is consumed by ``legacy_importer`` and ``decomposer``;
 both rely on the same canonical 7-section layout. These tests pin
@@ -11,7 +11,7 @@ deliberate change with one place to update.
 from __future__ import annotations
 
 
-from td_release_packager import properties_scaffold as scaffold
+from td_release_packager import env_config_scaffold as scaffold
 from td_release_packager.token_engine import read_env_config
 
 

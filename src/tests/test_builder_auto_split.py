@@ -233,7 +233,7 @@ class TestBuildPackageNoSplit:
             source_dir=str(tmp_project),
             environment="DEV",
             package_name="ships_test",
-            properties_file=str(properties),
+            env_config_file=str(properties),
             build_number=1,
             output_dir=str(tmp_path),
         )
@@ -261,7 +261,7 @@ class TestBuildPackageNoSplit:
             source_dir=str(tmp_project),
             environment="DEV",
             package_name="ships_test",
-            properties_file=str(properties),
+            env_config_file=str(properties),
             build_number=1,
             output_dir=str(tmp_path),
         )
@@ -293,7 +293,7 @@ class TestBuildPackageAutoSplit:
             source_dir=str(tmp_project),
             environment="DEV",
             package_name="ships_test",
-            properties_file=str(properties),
+            env_config_file=str(properties),
             build_number=1,
             output_dir=str(tmp_path),
         )
@@ -436,7 +436,7 @@ class TestBuildPackageAutoSplitTokenised:
             source_dir=str(tmp_project),
             environment="DEV",
             package_name="ships_test",
-            properties_file=str(properties),
+            env_config_file=str(properties),
             build_number=1,
             output_dir=str(tmp_path),
         )
@@ -496,7 +496,7 @@ class TestPrereqOrderResolvedNames:
             source_dir=str(tmp_project),
             environment="DEV",
             package_name="ships_test",
-            properties_file=str(props),
+            env_config_file=str(props),
             build_number=1,
             output_dir=str(tmp_path),
         )

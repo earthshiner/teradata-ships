@@ -9,7 +9,7 @@ Three layers exercised:
   1. ``scan_source_directory`` (the heavy-lifting function):
      aggregation by var_name, multi-syntax handling, file walk,
      ScanResult shape.
-  2. The new formatters (``scan_format_properties_file``,
+  2. The new formatters (``scan_format_env_config_file``,
      ``scan_format_report``) and the updated
      ``format_migration_sed`` (dedupe by (marker, var_name)).
   3. CLI: ``--scan-source`` end-to-end via ``main()`` -- both the
@@ -199,7 +199,7 @@ class TestFormatMigrationSedDedupByMarkerAndVarName:
 
 
 # ---------------------------------------------------------------
-# scan_format_properties_file
+# scan_format_env_config_file
 # ---------------------------------------------------------------
 
 
@@ -221,14 +221,14 @@ class TestScanFormatPropertiesFile:
                 "b.tbl": "CREATE TABLE ${UTL_T}.B (Id INT);",
             },
         )
-        out = importer.scan_format_properties_file("DEV", scan)
+        out = importer.scan_format_env_config_file("DEV", scan)
 
         # Single UTL_T= entry even though two syntaxes were detected.
         assert out.count("UTL_T=") == 1
 
     def test_value_is_empty_user_fills(self, tmp_path):
         scan = _scan_with(tmp_path, {"a.tbl": "CREATE TABLE $UTL_T.A (Id INT);"})
-        out = importer.scan_format_properties_file("DEV", scan)
+        out = importer.scan_format_env_config_file("DEV", scan)
 
         # Empty value -- "UTL_T=" with nothing after the equals.
         assert "UTL_T=\n" in out or "UTL_T=" in out.rstrip().splitlines()
@@ -241,7 +241,7 @@ class TestScanFormatPropertiesFile:
                 "b.tbl": "CREATE TABLE $UTL_T.B (Id INT);",
             },
         )
-        out = importer.scan_format_properties_file("DEV", scan)
+        out = importer.scan_format_env_config_file("DEV", scan)
 
         # The comment names the count and the sample file.
         assert "UTL_T: 2 occurrences" in out
@@ -256,7 +256,7 @@ class TestScanFormatPropertiesFile:
                 "c.tbl": "CREATE TABLE MyDb.C (D DATE &&DATE_FORMAT&&);",
             },
         )
-        out = importer.scan_format_properties_file("DEV", scan)
+        out = importer.scan_format_env_config_file("DEV", scan)
 
         # UTL_T (count=2) appears in the file BEFORE DATE_FORMAT (count=1).
         utl_pos = out.find("UTL_T=")
@@ -338,7 +338,7 @@ class TestScanSourceCLI:
         assert (out_dir / "legacy_migration.sed").exists()
         assert (out_dir / "scan_report.md").exists()
 
-    def test_properties_file_has_uncategorised_token(self, tmp_path):
+    def test_env_config_file_has_uncategorised_token(self, tmp_path):
         source = tmp_path / "source"
         source.mkdir()
         (source / "x.tbl").write_text(
