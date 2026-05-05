@@ -109,7 +109,7 @@ class TestScanRecordsValidationIssues:
             ddl_content="CREATE TABLE {{UNDEFINED}}.demo (id INT);\n",
         )
         # Properties file that does NOT define UNDEFINED
-        props = project / "config" / "properties" / "DEV.properties"
+        props = project / "config" / "properties" / "DEV.conf"
         props.parent.mkdir(parents=True)
         props.write_text("DEFINED=value\n", encoding="utf-8")
 
@@ -131,7 +131,7 @@ class TestScanRecordsValidationIssues:
             ddl_content="CREATE TABLE {{USED}}.demo (id INT);\n",
         )
         # Properties file defines an extra token never referenced in DDL
-        props = project / "config" / "properties" / "DEV.properties"
+        props = project / "config" / "properties" / "DEV.conf"
         props.parent.mkdir(parents=True)
         props.write_text("USED=v1\nUNUSED=v2\n", encoding="utf-8")
 
@@ -154,7 +154,7 @@ class TestScanRecordsValidationIssues:
 
         _cmd_scan(Namespace(
             source=str(project),
-            properties=str(project / "nonexistent.properties"),
+            properties=str(project / "nonexistent.conf"),
         ))
         capsys.readouterr()
 

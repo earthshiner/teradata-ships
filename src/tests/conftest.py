@@ -129,7 +129,7 @@ def sample_properties_file(tmp_path):
 
     Returns the path to the properties file.
     """
-    props = tmp_path / "DEV.properties"
+    props = tmp_path / "DEV.conf"
     props.write_text(
         "# DEV environment properties\n"
         "SHIPS_ENV=DEV\n"

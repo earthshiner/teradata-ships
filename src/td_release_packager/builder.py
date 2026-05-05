@@ -251,7 +251,7 @@ def build_package(
                     print(f"      -> {rel}")
                 print()
 
-            print("  Action: add these tokens to your .properties file,")
+            print("  Action: add these tokens to your .conf file,")
             print("  or update token_map.conf and re-harvest.")
 
         if unreferenced:
@@ -968,9 +968,9 @@ def _copy_payload(
                     f"  File:    {rel_file}\n"
                     f"  Token:   {{{{{token_name}}}}}\n\n"
                     f"  This token is referenced in the file but is not\n"
-                    f"  defined in the properties file.\n\n"
+                    f"  defined in the config file.\n\n"
                     f"  To fix, either:\n"
-                    f"    1. Add {token_name}=<value> to your .properties\n"
+                    f"    1. Add {token_name}=<value> to your .conf\n"
                     f"       file, or\n"
                     f"    2. Add the literal database name to your\n"
                     f"       token_map.conf and re-harvest with --force"
@@ -990,10 +990,10 @@ def _copy_payload(
                     f"  Token: {{{{{token_name}}}}}\n"
                     f"\n"
                     f"  This token is referenced in the file above but\n"
-                    f"  is not defined in your .properties file.\n"
+                    f"  is not defined in your .conf file.\n"
                     f"\n"
                     f"  To fix, either:\n"
-                    f"    1. Add the token to your .properties file:\n"
+                    f"    1. Add the token to your .conf file:\n"
                     f"       {token_name}=<value>\n"
                     f"\n"
                     f"    2. Add the literal name to your token_map.conf\n"

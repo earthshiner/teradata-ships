@@ -9,7 +9,7 @@ decomposes them against the SHIPS naming grammar:
     {ENV_PREFIX}_{SHIPS_ENV}_{INSTANCE}_{LAYER}_{SECURITY_TIER}_{KIND}
           PDE         DEV          00       MDL           0           T
 
-Produces a SHIPS .properties file with:
+Produces a SHIPS .conf file with:
 
     1. Composition roots (ENV_PREFIX, SHIPS_ENV, INSTANCE,
        SECURITY_TIER) inferred from the names.
@@ -39,9 +39,9 @@ Workflow::
         --env DEV \\
         --output-dir myproj/config
 
-    # 3. Review the generated .properties + report, refine as needed
+    # 3. Review the generated .conf + report, refine as needed
     # 4. Re-harvest with the (curated) token_map applied
-    # 5. package using the .properties
+    # 5. package using the .conf
 
 The tool auto-detects whether the input file is a token_map.conf
 (LITERAL={{TOKEN}} format) or a plain names file (one literal per
@@ -454,7 +454,7 @@ def _safe_token_name_for_outlier(literal: str) -> str:
 
 def format_properties_file(env: str, result: DecompositionResult) -> str:
     """
-    Render a SHIPS ``.properties`` file from a decomposition result.
+    Render a SHIPS ``.conf`` file from a decomposition result.
 
     Renders the canonical 7-section scaffold with sections 1
     (composition roots) and 2 (derived database names) populated
@@ -601,7 +601,7 @@ def format_decomposition_report(
         lines.append(
             "These names did not match the inferred grammar and are "
             "emitted as literal-valued fallback tokens in the "
-            ".properties file. Review each one."
+            ".conf file. Review each one."
         )
         lines.append("")
         for o in result.outliers:
@@ -636,7 +636,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--output-dir",
         default=".",
         help="Output directory (default: current). Files written under "
-        "<output-dir>/properties/<env>.properties and "
+        "<output-dir>/properties/<env>.conf and "
         "<output-dir>/decomposition_report.md.",
     )
     p.add_argument(
@@ -675,7 +675,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     properties_dir = output_dir / "properties"
     properties_dir.mkdir(parents=True, exist_ok=True)
 
-    properties_path = properties_dir / f"{args.env}.properties"
+    properties_path = properties_dir / f"{args.env}.conf"
     report_path = output_dir / "decomposition_report.md"
 
     properties_path.write_text(
@@ -711,7 +711,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if result.collisions:
         print(f"  Collisions:    {len(result.collisions)}  (see report)")
     print()
-    print(f"  Properties:    {properties_path}")
+    print(f"  Config:        {properties_path}")
     print(f"  Report:        {report_path}")
     print("=" * 64)
 

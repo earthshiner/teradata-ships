@@ -37,7 +37,7 @@ class TestProjectHasEnvProperties:
     def test_one_properties_file(self, tmp_path):
         d = tmp_path / "config" / "properties"
         d.mkdir(parents=True)
-        (d / "DEV.properties").write_text("X=1\n", encoding="utf-8")
+        (d / "DEV.conf").write_text("X=1\n", encoding="utf-8")
         assert _project_has_env_properties(str(tmp_path)) is True
 
     def test_other_files_dont_count(self, tmp_path):
@@ -64,7 +64,7 @@ class TestFlowA_GenerateTokenMap:
         if has_props:
             d = tmp_path / "config" / "properties"
             d.mkdir(parents=True)
-            (d / "DEV.properties").write_text("X=1\n", encoding="utf-8")
+            (d / "DEV.conf").write_text("X=1\n", encoding="utf-8")
 
         args = Namespace(project=str(tmp_path))
         return args
@@ -87,7 +87,7 @@ class TestFlowA_GenerateTokenMap:
         assert token_map in out
         # Step 2: bootstrap properties via decompose-names
         assert "decompose-names" in out
-        assert "Bootstrap a .properties file" in out
+        assert "Bootstrap a .conf file" in out
         # Step 3: re-harvest with --token-map
         assert "Re-harvest with the token map applied" in out
         assert "--token-map" in out
@@ -117,7 +117,7 @@ class TestFlowA_GenerateTokenMap:
 
         out = capsys.readouterr().out
         # The bootstrap step is skipped
-        assert "Bootstrap a .properties file" not in out
+        assert "Bootstrap a .conf file" not in out
         # But the rest — including the quality gates — should appear
         assert "Review the generated token map" in out
         assert "Re-harvest with the token map applied" in out
@@ -219,7 +219,7 @@ class TestFlowD_AlreadyTokenised:
 
         # Flow-D-specific guidance
         assert "bootstrap-properties" in out
-        assert "Bootstrap a .properties file from the tokens" in out
+        assert "Bootstrap a .conf file from the tokens" in out
 
         # Must NOT mention token-map activities — we're past that
         assert "Review the generated token map" not in out
@@ -237,7 +237,7 @@ class TestFlowD_AlreadyTokenised:
         validate / verify / package."""
         d = tmp_path / "config" / "properties"
         d.mkdir(parents=True)
-        (d / "DEV.properties").write_text("X=1\n", encoding="utf-8")
+        (d / "DEV.conf").write_text("X=1\n", encoding="utf-8")
 
         args = Namespace(project=str(tmp_path))
 

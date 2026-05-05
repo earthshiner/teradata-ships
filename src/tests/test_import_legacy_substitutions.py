@@ -148,7 +148,7 @@ class TestFormatPropertiesFile:
         """The generated banner names the environment."""
         subs = [importer.Substitution("$A", "A", "1", 1)]
         out = importer.format_properties_file("DEV", subs)
-        assert "DEV.properties" in out
+        assert "DEV.conf" in out
 
     def test_simple_dump(self):
         """Each substitution becomes one KEY=VALUE line."""
@@ -257,7 +257,7 @@ class TestCLI:
         )
         assert rc == 0
 
-        props_path = tmp_path / "properties" / "DEV.properties"
+        props_path = tmp_path / "properties" / "DEV.conf"
         sed_path = tmp_path / "legacy_migration.sed"
         assert props_path.exists()
         assert sed_path.exists()
@@ -360,7 +360,7 @@ class TestRealWorldRoundTrip:
         )
         assert rc == 0
 
-        props_path = tmp_path / "properties" / "DEV.properties"
+        props_path = tmp_path / "properties" / "DEV.conf"
         tokens = read_properties(str(props_path))
 
         # Sanity — both literal and SQL-type tokens survived.

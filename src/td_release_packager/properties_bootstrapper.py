@@ -1,25 +1,25 @@
 """
-properties_bootstrapper.py — Bootstrap a SHIPS ``.properties`` file
+properties_bootstrapper.py — Bootstrap a SHIPS ``.conf`` file
 from an already-tokenised project tree.
 
 Closes the third bootstrap path. The other two assume some form of
 literal substitution to start from:
 
-    - import_legacy:    legacy sed script              → .properties
-    - decomposer:       literal database names         → .properties
-    - bootstrap (here): already-tokenised source tree  → .properties
+    - import_legacy:    legacy sed script              → .conf
+    - decomposer:       literal database names         → .conf
+    - bootstrap (here): already-tokenised source tree  → .conf
 
 When the harvested DDL already uses ``{{TOKEN}}`` references — the
 end-state both other bootstrappers work towards — there are no
 literals to convert and no substitution map to derive from. What's
-missing is a ``.properties`` file with values for the tokens the
+missing is a ``.conf`` file with values for the tokens the
 source actually references.
 
 This module:
     1. Scans the project payload for ``{{TOKEN}}`` references.
-    2. Optionally reads an existing ``.properties`` file at the
+    2. Optionally reads an existing ``.conf`` file at the
        target path and preserves any values already set.
-    3. Renders a 7-section ``.properties`` scaffold via
+    3. Renders a 7-section ``.conf`` scaffold via
        ``properties_scaffold.render_scaffold`` with every referenced
        token parked in section 8 ("Imported (UNCATEGORISED)") for
        the user to re-section by cut-and-paste.
@@ -77,7 +77,7 @@ def discover_referenced_tokens(project_dir: str) -> Set[str]:
 
 def read_existing_values(properties_path: str) -> Dict[str, str]:
     """
-    Read an existing ``.properties`` file at ``properties_path`` and
+    Read an existing ``.conf`` file at ``properties_path`` and
     return ``{name: value}``. Returns an empty dict if the file does
     not exist. Never raises on a missing file — it's the expected
     case for the first bootstrap run.
@@ -153,7 +153,7 @@ def render_bootstrap_properties(
     referenced: Set[str],
     existing: Dict[str, str],
 ) -> str:
-    """Render the full 7-section .properties scaffold for the
+    """Render the full 7-section .conf scaffold for the
     bootstrap output."""
     from td_release_packager.properties_scaffold import render_scaffold
 
@@ -183,7 +183,7 @@ def render_bootstrap_properties(
             "",
             "4. Validate the result:",
             "     python -m td_release_packager scan --source <project> \\",
-            "         --properties config/properties/{env}.properties".format(env=env),
+            "         --properties config/properties/{env}.conf".format(env=env),
             "",
             "5. Delete the Imported section once empty.",
         ],
@@ -191,7 +191,7 @@ def render_bootstrap_properties(
         final_section_title="Imported (UNCATEGORISED)",
         final_section_purpose=[
             "Every {{TOKEN}} discovered in the project's tokenised",
-            "DDL, with its current value (if a previous .properties",
+            "DDL, with its current value (if a previous .conf",
             "file was found) or empty if none. Move each entry into",
             "the appropriate section above (1-7) and delete this",
             "section when empty.",
@@ -214,13 +214,13 @@ def bootstrap_properties_file(
 ) -> Dict[str, object]:
     """
     Run the full bootstrap pipeline and write the resulting
-    ``.properties`` file.
+    ``.conf`` file.
 
     Args:
         project_dir: Path to the SHIPS project (with payload/).
         env:         Target environment name (DEV / TST / PRD).
         output_dir:  Directory under which to write
-                     ``properties/<env>.properties``. Defaults to
+                     ``properties/<env>.conf``. Defaults to
                      ``<project_dir>/config``.
         force:       Overwrite an existing properties file at the
                      target path. Without this flag, the tool
@@ -242,14 +242,14 @@ def bootstrap_properties_file(
 
     output_root = Path(output_dir) if output_dir else Path(project_dir) / "config"
     properties_dir = output_root / "properties"
-    properties_path = properties_dir / f"{env}.properties"
+    properties_path = properties_dir / f"{env}.conf"
 
     existing = read_existing_values(str(properties_path))
     overwrote = bool(existing)
 
     if overwrote and not force:
         raise FileExistsError(
-            f"Properties file already exists: {properties_path}\n"
+            f"Config file already exists: {properties_path}\n"
             "  Re-run with --force to overwrite (existing values for "
             "still-referenced tokens will be preserved)."
         )
@@ -296,14 +296,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--output-dir",
         default=None,
-        help="Output directory; the .properties file is written under "
-        "<output-dir>/properties/<env>.properties. Defaults to "
+        help="Output directory; the .conf file is written under "
+        "<output-dir>/properties/<env>.conf. Defaults to "
         "<source>/config.",
     )
     p.add_argument(
         "--force",
         action="store_true",
-        help="Overwrite an existing properties file at the target "
+        help="Overwrite an existing .conf file at the target "
         "path. Without this, the tool refuses to clobber.",
     )
     p.add_argument(
@@ -335,7 +335,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # Stage banner — "what just happened"
     print("=" * 64)
-    print(f"  [bootstrap-properties] — {args.env}.properties scaffold written")
+    print(f"  [bootstrap-properties] — {args.env}.conf scaffold written")
     print("=" * 64)
     print(f"  Properties file: {result['properties_path']}")
     print(f"  Tokens referenced in source: {len(result['referenced'])}")
@@ -364,7 +364,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     print("  You are here: bootstrap-properties complete")
     print(f"  Project state: tokens scanned, scaffold written, values empty")
     print()
-    print("  → Next: edit the .properties file to populate values:")
+    print("  → Next: edit the .conf file to populate values:")
     print(f"          {result['properties_path']}")
     print()
     print("    Open it. Section 8 (Imported) lists every token your source")
