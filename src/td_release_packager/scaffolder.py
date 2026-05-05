@@ -261,9 +261,7 @@ def _generate_properties(
             f.write("# Usage: python -m td_release_packager package \\\n")
             f.write(f"#            --source . --env {env_upper} \\\n")
             f.write(f"#            --name {project_name} \\\n")
-            f.write(
-                f"#            --properties config/properties/{env_upper}.conf\n"
-            )
+            f.write(f"#            --properties config/properties/{env_upper}.conf\n")
             f.write("#\n\n")
 
             # -- Section 1: Environment metadata --

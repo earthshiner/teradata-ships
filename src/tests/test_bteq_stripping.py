@@ -30,7 +30,6 @@ from td_release_packager.ingest import _strip_bteq_commands, ingest_directory
 
 
 class TestStripBteqCommands:
-
     def test_if_errorcode_stripped(self):
         content = (
             ".IF ERRORCODE <> 0 THEN .GOTO ERR\n\n"
@@ -67,7 +66,9 @@ class TestStripBteqCommands:
         assert cleaned == sql
 
     def test_leading_whitespace_before_dot_is_stripped(self):
-        content = "  .IF ERRORCODE <> 0 THEN .GOTO ERR\nCREATE USER X FROM DBC AS PERM=0;\n"
+        content = (
+            "  .IF ERRORCODE <> 0 THEN .GOTO ERR\nCREATE USER X FROM DBC AS PERM=0;\n"
+        )
         cleaned, n = _strip_bteq_commands(content)
         assert n == 1
         assert ".IF" not in cleaned
@@ -83,10 +84,7 @@ class TestStripBteqCommands:
 
     def test_dot_in_perm_expression_not_stripped(self):
         """``AS PERM=15e6/2*(HASHAMP()+1)`` contains no leading dot."""
-        content = (
-            "CREATE DATABASE MyDB FROM DBC\n"
-            "AS PERM=15e6/2*(HASHAMP()+1)\n;\n"
-        )
+        content = "CREATE DATABASE MyDB FROM DBC\nAS PERM=15e6/2*(HASHAMP()+1)\n;\n"
         cleaned, n = _strip_bteq_commands(content)
         assert n == 0
 
@@ -151,7 +149,6 @@ def _make_project(tmp_path: Path) -> Path:
 
 
 class TestIngestBteqStripping:
-
     def test_database_file_stripped(self, tmp_path):
         project = _make_project(tmp_path)
         source = tmp_path / "source"
@@ -167,13 +164,12 @@ class TestIngestBteqStripping:
         # One file placed in the payload.
         assert result.classified == 1
         # Warning emitted naming the stripped lines.
-        assert any(
-            ".IF" in w or "BTEQ" in w
-            for w in result.classification_warnings
-        )
+        assert any(".IF" in w or "BTEQ" in w for w in result.classification_warnings)
         # Payload file contains only SQL.
         db_files = list(
-            (project / "payload" / "database" / "pre-requisites" / "databases").glob("*.db")
+            (project / "payload" / "database" / "pre-requisites" / "databases").glob(
+                "*.db"
+            )
         )
         assert len(db_files) == 1
         content = db_files[0].read_text(encoding="utf-8")
@@ -193,7 +189,9 @@ class TestIngestBteqStripping:
         result = ingest_directory(str(source), str(project), detect_tokens=False)
 
         usr_files = list(
-            (project / "payload" / "database" / "pre-requisites" / "users").glob("*.usr")
+            (project / "payload" / "database" / "pre-requisites" / "users").glob(
+                "*.usr"
+            )
         )
         assert len(usr_files) == 1
         content = usr_files[0].read_text(encoding="utf-8")
@@ -219,9 +217,7 @@ class TestIngestBteqStripping:
         result = ingest_directory(str(source), str(project), detect_tokens=False)
 
         assert result.classified == 1
-        bteq_warnings = [
-            w for w in result.classification_warnings if "BTEQ" in w
-        ]
+        bteq_warnings = [w for w in result.classification_warnings if "BTEQ" in w]
         assert bteq_warnings == []
 
     def test_clean_database_file_no_warning(self, tmp_path):
@@ -237,7 +233,5 @@ class TestIngestBteqStripping:
 
         result = ingest_directory(str(source), str(project), detect_tokens=False)
 
-        bteq_warnings = [
-            w for w in result.classification_warnings if "BTEQ" in w
-        ]
+        bteq_warnings = [w for w in result.classification_warnings if "BTEQ" in w]
         assert bteq_warnings == []

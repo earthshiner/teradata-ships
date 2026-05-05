@@ -38,7 +38,6 @@ from td_release_packager.ingest import (
 
 
 class TestExtractPrereqParent:
-
     def test_create_database_from(self):
         ddl = "CREATE DATABASE MyDB FROM ParentDB AS PERM=0;"
         result = _extract_prereq_parent(ddl)
@@ -94,7 +93,6 @@ def _make_prereq_dir(tmp_path: Path) -> Path:
 
 
 class TestEmitPrereqOrder:
-
     def test_simple_parent_child_ordering(self, tmp_path):
         """Child must appear AFTER parent in the ordered list."""
         prereq = _make_prereq_dir(tmp_path)
@@ -131,9 +129,11 @@ class TestEmitPrereqOrder:
 
         r = _emit_prereq_order(str(prereq))
 
-        assert r.ordered.index("databases/A_GRANDPARENT.db") \
-             < r.ordered.index("databases/B_PARENT.db") \
-             < r.ordered.index("databases/C_CHILD.db")
+        assert (
+            r.ordered.index("databases/A_GRANDPARENT.db")
+            < r.ordered.index("databases/B_PARENT.db")
+            < r.ordered.index("databases/C_CHILD.db")
+        )
 
     def test_user_dependent_on_database(self, tmp_path):
         """A user whose parent database is in the same package: DB first."""
@@ -263,7 +263,6 @@ def _make_project(tmp_path: Path) -> Path:
 
 
 class TestIngestProducesPrereqOrder:
-
     def test_order_txt_written_after_harvest(self, tmp_path):
         """After harvesting a DATABASE file, _order.txt appears."""
         project = _make_project(tmp_path)
@@ -280,10 +279,7 @@ class TestIngestProducesPrereqOrder:
 
         ingest_directory(str(source), str(project), detect_tokens=False)
 
-        order_file = (
-            project
-            / "payload" / "database" / "pre-requisites" / "_order.txt"
-        )
+        order_file = project / "payload" / "database" / "pre-requisites" / "_order.txt"
         assert order_file.exists()
 
     def test_parent_before_child_in_order_txt(self, tmp_path):
@@ -303,12 +299,10 @@ class TestIngestProducesPrereqOrder:
 
         ingest_directory(str(source), str(project), detect_tokens=False)
 
-        order_file = (
-            project
-            / "payload" / "database" / "pre-requisites" / "_order.txt"
-        )
+        order_file = project / "payload" / "database" / "pre-requisites" / "_order.txt"
         lines = [
-            l for l in order_file.read_text(encoding="utf-8").splitlines()
+            l
+            for l in order_file.read_text(encoding="utf-8").splitlines()
             if not l.startswith("#") and l.strip()
         ]
         parent_idx = next(i for i, l in enumerate(lines) if "P_PARENT" in l)
@@ -328,10 +322,7 @@ class TestIngestProducesPrereqOrder:
 
         ingest_directory(str(source), str(project), detect_tokens=False)
 
-        order_file = (
-            project
-            / "payload" / "database" / "pre-requisites" / "_order.txt"
-        )
+        order_file = project / "payload" / "database" / "pre-requisites" / "_order.txt"
         assert not order_file.exists()
 
     def test_unresolvable_file_produces_harvest_warning(self, tmp_path):
@@ -351,8 +342,7 @@ class TestIngestProducesPrereqOrder:
         result = ingest_directory(str(source), str(project), detect_tokens=False)
 
         unresolvable_warnings = [
-            w for w in result.classification_warnings
-            if "UNRESOLVED" in w
+            w for w in result.classification_warnings if "UNRESOLVED" in w
         ]
         assert len(unresolvable_warnings) == 1
         assert "Mystery.db" in unresolvable_warnings[0]

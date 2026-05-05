@@ -15,7 +15,6 @@ Three layers exercised:
 from __future__ import annotations
 
 import textwrap
-from pathlib import Path
 
 from td_release_packager.discovery import (
     DEFAULT_HARVEST_EXTENSIONS,

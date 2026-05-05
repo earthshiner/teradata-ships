@@ -740,9 +740,7 @@ def _check_jar_alias_coverage(
                 )
             )
         else:
-            installed_summary = (
-                ", ".join(sorted(installed)) if installed else "(none)"
-            )
+            installed_summary = ", ".join(sorted(installed)) if installed else "(none)"
             checks.append(
                 PreflightCheck(
                     check_name="jar_alias_coverage",

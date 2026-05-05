@@ -10,7 +10,6 @@ deliberate change with one place to update.
 
 from __future__ import annotations
 
-import pytest
 
 from td_release_packager import properties_scaffold as scaffold
 from td_release_packager.token_engine import read_properties

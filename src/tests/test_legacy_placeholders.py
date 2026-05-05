@@ -203,16 +203,12 @@ class TestFormatLegacyPlaceholdersReport:
 
     def test_project_dir_hint_appears_in_output_dir_flag(self):
         findings = [_make_finding()]
-        out = format_legacy_placeholders_report(
-            findings, project_dir_hint="myproj"
-        )
+        out = format_legacy_placeholders_report(findings, project_dir_hint="myproj")
         assert "myproj/config" in out
 
     def test_relativises_paths_against_source_dir(self):
         findings = [_make_finding(file_path="/src/sub/x.tbl")]
-        out = format_legacy_placeholders_report(
-            findings, source_dir="/src"
-        )
+        out = format_legacy_placeholders_report(findings, source_dir="/src")
         # Either Windows or Unix separator works; just check the
         # absolute root has been stripped.
         assert "/src/sub/x.tbl" not in out
@@ -220,9 +216,7 @@ class TestFormatLegacyPlaceholdersReport:
 
     def test_file_sample_truncated(self):
         # 8 distinct files; banner should show 5 + "+3 more files".
-        findings = [
-            _make_finding(file_path=f"/src/file_{i}.tbl") for i in range(8)
-        ]
+        findings = [_make_finding(file_path=f"/src/file_{i}.tbl") for i in range(8)]
         out = format_legacy_placeholders_report(findings)
         assert "showing 5 of 8" in out
         assert "+3 more files" in out
@@ -230,8 +224,7 @@ class TestFormatLegacyPlaceholdersReport:
     def test_var_name_sample_truncated_per_syntax(self):
         # 10 distinct $VAR names — sample should top-N (currently 6).
         findings = [
-            _make_finding(syntax="dollar", var_name=f"VAR_{i}")
-            for i in range(10)
+            _make_finding(syntax="dollar", var_name=f"VAR_{i}") for i in range(10)
         ]
         out = format_legacy_placeholders_report(findings)
         assert "+4 more" in out
@@ -266,8 +259,7 @@ class TestIngestPopulatesLegacyPlaceholders:
         source = tmp_path / "source"
         source.mkdir()
         (source / "BKEY_Domain.tbl").write_text(
-            "CREATE MULTISET TABLE $UTL_T.BKEY_Domain (Id INT) "
-            "PRIMARY INDEX (Id);",
+            "CREATE MULTISET TABLE $UTL_T.BKEY_Domain (Id INT) PRIMARY INDEX (Id);",
             encoding="utf-8",
         )
 
@@ -290,8 +282,7 @@ class TestIngestPopulatesLegacyPlaceholders:
         source = tmp_path / "source"
         source.mkdir()
         (source / "MyTable.tbl").write_text(
-            "CREATE MULTISET TABLE {{T_DB}}.MyTable (Id INT) "
-            "PRIMARY INDEX (Id);",
+            "CREATE MULTISET TABLE {{T_DB}}.MyTable (Id INT) PRIMARY INDEX (Id);",
             encoding="utf-8",
         )
 

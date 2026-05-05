@@ -11,9 +11,7 @@ wrong scenario.
 from __future__ import annotations
 
 from argparse import Namespace
-from pathlib import Path
 
-import pytest
 
 from td_release_packager.cli import (
     _print_harvest_next_steps,

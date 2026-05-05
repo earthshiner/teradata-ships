@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from td_release_packager import binary_harvester as bh
 
@@ -176,9 +175,7 @@ class TestRewriteContent:
         assert "./foo.jar" in out
 
     def test_multiple_replacements(self):
-        content = (
-            "EXTERNAL NAME 'CS!a!../C/foo.c!CH!a!../C/foo.h';"
-        )
+        content = "EXTERNAL NAME 'CS!a!../C/foo.c!CH!a!../C/foo.h';"
         deps = [
             self._dep("../C/foo.c", "./foo.c"),
             self._dep("../C/foo.h", "./foo.h"),
@@ -230,9 +227,7 @@ class TestHarvestBinariesEndToEnd:
         source_script = scripts_dir / "install.ddl"
         source_script.write_text("placeholder", encoding="utf-8")
 
-        jar = _write_bin(
-            tmp_path / "JAVA" / "JAR" / "ExecLargeSqlJ.jar", b"jar-bytes"
-        )
+        jar = _write_bin(tmp_path / "JAVA" / "JAR" / "ExecLargeSqlJ.jar", b"jar-bytes")
 
         content = (
             "CALL SQLJ.INSTALL_JAR("
