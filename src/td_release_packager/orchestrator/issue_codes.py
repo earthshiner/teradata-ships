@@ -91,7 +91,7 @@ ISSUE_CODES: Dict[str, str] = {
         "missing."
     ),
     PROPERTIES_NOT_FOUND: (
-        "The --properties path was supplied but the file does not "
+        "The --env-config path was supplied but the file does not "
         "exist on disc. Check the path and re-run."
     ),
     INSPECT_TOKEN_MALFORMED: (

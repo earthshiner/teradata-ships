@@ -88,10 +88,10 @@ def read_existing_values(properties_path: str) -> Dict[str, str]:
     """
     if not os.path.isfile(properties_path):
         return {}
-    from td_release_packager.token_engine import read_properties
+    from td_release_packager.token_engine import read_env_config
 
     try:
-        return dict(read_properties(properties_path))
+        return dict(read_env_config(properties_path))
     except Exception as e:  # noqa: BLE001
         logger.warning(
             "Could not parse existing properties at %s (%s) — treating as empty.",
@@ -177,7 +177,7 @@ def render_bootstrap_properties(
             "",
             "4. Validate the result:",
             "     python -m td_release_packager scan --source <project> \\",
-            "         --properties config/properties/{env}.conf".format(env=env),
+            "         --env-config config/env/{env}.conf".format(env=env),
             "",
             "5. Delete the Imported section once empty.",
         ],
@@ -235,7 +235,7 @@ def bootstrap_properties_file(
     referenced = discover_referenced_tokens(project_dir)
 
     output_root = Path(output_dir) if output_dir else Path(project_dir) / "config"
-    properties_dir = output_root / "properties"
+    properties_dir = output_root / "env"
     properties_path = properties_dir / f"{env}.conf"
 
     existing = read_existing_values(str(properties_path))
@@ -377,7 +377,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     print("  → Then validate: ")
     print("      python -m td_release_packager scan \\")
     print(f"          --source {args.source} \\")
-    print(f"          --properties {result['properties_path']}")
+    print(f"          --env-config {result['properties_path']}")
     print()
     print(f"{'=' * 64}")
 

@@ -20,7 +20,7 @@ from __future__ import annotations
 import pytest
 
 from td_release_packager import decomposer as decomp
-from td_release_packager.token_engine import read_properties
+from td_release_packager.token_engine import read_env_config
 
 
 # ---------------------------------------------------------------
@@ -367,7 +367,7 @@ class TestCLI:
             [str(names_file), "--env", "DEV", "--output-dir", str(tmp_path)]
         )
         assert rc == 0
-        assert (tmp_path / "properties" / "DEV.conf").exists()
+        assert (tmp_path / "env" / "DEV.conf").exists()
         assert (tmp_path / "decomposition_report.md").exists()
 
     def test_missing_input_returns_nonzero(self, tmp_path, capsys):
@@ -473,8 +473,8 @@ class TestRealisticGCFRRoundTrip:
         )
         assert rc == 0
 
-        props_path = tmp_path / "properties" / "DEV.conf"
-        tokens = read_properties(str(props_path))
+        props_path = tmp_path / "env" / "DEV.conf"
+        tokens = read_env_config(str(props_path))
 
         # Composition roots survived
         assert tokens["ENV_PREFIX"] == "PDE"

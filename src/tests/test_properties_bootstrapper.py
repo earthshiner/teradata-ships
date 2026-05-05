@@ -8,7 +8,7 @@ Covers:
     3. Section-8 emission with sorted ordering
     4. CLI: --force gating, --output-dir handling, error paths
     5. Integration: scaffold output round-trips through the
-       SHIPS token engine read_properties()
+       SHIPS token engine read_env_config()
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 from td_release_packager import properties_bootstrapper as boot
-from td_release_packager.token_engine import read_properties
+from td_release_packager.token_engine import read_env_config
 
 
 def _make_tokenised_project(tmp_path: Path, ddl_files: dict) -> Path:
@@ -73,10 +73,10 @@ class TestDiscoverReferencedTokens:
 
 class TestReadExistingValues:
     def test_missing_file_returns_empty(self, tmp_path):
-        assert boot.read_existing_values(str(tmp_path / "no.properties")) == {}
+        assert boot.read_existing_values(str(tmp_path / "no.conf")) == {}
 
     def test_reads_simple_kv_pairs(self, tmp_path):
-        f = tmp_path / "p.properties"
+        f = tmp_path / "p.conf"
         f.write_text("FOO=bar\nBAZ=qux\n", encoding="utf-8")
         result = boot.read_existing_values(str(f))
         assert result == {"FOO": "bar", "BAZ": "qux"}
@@ -165,7 +165,7 @@ class TestBootstrapPropertiesFile:
         )
         # Manually pre-populate a value
         config_dir = project / "config"
-        props_dir = config_dir / "properties"
+        props_dir = config_dir / "env"
         props_dir.mkdir(parents=True)
         props_path = props_dir / "DEV.conf"
         props_path.write_text("BASE_T=existing_value\n", encoding="utf-8")
@@ -188,7 +188,7 @@ class TestBootstrapPropertiesFile:
             {"a.tbl": "CREATE TABLE {{NEW_TOKEN}}.a (id INT);\n"},
         )
         config_dir = project / "config"
-        props_dir = config_dir / "properties"
+        props_dir = config_dir / "env"
         props_dir.mkdir(parents=True)
         (props_dir / "DEV.conf").write_text(
             "OLD_TOKEN=v1\nNEW_TOKEN=v2\n", encoding="utf-8"
@@ -293,7 +293,7 @@ class TestRoundTrip:
         )
 
         # The file is parseable. Tokens have empty values.
-        tokens = read_properties(result["properties_path"])
+        tokens = read_env_config(result["properties_path"])
         assert tokens.get("BASE_T") == ""
         assert tokens.get("GCFR_T") == ""
 

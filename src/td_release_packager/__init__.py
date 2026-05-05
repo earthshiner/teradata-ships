@@ -17,7 +17,7 @@ from td_release_packager.builder import build_package
 from td_release_packager.scaffolder import scaffold_project
 from td_release_packager.build_counter import next_build_number, read_build_number
 from td_release_packager.token_engine import (
-    read_properties,
+    read_env_config,
     substitute_tokens,
     validate_tokens,
 )
@@ -36,7 +36,7 @@ __all__ = [
     "next_build_number",
     "read_build_number",
     # token_engine
-    "read_properties",
+    "read_env_config",
     "substitute_tokens",
     "validate_tokens",
     # models
