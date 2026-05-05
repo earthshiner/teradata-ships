@@ -9,15 +9,15 @@ Commands:
     scan              Scan source files and report all tokens found.
     analyze           Analyse DDL dependencies, generate waves, export graph.
     import-legacy     Import a pre-SHIPS sed substitution script and
-                      emit a .properties file plus a migration sed.
+                      emit a .conf file plus a migration sed.
     migrate-source    Apply a legacy_migration.sed to a source tree
                       (Windows-safe; no sed binary required).
     decompose-names   Infer composition roots from literal database
-                      names and emit a cascade-form .properties file.
+                      names and emit a cascade-form .conf file.
 
 Usage:
     python -m td_release_packager scaffold --name MortgagePlatform --output /projects
-    python -m td_release_packager build --source . --env DEV --name create_objects --properties config/properties/DEV.properties
+    python -m td_release_packager build --source . --env DEV --name create_objects --properties config/properties/DEV.conf
     python -m td_release_packager inspect --source . --fix-grants
     python -m td_release_packager scan --source .
     python -m td_release_packager analyze --source . --graph ./output/
@@ -365,13 +365,13 @@ def _stage_recording(project_dir: str, stage_name: str):
 
 def _project_has_env_properties(project_dir: str) -> bool:
     """True if ``<project>/config/properties/`` contains any
-    ``*.properties`` file. Used to pick between the 'bootstrap'
+    ``*.conf`` file. Used to pick between the 'bootstrap'
     and 'verify' wording in the harvest banner."""
     props_dir = os.path.join(project_dir, "config", "properties")
     if not os.path.isdir(props_dir):
         return False
     return any(
-        f.endswith(".properties") for f in os.listdir(props_dir)
+        f.endswith(".conf") for f in os.listdir(props_dir)
     )
 
 
@@ -429,7 +429,7 @@ def _print_harvest_next_steps(
     print()
     print("  You are here:  [H] Harvest complete")
     if already_tokenised:
-        state = "source already tokenised; .properties not yet defined"
+        state = "source already tokenised; .conf not yet defined"
     elif generated_token_map_path:
         state = "literals scanned; token map written; substitutions NOT applied"
     elif substitutions_applied:
@@ -445,7 +445,7 @@ def _print_harvest_next_steps(
     # 'inspect' is part of the canonical S-H-I-P-S workflow;
     # 'analyze' produces dependency waves for parallel deploy
     # (optional but recommended); 'scan' catches {{TOKEN}}
-    # references that have no value in the .properties file.
+    # references that have no value in the .conf file.
     def _quality_gates_step(num: int) -> str:
         return (
             f"{num}. Validate the harvested DDL before packaging:\n"
@@ -459,7 +459,7 @@ def _print_harvest_next_steps(
             f"\n"
             f"     python -m td_release_packager scan \\\n"
             f"         --source {project} \\\n"
-            f"         --properties config/properties/DEV.properties\n"
+            f"         --properties config/properties/DEV.conf\n"
             f"\n"
             f"   inspect lints the DDL and validates grants;\n"
             f"   analyze produces dependency waves for parallel deploy;\n"
@@ -485,7 +485,7 @@ def _print_harvest_next_steps(
             f"\n"
             f"     python -m td_release_packager package \\\n"
             f"         --source {project} --env DEV --name <name> \\\n"
-            f"         --properties config/properties/DEV.properties \\\n"
+            f"         --properties config/properties/DEV.conf \\\n"
             f"         --output releases/"
         )
 
@@ -500,19 +500,19 @@ def _print_harvest_next_steps(
         ]
         if not has_props:
             steps.append(
-                f"1. Bootstrap a .properties file from the tokens the\n"
+                f"1. Bootstrap a .conf file from the tokens the\n"
                 f"   source already references:\n"
                 f"\n"
                 f"{bootstrap_cmd_parts[0]}\n"
                 f"\n"
-                f"   Output: a 7-section .properties scaffold under\n"
-                f"   {project}\\config\\properties\\DEV.properties\n"
+                f"   Output: a 7-section .conf scaffold under\n"
+                f"   {project}\\config\\properties\\DEV.conf\n"
                 f"   with every {{{{TOKEN}}}} parked in section 8\n"
                 f"   for you to re-section by cut-and-paste."
             )
         else:
             steps.append(
-                f"1. (Optional) Refresh the existing .properties scaffold\n"
+                f"1. (Optional) Refresh the existing .conf scaffold\n"
                 f"   to pick up any newly-referenced tokens:\n"
                 f"\n"
                 f"{bootstrap_cmd_parts[0]} --force\n"
@@ -537,15 +537,15 @@ def _print_harvest_next_steps(
         )
         if not has_props:
             steps.append(
-                f"2. Bootstrap a .properties file from the token map:\n"
+                f"2. Bootstrap a .conf file from the token map:\n"
                 f"\n"
                 f"     python -m td_release_packager decompose-names \\\n"
                 f"         {generated_token_map_path} \\\n"
                 f"         --env DEV \\\n"
                 f"         --output-dir {project}\\config\n"
                 f"\n"
-                f"   Output: a 7-section .properties scaffold under\n"
-                f"   {project}\\config\\properties\\DEV.properties\n"
+                f"   Output: a 7-section .conf scaffold under\n"
+                f"   {project}\\config\\properties\\DEV.conf\n"
                 f"   plus a decomposition_report.md with confidence\n"
                 f"   ratings and outliers."
             )
@@ -604,7 +604,7 @@ def _cmd_import_legacy(args):
     ``--script`` consumes an existing sed substitution script;
     ``--scan-source`` walks a source DDL tree and auto-discovers
     placeholders. Either resolves into the same shape of artefacts
-    (``.properties`` + ``legacy_migration.sed``) -- the latter mode
+    (``.conf`` + ``legacy_migration.sed``) -- the latter mode
     additionally writes ``scan_report.md``.
     """
     from td_release_packager.legacy_importer import main as importer_main
@@ -762,7 +762,7 @@ def _cmd_scaffold(args):
             print(
                 f"                    --source {project_dir} --env DEV --name {args.name} \\"
             )
-            print("                    --properties config/properties/DEV.properties")
+            print("                    --properties config/properties/DEV.conf")
             print("    [S] Ship      python deploy.py --host <host> --user <user>")
 
         print(f"{'=' * 64}\n")
@@ -917,7 +917,7 @@ def _cmd_ingest(args):
                 "\n  ✓ No hardcoded database names detected.\n"
                 "    The source DDL appears to be already tokenised — you're at\n"
                 "    the end-state most projects have to work toward. Skip the\n"
-                "    token map and go straight to .properties bootstrap below."
+                "    token map and go straight to .conf bootstrap below."
             )
 
         elif result.token_candidates and not apply_tokens:
@@ -1811,11 +1811,11 @@ def _cmd_scan(args):
                     stage.set_status("warning")
 
             except FileNotFoundError:
-                print(f"\n  ⚠ Properties file not found: {args.properties}")
+                print(f"\n  ⚠ Config file not found: {args.properties}")
                 stage.add_issue(
                     "error",
                     issue_codes.PROPERTIES_NOT_FOUND,
-                    f"Properties file not found: {args.properties}",
+                    f"Config file not found: {args.properties}",
                 )
 
         print()
@@ -2129,7 +2129,7 @@ def _build_parser():
         "--name", required=True, help="Package name (e.g. 'create_objects')."
     )
     bp.add_argument(
-        "--properties", required=True, help="Path to environment .properties file."
+        "--properties", required=True, help="Path to environment .conf file."
     )
     bp.add_argument(
         "--build-number",
@@ -2218,7 +2218,7 @@ def _build_parser():
         "--script consumes an existing sed substitution script "
         "(s/$VAR/value/g rules); --scan-source walks a source DDL "
         "tree and auto-discovers $VAR / ${VAR} / &&VAR&& "
-        "placeholders. Both modes emit a .properties file (token "
+        "placeholders. Both modes emit a .conf file (token "
         "values) and a sed migration script (legacy markers → "
         "{{TOKEN}}). --scan-source additionally writes "
         "scan_report.md, an audit detail of every discovered token.",
@@ -2237,7 +2237,7 @@ def _build_parser():
         help="Walk a source DDL directory and auto-discover non-SHIPS "
         "placeholders ($VAR, ${VAR}, &&VAR&&). Use this when the "
         "project has placeholders embedded in source but no sed "
-        "file to point at -- the .properties values come out empty "
+        "file to point at -- the .conf values come out empty "
         "for you to fill in, and the migration sed converts every "
         "discovered marker to its {{TOKEN}} form. NOTE: expects a "
         "DIRECTORY (the root of your source DDL), not a single file.",
@@ -2257,7 +2257,7 @@ def _build_parser():
         "--output-dir",
         default=".",
         help="Output directory (default: current). Files written under "
-        "<output-dir>/properties/<env>.properties and "
+        "<output-dir>/properties/<env>.conf and "
         "<output-dir>/legacy_migration.sed. In --scan-source mode an "
         "additional <output-dir>/scan_report.md is also written.",
     )
@@ -2306,12 +2306,12 @@ def _build_parser():
     dn = subs.add_parser(
         "decompose-names",
         help="Decompose literal database names against the SHIPS "
-        "naming grammar and emit a cascade-form .properties file.",
+        "naming grammar and emit a cascade-form .conf file.",
         description="Read a list of literal Teradata database names "
         "(from a token_map.conf or a plain names file) and decompose "
         "them against the SHIPS grammar "
         "{ENV_PREFIX}_{SHIPS_ENV}_{INSTANCE}_{LAYER}_{SECURITY_TIER}_{KIND}. "
-        "Emits a sectioned .properties file with composition roots "
+        "Emits a sectioned .conf file with composition roots "
         "and derived names in cascade form, plus a markdown report.",
     )
     dn.add_argument(
@@ -2328,22 +2328,22 @@ def _build_parser():
         "--output-dir",
         default=".",
         help="Output directory (default: current). Files written under "
-        "<output-dir>/properties/<env>.properties and "
+        "<output-dir>/properties/<env>.conf and "
         "<output-dir>/decomposition_report.md.",
     )
 
     # -- bootstrap-properties --
     bp = subs.add_parser(
         "bootstrap-properties",
-        help="Generate a .properties scaffold for an already-tokenised "
+        help="Generate a .conf scaffold for an already-tokenised "
         "project. Use when the source already references "
-        "{{TOKEN}} but no .properties file exists yet.",
+        "{{TOKEN}} but no .conf file exists yet.",
         description="Scan an already-tokenised SHIPS project for "
-        "{{TOKEN}} references and emit a 7-section .properties "
+        "{{TOKEN}} references and emit a 7-section .conf "
         "scaffold with every referenced token parked in section 8 "
         "for the user to re-section. Closes the third bootstrap "
         "path: when there's nothing to convert (no literals, no "
-        "legacy script) you just need a starting .properties skeleton.",
+        "legacy script) you just need a starting .conf skeleton.",
     )
     bp.add_argument(
         "--source",
@@ -2358,14 +2358,14 @@ def _build_parser():
     bp.add_argument(
         "--output-dir",
         default=None,
-        help="Output directory; .properties written under "
-        "<output-dir>/properties/<env>.properties. Defaults to "
+        help="Output directory; .conf written under "
+        "<output-dir>/properties/<env>.conf. Defaults to "
         "<source>/config.",
     )
     bp.add_argument(
         "--force",
         action="store_true",
-        help="Overwrite an existing .properties file at the target. "
+        help="Overwrite an existing .conf file at the target. "
         "Without this, the tool refuses to clobber.",
     )
 

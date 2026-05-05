@@ -5,7 +5,7 @@ Reads a sed substitution script (the kind commonly used by pre-SHIPS
 deployment frameworks) and produces two artefacts that bootstrap a
 SHIPS project from chaos:
 
-    1. <env>.properties — token name → value, ready for use at
+    1. <env>.conf — token name → value, ready for use at
        ``package`` time. Drop this in ``config/properties/`` next to
        your DEV/TST/PRD files.
 
@@ -36,7 +36,7 @@ Usage::
         --output-dir ./MyProject/config
 
     # Files written:
-    #   ./MyProject/config/properties/DEV.properties
+    #   ./MyProject/config/properties/DEV.conf
     #   ./MyProject/config/legacy_migration.sed
 
 Author: Paul / Teradata Field Engineering
@@ -70,7 +70,7 @@ class Substitution:
     from the sed replacement; in ``--scan-source`` mode the value
     is empty (the user populates it after import) and the
     ``line_number`` records the first occurrence in the source
-    tree so the .properties comment can show a sample location.
+    tree so the .conf comment can show a sample location.
     """
 
     original_marker: str  # e.g. "$ADMIN_USER" or "&&DATE_FORMAT&&"
@@ -93,12 +93,12 @@ class ScanResult:
                                  with the same ``var_name``.
         var_counts:              Per-var_name total occurrence count
                                  across the whole source tree. Used
-                                 to order the .properties output by
+                                 to order the .conf output by
                                  frequency (most-impactful first).
         var_to_files:            Per-var_name: list of (file_path,
                                  line) tuples — first ``_SAMPLE_LIMIT``
                                  occurrences. Drives the audit
-                                 report and the per-token .properties
+                                 report and the per-token .conf
                                  comments.
         var_to_syntaxes:         Per-var_name: set of syntaxes seen
                                  (``"dollar"`` / ``"dollar-braced"`` /
@@ -228,7 +228,7 @@ def _unescape_sed_value(raw: str) -> str:
 
 def format_properties_file(env: str, subs: List[Substitution]) -> str:
     """
-    Render a SHIPS ``.properties`` file from substitutions.
+    Render a SHIPS ``.conf`` file from substitutions.
 
     Renders the canonical 7-section scaffold (composition roots,
     derived names, users & roles, SQL constants, engine flags,
@@ -350,10 +350,10 @@ def format_migration_sed(subs: List[Substitution]) -> str:
 # When a project has placeholders in its source DDL but NO sed
 # script to point at, ``--scan-source`` walks the source tree and
 # auto-discovers the substitutions. Output is the same shape as
-# ``--script`` mode (``.properties`` + ``legacy_migration.sed``)
+# ``--script`` mode (``.conf`` + ``legacy_migration.sed``)
 # plus an additional audit file ``scan_report.md`` listing every
 # placeholder, syntax, and occurrence. The user fills in the
-# .properties values and runs the sed script as before.
+# .conf values and runs the sed script as before.
 
 
 #: How many sample (file, line) pairs to record per token.
@@ -468,7 +468,7 @@ def scan_source_directory(
 
 
 def scan_format_properties_file(env: str, scan: ScanResult) -> str:
-    """Render the .properties file from a scan-source result.
+    """Render the .conf file from a scan-source result.
 
     Differs from ``format_properties_file`` (sed-script mode):
 
@@ -544,12 +544,12 @@ def scan_format_properties_file(env: str, scan: ScanResult) -> str:
 def scan_format_report(scan: ScanResult, source_dir: str) -> str:
     """Render the audit report ``scan_report.md``.
 
-    Companion artefact to the .properties + .sed files. Lists every
+    Companion artefact to the .conf + .sed files. Lists every
     discovered token, its syntaxes, total occurrence count, and
     every (file, line) where it was seen. Useful when reviewing
     the import for surprises (a token that appears in 200 files vs
     one that appears once is a meaningful distinction the
-    .properties file doesn't preserve).
+    .conf file doesn't preserve).
     """
     lines: List[str] = []
     lines.append("# Legacy Placeholder Scan Report")
@@ -648,7 +648,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Walk a source DDL tree and auto-discover non-SHIPS "
         "placeholders ($VAR, ${VAR}, &&VAR&&). Use this when the "
         "project has placeholders embedded in source but no sed "
-        "file to point at -- the .properties values come out empty "
+        "file to point at -- the .conf values come out empty "
         "for you to fill in, the migration sed converts every "
         "discovered marker to its {{TOKEN}} form.",
     )
@@ -662,13 +662,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--env",
         required=True,
         help="Target environment name (e.g. DEV, TST, PRD). Used as "
-        "the .properties filename and noted in the file header.",
+        "the .conf filename and noted in the file header.",
     )
     p.add_argument(
         "--output-dir",
         default=".",
         help="Output directory (default: current). Files are written "
-        "under <output-dir>/properties/<env>.properties and "
+        "under <output-dir>/properties/<env>.conf and "
         "<output-dir>/legacy_migration.sed. In --scan-source mode an "
         "additional <output-dir>/scan_report.md is also written.",
     )
@@ -699,7 +699,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 
 def _run_script_mode(args) -> int:
-    """Existing --script flow: parse a sed file, emit .properties + .sed."""
+    """Existing --script flow: parse a sed file, emit .conf + .sed."""
     input_path = Path(args.script)
     if not input_path.is_file():
         print(f"ERROR: input file not found: {input_path}", file=sys.stderr)
@@ -719,7 +719,7 @@ def _run_script_mode(args) -> int:
     properties_dir = output_dir / "properties"
     properties_dir.mkdir(parents=True, exist_ok=True)
 
-    properties_path = properties_dir / f"{args.env}.properties"
+    properties_path = properties_dir / f"{args.env}.conf"
     migration_path = output_dir / "legacy_migration.sed"
 
     properties_path.write_text(
@@ -749,14 +749,14 @@ def _run_script_mode(args) -> int:
     )
     print()
     print(f"  3. Review and section {properties_path}")
-    print("     against config/properties/DEV.properties as a structural template.")
+    print("     against config/properties/DEV.conf as a structural template.")
     print("=" * 64)
 
     return 0
 
 
 def _run_scan_mode(args) -> int:
-    """New --scan-source flow: walk source, emit .properties + .sed +
+    """New --scan-source flow: walk source, emit .conf + .sed +
     scan_report.md."""
     source_dir = Path(args.scan_source)
     if not source_dir.is_dir():
@@ -782,7 +782,7 @@ def _run_scan_mode(args) -> int:
     properties_dir = output_dir / "properties"
     properties_dir.mkdir(parents=True, exist_ok=True)
 
-    properties_path = properties_dir / f"{args.env}.properties"
+    properties_path = properties_dir / f"{args.env}.conf"
     migration_path = output_dir / "legacy_migration.sed"
     report_path = output_dir / "scan_report.md"
 

@@ -341,7 +341,7 @@ class TestScanSourceCLI:
         )
 
         assert rc == 0
-        assert (out_dir / "properties" / "DEV.properties").exists()
+        assert (out_dir / "properties" / "DEV.conf").exists()
         assert (out_dir / "legacy_migration.sed").exists()
         assert (out_dir / "scan_report.md").exists()
 
@@ -361,7 +361,7 @@ class TestScanSourceCLI:
             ]
         )
 
-        props = (out_dir / "properties" / "DEV.properties").read_text(
+        props = (out_dir / "properties" / "DEV.conf").read_text(
             encoding="utf-8"
         )
         assert "UTL_T=" in props
@@ -413,7 +413,7 @@ class TestScanSourceCLI:
         )
 
         assert rc == 0
-        assert not (out_dir / "properties" / "DEV.properties").exists()
+        assert not (out_dir / "properties" / "DEV.conf").exists()
         assert not (out_dir / "legacy_migration.sed").exists()
         assert not (out_dir / "scan_report.md").exists()
 
@@ -510,7 +510,7 @@ class TestCLIDispatcherScanSource:
         capsys.readouterr()  # discard stdout
 
         assert rc == 0
-        assert (out / "properties" / "DEV.properties").exists()
+        assert (out / "properties" / "DEV.conf").exists()
         assert (out / "legacy_migration.sed").exists()
         assert (out / "scan_report.md").exists()
 
@@ -530,7 +530,7 @@ class TestCLIDispatcherScanSource:
         capsys.readouterr()
 
         assert rc == 0
-        assert (out / "properties" / "DEV.properties").exists()
+        assert (out / "properties" / "DEV.conf").exists()
         assert (out / "legacy_migration.sed").exists()
         # --script mode does NOT emit scan_report.md.
         assert not (out / "scan_report.md").exists()

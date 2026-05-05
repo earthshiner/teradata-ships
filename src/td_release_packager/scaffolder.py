@@ -18,9 +18,9 @@ Produces:
     ├── README.md
     ├── config/
     │   └── properties/
-    │       ├── DEV.properties
-    │       ├── TEST.properties
-    │       └── PROD.properties
+    │       ├── DEV.conf
+    │       ├── TEST.conf
+    │       └── PROD.conf
     ├── payload/
     │   └── database/
     │       ├── pre-requisites/
@@ -189,7 +189,7 @@ def _generate_properties(
     skip_existing: bool = False,
 ):
     """
-    Generate a .properties file per environment.
+    Generate a .conf file per environment.
 
     Layout:
         1. Environment metadata (SHIPS_ENV, ENV_PREFIX, SHIPS_PROJECT)
@@ -247,11 +247,11 @@ def _generate_properties(
         perm, spool = space_map.get(env_upper, ("1e9", "1e9"))
 
         props_path = os.path.join(
-            project_dir, "config", "properties", f"{env_upper}.properties"
+            project_dir, "config", "properties", f"{env_upper}.conf"
         )
 
         if skip_existing and os.path.exists(props_path):
-            logger.info("Properties file exists — skipping: %s", props_path)
+            logger.info("Config file exists — skipping: %s", props_path)
             continue
 
         with open(props_path, "w", encoding="utf-8") as f:
@@ -262,7 +262,7 @@ def _generate_properties(
             f.write(f"#            --source . --env {env_upper} \\\n")
             f.write(f"#            --name {project_name} \\\n")
             f.write(
-                f"#            --properties config/properties/{env_upper}.properties\n"
+                f"#            --properties config/properties/{env_upper}.conf\n"
             )
             f.write("#\n\n")
 
@@ -554,7 +554,7 @@ Thumbs.db
 
 # DO track these:
 # .build_counter   — auto-incremented build number (commit this!)
-# config/properties/*.properties — environment token values
+# config/properties/*.conf — environment token values
 """
 
     with open(gitignore_path, "w", encoding="utf-8") as f:
@@ -590,7 +590,7 @@ Teradata release project managed by SHIPS (`td_release_packager`).
 
 {env_list}
 
-Properties files: `config/properties/<ENV>.properties`
+Config files: `config/properties/<ENV>.conf`
 
 ## Project Structure
 
@@ -616,7 +616,7 @@ package time.
 Scan for token usage:
 ```bash
 python -m td_release_packager scan --source .
-python -m td_release_packager scan --source . --properties config/properties/DEV.properties
+python -m td_release_packager scan --source . --properties config/properties/DEV.conf
 ```
 
 ## Object Placement
@@ -646,7 +646,7 @@ python -m td_release_packager package \\
     --source . \\
     --env DEV \\
     --name {project_name} \\
-    --properties config/properties/DEV.properties \\
+    --properties config/properties/DEV.conf \\
     --output releases/ \\
     --author "Your Name"
 ```
@@ -658,7 +658,7 @@ python -m td_release_packager package \\
     --source . \\
     --env PROD \\
     --name {project_name} \\
-    --properties config/properties/PROD.properties \\
+    --properties config/properties/PROD.conf \\
     --output releases/ \\
     --no-increment
 ```
