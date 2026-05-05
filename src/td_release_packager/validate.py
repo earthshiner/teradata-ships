@@ -81,7 +81,15 @@ DEFAULT_RULES: Dict[str, str] = {
 }
 
 # -- Valid severity values --
-_VALID_SEVERITIES = {"ERROR", "WARNING", "OFF"}
+# Casing convention: UPPER in config files (inspect.conf), lower in
+# decisions.json / JSON output. The vocab is the same; the casing
+# follows each format's own convention.
+#
+# INFO is intentionally separate from OFF: INFO emits a visible note
+# (e.g. "comma_style=as-per-source: consistency not enforced") that
+# appears in the report and is recorded in decisions.json so the
+# policy is auditable. OFF is completely silent.
+_VALID_SEVERITIES = {"ERROR", "WARNING", "INFO", "OFF"}
 
 # -- Comma style configuration --
 # Two orthogonal keys control comma placement inspection:
@@ -215,10 +223,16 @@ def generate_default_config() -> str:
         "# what severity. Place this file in config/inspect.conf",
         "# within your project, or pass via --config on the CLI.",
         "#",
-        "# Severity values:",
+        "# Severity values (for rules that accept severities):",
         "#   ERROR   — must fix before deployment (blocks --strict)",
         "#   WARNING — advisory, does not block deployment",
-        "#   OFF     — rule is disabled entirely",
+        "#   INFO    — informational; visible in report and decisions.json",
+        "#             but does not count as a failure. Use for rules that",
+        "#             record a deliberate policy choice rather than a violation.",
+        "#   OFF     — rule is disabled and completely silent",
+        "#",
+        "# Casing note: use UPPER here (config file convention).",
+        "# decisions.json uses lowercase (JSON convention) for the same vocab.",
         "#",
         "# --strict mode promotes all WARNING rules to ERROR.",
         "# OFF rules remain off even in strict mode.",

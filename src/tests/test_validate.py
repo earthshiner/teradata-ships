@@ -1096,16 +1096,17 @@ class TestReadInspectConfig:
 
     def test_all_default_severities_are_valid(self):
         """Every default severity in DEFAULT_RULES is one of the
-        recognised values. Catches typos like 'WARN' or 'WARMING'."""
-        valid_severities = {"ERROR", "WARNING", "OFF"}
+        recognised values. Derives from _VALID_SEVERITIES so the test
+        stays correct when new severity levels are added."""
+        from td_release_packager.validate import _VALID_SEVERITIES
         invalid = {
             rule: sev
             for rule, sev in DEFAULT_RULES.items()
-            if sev not in valid_severities
+            if sev not in _VALID_SEVERITIES
         }
         assert not invalid, (
             f"Rules in DEFAULT_RULES with invalid severities "
-            f"(must be one of {sorted(valid_severities)}): {invalid}"
+            f"(must be one of {sorted(_VALID_SEVERITIES)}): {invalid}"
         )
 
 
