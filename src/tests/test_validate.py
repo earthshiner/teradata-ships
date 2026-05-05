@@ -759,6 +759,7 @@ class TestCheckLeadingCommas:
     def test_comma_style_read_from_config(self, tmp_path):
         """comma_style in inspect.conf is parsed correctly."""
         from td_release_packager.validate import read_inspect_config
+
         conf = tmp_path / "inspect.conf"
         conf.write_text("comma_style=trailing\n", encoding="utf-8")
         rules = read_inspect_config(str(conf))
@@ -767,6 +768,7 @@ class TestCheckLeadingCommas:
     def test_invalid_comma_style_rejected(self, tmp_path):
         """An unrecognised comma_style value falls back to default."""
         from td_release_packager.validate import read_inspect_config
+
         conf = tmp_path / "inspect.conf"
         conf.write_text("comma_style=sideways\n", encoding="utf-8")
         rules = read_inspect_config(str(conf))
@@ -777,6 +779,7 @@ class TestCheckLeadingCommas:
         """as-per-source emits INFO but does not increment the error/warning
         count — the run still passes."""
         from td_release_packager.validate import DEFAULT_RULES, validate_directory
+
         ddl_dir = tmp_path / "DDL" / "tables"
         ddl_dir.mkdir(parents=True)
         (ddl_dir / "MyDB.T.tbl").write_text(
@@ -1092,6 +1095,7 @@ class TestReadInspectConfig:
         recognised values. Derives from _VALID_SEVERITIES so the test
         stays correct when new severity levels are added."""
         from td_release_packager.validate import _VALID_SEVERITIES
+
         invalid = {
             rule: sev
             for rule, sev in DEFAULT_RULES.items()

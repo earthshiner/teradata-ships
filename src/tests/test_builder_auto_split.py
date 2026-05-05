@@ -45,7 +45,7 @@ def _write(path: Path, content: str) -> None:
 
 
 def _properties_for(env: str, tmp_path: Path, **extra) -> Path:
-    """Write a minimal .properties file declaring SHIPS_ENV=<env>.
+    """Write a minimal .conf file declaring SHIPS_ENV=<env>.
 
     Extra keys go in verbatim. The build cross-checks SHIPS_ENV
     against the --env argument, so the two must match.

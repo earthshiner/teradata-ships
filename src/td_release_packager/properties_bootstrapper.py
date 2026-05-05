@@ -214,7 +214,7 @@ def bootstrap_properties_file(
         project_dir: Path to the SHIPS project (with payload/).
         env:         Target environment name (DEV / TST / PRD).
         output_dir:  Directory under which to write
-                     ``properties/<env>.conf``. Defaults to
+                     ``env/<env>.conf``. Defaults to
                      ``<project_dir>/config``.
         force:       Overwrite an existing properties file at the
                      target path. Without this flag, the tool
@@ -291,7 +291,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--output-dir",
         default=None,
         help="Output directory; the .conf file is written under "
-        "<output-dir>/properties/<env>.conf. Defaults to "
+        "<output-dir>/env/<env>.conf. Defaults to "
         "<source>/config.",
     )
     p.add_argument(
@@ -331,7 +331,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     print("=" * 64)
     print(f"  [bootstrap-properties] — {args.env}.conf scaffold written")
     print("=" * 64)
-    print(f"  Properties file: {result['properties_path']}")
+    print(f"  Config file: {result['properties_path']}")
     print(f"  Tokens referenced in source: {len(result['referenced'])}")
     if result["overwrote"]:
         print(

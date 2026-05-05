@@ -197,7 +197,7 @@ class TestFlowD_AlreadyTokenised:
     bootstrap-properties."""
 
     def test_already_tokenised_no_props_yet(self, tmp_path, capsys):
-        """Flow D, no .properties file → 4 steps:
+        """Flow D, no .conf file → 4 steps:
         bootstrap-properties, validate, verify, package.
         Token map / decompose-names / re-harvest must NOT appear."""
         args = Namespace(project=str(tmp_path))
@@ -230,7 +230,7 @@ class TestFlowD_AlreadyTokenised:
         assert "package" in out
 
     def test_already_tokenised_with_existing_props(self, tmp_path, capsys):
-        """When a .properties file already exists, bootstrap step
+        """When a .conf file already exists, bootstrap step
         becomes optional with --force. Flow still ends in
         validate / verify / package."""
         d = tmp_path / "config" / "env"

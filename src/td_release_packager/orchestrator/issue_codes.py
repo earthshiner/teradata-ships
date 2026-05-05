@@ -23,7 +23,7 @@ Naming convention:
 
     Domain prefixes currently in use:
       - TOKEN_*       Token substitution / cascade resolution
-      - PROPERTIES_*  .properties file handling
+      - PROPERTIES_*  .conf file handling
       - HARVEST_*     Reserved for harvest stage (item 4 rollout)
       - INSPECT_*     Reserved for inspect stage (item 4 rollout)
       - PACKAGE_*     Reserved for package stage (item 4 rollout)
@@ -45,7 +45,7 @@ TOKEN_UNDEFINED = "TOKEN_UNDEFINED"
 #: Token defined in properties but never referenced in any DDL file.
 TOKEN_UNUSED = "TOKEN_UNUSED"
 
-#: Properties file path was provided but the file does not exist.
+#: Config file path was provided but the file does not exist.
 PROPERTIES_NOT_FOUND = "PROPERTIES_NOT_FOUND"
 
 
