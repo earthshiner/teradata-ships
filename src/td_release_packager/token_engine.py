@@ -1,12 +1,12 @@
 """
 token_engine.py — Token substitution engine.
 
-Reads token values from a .properties file and substitutes
+Reads token values from a .conf file and substitutes
 {{TOKENNAME}} placeholders in DDL, DCL, and DML files.
 
 Token format:
     Source files use {{TOKENNAME}} (doubled curly braces).
-    Properties files use NAME=VALUE (one per line).
+    Config files use NAME=VALUE (one per line).
     Lines starting with '#' are comments.
 
 Token substitution happens at BUILD time — the packaged files
@@ -120,7 +120,7 @@ def _validate_property_values(
 
 def read_env_config(properties_path: str) -> Dict[str, str]:
     """
-    Read a .properties file into a token dictionary.
+    Read a .conf file into a token dictionary.
 
     Format:
         # Comment lines start with '#'
@@ -132,7 +132,7 @@ def read_env_config(properties_path: str) -> Dict[str, str]:
     keys use the last-defined value (with a warning).
 
     Args:
-        properties_path: Path to the .properties file.
+        properties_path: Path to the .conf file.
 
     Returns:
         Dictionary of token_name → value.
@@ -141,7 +141,7 @@ def read_env_config(properties_path: str) -> Dict[str, str]:
         FileNotFoundError: If the properties file does not exist.
     """
     if not os.path.exists(properties_path):
-        raise FileNotFoundError(f"Properties file not found: {properties_path}")
+        raise FileNotFoundError(f"Config file not found: {properties_path}")
 
     tokens = {}
     with open(properties_path, "r", encoding="utf-8") as f:
@@ -190,7 +190,7 @@ def read_env_config(properties_path: str) -> Dict[str, str]:
     if raw_errors:
         error_list = "\n  ".join(raw_errors)
         raise ValueError(
-            f"Properties file has {len(raw_errors)} error(s):\n"
+            f"Config file has {len(raw_errors)} error(s):\n"
             f"  {error_list}\n\n"
             f"File: {properties_path}"
         )
@@ -208,7 +208,7 @@ def read_env_config(properties_path: str) -> Dict[str, str]:
     if resolved_errors:
         error_list = "\n  ".join(resolved_errors)
         raise ValueError(
-            f"Properties file has {len(resolved_errors)} error(s) "
+            f"Config file has {len(resolved_errors)} error(s) "
             f"after token resolution:\n"
             f"  {error_list}\n\n"
             f"File: {properties_path}"

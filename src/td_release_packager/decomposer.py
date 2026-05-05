@@ -575,7 +575,7 @@ def format_decomposition_report(
         lines.append(
             "Multiple literals decomposed to the same token name. "
             "Disambiguate by renaming literals in source or by editing "
-            "the generated .properties file."
+            "the generated .conf file."
         )
         lines.append("")
         for token, literals in sorted(result.collisions.items()):
@@ -623,7 +623,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--output-dir",
         default=".",
         help="Output directory (default: current). Files written under "
-        "<output-dir>/properties/<env>.conf and "
+        "<output-dir>/env/<env>.conf and "
         "<output-dir>/decomposition_report.md.",
     )
     p.add_argument(

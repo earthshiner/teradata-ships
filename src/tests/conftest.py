@@ -125,7 +125,7 @@ def tmp_project(tmp_path):
 @pytest.fixture
 def sample_properties_file(tmp_path):
     """
-    Create a sample .properties file with token definitions.
+    Create a sample .conf file with token definitions.
 
     Returns the path to the properties file.
     """

@@ -2253,7 +2253,7 @@ def _build_parser():
         "--output-dir",
         default=".",
         help="Output directory (default: current). Files written under "
-        "<output-dir>/properties/<env>.conf and "
+        "<output-dir>/env/<env>.conf and "
         "<output-dir>/legacy_migration.sed. In --scan-source mode an "
         "additional <output-dir>/scan_report.md is also written.",
     )
@@ -2323,7 +2323,7 @@ def _build_parser():
         "--output-dir",
         default=".",
         help="Output directory (default: current). Files written under "
-        "<output-dir>/properties/<env>.conf and "
+        "<output-dir>/env/<env>.conf and "
         "<output-dir>/decomposition_report.md.",
     )
 
@@ -2354,7 +2354,7 @@ def _build_parser():
         "--output-dir",
         default=None,
         help="Output directory; .conf written under "
-        "<output-dir>/properties/<env>.conf. Defaults to "
+        "<output-dir>/env/<env>.conf. Defaults to "
         "<source>/config.",
     )
     bp.add_argument(

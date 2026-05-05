@@ -1,5 +1,5 @@
 """
-test_properties_scaffold.py — Tests for the shared ``.properties``
+test_properties_scaffold.py — Tests for the shared ``.conf``
 scaffold renderer (``td_release_packager.properties_scaffold``).
 
 The scaffold is consumed by ``legacy_importer`` and ``decomposer``;

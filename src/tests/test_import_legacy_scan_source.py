@@ -93,7 +93,7 @@ class TestScanSourceDirectory:
 
     def test_substitutions_ordered_by_frequency_desc(self, tmp_path):
         """The most-impactful tokens (highest occurrence count) sort
-        first so they appear at the top of the .properties file."""
+        first so they appear at the top of the .conf file."""
         # 3x UTL_T, 1x DATE_FORMAT
         (tmp_path / "a.tbl").write_text(
             "CREATE TABLE $UTL_T.A (Id INT);", encoding="utf-8"

@@ -1,6 +1,6 @@
 """
 test_properties_bootstrapper.py — Tests for the third bootstrap
-path (already-tokenised source → .properties scaffold).
+path (already-tokenised source → .conf scaffold).
 
 Covers:
     1. Token discovery from a project's payload tree
