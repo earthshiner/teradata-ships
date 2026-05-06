@@ -1078,3 +1078,126 @@ class TestIngestDirectory:
         src.mkdir()
         with pytest.raises(FileNotFoundError):
             ingest_directory(str(src), "/nonexistent/project")
+
+    # -----------------------------------------------------------
+    # Pre-harvest payload clean (default behaviour)
+    # -----------------------------------------------------------
+
+    def test_ingest_default_cleans_orphaned_payload_files(
+        self, tmp_path, tmp_project, ddl_create_table
+    ):
+        """Default re-harvest wipes harvest-owned files from a prior
+        run before scanning source. Files whose source counterpart
+        is gone do not survive into the new payload."""
+        src = tmp_path / "source"
+        src.mkdir()
+
+        # First harvest places customer.tbl in the payload.
+        (src / "customer.tbl").write_text(ddl_create_table, encoding="utf-8")
+        ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        tables_dir = tmp_project / "payload" / "database" / "DDL" / "tables"
+        placed = list(tables_dir.glob("*.tbl"))
+        assert len(placed) == 1, "first harvest should place one .tbl"
+        orphan_path = placed[0]
+        assert orphan_path.exists()
+
+        # Source changes — the file driving customer.tbl is removed.
+        orphan_path_name = orphan_path.name
+        for f in src.iterdir():
+            f.unlink()
+        # New source produces a different table.
+        (src / "order.tbl").write_text(
+            ddl_create_table.replace("customer", "order").replace("Customer", "Order"),
+            encoding="utf-8",
+        )
+
+        # Re-harvest with default clean_payload=True.
+        result = ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        # Orphaned file from first run is gone, new file present.
+        assert result.cleaned >= 1
+        assert not (tables_dir / orphan_path_name).exists(), (
+            "orphaned payload file should have been cleaned before re-harvest"
+        )
+        new_files = list(tables_dir.glob("*.tbl"))
+        assert len(new_files) == 1
+        assert new_files[0].name != orphan_path_name
+
+    def test_ingest_keep_existing_preserves_orphans(
+        self, tmp_path, tmp_project, ddl_create_table
+    ):
+        """``clean_payload=False`` (CLI: --keep-existing) is the
+        legacy overlay behaviour: existing payload files survive a
+        re-harvest even if they no longer have a source counterpart.
+        Collision behaviour is governed by ``force``."""
+        src = tmp_path / "source"
+        src.mkdir()
+        (src / "customer.tbl").write_text(ddl_create_table, encoding="utf-8")
+        ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        tables_dir = tmp_project / "payload" / "database" / "DDL" / "tables"
+        orphan_name = list(tables_dir.glob("*.tbl"))[0].name
+
+        # Replace source so the old artefact would otherwise be orphaned.
+        for f in src.iterdir():
+            f.unlink()
+        (src / "order.tbl").write_text(
+            ddl_create_table.replace("customer", "order").replace("Customer", "Order"),
+            encoding="utf-8",
+        )
+
+        result = ingest_directory(
+            str(src),
+            str(tmp_project),
+            detect_tokens=False,
+            clean_payload=False,
+        )
+
+        assert result.cleaned == 0
+        assert (tables_dir / orphan_name).exists(), (
+            "with clean_payload=False, orphaned files must survive"
+        )
+
+    def test_ingest_clean_preserves_gitkeep_and_control_files(
+        self, tmp_path, tmp_project, ddl_create_table
+    ):
+        """The pre-harvest clean preserves .gitkeep markers (so empty
+        directories stay tracked) and control files starting with
+        ``_`` such as a user-curated _order.txt.
+
+        Pre-seeded directory receives no new placement during this
+        harvest, so .gitkeep is preserved by the clean alone — the
+        existing harvest logic strips .gitkeep from a directory only
+        when a real file is placed in it, which is correct behaviour
+        and orthogonal to the pre-clean."""
+        prereq_db_dir = (
+            tmp_project / "payload" / "database" / "pre-requisites" / "databases"
+        )
+        prereq_db_dir.mkdir(parents=True, exist_ok=True)
+        (prereq_db_dir / ".gitkeep").write_text("", encoding="utf-8")
+        (prereq_db_dir / "_order.txt").write_text("a.db\nb.db\n", encoding="utf-8")
+        (prereq_db_dir / "stale.db").write_text(
+            "CREATE DATABASE stale;", encoding="utf-8"
+        )
+
+        # Source contains only a table — nothing destined for
+        # pre-requisites/databases/ — so the clean alone determines
+        # what survives in that directory.
+        src = tmp_path / "source"
+        src.mkdir()
+        (src / "customer.tbl").write_text(ddl_create_table, encoding="utf-8")
+
+        result = ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        assert (prereq_db_dir / ".gitkeep").exists(), "gitkeep must survive"
+        assert (prereq_db_dir / "_order.txt").exists(), (
+            "control file _order.txt must survive"
+        )
+        assert not (prereq_db_dir / "stale.db").exists(), (
+            "stale harvest-owned file must be cleaned"
+        )
+        assert result.cleaned >= 1
+        assert (prereq_db_dir / "_order.txt").read_text(
+            encoding="utf-8"
+        ) == "a.db\nb.db\n"
