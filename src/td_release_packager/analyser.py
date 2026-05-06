@@ -391,7 +391,16 @@ _DROP_OBJECT_RE = re.compile(
 # _QNAME portion (db.table) — the .col suffix is discarded
 # because _QNAME only captures two segments.
 _COMMENT_ON_RE = re.compile(
-    rf"(?ix)\bCOMMENT\s+ON\s+(?:TABLE|COLUMN)\s+({_NAME})",
+    rf"(?ix)\bCOMMENT\s+ON\s+(?:TABLE|COLUMN|VIEW|MACRO)\s+({_NAME})",
+)
+
+# -- GRANT ON (DCL) --------------------------------------------
+# Catches:  GRANT privilege ON [TABLE|VIEW|MACRO|PROCEDURE] db.obj TO ...
+# Used to detect that a GRANT file depends on the object it
+# grants on, so the grant is placed after the object in waves.
+# Unqualified (single-name) targets are excluded by _classify_ref.
+_GRANT_ON_OBJECT_RE = re.compile(
+    rf"(?ix)\bGRANT\b[^;]*?\bON\s+(?:TABLE\s+|VIEW\s+|MACRO\s+|PROCEDURE\s+|FUNCTION\s+)?({_NAME})",
 )
 
 
@@ -612,8 +621,12 @@ def _scan_references(
     for m in _DROP_OBJECT_RE.finditer(body):
         raw_refs.append(m.group(1).strip())
 
-    # COMMENT ON TABLE|COLUMN db.name
+    # COMMENT ON TABLE|COLUMN|VIEW|MACRO db.name
     for m in _COMMENT_ON_RE.finditer(body):
+        raw_refs.append(m.group(1).strip())
+
+    # GRANT ... ON [TABLE|VIEW|...] db.obj TO ...
+    for m in _GRANT_ON_OBJECT_RE.finditer(body):
         raw_refs.append(m.group(1).strip())
 
     # -- Classify each reference --
@@ -645,12 +658,11 @@ def _scan_references(
 # inner verb's type. See classifier.py for the full rationale.
 _ANALYSER_STMT_FLAGS = re.IGNORECASE | re.MULTILINE
 _CLASSIFY_PATTERNS = [
+    # Indexes (most specific first)
     (re.compile(r"^\s*CREATE\s+JOIN\s+INDEX\b", _ANALYSER_STMT_FLAGS), "JOIN_INDEX"),
     (re.compile(r"^\s*CREATE\s+HASH\s+INDEX\b", _ANALYSER_STMT_FLAGS), "HASH_INDEX"),
-    (
-        re.compile(r"^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\b", _ANALYSER_STMT_FLAGS),
-        "INDEX",
-    ),
+    (re.compile(r"^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\b", _ANALYSER_STMT_FLAGS), "INDEX"),
+    # SCRIPT_TABLE_OPERATOR (FUNCTION syntax + TABLE OPERATOR body)
     (
         re.compile(
             r"^\s*(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b"
@@ -659,6 +671,7 @@ _CLASSIFY_PATTERNS = [
         ),
         "SCRIPT_TABLE_OPERATOR",
     ),
+    # Standard DDL objects
     (
         re.compile(
             r"^\s*(?:CREATE|REPLACE)\s+(?:MULTISET|SET)?\s*"
@@ -668,22 +681,15 @@ _CLASSIFY_PATTERNS = [
         ),
         "TABLE",
     ),
-    (
-        re.compile(r"^\s*(?:CREATE|REPLACE)\s+VIEW\b", _ANALYSER_STMT_FLAGS),
-        "VIEW",
-    ),
-    (
-        re.compile(r"^\s*(?:CREATE|REPLACE)\s+MACRO\b", _ANALYSER_STMT_FLAGS),
-        "MACRO",
-    ),
+    (re.compile(r"^\s*(?:CREATE|REPLACE)\s+VIEW\b", _ANALYSER_STMT_FLAGS), "VIEW"),
+    (re.compile(r"^\s*(?:CREATE\s+|REPLACE\s+)MACRO\b", _ANALYSER_STMT_FLAGS), "MACRO"),
     (
         re.compile(r"^\s*(?:CREATE|REPLACE)\s+PROCEDURE\b", _ANALYSER_STMT_FLAGS),
         "PROCEDURE",
     ),
     (
         re.compile(
-            r"^\s*(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b",
-            _ANALYSER_STMT_FLAGS,
+            r"^\s*(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b", _ANALYSER_STMT_FLAGS
         ),
         "FUNCTION",
     ),
@@ -691,6 +697,43 @@ _CLASSIFY_PATTERNS = [
         re.compile(r"^\s*(?:CREATE|REPLACE)\s+TRIGGER\b", _ANALYSER_STMT_FLAGS),
         "TRIGGER",
     ),
+    # Pre-requisites
+    (re.compile(r"^\s*CREATE\s+DATABASE\b", _ANALYSER_STMT_FLAGS), "DATABASE"),
+    (re.compile(r"^\s*CREATE\s+USER\b", _ANALYSER_STMT_FLAGS), "USER"),
+    # System-scoped objects
+    (re.compile(r"^\s*CREATE\s+MAP\b", _ANALYSER_STMT_FLAGS), "MAP"),
+    (re.compile(r"^\s*CREATE\s+PROFILE\b", _ANALYSER_STMT_FLAGS), "PROFILE"),
+    (re.compile(r"^\s*CREATE\s+ROLE\b", _ANALYSER_STMT_FLAGS), "ROLE"),
+    (
+        re.compile(r"^\s*CREATE\s+AUTHORIZATION\b", _ANALYSER_STMT_FLAGS),
+        "AUTHORIZATION",
+    ),
+    (
+        re.compile(r"^\s*CREATE\s+FOREIGN\s+SERVER\b", _ANALYSER_STMT_FLAGS),
+        "FOREIGN_SERVER",
+    ),
+    # JAR install scripts
+    (
+        re.compile(
+            r"^\s*CALL\s+SQLJ\s*\.\s*(?:INSTALL_JAR|REPLACE_JAR)\s*\(",
+            _ANALYSER_STMT_FLAGS,
+        ),
+        "JAR",
+    ),
+    # Metadata + statistics (before GRANT/DML to avoid false matches)
+    (re.compile(r"^\s*COMMENT\s+ON\b", _ANALYSER_STMT_FLAGS), "COMMENT"),
+    (
+        re.compile(r"^\s*(?:COLLECT|UPDATE)\s+STATISTICS\b", _ANALYSER_STMT_FLAGS),
+        "STATISTICS",
+    ),
+    # DCL
+    (re.compile(r"^\s*GRANT\b", _ANALYSER_STMT_FLAGS), "GRANT"),
+    (re.compile(r"^\s*REVOKE\b", _ANALYSER_STMT_FLAGS), "REVOKE"),
+    # DML (last — any DDL with embedded DML classifies via earlier pattern)
+    (re.compile(r"^\s*INSERT\s+INTO\b", _ANALYSER_STMT_FLAGS), "DML"),
+    (re.compile(r"^\s*UPDATE\b", _ANALYSER_STMT_FLAGS), "DML"),
+    (re.compile(r"^\s*DELETE\s+FROM\b", _ANALYSER_STMT_FLAGS), "DML"),
+    (re.compile(r"^\s*MERGE\s+INTO\b", _ANALYSER_STMT_FLAGS), "DML"),
 ]
 
 # Qualified name extraction
@@ -702,13 +745,18 @@ _QUAL_NAME = _NAME_FRAG + r"(?:\." + _NAME_FRAG + r")?"
 # Anchored — see classifier.py for the GRANT-with-CREATE-PROCEDURE
 # regression rationale. The capture group would otherwise greedily
 # claim ``ON`` as the object name when scanning a GRANT statement.
+#
+# DATABASE, USER, MAP, PROFILE, ROLE, AUTHORIZATION, FOREIGN SERVER
+# use single-part names (no database qualifier). _extract_name handles
+# both two-part (db.obj) and one-part (obj) forms from this pattern.
 _QUALIFIED_NAME_RE = re.compile(
     r"^\s*(?:CREATE|REPLACE)\s+(?:MULTISET\s+|SET\s+)?"
     r"(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?"
     r"(?:TRACE\s+)?"
     r"(?:SPECIFIC\s+)?"
     r"(?:TABLE|VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER|"
-    r"JOIN\s+INDEX|HASH\s+INDEX)\s+"
+    r"JOIN\s+INDEX|HASH\s+INDEX|"
+    r"DATABASE|USER|MAP|PROFILE|ROLE|AUTHORIZATION|FOREIGN\s+SERVER)\s+"
     r"(" + _QUAL_NAME + r")",
     re.IGNORECASE | re.MULTILINE,
 )
@@ -801,23 +849,36 @@ def analyse_project(project_dir: str) -> AnalysisResult:
         if obj_type is None:
             continue
 
+        rel_path = os.path.relpath(file_path, project_dir)
         db_name, obj_name = _extract_name(content)
-        if not db_name or not obj_name:
-            continue
 
         # For functions, use SPECIFIC name to avoid overload collisions
         base_fn = None
-        if obj_type == "FUNCTION":
+        if obj_type == "FUNCTION" and db_name and obj_name:
             base_fn = f"{db_name}.{obj_name}"  # Base function name
             specific_match = _SPECIFIC_RE.search(content)
             if specific_match:
                 specific_qual = specific_match.group(1).replace('"', "")
                 parts = specific_qual.split(".")
-                # Use the specific name as the object name
                 obj_name = parts[-1].strip()
 
-        qualified = f"{db_name}.{obj_name}"
-        rel_path = os.path.relpath(file_path, project_dir)
+        if db_name and obj_name:
+            # Standard two-part qualified name: TABLE, VIEW, JOIN_INDEX, etc.
+            qualified = f"{db_name}.{obj_name}"
+        elif obj_name:
+            # Single-part name: DATABASE, USER, MAP, ROLE, PROFILE, etc.
+            # Prefix with $TYPE to avoid collision with real db.obj names.
+            qualified = f"${obj_type}.{obj_name}"
+        else:
+            # No extractable name: GRANT, REVOKE, COMMENT, STATISTICS,
+            # secondary INDEX, DML, JAR — use the relative file path as
+            # a unique graph key. Nothing else depends ON these files by
+            # name, so the key only needs to be unique, not matchable.
+            qualified = f"$FILE:{rel_path}"
+
+        if qualified in result.objects:
+            logger.warning("Duplicate graph key %r — skipping %s", qualified, rel_path)
+            continue
 
         obj = IndexedObject(
             qualified_name=qualified,
@@ -1024,18 +1085,34 @@ def _topological_sort(
             waves.append(sorted(remaining))
             break
 
-        # Sort within wave for deterministic output:
-        # Tables first, then indexes, then views/macros/procs, then triggers
+        # Sort within wave for deterministic output.
+        # Lower number = earlier in the wave.
+        # System/foundation objects sort before structural DDL;
+        # post-structural (COMMENT, STATISTICS, DML) sort last.
         type_order = {
+            "MAP": -10,
+            "ROLE": -9,
+            "PROFILE": -9,
+            "AUTHORIZATION": -8,
+            "FOREIGN_SERVER": -7,
+            "DATABASE": -3,
+            "USER": -2,
+            "GRANT": -1,
+            "REVOKE": -1,
+            "JAR": 0,
             "TABLE": 0,
             "JOIN_INDEX": 1,
             "HASH_INDEX": 1,
             "INDEX": 1,
             "FUNCTION": 2,
+            "SCRIPT_TABLE_OPERATOR": 2,
             "MACRO": 2,
             "VIEW": 3,
             "PROCEDURE": 3,
             "TRIGGER": 4,
+            "COMMENT": 5,
+            "STATISTICS": 5,
+            "DML": 6,
         }
         wave.sort(
             key=lambda n: (
@@ -1133,17 +1210,37 @@ def _find_payload(project_dir: str) -> Optional[str]:
 def _collect_ddl_files(payload_dir: str) -> List[str]:
     """Collect all DDL files from the payload directory."""
     extensions = {
-        ".tbl",
-        ".viw",
-        ".spl",
-        ".mcr",
-        ".fnc",
-        ".trg",
-        ".jix",
-        ".idx",
+        # DDL objects
+        ".tbl",  # TABLE
+        ".viw",  # VIEW
+        ".spl",  # PROCEDURE
+        ".mcr",  # MACRO
+        ".fnc",  # FUNCTION
+        ".trg",  # TRIGGER
+        ".jix",  # JOIN_INDEX
+        ".idx",  # HASH_INDEX / secondary INDEX
+        ".sto",  # SCRIPT_TABLE_OPERATOR
+        # Pre-requisites
+        ".db",  # DATABASE
+        ".usr",  # USER
+        # DCL
+        ".dcl",  # GRANT / REVOKE
+        # Metadata
+        ".cmt",  # COMMENT
+        ".stt",  # STATISTICS
+        # JAR install
+        ".sjr",  # JAR (SQLJ)
+        # System objects
+        ".map",  # MAP
+        ".rol",  # ROLE
+        ".prf",  # PROFILE
+        ".auth",  # AUTHORIZATION
+        ".fsvr",  # FOREIGN_SERVER
+        # DML
+        ".dml",  # DML scripts
+        # Generic
         ".sql",
         ".ddl",
-        ".sto",
         ".jcl",
     }
     files = []
