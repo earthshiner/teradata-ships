@@ -19,6 +19,8 @@ All commands use the same entry point:
 python -m td_release_packager <command> [options]
 ```
 
+> **Why does SHIPS work this way?** The pipeline is built around three design principles — *eponymous, atomic scripts*, *object-type extensions*, and a careful approach to *DML naming*. For the rationale rather than the mechanics, see [docs/design-rationale/](./design-rationale/README.md).
+
 ---
 
 ## [S] Scaffold — Create a New Project
