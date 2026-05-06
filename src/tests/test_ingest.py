@@ -841,6 +841,63 @@ class TestIngestDirectory:
         assert any("DDL" in d and "tables" in d for d in dests)
         assert any("DCL" in d for d in dests)
 
+    def test_ingest_does_not_split_inside_string_literal_with_semicolon(
+        self, tmp_path, tmp_project
+    ):
+        """A COMMENT (or any DDL) whose string literal contains an
+        embedded semicolon must NOT be split mid-string. Without the
+        string-aware splitter, the file gets cut at the first ``;``
+        inside ``'...'``, leaving an unterminated quote in the first
+        chunk and the rest of the comment in the second chunk."""
+        src = tmp_path / "raw"
+        src.mkdir()
+        # The inner ``;`` after "AML/CTF Act" must not break the split.
+        (src / "compound.ddl").write_text(
+            "CREATE MULTISET TABLE x.t (id INT);\n"
+            "COMMENT ON TABLE x.t IS "
+            "'Reference: AML risk rating. Regulated under "
+            "AML/CTF Act; H rating requires Enhanced Due Diligence.';\n",
+            encoding="utf-8",
+        )
+
+        result = ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        # Two statements split correctly — TABLE plus COMMENT.
+        types = sorted(t for _, _, t in result.files_placed)
+        assert types == ["COMMENT", "TABLE"]
+
+        # The comment file content must contain the FULL comment text
+        # — the string with the embedded semicolon round-trips intact.
+        comment_dest = next(d for _, d, t in result.files_placed if t == "COMMENT")
+        comment_path = os.path.join(str(tmp_project), comment_dest)
+        with open(comment_path, encoding="utf-8") as f:
+            content = f.read()
+        # The complete string literal — including the inner ; — must
+        # appear in the output, terminated by a closing single quote
+        # then the statement-end semicolon.
+        assert "AML/CTF Act; H rating requires Enhanced Due Diligence.'" in content
+
+    def test_ingest_handles_doubled_quote_escape_in_literal(
+        self, tmp_path, tmp_project
+    ):
+        """Teradata escapes embedded apostrophes by doubling them
+        (``'O''Connor'``). The splitter must treat ``''`` as a literal
+        quote inside the string, not as a quote-close-then-quote-open.
+        A ``;`` after the doubled quote is still inside the string."""
+        src = tmp_path / "raw"
+        src.mkdir()
+        (src / "compound.ddl").write_text(
+            "CREATE MULTISET TABLE x.t (id INT);\n"
+            "COMMENT ON TABLE x.t IS "
+            "'O''Connor; surname with apostrophe; still one string';\n",
+            encoding="utf-8",
+        )
+
+        result = ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        types = sorted(t for _, _, t in result.files_placed)
+        assert types == ["COMMENT", "TABLE"]
+
     def test_ingest_does_not_split_procedure_with_begin_end(
         self, tmp_path, tmp_project
     ):
