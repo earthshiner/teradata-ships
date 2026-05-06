@@ -347,6 +347,74 @@ class TestExtractQualifiedName:
         assert db == "{{MEM_DATABASE}}"
         assert obj == "v_Active"
 
+    # -- String-literal interference (was: caused ``and.dml`` filenames) --
+
+    def test_dml_ignores_comment_on_inside_string_literal(self):
+        """An IS-string saying 'COMMENT ON TABLE and ...' must not be
+        mistaken for a real COMMENT ON statement. The DML target
+        (Memory.Change_Log) should be picked up instead. Pre-fix this
+        produced ``(None, 'and')`` and a file called ``and.dml``."""
+        chunk = (
+            "INSERT INTO MortgagePlatform_Memory.Change_Log\n"
+            "(change_id, change_description) VALUES\n"
+            "('CL-001',\n"
+            " 'Created complete Domain schema. All COMMENT ON TABLE "
+            "and COMMENT ON COLUMN applied.');"
+        )
+        db, obj = _extract_qualified_name(chunk)
+        assert db == "MortgagePlatform_Memory"
+        assert obj == "Change_Log"
+
+    def test_ddl_ignores_create_inside_string_literal(self):
+        """A CREATE TABLE name should win even when an earlier IS-text
+        contains keyword-like phrases such as 'CREATE schema' (which
+        the regex would otherwise misread as a hint at the target)."""
+        chunk = (
+            "COMMENT ON TABLE MyDB.RealTable IS\n"
+            "'Tracks how each CREATE TABLE Other.NotReal got applied';"
+        )
+        db, obj = _extract_qualified_name(chunk)
+        assert db == "MyDB"
+        assert obj == "RealTable"
+
+    # -- GRANT / REVOKE eponymous extraction --
+
+    def test_grant_on_database(self):
+        """GRANT on a bare database name extracts the database name."""
+        ddl = (
+            "GRANT SELECT ON {{MortgagePlatform_Observability}} "
+            "TO PUBLIC WITH GRANT OPTION;"
+        )
+        db, obj = _extract_qualified_name(ddl)
+        # 1-part target — db None, obj is the database name itself
+        assert db is None
+        assert obj == "{{MortgagePlatform_Observability}}"
+
+    def test_grant_on_table(self):
+        """GRANT on db.table extracts both parts."""
+        ddl = "GRANT SELECT ON MyDB.Customer TO read_role;"
+        db, obj = _extract_qualified_name(ddl)
+        assert db == "MyDB"
+        assert obj == "Customer"
+
+    def test_revoke_on_database(self):
+        """REVOKE follows the same shape as GRANT."""
+        ddl = "REVOKE ALL PRIVILEGES ON MyDB FROM old_role;"
+        db, obj = _extract_qualified_name(ddl)
+        assert db is None
+        assert obj == "MyDB"
+
+    def test_grant_with_complex_privilege_list(self):
+        """The privilege list between GRANT and ON is consumed
+        regardless of how many privileges are listed."""
+        ddl = (
+            "GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE FUNCTION "
+            "ON MyDB.Foo TO role_admin;"
+        )
+        db, obj = _extract_qualified_name(ddl)
+        assert db == "MyDB"
+        assert obj == "Foo"
+
 
 # ---------------------------------------------------------------
 # _extract_specific_function_name
@@ -1157,6 +1225,86 @@ class TestIngestDirectory:
         assert result.cleaned == 0
         assert (tables_dir / orphan_name).exists(), (
             "with clean_payload=False, orphaned files must survive"
+        )
+
+    # -----------------------------------------------------------
+    # Output quality fixes (issues observed against
+    # mortgage-ai-data-product-demo)
+    # -----------------------------------------------------------
+
+    def test_ingest_strips_leading_source_structure_comments(
+        self, tmp_path, tmp_project
+    ):
+        """Source files commonly start with file/section banner
+        comments ("D. MEMORY - CHANGE LOG") that reference a layout
+        that no longer exists in the package. They must be stripped
+        from each placed chunk so the deployed SQL is not littered
+        with stale headers. Inline / trailing comments are preserved."""
+        src = tmp_path / "source"
+        src.mkdir()
+        (src / "documentation.sql").write_text(
+            "-- =================================================\n"
+            "-- D. MEMORY  -  CHANGE LOG\n"
+            "-- =================================================\n"
+            "\n"
+            "INSERT INTO MyDB.Change_Log (id) VALUES (1);  -- inline kept\n",
+            encoding="utf-8",
+        )
+
+        ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        placed = tmp_project / "payload" / "database" / "DML" / "MyDB.Change_Log.dml"
+        assert placed.exists()
+        body = placed.read_text(encoding="utf-8")
+
+        # Header banner gone
+        assert "D. MEMORY" not in body
+        assert "============" not in body
+        # Real statement preserved
+        assert "INSERT INTO MyDB.Change_Log" in body
+        # Inline trailing comment preserved
+        assert "-- inline kept" in body
+
+    def test_ingest_grant_lands_in_eponymous_dcl(self, tmp_path, tmp_project):
+        """GRANT statement should produce <db>.dcl (database-level)
+        instead of falling back to the source filename. Pre-fix the
+        same content would have produced ``01_observability_ddl.dcl``."""
+        src = tmp_path / "source"
+        src.mkdir()
+        (src / "01_observability_ddl.sql").write_text(
+            "GRANT SELECT ON MortgagePlatform_Observability "
+            "TO PUBLIC WITH GRANT OPTION;\n",
+            encoding="utf-8",
+        )
+
+        ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        dcl_dir = tmp_project / "payload" / "database" / "DCL" / "inter_db"
+        assert (dcl_dir / "MortgagePlatform_Observability.dcl").exists(), (
+            "GRANT must land in an eponymous .dcl file, not under the source filename"
+        )
+        assert not (dcl_dir / "01_observability_ddl.dcl").exists()
+
+    def test_ingest_dml_with_comment_on_inside_string_lands_eponymously(
+        self, tmp_path, tmp_project
+    ):
+        """End-to-end regression: an INSERT with an IS-string mentioning
+        'COMMENT ON TABLE and ...' must land in the DML eponymous file
+        (MyDB.Change_Log.dml), not in ``and.dml``."""
+        src = tmp_path / "source"
+        src.mkdir()
+        (src / "documentation.sql").write_text(
+            "INSERT INTO MyDB.Change_Log (id, descr) VALUES\n"
+            "(1, 'All COMMENT ON TABLE and COMMENT ON COLUMN applied.');\n",
+            encoding="utf-8",
+        )
+
+        ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        dml_dir = tmp_project / "payload" / "database" / "DML"
+        assert (dml_dir / "MyDB.Change_Log.dml").exists()
+        assert not (dml_dir / "and.dml").exists(), (
+            "string-literal text must not produce a nonsense filename"
         )
 
     def test_ingest_clean_preserves_gitkeep_and_control_files(
