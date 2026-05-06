@@ -64,6 +64,102 @@ class TestPlainTypes:
 
 
 # ---------------------------------------------------------------
+# DML — INSERT / UPDATE / DELETE / MERGE
+# ---------------------------------------------------------------
+
+
+class TestDMLPatterns:
+    """SHIPS classifies INSERT/UPDATE/DELETE/MERGE as ``DML`` so that
+    seed-data, registration metadata, and reference-data loads land in
+    ``payload/database/DML/`` and ship with the package — not silently
+    dropped as 'unclassified'."""
+
+    def test_insert_into(self):
+        r = cls.classify(
+            "seed.dml",
+            "INSERT INTO db.t (id, name) VALUES (1, 'a');",
+        )
+        assert r.type == "DML"
+        assert r.confidence == "HIGH"
+
+    def test_insert_with_select(self):
+        r = cls.classify(
+            "load.sql",
+            "INSERT INTO db.t SELECT * FROM db.staging;",
+        )
+        assert r.type == "DML"
+
+    def test_update_set(self):
+        r = cls.classify(
+            "fix.sql",
+            "UPDATE db.t SET name = 'x' WHERE id = 1;",
+        )
+        assert r.type == "DML"
+
+    def test_update_from(self):
+        """Teradata's UPDATE-FROM syntax: target then FROM clause then SET."""
+        r = cls.classify(
+            "fix.sql",
+            "UPDATE db.t FROM db.other o SET t.name = o.name WHERE t.id = o.id;",
+        )
+        assert r.type == "DML"
+
+    def test_delete_from(self):
+        r = cls.classify(
+            "purge.sql",
+            "DELETE FROM db.t WHERE id < 100;",
+        )
+        assert r.type == "DML"
+
+    def test_merge_into(self):
+        r = cls.classify(
+            "upsert.sql",
+            "MERGE INTO db.t USING db.src s ON t.id = s.id "
+            "WHEN MATCHED THEN UPDATE SET t.x = s.x "
+            "WHEN NOT MATCHED THEN INSERT (id, x) VALUES (s.id, s.x);",
+        )
+        assert r.type == "DML"
+
+    def test_update_statistics_classified_as_statistics_not_dml(self):
+        """``UPDATE STATISTICS`` is a Teradata synonym for
+        ``COLLECT STATISTICS`` — must classify as STATISTICS, not DML."""
+        r = cls.classify("stats.stt", "UPDATE STATISTICS ON db.t;")
+        assert r.type == "STATISTICS"
+
+    def test_collect_statistics_still_classified_as_statistics(self):
+        """Existing COLLECT STATISTICS path must keep working."""
+        r = cls.classify("stats.stt", "COLLECT STATISTICS ON db.t;")
+        assert r.type == "STATISTICS"
+
+    def test_delete_database_not_classified_as_dml(self):
+        """Teradata's destructive ``DELETE DATABASE foo ALL`` is a teardown
+        operation, not a deployable DML statement. Without ``FROM`` it must
+        not match the DML pattern."""
+        r = cls.classify("teardown.sql", "DELETE DATABASE foo ALL;")
+        assert r.type is None
+
+    def test_procedure_with_embedded_dml_classifies_as_procedure(self):
+        """A CREATE PROCEDURE whose body contains INSERT/UPDATE must
+        classify as PROCEDURE — DML patterns are last in the table so
+        the earlier PROCEDURE pattern wins."""
+        ddl = (
+            "CREATE PROCEDURE db.refresh_summary()\n"
+            "BEGIN\n"
+            "    DELETE FROM db.summary;\n"
+            "    INSERT INTO db.summary SELECT * FROM db.detail;\n"
+            "    UPDATE db.summary SET refreshed_at = CURRENT_TIMESTAMP;\n"
+            "END;"
+        )
+        r = cls.classify("refresh.spl", ddl)
+        assert r.type == "PROCEDURE_SPL"
+
+    def test_dml_has_dml_extension_and_subdir(self):
+        """DML files map to ``.dml`` extension and ``DML`` subdir."""
+        assert cls.TYPE_TO_EXTENSION["DML"] == ".dml"
+        assert cls.TYPE_TO_SUBDIR["DML"] == "DML"
+
+
+# ---------------------------------------------------------------
 # Sub-types
 # ---------------------------------------------------------------
 

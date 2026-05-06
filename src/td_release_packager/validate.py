@@ -400,6 +400,8 @@ _EXPECTED_EXT = {
     # for the rationale. Keep these two maps in sync.
     "JAR": ".sjr",
     "SCRIPT_TABLE_OPERATOR": ".sto",
+    # DML — INSERT / UPDATE / DELETE / MERGE seed/registration scripts.
+    "DML": ".dml",
 }
 
 # -- Classification patterns (mirrors classifier.py order) --
@@ -479,6 +481,14 @@ _CLASSIFY_PATTERNS = [
         ),
         "JAR",
     ),
+    # DML — must come AFTER all DDL patterns so a CREATE PROCEDURE
+    # whose body contains INSERT/UPDATE classifies as PROCEDURE,
+    # not DML. Mirrors the ordering in classifier.py.
+    (re.compile(r"^\s*INSERT\s+INTO\b", _VAL_STMT_FLAGS), "DML"),
+    (re.compile(r"^\s*UPDATE\s+STATISTICS\b", _VAL_STMT_FLAGS), "STATISTICS"),
+    (re.compile(r"^\s*UPDATE\b", _VAL_STMT_FLAGS), "DML"),
+    (re.compile(r"^\s*DELETE\s+FROM\b", _VAL_STMT_FLAGS), "DML"),
+    (re.compile(r"^\s*MERGE\s+INTO\b", _VAL_STMT_FLAGS), "DML"),
 ]
 
 # -- System-scope types: no database qualifier, no tokens expected --
