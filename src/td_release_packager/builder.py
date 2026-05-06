@@ -376,7 +376,8 @@ def build_package(
         logger.info("Auto-split: main    → %s", main_archive)
         return (main_pair, prereqs_pair)
 
-    # -- Phase 13 (single-zip path): Archive + checksum --
+    # -- Phase 13 (single-zip path): Integrity fingerprint + archive + checksum --
+    _generate_integrity_file(pkg_dir)
     archive_path = _archive_package(pkg_dir, config.archive_format)
     checksum_path = _generate_checksum(archive_path)
 
@@ -625,11 +626,12 @@ def _split_into_paired_packages(
         with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(target_manifest.__dict__, f, indent=2, ensure_ascii=False)
 
-    # 8. Archive both. The deploy-first half (prereqs) is archived
-    #    first so the on-disk creation order matches the deploy order
-    #    — mostly cosmetic but it makes the build log read naturally.
+    # 8. Integrity fingerprints, then archive both. Prereqs first so
+    #    the on-disk creation order matches the deploy order.
+    _generate_integrity_file(prereqs_pkg_dir)
     prereqs_archive = _archive_package(prereqs_pkg_dir, archive_format)
     _generate_checksum(prereqs_archive)
+    _generate_integrity_file(pkg_dir)
     main_archive = _archive_package(pkg_dir, archive_format)
     _generate_checksum(main_archive)
 
@@ -1357,9 +1359,11 @@ Requirements:
 """
 
 import argparse
+import hashlib
 import json
 import logging
 import os
+import pathlib
 import sys
 import glob
 from datetime import datetime, timezone
@@ -1409,6 +1413,9 @@ def main():
     # Clamp streams to 1–8
     num_streams = min(max(args.streams, 1), 8)
 
+    # -- Package integrity verification (before any database connection) --
+    pkg_hash = _verify_integrity(SCRIPT_DIR, logger, args.skip_integrity_check)
+
     # -- Connect (skip in dry-run — no database needed) --
     cursor = None
     make_cursor = None
@@ -1426,7 +1433,8 @@ def main():
             try:
                 band = (
                     f"BUILD={{BUILD_NUMBER}};PKG={{PACKAGE_NAME}};"
-                    f"ENV={{ENVIRONMENT}};DEPLOYER=ddl_deployer_v2;"
+                    f"ENV={{ENVIRONMENT}};PKG_HASH={{pkg_hash[:16]}};"
+                    f"DEPLOYER=ddl_deployer_v2;"
                 )
                 cursor.execute(f"SET QUERY_BAND = '{{band}}' FOR SESSION")
                 logger.info("Query band set: %s", band)
@@ -1454,7 +1462,8 @@ def main():
             if cursor:
                 band = (
                     f"BUILD={{BUILD_NUMBER}};PKG={{PACKAGE_NAME}};"
-                    f"ENV={{ENVIRONMENT}};PHASE={{phase_dir_name}};"
+                    f"ENV={{ENVIRONMENT}};PKG_HASH={{pkg_hash[:16]}};"
+                    f"PHASE={{phase_dir_name}};"
                 )
                 cursor.execute(f"SET QUERY_BAND = '{{band}}' FOR SESSION")
         except Exception:
@@ -1565,6 +1574,90 @@ def main():
             cursor.connection.close()
 
 
+def _verify_integrity(script_dir, logger, skip=False):
+    """Verify the package has not been modified since packaging.
+
+    Recomputes SHA-256 over every file under payload/, derives the
+    combined package_hash, and compares against package_integrity.json.
+    Aborts the process on any mismatch.
+
+    Returns the package_hash string so callers can embed it in the
+    query band.  Returns 'SKIPPED' when --skip-integrity-check is set.
+    """
+    integrity_file = os.path.join(script_dir, "package_integrity.json")
+
+    if skip:
+        logger.warning("Integrity check SKIPPED (--skip-integrity-check).")
+        return "SKIPPED"
+
+    if not os.path.exists(integrity_file):
+        logger.error(
+            "INTEGRITY CHECK FAILED: package_integrity.json not found — "
+            "package may be incomplete or corrupted. "
+            "Use --skip-integrity-check to override (development only)."
+        )
+        sys.exit(1)
+
+    with open(integrity_file, encoding="utf-8") as fh:
+        stored = json.load(fh)
+
+    stored_hash = stored.get("package_hash", "")
+    stored_files = stored.get("files", {{}})
+    algorithm = stored.get("algorithm", "SHA-256")
+    logger.info("Verifying package integrity (%s) ...", algorithm)
+
+    computed_files = {{}}
+    payload_dir = os.path.join(script_dir, "payload")
+    for root, dirs, files in os.walk(payload_dir):
+        dirs.sort()
+        for fname in sorted(files):
+            fpath = os.path.join(root, fname)
+            rel = pathlib.Path(os.path.relpath(fpath, script_dir)).as_posix()
+            with open(fpath, "rb") as fh:
+                computed_files[rel] = hashlib.sha256(fh.read()).hexdigest()
+
+    errors = []
+    for path, expected in sorted(stored_files.items()):
+        got = computed_files.get(path)
+        if got is None:
+            errors.append(f"  MISSING:  {{path}}")
+        elif got != expected:
+            errors.append(f"  MODIFIED: {{path}}")
+    for path in sorted(computed_files):
+        if path not in stored_files:
+            errors.append(f"  ADDED:    {{path}}")
+
+    if errors:
+        logger.error(
+            "INTEGRITY CHECK FAILED — %d file(s) changed since packaging:",
+            len(errors),
+        )
+        for e in errors:
+            logger.error(e)
+        sys.exit(1)
+
+    combined = "".join(
+        f"{{k}}:{{v}}\\n" for k, v in sorted(computed_files.items())
+    )
+    computed_hash = hashlib.sha256(combined.encode()).hexdigest()
+
+    if computed_hash != stored_hash:
+        logger.error(
+            "INTEGRITY CHECK FAILED — package hash mismatch.\\n"
+            "  Expected: %s\\n  Computed: %s",
+            stored_hash,
+            computed_hash,
+        )
+        sys.exit(1)
+
+    logger.info(
+        "  ✓ Integrity verified: %s... (%d files)",
+        computed_hash[:16],
+        len(computed_files),
+    )
+    return computed_hash
+
+
 _PHASE_SUBDIR_ORDERS = {{
     "00_system": {{
         "maps": 0, "roles": 1, "profiles": 2,
@@ -1639,7 +1732,7 @@ def connect(args):
     clear, actionable messages for the DBA.
     """
     import teradatasql
-    params = {{"host": args.host, "user": args.user}}
+    params = {{"host": args.host, "user": args.user, "charset": "UTF8"}}
     if args.password:
         params["password"] = args.password
     if args.logmech:
@@ -1752,6 +1845,8 @@ def parse_args():
                    help="Continue past failures.")
     p.add_argument("-v", "--verbose", action="store_true",
                    help="Debug logging.")
+    p.add_argument("--skip-integrity-check", action="store_true",
+                   help="Skip package integrity verification (development use only).")
     args = p.parse_args()
 
     # Validate: --host and --user are required unless --dry-run
@@ -1960,6 +2055,57 @@ def _archive_package(pkg_dir: str, archive_format: str) -> str:
     logger.info("Archived and cleaned up: %s", archive_path)
 
     return archive_path
+
+
+def _generate_integrity_file(pkg_dir: str) -> str:
+    """Compute a SHA-256 fingerprint over every payload file.
+
+    Walks ``payload/`` recursively (sorted), hashes each file, then
+    derives a single ``package_hash`` as SHA-256 of the sorted
+    ``"rel/path:filehash\\n"`` concatenation.  Writes the result to
+    ``package_integrity.json`` in the package root so the embedded
+    ``deploy.py`` can verify the package has not been tampered with
+    before any database connection is opened.
+
+    Args:
+        pkg_dir: Package root directory (not yet archived).
+
+    Returns:
+        The hex package_hash.
+    """
+    import pathlib
+
+    payload_dir = os.path.join(pkg_dir, "payload")
+    file_hashes: dict = {}
+
+    for root, dirs, files in os.walk(payload_dir):
+        dirs.sort()
+        for fname in sorted(files):
+            fpath = os.path.join(root, fname)
+            rel = pathlib.Path(os.path.relpath(fpath, pkg_dir)).as_posix()
+            with open(fpath, "rb") as f:
+                file_hashes[rel] = hashlib.sha256(f.read()).hexdigest()
+
+    combined = "".join(f"{k}:{v}\n" for k, v in sorted(file_hashes.items()))
+    package_hash = hashlib.sha256(combined.encode()).hexdigest()
+
+    integrity = {
+        "algorithm": "SHA-256",
+        "package_hash": package_hash,
+        "file_count": len(file_hashes),
+        "files": file_hashes,
+    }
+
+    out_path = os.path.join(pkg_dir, "package_integrity.json")
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(integrity, f, indent=2, ensure_ascii=False)
+
+    logger.info(
+        "Integrity fingerprint: %s... (%d files)",
+        package_hash[:16],
+        len(file_hashes),
+    )
+    return package_hash
 
 
 def _generate_checksum(archive_path: str) -> str:
