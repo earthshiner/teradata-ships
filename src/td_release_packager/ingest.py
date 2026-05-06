@@ -756,18 +756,15 @@ def _split_multi_statement(
     if re.search(r"(?:CREATE|REPLACE)\s+MACRO\b", content, re.IGNORECASE):
         return [content]
 
-    # --- Build a comment-safe version for splitting ---
-    # Replace each comment with whitespace of the same length so that
-    # character positions are preserved for mapping back to originals.
-    clean = content
+    # --- Build a split-safe version of the content ---
+    # Strip comments AND string literals (replaced by spaces with
+    # newlines preserved so positions / line numbers survive). Without
+    # the string strip, a literal like ``'AML/CTF Act; H rating ...'``
+    # would split mid-string at the first ``;``, leaving an unterminated
+    # quote and a corrupt second chunk in the output.
+    from td_release_packager.sql_text import strip_comments_and_string_literals
 
-    # Block comments
-    for match in re.finditer(r"/\*.*?\*/", clean, flags=re.DOTALL):
-        clean = clean[: match.start()] + " " * len(match.group()) + clean[match.end() :]
-
-    # Single-line comments: replace from '--' to end of line with spaces
-    for match in re.finditer(r"--[^\n]*", clean):
-        clean = clean[: match.start()] + " " * len(match.group()) + clean[match.end() :]
+    clean = strip_comments_and_string_literals(content)
 
     # --- Find semicolon positions in the clean version ---
     semi_positions = [i for i, c in enumerate(clean) if c == ";"]
