@@ -237,6 +237,19 @@ _JAR_INSTALL_RE = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
+# DML — INSERT INTO / UPDATE / DELETE FROM / MERGE INTO.
+# Matched anywhere in the script (after comment stripping) so that
+# single- and multi-statement DML files both classify cleanly. The
+# first matched target supplies a representative database.table for
+# the report; the unique manifest key is derived from the filename.
+_DML_RE = re.compile(
+    r"""
+    \b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE\s+INTO)\s+
+    ((?:"[^"]+"|[A-Za-z_]\w*)(?:\.(?:"[^"]+"|[A-Za-z_]\w*))?)
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
 # -- Detect whether SET/MULTISET is already specified --
 _HAS_SET_MULTISET_RE = re.compile(
     r"""
@@ -347,7 +360,8 @@ def parse_ddl_text(ddl_text: str, file_path: str = "<inline>") -> ParsedDDL:
             "Expected CREATE/REPLACE TABLE, VIEW, MACRO, PROCEDURE, "
             "FUNCTION, TRIGGER, or CREATE DATABASE, JOIN INDEX, INDEX, "
             "USER, ROLE, PROFILE, MAP, AUTHORIZATION, FOREIGN SERVER, "
-            "GRANT, REVOKE, or CALL SQLJ.INSTALL_JAR."
+            "GRANT, REVOKE, CALL SQLJ.INSTALL_JAR, or "
+            "INSERT/UPDATE/DELETE/MERGE."
         )
 
     # -- Extract database and object name --
@@ -369,6 +383,10 @@ def parse_ddl_text(ddl_text: str, file_path: str = "<inline>") -> ParsedDDL:
         ObjectType.GRANT,
         ObjectType.REVOKE,
         ObjectType.JAR,
+        # DML — qualified name comes from the filename, not the
+        # captured first target (a multi-target DML file would
+        # otherwise collide with another file sharing that target).
+        ObjectType.DML,
     }
 
     if db_name is None and object_type not in _SINGLE_NAME_TYPES:
@@ -433,6 +451,19 @@ def parse_ddl_text(ddl_text: str, file_path: str = "<inline>") -> ParsedDDL:
     else:
         qualified_name = f"{db_name}.{obj_name}" if obj_name else db_name
 
+    # DML: every .dml file gets a filename-derived manifest key so
+    # multi-target scripts don't collide on a shared first target.
+    # The first DML target's database (already in db_name) is kept
+    # for the report so the operator can see which schema the load
+    # writes to.
+    if object_type == ObjectType.DML and file_path:
+        basename = os.path.splitext(os.path.basename(file_path))[0]
+        qualified_name = f"DML:{basename}"
+        if not obj_name:
+            obj_name = basename
+        if db_name is None:
+            db_name = ""
+
     return ParsedDDL(
         file_path=file_path,
         ddl_text=ddl_text,
@@ -481,6 +512,9 @@ def _detect_deploy_intent(ddl_text: str, object_type: ObjectType) -> DeployInten
         ObjectType.GRANT,
         ObjectType.REVOKE,
         ObjectType.JAR,
+        # DML scripts (INSERT/UPDATE/DELETE/MERGE) execute as-is.
+        # _execute_ddl already handles multi-statement bodies.
+        ObjectType.DML,
     ):
         return DeployIntent.DIRECT_EXECUTE
 
@@ -564,6 +598,10 @@ def _detect_object_type(ddl_text: str) -> Tuple[ObjectType, str]:
         (_JAR_INSTALL_RE, ObjectType.JAR),
         (_GRANT_RE, ObjectType.GRANT),
         (_REVOKE_RE, ObjectType.REVOKE),
+        # DML last — comes after every CREATE/REPLACE/GRANT/REVOKE
+        # form so a procedure body containing INSERT/UPDATE never
+        # classifies as DML. A pure DML script reaches this rung.
+        (_DML_RE, ObjectType.DML),
     ]
 
     for pattern, obj_type in patterns:

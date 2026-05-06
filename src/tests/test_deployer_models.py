@@ -331,6 +331,36 @@ class TestDeployOrder:
             if obj_type != ObjectType.UNKNOWN:
                 assert DEPLOY_ORDER.get(obj_type, 0) < DEPLOY_ORDER[ObjectType.UNKNOWN]
 
+    def test_dml_after_all_ddl(self):
+        """DML deploys after every DDL type so target tables /
+        views / triggers exist before data is loaded."""
+        ddl_types = [
+            ObjectType.TABLE,
+            ObjectType.JOIN_INDEX,
+            ObjectType.HASH_INDEX,
+            ObjectType.INDEX,
+            ObjectType.VIEW,
+            ObjectType.MACRO,
+            ObjectType.PROCEDURE,
+            ObjectType.FUNCTION,
+            ObjectType.JAR,
+            ObjectType.SCRIPT_TABLE_OPERATOR,
+            ObjectType.TRIGGER,
+        ]
+        for t in ddl_types:
+            assert DEPLOY_ORDER[t] < DEPLOY_ORDER[ObjectType.DML], (
+                f"{t.name} should deploy before DML"
+            )
+
+    def test_dml_uses_direct_execute(self):
+        """DML routes through DIRECT_EXECUTE — _execute_ddl already
+        handles the multi-statement case."""
+        assert STRATEGY_MAP[ObjectType.DML] == DeployStrategy.DIRECT_EXECUTE
+
+    def test_dml_is_environment_scoped(self):
+        """DML is per-environment (data lives in the target system)."""
+        assert SCOPE_MAP[ObjectType.DML] == DeployScope.ENVIRONMENT
+
 
 # ---------------------------------------------------------------
 # PackageDeployResult properties

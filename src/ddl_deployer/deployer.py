@@ -196,6 +196,11 @@ def deploy_package(
                 # underlying objects.
                 "*.bteq",
                 "*.btq",
+                # DML scripts (INSERT/UPDATE/DELETE/MERGE). Without
+                # this pattern the packager-emitted .dml artefacts
+                # would be silently dropped, leaving target tables
+                # unpopulated after deploy.
+                "*.dml",
             ]
         ddl_files = []
         for pattern in file_patterns:
