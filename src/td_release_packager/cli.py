@@ -556,10 +556,12 @@ def _print_harvest_next_steps(
             f"     python -m td_release_packager harvest \\\n"
             f"         --source <legacy_src> \\\n"
             f"         --project {project} \\\n"
-            f"         --token-map {generated_token_map_path} \\\n"
-            f"         --force\n"
+            f"         --token-map {generated_token_map_path}\n"
             f"\n"
-            f"   This rewrites the staged DDL to use {{{{TOKEN}}}} form."
+            f"   This rewrites the staged DDL to use {{{{TOKEN}}}} form. "
+            f"The default clean-payload mode wipes the previous run's "
+            f"un-tokenised files first; pass --keep-existing if you "
+            f"need legacy overlay behaviour."
         )
         next_num += 1
         steps.append(_quality_gates_step(next_num))
@@ -825,6 +827,7 @@ def _cmd_ingest(args):
             detect_tokens=True,
             apply_tokens=apply_tokens,
             force=args.force,
+            clean_payload=not args.keep_existing,
         )
 
         print(f"\n{'=' * 64}")
@@ -832,8 +835,14 @@ def _cmd_ingest(args):
         print(f"{'=' * 64}")
         print(f"  Source:           {args.source}")
         print(f"  Project:          {args.project}")
-        if args.force:
-            print("  Mode:             FORCE (overwrite existing)")
+        if args.keep_existing:
+            print("  Mode:             KEEP-EXISTING (overlay)")
+            if args.force:
+                print("                    + FORCE (overwrite collisions)")
+        else:
+            print("  Mode:             CLEAN (default — payload wiped first)")
+        if result.cleaned:
+            print(f"  Cleaned:          {result.cleaned} stale file(s)")
         print(f"  Files scanned:    {result.total_files}")
         print(f"  Classified:       {result.classified}")
         if result.overwritten:
@@ -2042,10 +2051,21 @@ def _build_parser():
         "--force",
         action="store_true",
         help="Overwrite existing files in the payload. "
-        "Use when re-harvesting after editing source "
-        "DDL. Warns if overwriting tokenised files "
-        "with non-tokenised content — pass the same "
-        "--token-map to preserve tokenisation.",
+        "Redundant under the default clean-payload mode "
+        "(nothing pre-exists to overwrite); only meaningful "
+        "alongside --keep-existing, where it governs "
+        "per-file collisions during overlay re-harvest.",
+    )
+    ig.add_argument(
+        "--keep-existing",
+        action="store_true",
+        help="Skip the pre-harvest payload clean and overlay "
+        "new files on top of whatever is already in "
+        "payload/database/. The default behaviour wipes "
+        "harvest-owned files first (preserving .gitkeep and "
+        "control files starting with '_' like a user-curated "
+        "_order.txt) so the payload always reflects current "
+        "source state without orphaned artefacts.",
     )
     ig.add_argument(
         "--reconcile",
