@@ -71,6 +71,9 @@ _TYPE_TO_EXT = {
     # Supporting artefacts (not deployed)
     "C_SOURCE": ".c",
     "C_HEADER": ".h",
+    # Data Manipulation Language — INSERT / UPDATE / DELETE / MERGE.
+    # Seed-data, registration metadata, reference-data loads.
+    "DML": ".dml",
 }
 
 # -- Subdirectory mapping by object type --
@@ -104,6 +107,10 @@ _TYPE_TO_SUBDIR = {
     # Supporting artefacts travel with their parent
     "C_SOURCE": "DDL/functions",
     "C_HEADER": "DDL/functions",
+    # DML lives in its own top-level subdirectory under
+    # payload/database/, deployed after all DDL so the target
+    # tables exist before the data is loaded.
+    "DML": "DML",
 }
 
 # -- Classification patterns: removed --
@@ -140,13 +147,30 @@ _COMMENT_ON_NAME_RE = re.compile(
     re.IGNORECASE,
 )
 
-# -- Name extraction for COLLECT STATISTICS statements --
+# -- Name extraction for COLLECT / UPDATE STATISTICS statements --
 # Matches: COLLECT STATISTICS [COLUMN (...)] ON {{DB}}.table
 #          COLLECT STATISTICS ON {{DB}}.table COLUMN (...)
+#          UPDATE STATISTICS ON {{DB}}.table  (Teradata synonym)
 _COLLECT_STATS_NAME_RE = re.compile(
-    r"COLLECT\s+STATISTICS\b.*?\bON\s+"
+    r"(?:COLLECT|UPDATE)\s+STATISTICS\b.*?\bON\s+"
     rf"({_NAME_PART}\.{_NAME_PART})",
     re.IGNORECASE | re.DOTALL,
+)
+
+# -- Name extraction for DML statements (INSERT / UPDATE / DELETE / MERGE) --
+# Captures the qualified target object so the harvested file can be
+# named ``<db>.<table>.dml``. All four verbs follow the same shape:
+# the target is the first qualified name after the leading verb.
+#   INSERT INTO {{DB}}.t (...) VALUES (...)
+#   UPDATE      {{DB}}.t SET ... [FROM ... WHERE ...]
+#   DELETE FROM {{DB}}.t WHERE ...
+#   MERGE  INTO {{DB}}.t USING ... ON ... WHEN MATCHED THEN ...
+# The line-start anchor mirrors the classifier; UPDATE STATISTICS is
+# already handled by ``_COLLECT_STATS_NAME_RE`` above.
+_DML_NAME_RE = re.compile(
+    r"^\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE\s+INTO)\s+"
+    rf"({_NAME_PART}(?:\.{_NAME_PART})?)",
+    re.IGNORECASE | re.MULTILINE,
 )
 
 # -- Detect REPLACE VIEW vs CREATE VIEW --
@@ -421,10 +445,12 @@ def ingest_directory(
 
                 # -- Handle existing files --------------------------------
                 if os.path.exists(dest_path):
-                    # COMMENT and STATISTICS: append to existing file.
-                    # Multiple COMMENT ON or COLLECT STATISTICS statements
-                    # for the same table accumulate into one .cmt/.stt file.
-                    if obj_type in ("COMMENT", "STATISTICS"):
+                    # COMMENT, STATISTICS, and DML: append to existing file.
+                    # Multiple COMMENT ON / COLLECT STATISTICS / INSERT
+                    # statements for the same target table accumulate
+                    # into one .cmt / .stt / .dml file rather than
+                    # silently overwriting each other.
+                    if obj_type in ("COMMENT", "STATISTICS", "DML"):
                         with open(dest_path, "a", encoding="utf-8") as f:
                             f.write("\n" + content + "\n")
                         result.classified += 1
@@ -894,13 +920,23 @@ def _extract_qualified_name(content: str) -> Tuple[Optional[str], Optional[str]]
         if len(parts) >= 2:
             return (parts[0].strip(), parts[1].strip())
 
-    # --- COLLECT STATISTICS ... ON ---
+    # --- COLLECT / UPDATE STATISTICS ... ON ---
     match = _COLLECT_STATS_NAME_RE.search(content)
     if match:
         qualified = match.group(1)
         parts = qualified.replace('"', "").split(".")
         if len(parts) == 2:
             return (parts[0].strip(), parts[1].strip())
+
+    # --- INSERT / UPDATE / DELETE / MERGE → DML target ---
+    match = _DML_NAME_RE.search(content)
+    if match:
+        qualified = match.group(1)
+        parts = qualified.replace('"', "").split(".")
+        if len(parts) == 2:
+            return (parts[0].strip(), parts[1].strip())
+        elif len(parts) == 1:
+            return (None, parts[0].strip())
 
     return (None, None)
 

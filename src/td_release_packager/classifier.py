@@ -83,6 +83,7 @@ BASE_TYPES: Set[str] = {
     "FOREIGN_SERVER",
     "C_SOURCE",
     "C_HEADER",
+    "DML",
 }
 
 
@@ -135,6 +136,7 @@ TYPE_TO_EXTENSION: Dict[str, str] = {
     "FOREIGN_SERVER": ".fsvr",
     "C_SOURCE": ".c",
     "C_HEADER": ".h",
+    "DML": ".dml",
 }
 
 
@@ -168,6 +170,7 @@ TYPE_TO_SUBDIR: Dict[str, str] = {
     "FOREIGN_SERVER": "system/foreign_servers",
     "C_SOURCE": "DDL/functions",
     "C_HEADER": "DDL/functions",
+    "DML": "DML",
 }
 
 
@@ -202,10 +205,11 @@ EXTENSION_TO_EXPECTED: Dict[str, Optional[Set[str]]] = {
     ".prf": {"PROFILE"},
     ".auth": {"AUTHORIZATION"},
     ".fsvr": {"FOREIGN_SERVER"},
+    # DML scripts — INSERT/UPDATE/DELETE/MERGE.
+    ".dml": {"DML"},
     # Generic — any type acceptable
     ".sql": None,
     ".ddl": None,
-    ".dml": None,
     # BTEQ-style extensions. Legacy Teradata codebases sometimes
     # name pure-SQL scripts ``.bteq`` / ``.btq`` even when there
     # are no actual BTEQ commands in the body. Treat them as
@@ -297,17 +301,39 @@ _CLASSIFY_PATTERNS: List[Tuple[re.Pattern, str]] = [
         ),
         "JAR",
     ),
-    # Metadata + statistics
+    # Metadata + statistics. ``UPDATE STATISTICS`` is a Teradata
+    # synonym for ``COLLECT STATISTICS`` — both refresh table stats.
+    # Match it here BEFORE the generic UPDATE → DML pattern below so
+    # stats-collection scripts don't get misclassified as DML.
     (re.compile(r"^\s*COMMENT\s+ON\b", _STMT_FLAGS), "COMMENT"),
-    (re.compile(r"^\s*COLLECT\s+STATISTICS\b", _STMT_FLAGS), "STATISTICS"),
-    # DCL (least specific). Anchoring matters MORE here than for the
-    # CREATE/REPLACE patterns — a real procedure body can legally
-    # contain a string literal like ``EXECUTE IMMEDIATE 'GRANT ...'``,
-    # which is stripped by the caller, but if any GRANT survived in
-    # the body we'd still avoid mis-classifying because the GRANT
-    # verb wouldn't be at line-start.
+    (
+        re.compile(r"^\s*(?:COLLECT|UPDATE)\s+STATISTICS\b", _STMT_FLAGS),
+        "STATISTICS",
+    ),
+    # DCL (least specific of the DDL family). Anchoring matters MORE
+    # here than for the CREATE/REPLACE patterns — a real procedure
+    # body can legally contain a string literal like
+    # ``EXECUTE IMMEDIATE 'GRANT ...'``, which is stripped by the
+    # caller, but if any GRANT survived in the body we'd still avoid
+    # mis-classifying because the GRANT verb wouldn't be at line-start.
     (re.compile(r"^\s*GRANT\b", _STMT_FLAGS), "GRANT"),
     (re.compile(r"^\s*REVOKE\b", _STMT_FLAGS), "REVOKE"),
+    # DML — comes LAST so any DDL with embedded DML (e.g. a procedure
+    # body containing INSERT/UPDATE) classifies as the DDL type via
+    # an earlier pattern. A pure DML script (registration data, seed
+    # loads) reaches these patterns and classifies as DML.
+    #
+    # ``DELETE FROM`` only — bare ``DELETE`` would also match Teradata's
+    # destructive ``DELETE DATABASE foo ALL`` (a teardown command, not a
+    # deployment artefact). Requiring ``FROM`` keeps that out.
+    #
+    # ``UPDATE`` is permissive (no ``SET`` requirement) because Teradata's
+    # ``UPDATE t FROM other o SET ...`` reorders the SET clause; the line-
+    # start anchor + earlier UPDATE STATISTICS rule are enough discrimination.
+    (re.compile(r"^\s*INSERT\s+INTO\b", _STMT_FLAGS), "DML"),
+    (re.compile(r"^\s*UPDATE\b", _STMT_FLAGS), "DML"),
+    (re.compile(r"^\s*DELETE\s+FROM\b", _STMT_FLAGS), "DML"),
+    (re.compile(r"^\s*MERGE\s+INTO\b", _STMT_FLAGS), "DML"),
 ]
 
 
