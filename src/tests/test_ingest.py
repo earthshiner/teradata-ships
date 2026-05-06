@@ -347,6 +347,122 @@ class TestExtractQualifiedName:
         assert db == "{{MEM_DATABASE}}"
         assert obj == "v_Active"
 
+    # -- COMMENT ON COLUMN aggregates with the parent's other comments --
+    # Teradata stores comments for view columns and for macro /
+    # procedure / function parameters in DBC.TVM (exposed via
+    # DBC.ColumnsV). The eponymous .cmt file groups every comment
+    # for the same parent so view column comments aggregate with
+    # the COMMENT ON VIEW, procedure parameter comments aggregate
+    # with the COMMENT ON PROCEDURE, and so on. Encouraged for AI-
+    # native data products: rich descriptions help both autonomous
+    # agents and human readers.
+
+    def test_comment_on_column_of_view_aggregates_with_view(self):
+        """A COMMENT ON COLUMN on a view's column extracts the view's
+        (db, view_name) so the .cmt file aggregates with the
+        COMMENT ON VIEW and any sibling column comments."""
+        db, obj = _extract_qualified_name(
+            "COMMENT ON COLUMN MyDB.v_Active.customer_id IS 'PII identifier';"
+        )
+        assert db == "MyDB"
+        assert obj == "v_Active"
+
+    def test_comment_on_macro_parameter_aggregates_with_macro(self):
+        """COMMENT ON COLUMN <db>.<macro>.<arg> extracts (db, macro)
+        so parameter comments aggregate with COMMENT ON MACRO into
+        the same eponymous .cmt file."""
+        db, obj = _extract_qualified_name(
+            "COMMENT ON COLUMN MyDB.mc_Report.start_date IS 'period start';"
+        )
+        assert db == "MyDB"
+        assert obj == "mc_Report"
+
+    def test_comment_on_procedure_parameter_aggregates_with_procedure(self):
+        """COMMENT ON COLUMN <db>.<proc>.<arg> aggregates parameter
+        comments with the procedure's own COMMENT ON statement."""
+        db, obj = _extract_qualified_name(
+            "COMMENT ON COLUMN MyDB.sp_LoadLoans.batch_size IS 'rows per batch';"
+        )
+        assert db == "MyDB"
+        assert obj == "sp_LoadLoans"
+
+    def test_comment_on_function_parameter_aggregates_with_function(self):
+        """COMMENT ON COLUMN <db>.<fn>.<arg> aggregates parameter
+        comments with the function's own COMMENT ON statement."""
+        db, obj = _extract_qualified_name(
+            "COMMENT ON COLUMN MyDB.fn_Calc.input_x IS 'denominator';"
+        )
+        assert db == "MyDB"
+        assert obj == "fn_Calc"
+
+    # -- String-literal interference (was: caused ``and.dml`` filenames) --
+
+    def test_dml_ignores_comment_on_inside_string_literal(self):
+        """An IS-string saying 'COMMENT ON TABLE and ...' must not be
+        mistaken for a real COMMENT ON statement. The DML target
+        (Memory.Change_Log) should be picked up instead. Pre-fix this
+        produced ``(None, 'and')`` and a file called ``and.dml``."""
+        chunk = (
+            "INSERT INTO MortgagePlatform_Memory.Change_Log\n"
+            "(change_id, change_description) VALUES\n"
+            "('CL-001',\n"
+            " 'Created complete Domain schema. All COMMENT ON TABLE "
+            "and COMMENT ON COLUMN applied.');"
+        )
+        db, obj = _extract_qualified_name(chunk)
+        assert db == "MortgagePlatform_Memory"
+        assert obj == "Change_Log"
+
+    def test_ddl_ignores_create_inside_string_literal(self):
+        """A CREATE TABLE name should win even when an earlier IS-text
+        contains keyword-like phrases such as 'CREATE schema' (which
+        the regex would otherwise misread as a hint at the target)."""
+        chunk = (
+            "COMMENT ON TABLE MyDB.RealTable IS\n"
+            "'Tracks how each CREATE TABLE Other.NotReal got applied';"
+        )
+        db, obj = _extract_qualified_name(chunk)
+        assert db == "MyDB"
+        assert obj == "RealTable"
+
+    # -- GRANT / REVOKE eponymous extraction --
+
+    def test_grant_on_database(self):
+        """GRANT on a bare database name extracts the database name."""
+        ddl = (
+            "GRANT SELECT ON {{MortgagePlatform_Observability}} "
+            "TO PUBLIC WITH GRANT OPTION;"
+        )
+        db, obj = _extract_qualified_name(ddl)
+        # 1-part target — db None, obj is the database name itself
+        assert db is None
+        assert obj == "{{MortgagePlatform_Observability}}"
+
+    def test_grant_on_table(self):
+        """GRANT on db.table extracts both parts."""
+        ddl = "GRANT SELECT ON MyDB.Customer TO read_role;"
+        db, obj = _extract_qualified_name(ddl)
+        assert db == "MyDB"
+        assert obj == "Customer"
+
+    def test_revoke_on_database(self):
+        """REVOKE follows the same shape as GRANT."""
+        ddl = "REVOKE ALL PRIVILEGES ON MyDB FROM old_role;"
+        db, obj = _extract_qualified_name(ddl)
+        assert db is None
+        assert obj == "MyDB"
+
+    def test_grant_with_complex_privilege_list(self):
+        """The privilege list between GRANT and ON is consumed
+        regardless of how many privileges are listed."""
+        ddl = (
+            "GRANT SELECT, INSERT, UPDATE, DELETE, EXECUTE FUNCTION "
+            "ON MyDB.Foo TO role_admin;"
+        )
+        db, obj = _extract_qualified_name(ddl)
+        assert db == "MyDB"
+        assert obj == "Foo"
+
 
 # ---------------------------------------------------------------
 # _extract_specific_function_name
@@ -1157,6 +1273,158 @@ class TestIngestDirectory:
         assert result.cleaned == 0
         assert (tables_dir / orphan_name).exists(), (
             "with clean_payload=False, orphaned files must survive"
+        )
+
+    # -----------------------------------------------------------
+    # Output quality fixes (issues observed against
+    # mortgage-ai-data-product-demo)
+    # -----------------------------------------------------------
+
+    def test_ingest_strips_leading_source_structure_comments(
+        self, tmp_path, tmp_project
+    ):
+        """Source files commonly start with file/section banner
+        comments ("D. MEMORY - CHANGE LOG") that reference a layout
+        that no longer exists in the package. They must be stripped
+        from each placed chunk so the deployed SQL is not littered
+        with stale headers. Inline / trailing comments are preserved."""
+        src = tmp_path / "source"
+        src.mkdir()
+        (src / "documentation.sql").write_text(
+            "-- =================================================\n"
+            "-- D. MEMORY  -  CHANGE LOG\n"
+            "-- =================================================\n"
+            "\n"
+            "INSERT INTO MyDB.Change_Log (id) VALUES (1);  -- inline kept\n",
+            encoding="utf-8",
+        )
+
+        ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        placed = tmp_project / "payload" / "database" / "DML" / "MyDB.Change_Log.dml"
+        assert placed.exists()
+        body = placed.read_text(encoding="utf-8")
+
+        # Header banner gone
+        assert "D. MEMORY" not in body
+        assert "============" not in body
+        # Real statement preserved
+        assert "INSERT INTO MyDB.Change_Log" in body
+        # Inline trailing comment preserved
+        assert "-- inline kept" in body
+
+    def test_ingest_grant_lands_in_eponymous_dcl(self, tmp_path, tmp_project):
+        """GRANT statement should produce <db>.dcl (database-level)
+        instead of falling back to the source filename. Pre-fix the
+        same content would have produced ``01_observability_ddl.dcl``."""
+        src = tmp_path / "source"
+        src.mkdir()
+        (src / "01_observability_ddl.sql").write_text(
+            "GRANT SELECT ON MortgagePlatform_Observability "
+            "TO PUBLIC WITH GRANT OPTION;\n",
+            encoding="utf-8",
+        )
+
+        ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        dcl_dir = tmp_project / "payload" / "database" / "DCL" / "inter_db"
+        assert (dcl_dir / "MortgagePlatform_Observability.dcl").exists(), (
+            "GRANT must land in an eponymous .dcl file, not under the source filename"
+        )
+        assert not (dcl_dir / "01_observability_ddl.dcl").exists()
+
+    def test_ingest_aggregates_view_and_column_comments_into_one_cmt(
+        self, tmp_path, tmp_project
+    ):
+        """COMMENT ON VIEW plus COMMENT ON COLUMN entries for the same
+        view all aggregate into a single ``<db>.<view>.cmt`` file —
+        Teradata stores view column comments in DBC.TVM the same way
+        it stores table column comments. Useful documentation for
+        autonomous agents and human readers; harvest must preserve it."""
+        src = tmp_path / "source"
+        src.mkdir()
+        (src / "doc.sql").write_text(
+            "COMMENT ON VIEW MyDB.v_Active IS 'Active customer rows';\n"
+            "COMMENT ON COLUMN MyDB.v_Active.customer_id IS 'PII id';\n"
+            "COMMENT ON COLUMN MyDB.v_Active.region IS 'AU state code';\n",
+            encoding="utf-8",
+        )
+
+        ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        cmt = (
+            tmp_project
+            / "payload"
+            / "database"
+            / "DDL"
+            / "comments"
+            / "MyDB.v_Active.cmt"
+        )
+        assert cmt.exists()
+        body = cmt.read_text(encoding="utf-8")
+        assert body.count("COMMENT ON VIEW") == 1
+        assert body.count("COMMENT ON COLUMN") == 2
+        assert "Active customer rows" in body
+        assert "PII id" in body
+        assert "AU state code" in body
+
+    def test_ingest_aggregates_procedure_parameter_comments_with_procedure(
+        self, tmp_path, tmp_project
+    ):
+        """Parameter comments on macros / procedures / functions —
+        ``COMMENT ON COLUMN <db>.<routine>.<arg>`` — aggregate with
+        the routine's own COMMENT ON into one eponymous .cmt file.
+        The mortgage AI-native data product standard recommends this
+        for richer parameter documentation visible to agents."""
+        src = tmp_path / "source"
+        src.mkdir()
+        (src / "doc.sql").write_text(
+            "COMMENT ON PROCEDURE MyDB.sp_LoadLoans "
+            "IS 'Loads a batch of loans';\n"
+            "COMMENT ON COLUMN MyDB.sp_LoadLoans.batch_size "
+            "IS 'rows per batch';\n"
+            "COMMENT ON COLUMN MyDB.sp_LoadLoans.dry_run "
+            "IS '1 = simulate only';\n",
+            encoding="utf-8",
+        )
+
+        ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        cmt = (
+            tmp_project
+            / "payload"
+            / "database"
+            / "DDL"
+            / "comments"
+            / "MyDB.sp_LoadLoans.cmt"
+        )
+        assert cmt.exists()
+        body = cmt.read_text(encoding="utf-8")
+        assert body.count("COMMENT ON PROCEDURE") == 1
+        assert body.count("COMMENT ON COLUMN") == 2
+        assert "rows per batch" in body
+        assert "1 = simulate only" in body
+
+    def test_ingest_dml_with_comment_on_inside_string_lands_eponymously(
+        self, tmp_path, tmp_project
+    ):
+        """End-to-end regression: an INSERT with an IS-string mentioning
+        'COMMENT ON TABLE and ...' must land in the DML eponymous file
+        (MyDB.Change_Log.dml), not in ``and.dml``."""
+        src = tmp_path / "source"
+        src.mkdir()
+        (src / "documentation.sql").write_text(
+            "INSERT INTO MyDB.Change_Log (id, descr) VALUES\n"
+            "(1, 'All COMMENT ON TABLE and COMMENT ON COLUMN applied.');\n",
+            encoding="utf-8",
+        )
+
+        ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        dml_dir = tmp_project / "payload" / "database" / "DML"
+        assert (dml_dir / "MyDB.Change_Log.dml").exists()
+        assert not (dml_dir / "and.dml").exists(), (
+            "string-literal text must not produce a nonsense filename"
         )
 
     def test_ingest_clean_preserves_gitkeep_and_control_files(
