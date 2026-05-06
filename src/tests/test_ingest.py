@@ -1427,6 +1427,128 @@ class TestIngestDirectory:
             "string-literal text must not produce a nonsense filename"
         )
 
+    # -----------------------------------------------------------
+    # Multi-target DML keep-together policy (issue #68)
+    # -----------------------------------------------------------
+
+    def test_ingest_multi_target_dml_kept_together_as_multi_table(
+        self, tmp_path, tmp_project
+    ):
+        """A source file with INSERTs into multiple distinct tables
+        is placed as one ``<source_basename>.multi_table.dml`` file —
+        statement order preserved, no per-statement splitting. This
+        protects FK ordering / sequenced operations the source author
+        encoded by listing statements in a particular order."""
+        src = tmp_path / "source"
+        src.mkdir()
+        (src / "load_domain.sql").write_text(
+            "INSERT INTO MyDB.Customer_H (id) VALUES (1);\n"
+            "INSERT INTO MyDB.Loan_H (id, customer_id) VALUES (1, 1);\n"
+            "INSERT INTO MyDB.Payment_H (id, loan_id) VALUES (1, 1);\n",
+            encoding="utf-8",
+        )
+
+        result = ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        dml_dir = tmp_project / "payload" / "database" / "DML"
+        assert (dml_dir / "load_domain.multi_table.dml").exists()
+        # No per-target eponymous files should have been emitted.
+        assert not (dml_dir / "MyDB.Customer_H.dml").exists()
+        assert not (dml_dir / "MyDB.Loan_H.dml").exists()
+        assert not (dml_dir / "MyDB.Payment_H.dml").exists()
+
+        # Manifest carries the target list and target_count.
+        rel_dest = next(iter(result.multi_table_targets))
+        assert "load_domain.multi_table.dml" in rel_dest
+        assert sorted(result.multi_table_targets[rel_dest]) == [
+            "MyDB.Customer_H",
+            "MyDB.Loan_H",
+            "MyDB.Payment_H",
+        ]
+
+        # Order preserved: Customer_H must appear before Loan_H,
+        # Loan_H before Payment_H.
+        body = (dml_dir / "load_domain.multi_table.dml").read_text(encoding="utf-8")
+        cust = body.index("Customer_H")
+        loan = body.index("Loan_H")
+        pay = body.index("Payment_H")
+        assert cust < loan < pay
+
+    def test_ingest_same_target_dml_aggregates_eponymously(self, tmp_path, tmp_project):
+        """When every chunk in a multi-statement DML file targets the
+        same table, it aggregates eponymously (regression — current
+        behaviour). The multi-table rule fires only on >1 distinct
+        target."""
+        src = tmp_path / "source"
+        src.mkdir()
+        (src / "ref_currency.sql").write_text(
+            "INSERT INTO MyDB.Currency (cd, nm) VALUES ('AUD', 'AUS Dollar');\n"
+            "INSERT INTO MyDB.Currency (cd, nm) VALUES ('USD', 'US Dollar');\n"
+            "INSERT INTO MyDB.Currency (cd, nm) VALUES ('GBP', 'UK Pound');\n",
+            encoding="utf-8",
+        )
+
+        result = ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        dml_dir = tmp_project / "payload" / "database" / "DML"
+        assert (dml_dir / "MyDB.Currency.dml").exists()
+        assert not (dml_dir / "ref_currency.multi_table.dml").exists()
+        assert not result.multi_table_targets
+
+        body = (dml_dir / "MyDB.Currency.dml").read_text(encoding="utf-8")
+        assert body.count("INSERT INTO") == 3
+
+    def test_ingest_multi_table_dml_marker_forces_keep_together(
+        self, tmp_path, tmp_project
+    ):
+        """A ``-- MULTI_TABLE_DML`` header marker forces keep-together
+        treatment even when every chunk targets the same table.
+        Useful when the source author wants to preserve a particular
+        statement order on a single-target file (e.g. INSERT, UPDATE,
+        DELETE applied as a sequence)."""
+        src = tmp_path / "source"
+        src.mkdir()
+        (src / "audit_seq.sql").write_text(
+            "-- MULTI_TABLE_DML\n"
+            "INSERT INTO MyDB.Audit (id, state) VALUES (1, 'open');\n"
+            "UPDATE MyDB.Audit SET state = 'pending' WHERE id = 1;\n"
+            "DELETE FROM MyDB.Audit WHERE id = 1 AND state = 'pending';\n",
+            encoding="utf-8",
+        )
+
+        ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        dml_dir = tmp_project / "payload" / "database" / "DML"
+        assert (dml_dir / "audit_seq.multi_table.dml").exists()
+        # Must NOT have aggregated eponymously despite single target.
+        assert not (dml_dir / "MyDB.Audit.dml").exists()
+
+    def test_ingest_mixed_ddl_dml_splits_per_statement(
+        self, tmp_path, tmp_project, ddl_create_table
+    ):
+        """A source file with both DDL and DML chunks does not get
+        the multi-table treatment — each chunk is placed eponymously
+        as today. The keep-together rule applies only when every
+        classified chunk is DML."""
+        src = tmp_path / "source"
+        src.mkdir()
+        (src / "mixed.sql").write_text(
+            ddl_create_table + "\nINSERT INTO MyDB.AnotherTable (id) VALUES (1);\n",
+            encoding="utf-8",
+        )
+
+        ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        # DDL chunk → eponymous .tbl
+        tables_dir = tmp_project / "payload" / "database" / "DDL" / "tables"
+        assert any(p.suffix == ".tbl" for p in tables_dir.iterdir())
+        # DML chunk → eponymous .dml (different target, but only one
+        # DML chunk so it's unambiguous single-target)
+        dml_dir = tmp_project / "payload" / "database" / "DML"
+        assert (dml_dir / "MyDB.AnotherTable.dml").exists()
+        # No multi_table file expected.
+        assert not any("multi_table" in p.name for p in dml_dir.iterdir())
+
     def test_ingest_clean_preserves_gitkeep_and_control_files(
         self, tmp_path, tmp_project, ddl_create_table
     ):

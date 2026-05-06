@@ -122,6 +122,26 @@ _TYPE_TO_SUBDIR = {
 # tables drifting out of sync (which they did, until the
 # start-of-statement anchoring fix exposed the divergence).
 
+# -- MULTI_TABLE_DML marker --
+# A source author can place ``-- MULTI_TABLE_DML`` near the top of a
+# DML file to force the harvester to keep the entire script as a
+# single ``<source>.multi_table.dml`` artefact regardless of whether
+# the harvester would otherwise have aggregated chunks eponymously.
+# Mirrors the existing ``-- LOCKING VIEW`` marker convention used by
+# the view-layer generator. See docs/design-rationale/dml-naming.md
+# for the policy this enforces.
+_MULTI_TABLE_DML_MARKER_RE = re.compile(
+    r"--\s*MULTI_TABLE_DML\b",
+    re.IGNORECASE,
+)
+
+
+def _has_multi_table_dml_marker(content: str) -> bool:
+    """Return True if the source content carries the
+    ``-- MULTI_TABLE_DML`` opt-in marker."""
+    return bool(_MULTI_TABLE_DML_MARKER_RE.search(content))
+
+
 # -- Qualified name extraction patterns --
 # Matches both literal names (Database.Object) and tokenised names
 # ({{TOKEN}}.Object or {{TOKEN}}) in DDL statements.
@@ -275,6 +295,14 @@ class IngestResult:
     classification_warnings: List[str] = field(default_factory=list)
     external_references: Dict[str, List[str]] = field(default_factory=dict)
     subtypes: Dict[str, str] = field(default_factory=dict)
+    #: Multi-target DML files kept together: maps the placed
+    #: ``<source>.multi_table.dml`` destination path to the list
+    #: of distinct targets observed across the source's statements.
+    #: Honours the per-source-author intent that statement order
+    #: in a multi-target script is meaningful (FK ordering,
+    #: sequenced operations, transactional grouping). See
+    #: ``docs/design-rationale/dml-naming.md``.
+    multi_table_targets: Dict[str, List[str]] = field(default_factory=dict)
     #: Binary artefacts physically copied into the payload —
     #: list of (source_abs_path, dest_rel_path, kind) tuples.
     #: kind is JAR_BINARY / C_SOURCE / C_HEADER / etc.
@@ -407,6 +435,53 @@ def ingest_directory(
             statements = _split_multi_statement(raw_content, src_path)
 
             from td_release_packager.classifier import classify, base_type
+
+            # -- Pre-pass: detect multi-target DML --
+            # When all classifiable chunks in a source file are DML and
+            # they target more than one distinct table, the source's
+            # statement order is meaningful (FK ordering, sequenced
+            # operations like INSERT staging → UPDATE control →
+            # DELETE staging, transactional grouping). Splitting these
+            # into separate eponymous .dml files would silently destroy
+            # that intent. Default policy: keep the entire source as a
+            # single ``<source_basename>.multi_table.dml`` artefact.
+            # See docs/design-rationale/dml-naming.md.
+            #
+            # The ``-- MULTI_TABLE_DML`` header marker forces this
+            # treatment even for DML files where every chunk would
+            # otherwise have aggregated to the same eponymous target —
+            # useful when the author wants statement order preserved
+            # across multiple INSERTs into a single history table.
+            dml_targets: Set[Tuple[Optional[str], Optional[str]]] = set()
+            non_dml_classified = False
+            for chunk in statements:
+                chunk_clean = _strip_comments(chunk)
+                pre_cls = classify(path=src_path, content=chunk_clean)
+                pre_type = base_type(pre_cls.type)
+                if pre_type == "DML":
+                    chunk_db, chunk_obj = _extract_qualified_name(chunk_clean)
+                    dml_targets.add((chunk_db, chunk_obj))
+                elif pre_type is not None:
+                    non_dml_classified = True
+
+            force_marker = _has_multi_table_dml_marker(raw_content)
+            multi_target_detected = not non_dml_classified and len(dml_targets) > 1
+            keep_as_multi_table = multi_target_detected or (
+                force_marker and not non_dml_classified
+            )
+
+            if keep_as_multi_table:
+                _place_multi_table_dml(
+                    raw_content=raw_content,
+                    src_path=src_path,
+                    source_dir=source_dir,
+                    project_dir=project_dir,
+                    payload_base=payload_base,
+                    apply_tokens=apply_tokens,
+                    dml_targets=dml_targets,
+                    result=result,
+                )
+                continue  # next source file
 
             for content in statements:
                 # Strip leading source-structure comments (file
@@ -814,6 +889,81 @@ def _find_payload_base(project_dir: str) -> str:
     )
 
 
+def _place_multi_table_dml(
+    *,
+    raw_content: str,
+    src_path: str,
+    source_dir: str,
+    project_dir: str,
+    payload_base: str,
+    apply_tokens: Optional[Dict[str, str]],
+    dml_targets: Set[Tuple[Optional[str], Optional[str]]],
+    result: "IngestResult",
+) -> None:
+    """Place a multi-target DML source file as a single
+    ``<source_basename>.multi_table.dml`` artefact.
+
+    Used when the harvester's pre-pass detects that a multi-statement
+    DML source touches more than one distinct target table (or when
+    a ``-- MULTI_TABLE_DML`` marker is present). The whole-source
+    write preserves statement order — which carries the source
+    author's intent (FK ordering, sequenced operations,
+    transactional grouping). Per-statement splitting would silently
+    destroy that intent.
+
+    Token substitutions are applied to the whole content. Leading
+    file-banner comments are stripped before write so the deployable
+    artefact does not carry source-layout noise; inline / trailing
+    comments are preserved.
+
+    The destination path and the set of distinct targets observed
+    in the source are recorded on ``result.multi_table_targets`` so
+    the manifest and harvest banner can surface them.
+    """
+    source_basename = os.path.splitext(os.path.basename(src_path))[0]
+    dest_name = f"{source_basename}.multi_table.dml"
+    dest_dir = os.path.join(payload_base, "DML")
+    os.makedirs(dest_dir, exist_ok=True)
+
+    gitkeep = os.path.join(dest_dir, ".gitkeep")
+    if os.path.exists(gitkeep):
+        os.remove(gitkeep)
+
+    dest_path = os.path.join(dest_dir, dest_name)
+
+    content = _strip_leading_chunk_comments(raw_content)
+
+    if apply_tokens:
+        for literal, token in apply_tokens.items():
+            pattern = r"\b" + re.escape(literal) + r"\b"
+            content = re.sub(pattern, token, content)
+
+        bad = find_malformed_tokens(content)
+        if bad:
+            result.warnings.append(
+                f"Malformed tokens after substitution in "
+                f"{os.path.basename(src_path)} "
+                f"({len(bad)} marker(s))."
+            )
+
+    with open(dest_path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+    rel_dest = os.path.relpath(dest_path, project_dir)
+    result.classified += 1
+    result.files_placed.append(
+        (
+            os.path.relpath(src_path, source_dir),
+            rel_dest,
+            "DML",
+        )
+    )
+    targets_pretty = sorted(
+        f"{db}.{obj}" if db else (obj or "?") for db, obj in dml_targets
+    )
+    result.multi_table_targets[rel_dest] = targets_pretty
+
+
 def _clean_payload_tree(payload_base: str) -> int:
     """
     Remove harvest-owned files from a payload tree.
@@ -932,7 +1082,8 @@ def _split_multi_statement(
         clean_chunk = _strip_comments(chunk)
         if re.search(
             r"\b(?:CREATE|REPLACE|DROP|ALTER|GRANT|REVOKE"
-            r"|COMMENT\s+ON|COLLECT\s+STATISTICS)\b",
+            r"|COMMENT\s+ON|COLLECT\s+STATISTICS"
+            r"|INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE\s+INTO)\b",
             clean_chunk,
             re.IGNORECASE,
         ):
@@ -944,7 +1095,8 @@ def _split_multi_statement(
         clean_trailing = _strip_comments(trailing)
         if re.search(
             r"\b(?:CREATE|REPLACE|DROP|ALTER|GRANT|REVOKE"
-            r"|COMMENT\s+ON|COLLECT\s+STATISTICS)\b",
+            r"|COMMENT\s+ON|COLLECT\s+STATISTICS"
+            r"|INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE\s+INTO)\b",
             clean_trailing,
             re.IGNORECASE,
         ):
