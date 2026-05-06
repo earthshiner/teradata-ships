@@ -81,6 +81,21 @@ _LOGO_B64 = (
     "n+xnSu/zhCcSVn7u/9vTx7wNeLG/Yd2GbHAAAAABJRU5ErkJggg=="
 )
 
+# -- Object types treated as pre-requisites in the wave graph --
+# These run serially before the parallel DDL waves and are grouped
+# at the top of the wave graph rather than inside a wave band.
+_PREREQ_TYPES = frozenset(
+    {
+        "DATABASE",
+        "USER",
+        "MAP",
+        "ROLE",
+        "PROFILE",
+        "AUTHORIZATION",
+        "FOREIGN_SERVER",
+    }
+)
+
 # -- Status badge styling --
 _STATE_BADGES = {
     DeployState.COMPLETED: ("Completed", "#28A745", _WHITE),
@@ -220,17 +235,40 @@ def _build_html(
     status = "PASSED" if result.success else "FAILED"
     status_colour = "#28A745" if result.success else "#DC3545"
 
-    sections = [
-        _html_head(result, now, mode),
-        _html_header(result, now, mode, status, status_colour),
+    deployment_content = [
         _html_provenance_notice(provenance_status),
         _html_action_items(result, provenance),
         _html_summary(result, mode),
         _html_preflight(result.preflight_result),
         _html_wave_summary(result),
         _html_object_results(result, provenance),
-        _html_footer(now),
     ]
+
+    if result.is_wave_parallel:
+        sections = [
+            _html_head(result, now, mode),
+            _html_header(result, now, mode, status, status_colour),
+            '<div class="tab-nav">',
+            '  <button class="tab-btn active"'
+            "   onclick=\"switchTab(this,'tab-deployment')\">Deployment</button>",
+            '  <button class="tab-btn"'
+            "   onclick=\"switchTab(this,'tab-graph')\">Wave Graph</button>",
+            "</div>",
+            '<div class="tab-pane active" id="tab-deployment">',
+            *deployment_content,
+            "</div>",
+            '<div class="tab-pane" id="tab-graph">',
+            _html_wave_graph_tab(result),
+            "</div>",
+            _html_footer(now),
+        ]
+    else:
+        sections = [
+            _html_head(result, now, mode),
+            _html_header(result, now, mode, status, status_colour),
+            *deployment_content,
+            _html_footer(now),
+        ]
 
     return "\n".join(sections)
 
@@ -338,8 +376,20 @@ def _html_head(result, now, mode):
               margin: 2px 0; font-size: 12px; }}
   .warning {{ background: #FFF3CD; padding: 4px 8px; border-radius: 3px;
               margin: 2px 0; font-size: 12px; }}
+  /* Tab navigation */
+  .tab-nav {{ display:flex; gap:4px; border-bottom:2px solid {_BORDER}; margin-bottom:24px; }}
+  .tab-btn {{ padding:8px 20px; border:none; background:none; cursor:pointer;
+              font:500 14px 'Inter',-apple-system,sans-serif; color:#6C757D;
+              border-bottom:3px solid transparent; margin-bottom:-2px;
+              border-radius:4px 4px 0 0; transition:color .15s,border-color .15s; }}
+  .tab-btn:hover {{ color:{_NAVY}; background:{_LIGHT_BG}; }}
+  .tab-btn.active {{ color:{_NAVY}; border-bottom-color:{_ORANGE}; font-weight:600; }}
+  .tab-pane {{ display:none; }}
+  .tab-pane.active {{ display:block; }}
   @media print {{
     .header {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
+    .tab-nav {{ display:none; }}
+    .tab-pane {{ display:block !important; }}
     body {{ font-size: 12px; }}
   }}
   {PROVENANCE_CSS}
@@ -873,12 +923,336 @@ def _html_object_results(result, provenance: Optional[ProvenanceDocument] = None
 </table>"""
 
 
+def _build_wave_graph_data(result: "PackageDeployResult") -> str:
+    """
+    Serialise deployment result into a JSON blob for the wave graph JS renderer.
+
+    Objects whose type is in _PREREQ_TYPES (DATABASE, USER, MAP, ROLE, etc.)
+    or that have no wave_number are grouped into the top "pre-requisites" band.
+    All other objects are grouped by wave_number and matched to wave_summaries.
+    """
+    import json
+
+    prereqs: list = []
+    wave_objs: dict = {}
+
+    all_objs = list(result.results) + list(getattr(result, "prior_completed", []))
+    for obj in all_objs:
+        type_val = (
+            obj.object_type.value
+            if hasattr(obj.object_type, "value")
+            else str(obj.object_type)
+        )
+        name = _display_name(obj)
+        state = obj.state.value if hasattr(obj.state, "value") else str(obj.state)
+        wave_n = getattr(obj, "wave_number", None)
+        node = {"name": name, "type": type_val, "state": state}
+
+        if type_val in _PREREQ_TYPES or wave_n is None:
+            prereqs.append(node)
+        else:
+            wave_objs.setdefault(wave_n, []).append(node)
+
+    waves = [
+        {
+            "wave_number": ws.wave_number,
+            "total": ws.total,
+            "completed": ws.completed,
+            "failed": ws.failed,
+            "skipped": ws.skipped,
+            "duration_ms": ws.duration_ms,
+            "objects": wave_objs.get(ws.wave_number, []),
+        }
+        for ws in sorted(result.wave_summaries, key=lambda w: w.wave_number)
+    ]
+
+    return json.dumps(
+        {"streams": result.num_streams, "prereqs": prereqs, "waves": waves},
+        ensure_ascii=True,
+    )
+
+
+# Wave graph renderer — pure JS, no external dependencies.
+# Raw string so backslash sequences (•, …, etc.) pass
+# through to the browser's JS engine verbatim.
+_WAVE_GRAPH_JS = r"""(function () {
+  'use strict';
+
+  var NS     = 'http://www.w3.org/2000/svg';
+  var NAVY   = '#00233C';
+  var ORANGE = '#FF5F02';
+  var BORDER = '#DEE2E6';
+  var LIGHT  = '#F8F9FA';
+
+  var STATE_COLOR = {
+    COMPLETED:   {bg:'#28A745', fg:'#fff'},
+    FAILED:      {bg:'#DC3545', fg:'#fff'},
+    SKIPPED:     {bg:'#FFC107', fg:'#333'},
+    ROLLED_BACK: {bg:'#6C757D', fg:'#fff'},
+    PENDING:     {bg:'#ADB5BD', fg:'#333'},
+    BACKED_UP:   {bg:'#17A2B8', fg:'#fff'},
+    CREATED:     {bg:'#17A2B8', fg:'#fff'},
+    MIGRATED:    {bg:'#28A745', fg:'#fff'},
+  };
+
+  function stateC(s) { return STATE_COLOR[s] || {bg:'#ADB5BD', fg:'#333'}; }
+
+  // ---- Layout constants ----
+  var W       = 900;   // total SVG width
+  var BMARG   = 24;    // band left/right margin from SVG edge
+  var BPAD_H  = 16;    // horizontal padding inside each band
+  var BPAD_V  = 12;    // vertical padding inside each band
+  var BHDR    = 28;    // band header height (label row)
+  var BRAD    = 8;     // band corner radius
+  var NW      = 160;   // node width
+  var NH      = 28;    // node height
+  var NGAP_H  = 8;     // horizontal gap between nodes
+  var NGAP_V  = 6;     // vertical gap between node rows
+  var ARR_H   = 56;    // vertical space between bands reserved for arrows
+  var TOP_PAD = 24;
+  var BOT_PAD = 32;    // extra space for legend
+  var MAX_N   = 30;    // max individual nodes shown per band before truncation
+
+  var BW  = W - 2 * BMARG;                                      // band width
+  var UW  = BW - 2 * BPAD_H;                                    // usable inner width
+  var NPR = Math.max(1, Math.floor((UW + NGAP_H) / (NW + NGAP_H))); // nodes per row
+
+  function bandH(n) {
+    if (n <= 0) return BHDR + 2 * BPAD_V;
+    var show = Math.min(n, MAX_N);
+    var rows = Math.ceil(show / NPR);
+    return BHDR + BPAD_V + rows * (NH + NGAP_V) - NGAP_V + BPAD_V;
+  }
+
+  // ---- SVG helpers ----
+  function svgEl(tag, attrs) {
+    var e = document.createElementNS(NS, tag);
+    Object.keys(attrs || {}).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    return e;
+  }
+
+  function addTxt(parent, str, attrs) {
+    var e = svgEl('text', attrs);
+    e.textContent = str;
+    parent.appendChild(e);
+    return e;
+  }
+
+  function addRect(parent, attrs) {
+    var e = svgEl('rect', attrs);
+    parent.appendChild(e);
+    return e;
+  }
+
+  function trunc(s, max) {
+    return s.length <= max ? s : s.slice(0, max - 1) + '…';
+  }
+
+  // ---- Draw a wave/prereq band ----
+  function drawBand(svg, x, y, w, h, label, objects, isPrereq) {
+    var g = svgEl('g', {});
+    svg.appendChild(g);
+
+    // Background rectangle
+    addRect(g, {
+      x: x, y: y, width: w, height: h, rx: BRAD,
+      fill:   isPrereq ? '#EEF2F7' : LIGHT,
+      stroke: isPrereq ? '#8BACD4' : BORDER,
+      'stroke-width': isPrereq ? 1.5 : 1,
+    });
+
+    // Band label
+    addTxt(g, label, {
+      x: x + BPAD_H, y: y + BHDR - 7,
+      'font-size': 12, 'font-weight': 600,
+      fill: isPrereq ? '#2B5580' : NAVY,
+    });
+
+    // Object nodes
+    var show = Math.min(objects.length, MAX_N);
+    for (var i = 0; i < show; i++) {
+      var obj = objects[i];
+      var col = i % NPR;
+      var row = Math.floor(i / NPR);
+      var nx  = x + BPAD_H + col * (NW + NGAP_H);
+      var ny  = y + BHDR + BPAD_V + row * (NH + NGAP_V);
+      var c   = stateC(obj.state);
+
+      addRect(g, {x: nx, y: ny, width: NW, height: NH, rx: 4, fill: c.bg});
+
+      // Object name (monospace, bottom-padded inside node)
+      addTxt(g, trunc(obj.name, 21), {
+        x: nx + 6, y: ny + NH - 8,
+        'font-size': 11, fill: c.fg,
+        'font-family': "'SF Mono','Fira Code',monospace",
+      });
+
+      // Type label — small, top-right of node
+      addTxt(g, obj.type.replace(/_/g, ' '), {
+        x: nx + NW - 4, y: ny + 10,
+        'font-size': 9, fill: c.fg, opacity: 0.75, 'text-anchor': 'end',
+      });
+    }
+
+    // Truncation notice
+    if (objects.length > MAX_N) {
+      addTxt(g, '+' + (objects.length - MAX_N) + ' more', {
+        x: x + w - BPAD_H, y: y + h - BPAD_V + 4,
+        'font-size': 11, fill: '#6C757D', 'text-anchor': 'end',
+      });
+    }
+  }
+
+  // ---- Draw N stream arrows between two y coordinates ----
+  // Arrows are evenly distributed across the band width.
+  // A text label between them indicates the stream count.
+  function drawArrows(svg, bx, bw, y1, y2, n, color) {
+    var midY = (y1 + y2) / 2;
+    for (var i = 0; i < n; i++) {
+      var x = bx + (i + 1) * bw / (n + 1);
+      svg.appendChild(svgEl('line', {
+        x1: x, y1: y1 + 2, x2: x, y2: y2 - 10,
+        stroke: color, 'stroke-width': 1.5,
+        'marker-end': 'url(#wg-arrowhead)',
+      }));
+    }
+    var label = n > 1 ? (n + ' streams') : 'serial';
+    addTxt(svg, label, {
+      x: bx + bw / 2, y: midY,
+      'font-size': 10, fill: '#9CA3AF',
+      'text-anchor': 'middle', 'dominant-baseline': 'middle',
+    });
+  }
+
+  // ---- Main render ----
+  var data    = JSON.parse(document.getElementById('wg-data').textContent);
+  var svg     = document.getElementById('wg-svg');
+  var streams = Math.min(data.streams, 10);  // cap visual arrows at 10
+  var hasPre  = data.prereqs.length > 0;
+
+  // Arrowhead marker
+  var defs   = svgEl('defs', {});
+  var marker = svgEl('marker', {
+    id: 'wg-arrowhead', markerWidth: 8, markerHeight: 6,
+    refX: 7, refY: 3, orient: 'auto',
+  });
+  marker.appendChild(svgEl('path', {d: 'M0,0 L8,3 L0,6 Z', fill: ORANGE}));
+  defs.appendChild(marker);
+  svg.appendChild(defs);
+
+  // Compute total SVG height
+  var totalH = TOP_PAD;
+  if (hasPre) totalH += bandH(data.prereqs.length) + ARR_H;
+  data.waves.forEach(function (w, i) {
+    totalH += bandH(w.objects.length);
+    if (i < data.waves.length - 1) totalH += ARR_H;
+  });
+  totalH += BOT_PAD;
+
+  svg.setAttribute('width', W);
+  svg.setAttribute('height', totalH);
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + totalH);
+
+  var y = TOP_PAD;
+
+  // Pre-requisites band (serial — 1 stream arrow down to wave 1)
+  if (hasPre) {
+    var ph  = bandH(data.prereqs.length);
+    var pl  = 'Pre-requisites  •  '
+              + data.prereqs.length
+              + ' object' + (data.prereqs.length !== 1 ? 's' : '')
+              + '  •  deployed serially before parallel waves';
+    drawBand(svg, BMARG, y, BW, ph, pl, data.prereqs, true);
+    y += ph;
+    drawArrows(svg, BMARG, BW, y, y + ARR_H, 1, ORANGE);
+    y += ARR_H;
+  }
+
+  // Parallel wave bands
+  data.waves.forEach(function (wave, idx) {
+    var h   = bandH(wave.objects.length);
+    var dur = wave.duration_ms >= 1000
+              ? (wave.duration_ms / 1000).toFixed(1) + 's'
+              : wave.duration_ms + 'ms';
+    var lbl = 'Wave ' + wave.wave_number
+              + '  •  ' + wave.total + ' object' + (wave.total !== 1 ? 's' : '')
+              + '  •  ' + dur;
+    if (wave.failed  > 0) lbl += '  •  ⚠ ' + wave.failed  + ' failed';
+    if (wave.skipped > 0 && wave.completed === 0)
+      lbl += '  •  ○ ' + wave.skipped + ' skipped';
+
+    drawBand(svg, BMARG, y, BW, h, lbl, wave.objects, false);
+    y += h;
+
+    if (idx < data.waves.length - 1) {
+      drawArrows(svg, BMARG, BW, y, y + ARR_H, streams, ORANGE);
+      y += ARR_H;
+    }
+  });
+
+  // Status legend
+  var lx = BMARG;
+  var ly = y + 12;
+  var legend = [
+    {s:'COMPLETED',   l:'Completed'},
+    {s:'FAILED',      l:'Failed'},
+    {s:'SKIPPED',     l:'Skipped'},
+    {s:'ROLLED_BACK', l:'Rolled back'},
+    {s:'PENDING',     l:'Pending'},
+  ];
+  legend.forEach(function (item, i) {
+    var c = stateC(item.s);
+    addRect(svg, {x: lx + i*120, y: ly, width: 12, height: 12, rx: 2, fill: c.bg});
+    addTxt(svg, item.l, {
+      x: lx + i*120 + 16, y: ly + 10,
+      'font-size': 11, fill: '#6C757D',
+    });
+  });
+}());
+"""
+
+
+def _html_wave_graph_tab(result: "PackageDeployResult") -> str:
+    """Generate the Wave Graph tab content.
+
+    Embeds the deployment wave data as JSON and the SVG renderer as
+    inline JavaScript. No external dependencies — the graph is fully
+    self-contained in the HTML report file.
+    """
+    if not result.is_wave_parallel:
+        return (
+            '<p style="color:#6C757D;padding:32px;text-align:center">'
+            "Wave graph is only available for wave-parallel deployments."
+            "</p>"
+        )
+
+    graph_data = _build_wave_graph_data(result)
+
+    return (
+        f'<script type="application/json" id="wg-data">{graph_data}</script>\n'
+        '<div id="wg-container" style="overflow-x:auto;padding:8px 0">\n'
+        '  <svg id="wg-svg" xmlns="http://www.w3.org/2000/svg"\n'
+        '       style="display:block;margin:0 auto;'
+        "font-family:'Inter',-apple-system,sans-serif\"></svg>\n"
+        "</div>\n"
+        f"<script>{_WAVE_GRAPH_JS}</script>\n"
+    )
+
+
 def _html_footer(now):
-    """Report footer."""
+    """Report footer with tab-switch helper."""
     return f"""
 </div>
 <div class="footer">
   Generated by ddl_deployer v2.0 &nbsp;|&nbsp; {now}
 </div>
+<script>
+function switchTab(btn, pane) {{
+  document.querySelectorAll('.tab-btn').forEach(function(b) {{ b.classList.remove('active'); }});
+  document.querySelectorAll('.tab-pane').forEach(function(p) {{ p.classList.remove('active'); }});
+  btn.classList.add('active');
+  document.getElementById(pane).classList.add('active');
+}}
+</script>
 </body>
 </html>"""
