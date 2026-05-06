@@ -525,7 +525,7 @@ def _connect(args):
         )
         sys.exit(1)
 
-    params = {"host": host, "user": user}
+    params = {"host": host, "user": user, "charset": "UTF8"}
     if password:
         params["password"] = password
     if logmech:
