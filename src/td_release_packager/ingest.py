@@ -26,7 +26,7 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from td_release_packager.legacy_placeholders import (
     LegacyPlaceholderFinding,
@@ -138,12 +138,29 @@ _QUALIFIED_NAME_RE = re.compile(
 )
 
 # -- Name extraction for COMMENT ON statements --
-# Matches: COMMENT ON TABLE {{DB}}.table IS ...
-#          COMMENT ON COLUMN {{DB}}.table.column IS ...
-# Captures the database.table part (ignoring column for naming)
+# Matches every Teradata COMMENT ON variant SHIPS handles. Each
+# kind has the qualified target as the first whitespace-separated
+# token after the kind keyword:
+#   COMMENT ON TABLE      {{DB}}.table       IS '...'
+#   COMMENT ON VIEW       {{DB}}.view        IS '...'
+#   COMMENT ON MACRO      {{DB}}.macro       IS '...'
+#   COMMENT ON PROCEDURE  {{DB}}.proc        IS '...'
+#   COMMENT ON FUNCTION   {{DB}}.fn          IS '...'
+#   COMMENT ON TRIGGER    {{DB}}.trg         IS '...'
+#   COMMENT ON COLUMN     {{DB}}.table.col   IS '...'
+#   COMMENT ON DATABASE   {{DB}}             IS '...'
+#   COMMENT ON USER       user               IS '...'
+#   COMMENT ON ROLE       role               IS '...'
+#   COMMENT ON PROFILE    profile            IS '...'
+# The capture group always points at the qualified target. For
+# COLUMN it captures db.table.col (3 parts) and the caller drops
+# the column segment so multiple comments on the same table
+# aggregate into one .cmt file.
 _COMMENT_ON_NAME_RE = re.compile(
-    r"COMMENT\s+ON\s+(?:TABLE|COLUMN)\s+"
-    rf"({_NAME_PART}(?:\.{_NAME_PART}){{1,2}})",
+    r"COMMENT\s+ON\s+"
+    r"(?:TABLE|VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER|COLUMN|"
+    r"DATABASE|USER|ROLE|PROFILE)\s+"
+    rf"({_NAME_PART}(?:\.{_NAME_PART}){{0,2}})",
     re.IGNORECASE,
 )
 
@@ -310,6 +327,15 @@ def ingest_directory(
     # -- Track all database names seen (for token detection) --
     all_db_names: Dict[str, List[str]] = defaultdict(list)
 
+    # -- Track aggregating-type destinations first-touched THIS run --
+    # COMMENT/STATISTICS/DML files accumulate multiple statements
+    # within a single harvest. The first time we touch such a file
+    # in this run, we truncate any leftover content from a previous
+    # run (otherwise --force re-harvest produces files with both
+    # the old untokenised AND new tokenised statements). Subsequent
+    # touches within the same run append normally.
+    first_touch_aggregating: Set[str] = set()
+
     for src_path in source_files:
         try:
             raw_content = _read_file(src_path)
@@ -445,14 +471,27 @@ def ingest_directory(
 
                 # -- Handle existing files --------------------------------
                 if os.path.exists(dest_path):
-                    # COMMENT, STATISTICS, and DML: append to existing file.
-                    # Multiple COMMENT ON / COLLECT STATISTICS / INSERT
-                    # statements for the same target table accumulate
-                    # into one .cmt / .stt / .dml file rather than
-                    # silently overwriting each other.
+                    # COMMENT, STATISTICS, and DML: aggregate by appending
+                    # multiple statements for the same target into one
+                    # .cmt / .stt / .dml file. But: the FIRST touch of
+                    # this file in this harvest run truncates any leftover
+                    # content from a PREVIOUS run when --force is set —
+                    # otherwise re-harvesting with a token-map would leave
+                    # the old untokenised content alongside the new
+                    # tokenised content. Subsequent touches within the
+                    # same run append normally to build the aggregate.
                     if obj_type in ("COMMENT", "STATISTICS", "DML"):
-                        with open(dest_path, "a", encoding="utf-8") as f:
-                            f.write("\n" + content + "\n")
+                        if force and dest_path not in first_touch_aggregating:
+                            mode = "w"
+                            result.overwritten += 1
+                        else:
+                            mode = "a"
+                        first_touch_aggregating.add(dest_path)
+                        with open(dest_path, mode, encoding="utf-8") as f:
+                            if mode == "a":
+                                f.write("\n")
+                            f.write(content)
+                            f.write("\n")
                         result.classified += 1
                         result.files_placed.append(
                             (
@@ -555,6 +594,13 @@ def ingest_directory(
                 # -- Write normalised content --
                 with open(dest_path, "w", encoding="utf-8") as f:
                     f.write(content)
+
+                # Aggregating types (COMMENT/STATISTICS/DML) need to know
+                # that this dest_path has already been first-touched in
+                # this run, so a SECOND statement targeting the same file
+                # appends instead of triggering the --force truncate path.
+                if obj_type in ("COMMENT", "STATISTICS", "DML"):
+                    first_touch_aggregating.add(dest_path)
 
                 result.classified += 1
                 rel_dest = os.path.relpath(dest_path, project_dir)
@@ -907,15 +953,22 @@ def _extract_qualified_name(content: str) -> Tuple[Optional[str], Optional[str]]
         elif len(parts) == 1:
             return (None, parts[0].strip())
 
-    # --- COMMENT ON TABLE/COLUMN ---
+    # --- COMMENT ON {TABLE|VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER|
+    #                 COLUMN|DATABASE|USER|ROLE|PROFILE} ---
     match = _COMMENT_ON_NAME_RE.search(content)
     if match:
         qualified = match.group(1)
         parts = qualified.replace('"', "").split(".")
-        # COMMENT ON TABLE db.table → 2 parts
-        # COMMENT ON COLUMN db.table.column → 3 parts (ignore column)
+        # COMMENT ON TABLE / VIEW / MACRO / ... db.object → 2 parts
+        # COMMENT ON COLUMN db.table.column           → 3 parts
+        #   (column dropped so all comments on the same table
+        #   aggregate into one .cmt file)
+        # COMMENT ON DATABASE / USER / ROLE / PROFILE name → 1 part
+        #   (system-scope object — no database qualifier)
         if len(parts) >= 2:
             return (parts[0].strip(), parts[1].strip())
+        elif len(parts) == 1:
+            return (None, parts[0].strip())
 
     # --- COLLECT / UPDATE STATISTICS ... ON ---
     match = _COLLECT_STATS_NAME_RE.search(content)

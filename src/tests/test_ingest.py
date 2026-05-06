@@ -270,6 +270,83 @@ class TestExtractQualifiedName:
         assert db is None
         assert obj is None
 
+    # -- COMMENT ON variants — every comment-able object kind --
+
+    def test_comment_on_view(self):
+        """COMMENT ON VIEW <db>.<view> extracts (db, view)."""
+        db, obj = _extract_qualified_name(
+            "COMMENT ON VIEW MyDB.v_Active IS 'Active rows';"
+        )
+        assert db == "MyDB"
+        assert obj == "v_Active"
+
+    def test_comment_on_macro(self):
+        db, obj = _extract_qualified_name(
+            "COMMENT ON MACRO MyDB.mc_Report IS 'Daily report';"
+        )
+        assert db == "MyDB"
+        assert obj == "mc_Report"
+
+    def test_comment_on_procedure(self):
+        db, obj = _extract_qualified_name(
+            "COMMENT ON PROCEDURE MyDB.sp_DoStuff IS 'Background job';"
+        )
+        assert db == "MyDB"
+        assert obj == "sp_DoStuff"
+
+    def test_comment_on_function(self):
+        db, obj = _extract_qualified_name(
+            "COMMENT ON FUNCTION MyDB.fn_Calc IS 'Risk calculation';"
+        )
+        assert db == "MyDB"
+        assert obj == "fn_Calc"
+
+    def test_comment_on_trigger(self):
+        db, obj = _extract_qualified_name(
+            "COMMENT ON TRIGGER MyDB.trg_Audit IS 'Audit trail';"
+        )
+        assert db == "MyDB"
+        assert obj == "trg_Audit"
+
+    def test_comment_on_column_drops_column_segment(self):
+        """COMMENT ON COLUMN db.table.col → (db, table) so all
+        comments on the same table aggregate into one .cmt file."""
+        db, obj = _extract_qualified_name(
+            "COMMENT ON COLUMN MyDB.Customer.surname IS 'Last name';"
+        )
+        assert db == "MyDB"
+        assert obj == "Customer"
+
+    def test_comment_on_database_returns_unqualified_name(self):
+        """System-scope COMMENT ON DATABASE: no DB qualifier — name only."""
+        db, obj = _extract_qualified_name(
+            "COMMENT ON DATABASE Production IS 'Live env';"
+        )
+        assert db is None
+        assert obj == "Production"
+
+    def test_comment_on_user(self):
+        db, obj = _extract_qualified_name(
+            "COMMENT ON USER svc_etl IS 'ETL service account';"
+        )
+        assert db is None
+        assert obj == "svc_etl"
+
+    def test_comment_on_role(self):
+        db, obj = _extract_qualified_name(
+            "COMMENT ON ROLE read_only IS 'Read-only role';"
+        )
+        assert db is None
+        assert obj == "read_only"
+
+    def test_comment_on_view_with_token_qualifier(self):
+        """Token-qualified targets (post-harvest) still extract correctly."""
+        db, obj = _extract_qualified_name(
+            "COMMENT ON VIEW {{MEM_DATABASE}}.v_Active IS 'Active rows';"
+        )
+        assert db == "{{MEM_DATABASE}}"
+        assert obj == "v_Active"
+
 
 # ---------------------------------------------------------------
 # _extract_specific_function_name
@@ -840,6 +917,75 @@ class TestIngestDirectory:
         dests = [d for _, d, _ in result.files_placed]
         assert any("DDL" in d and "tables" in d for d in dests)
         assert any("DCL" in d for d in dests)
+
+    def test_ingest_force_reharvest_truncates_aggregating_files(
+        self, tmp_path, tmp_project
+    ):
+        """COMMENT/STATISTICS/DML files aggregate by appending. On a
+        fresh harvest run the file gets created fresh; on a SECOND
+        run with --force it must TRUNCATE first before re-aggregating
+        so old (e.g. untokenised) content from the previous run is
+        not retained alongside the new (tokenised) content."""
+        src = tmp_path / "raw"
+        src.mkdir()
+        (src / "schema.ddl").write_text(
+            "CREATE MULTISET TABLE x.t (id INT);\n"
+            "COMMENT ON TABLE x.t IS 'first version';\n"
+            "COMMENT ON COLUMN x.t.id IS 'identifier';\n",
+            encoding="utf-8",
+        )
+
+        # First harvest — aggregating .cmt file gets two statements.
+        ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+        cmt = tmp_project / "payload" / "database" / "DDL" / "comments" / "x.t.cmt"
+        first = cmt.read_text(encoding="utf-8")
+        assert "first version" in first
+        assert first.count("COMMENT ON TABLE") == 1
+
+        # Edit source so the first-version comment is replaced.
+        (src / "schema.ddl").write_text(
+            "CREATE MULTISET TABLE x.t (id INT);\n"
+            "COMMENT ON TABLE x.t IS 'second version';\n"
+            "COMMENT ON COLUMN x.t.id IS 'identifier';\n",
+            encoding="utf-8",
+        )
+
+        # Re-harvest with --force — the .cmt file must be truncated
+        # at first touch in the new run, then re-aggregated.
+        ingest_directory(str(src), str(tmp_project), detect_tokens=False, force=True)
+        second = cmt.read_text(encoding="utf-8")
+
+        # Old version must be gone, new version present, and only
+        # ONE COMMENT ON TABLE statement (no duplication).
+        assert "first version" not in second
+        assert "second version" in second
+        assert second.count("COMMENT ON TABLE") == 1
+        assert second.count("COMMENT ON COLUMN") == 1
+
+    def test_ingest_view_comments_get_eponymous_filenames(self, tmp_path, tmp_project):
+        """COMMENT ON VIEW must aggregate per target view (eponymous
+        <db>.<view>.cmt), not per source filename. Pre-fix, COMMENT
+        ON VIEW fell through to source-filename fallback because the
+        name-extraction regex only handled TABLE/COLUMN."""
+        src = tmp_path / "raw"
+        src.mkdir()
+        # Two views in two different databases, plus their comments.
+        (src / "views.ddl").write_text(
+            "CREATE VIEW dbA.v_one AS SELECT 1 AS x;\n"
+            "CREATE VIEW dbB.v_two AS SELECT 2 AS y;\n"
+            "COMMENT ON VIEW dbA.v_one IS 'first view';\n"
+            "COMMENT ON VIEW dbB.v_two IS 'second view';\n",
+            encoding="utf-8",
+        )
+
+        ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        comments_dir = tmp_project / "payload" / "database" / "DDL" / "comments"
+        # Each view's comment lands in its own eponymous file.
+        assert (comments_dir / "dbA.v_one.cmt").exists()
+        assert (comments_dir / "dbB.v_two.cmt").exists()
+        # And NOT in a source-filename-based fallback file.
+        assert not (comments_dir / "views.cmt").exists()
 
     def test_ingest_does_not_split_inside_string_literal_with_semicolon(
         self, tmp_path, tmp_project
