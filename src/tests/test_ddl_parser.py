@@ -592,3 +592,80 @@ class TestParseIndexParentTable:
         ddl = "CREATE INDEX idx_Name (Name);"
         result = parse_index_parent_table(ddl)
         assert result is None
+
+
+# ---------------------------------------------------------------
+# DML detection — INSERT/UPDATE/DELETE/MERGE classify as DML and
+# route through DIRECT_EXECUTE so .dml files actually deploy.
+# ---------------------------------------------------------------
+
+
+class TestDmlDetection:
+    """DML scripts must classify, parse, and route to DIRECT_EXECUTE."""
+
+    def test_insert_into_classifies_as_dml(self):
+        obj_type, _ = _detect_object_type(
+            "INSERT INTO MyDB.Customer (Id, Name) VALUES (1, 'a');"
+        )
+        assert obj_type == ObjectType.DML
+
+    def test_update_classifies_as_dml(self):
+        obj_type, _ = _detect_object_type(
+            "UPDATE MyDB.Customer SET Name = 'a' WHERE Id = 1;"
+        )
+        assert obj_type == ObjectType.DML
+
+    def test_delete_from_classifies_as_dml(self):
+        obj_type, _ = _detect_object_type("DELETE FROM MyDB.Customer WHERE Id = 1;")
+        assert obj_type == ObjectType.DML
+
+    def test_merge_into_classifies_as_dml(self):
+        obj_type, _ = _detect_object_type(
+            "MERGE INTO MyDB.Customer t USING MyDB.Stg s ON t.Id = s.Id "
+            "WHEN MATCHED THEN UPDATE SET Name = s.Name;"
+        )
+        assert obj_type == ObjectType.DML
+
+    def test_dml_uses_direct_execute_strategy(self):
+        """DML deploy_intent and strategy are both DIRECT_EXECUTE."""
+        parsed = parse_ddl_text(
+            "INSERT INTO MyDB.Customer (Id, Name) VALUES (1, 'a');",
+            file_path="MyDB.Customer.dml",
+        )
+        assert parsed.object_type == ObjectType.DML
+        assert parsed.deploy_intent == DeployIntent.DIRECT_EXECUTE
+        assert parsed.strategy == DeployStrategy.DIRECT_EXECUTE
+
+    def test_dml_qualified_name_is_filename_keyed(self):
+        """Manifest key is DML:<basename> so multi-target scripts
+        never collide on a shared first target."""
+        parsed = parse_ddl_text(
+            "INSERT INTO MyDB.Customer (Id) VALUES (1);\n"
+            "INSERT INTO MyDB.Order (Id) VALUES (1);",
+            file_path="/some/path/source_a.multi_table.dml",
+        )
+        assert parsed.qualified_name == "DML:source_a.multi_table"
+        # First target's database is preserved for the report
+        assert parsed.database_name == "MyDB"
+
+    def test_procedure_with_inner_insert_does_not_classify_as_dml(self):
+        """A PROCEDURE body containing INSERT must classify as
+        PROCEDURE — DML matching is the last rung in the pattern
+        ladder."""
+        ddl = (
+            "REPLACE PROCEDURE MyDB.LoadCust () "
+            "BEGIN INSERT INTO MyDB.Customer VALUES (1); END;"
+        )
+        obj_type, _ = _detect_object_type(ddl)
+        assert obj_type == ObjectType.PROCEDURE
+
+    def test_dml_in_comment_does_not_misclassify(self):
+        """An INSERT inside a comment must not trigger DML detection
+        when a CREATE/REPLACE statement follows."""
+        ddl = (
+            "-- INSERT INTO MyDB.Customer VALUES (1);\nREPLACE VIEW MyDB.V AS SELECT 1;"
+        )
+        obj_type, _ = _detect_object_type(ddl)
+        # Comment stripping happens upstream of _detect_object_type;
+        # but even with the comment, VIEW pattern matches first.
+        assert obj_type == ObjectType.VIEW
