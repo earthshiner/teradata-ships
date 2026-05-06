@@ -230,12 +230,14 @@ class TestDuplicateClassifierTablesMatch:
         # exits cleanly — no spurious ERROR.
         assert all(i.rule != "db_qualifier" for i in issues)
 
-    def test_analyser_pattern_does_not_match_grant_with_create_procedure(self):
-        """analyser.py walks every payload file and tries to slot it
-        into the dependency graph. A GRANT file misclassified as
-        PROCEDURE would land as a fake procedure node with no
-        qualified name. Verify the anchored pattern no longer
-        matches."""
+    def test_analyser_pattern_classifies_grant_with_create_procedure_as_grant(self):
+        """analyser.py now includes GRANT in _CLASSIFY_PATTERNS so that
+        grant files appear in _waves.txt with correct ordering.
+
+        The original concern was misclassification as PROCEDURE. A GRANT
+        listing CREATE PROCEDURE as a privilege should match GRANT, not
+        PROCEDURE (PROCEDURE requires CREATE at line start). Verify the
+        result is GRANT, not PROCEDURE or None."""
         from td_release_packager.analyser import _CLASSIFY_PATTERNS
 
         type_for = None
@@ -243,10 +245,10 @@ class TestDuplicateClassifierTablesMatch:
             if pattern.search(GCFR_GRANT_FILE):
                 type_for = type_
                 break
-        # analyser's _CLASSIFY_PATTERNS doesn't include GRANT (only
-        # the schema-object types). The expected outcome is that
-        # NOTHING matches — the GRANT file simply isn't an object.
-        assert type_for is None
+        # Must classify as GRANT (not PROCEDURE). The PROCEDURE pattern
+        # requires CREATE at line start; GRANT CREATE PROCEDURE has GRANT
+        # at line start, so the GRANT pattern wins.
+        assert type_for == "GRANT"
 
 
 # ---------------------------------------------------------------
