@@ -50,6 +50,10 @@ class ObjectType(Enum):
     REVOKE = "REVOKE"
     JAR = "JAR"
     SCRIPT_TABLE_OPERATOR = "SCRIPT_TABLE_OPERATOR"
+    # Data Manipulation scripts: INSERT / UPDATE / DELETE / MERGE.
+    # Carried in the package (typically under ``DML/``) and executed
+    # after all DDL so the target tables exist before data is loaded.
+    DML = "DML"
 
     # -- System-scoped objects (no database qualifier, no tokens) --
     MAP = "MAP"
@@ -142,6 +146,7 @@ STRATEGY_MAP = {
     ObjectType.REVOKE: DeployStrategy.DIRECT_EXECUTE,
     ObjectType.JAR: DeployStrategy.DIRECT_EXECUTE,
     ObjectType.SCRIPT_TABLE_OPERATOR: DeployStrategy.REPLACE_IN_PLACE,
+    ObjectType.DML: DeployStrategy.DIRECT_EXECUTE,
     # System-scoped objects — skip silently if already present
     ObjectType.MAP: DeployStrategy.SKIP_IF_EXISTS,
     ObjectType.ROLE: DeployStrategy.SKIP_IF_EXISTS,
@@ -174,6 +179,7 @@ SCOPE_MAP = {
     ObjectType.REVOKE: DeployScope.ENVIRONMENT,
     ObjectType.JAR: DeployScope.ENVIRONMENT,
     ObjectType.SCRIPT_TABLE_OPERATOR: DeployScope.ENVIRONMENT,
+    ObjectType.DML: DeployScope.ENVIRONMENT,
 }
 
 # -- Deployment ordering: objects deployed in this sequence --
@@ -203,6 +209,9 @@ DEPLOY_ORDER = {
     ObjectType.JAR: 3,
     ObjectType.SCRIPT_TABLE_OPERATOR: 4,
     ObjectType.TRIGGER: 5,
+    # DML runs last so every target table, view, and trigger that
+    # the data load depends on has already been deployed.
+    ObjectType.DML: 6,
     ObjectType.UNKNOWN: 99,
 }
 
