@@ -347,6 +347,54 @@ class TestExtractQualifiedName:
         assert db == "{{MEM_DATABASE}}"
         assert obj == "v_Active"
 
+    # -- COMMENT ON COLUMN aggregates with the parent's other comments --
+    # Teradata stores comments for view columns and for macro /
+    # procedure / function parameters in DBC.TVM (exposed via
+    # DBC.ColumnsV). The eponymous .cmt file groups every comment
+    # for the same parent so view column comments aggregate with
+    # the COMMENT ON VIEW, procedure parameter comments aggregate
+    # with the COMMENT ON PROCEDURE, and so on. Encouraged for AI-
+    # native data products: rich descriptions help both autonomous
+    # agents and human readers.
+
+    def test_comment_on_column_of_view_aggregates_with_view(self):
+        """A COMMENT ON COLUMN on a view's column extracts the view's
+        (db, view_name) so the .cmt file aggregates with the
+        COMMENT ON VIEW and any sibling column comments."""
+        db, obj = _extract_qualified_name(
+            "COMMENT ON COLUMN MyDB.v_Active.customer_id IS 'PII identifier';"
+        )
+        assert db == "MyDB"
+        assert obj == "v_Active"
+
+    def test_comment_on_macro_parameter_aggregates_with_macro(self):
+        """COMMENT ON COLUMN <db>.<macro>.<arg> extracts (db, macro)
+        so parameter comments aggregate with COMMENT ON MACRO into
+        the same eponymous .cmt file."""
+        db, obj = _extract_qualified_name(
+            "COMMENT ON COLUMN MyDB.mc_Report.start_date IS 'period start';"
+        )
+        assert db == "MyDB"
+        assert obj == "mc_Report"
+
+    def test_comment_on_procedure_parameter_aggregates_with_procedure(self):
+        """COMMENT ON COLUMN <db>.<proc>.<arg> aggregates parameter
+        comments with the procedure's own COMMENT ON statement."""
+        db, obj = _extract_qualified_name(
+            "COMMENT ON COLUMN MyDB.sp_LoadLoans.batch_size IS 'rows per batch';"
+        )
+        assert db == "MyDB"
+        assert obj == "sp_LoadLoans"
+
+    def test_comment_on_function_parameter_aggregates_with_function(self):
+        """COMMENT ON COLUMN <db>.<fn>.<arg> aggregates parameter
+        comments with the function's own COMMENT ON statement."""
+        db, obj = _extract_qualified_name(
+            "COMMENT ON COLUMN MyDB.fn_Calc.input_x IS 'denominator';"
+        )
+        assert db == "MyDB"
+        assert obj == "fn_Calc"
+
     # -- String-literal interference (was: caused ``and.dml`` filenames) --
 
     def test_dml_ignores_comment_on_inside_string_literal(self):
@@ -1284,6 +1332,78 @@ class TestIngestDirectory:
             "GRANT must land in an eponymous .dcl file, not under the source filename"
         )
         assert not (dcl_dir / "01_observability_ddl.dcl").exists()
+
+    def test_ingest_aggregates_view_and_column_comments_into_one_cmt(
+        self, tmp_path, tmp_project
+    ):
+        """COMMENT ON VIEW plus COMMENT ON COLUMN entries for the same
+        view all aggregate into a single ``<db>.<view>.cmt`` file —
+        Teradata stores view column comments in DBC.TVM the same way
+        it stores table column comments. Useful documentation for
+        autonomous agents and human readers; harvest must preserve it."""
+        src = tmp_path / "source"
+        src.mkdir()
+        (src / "doc.sql").write_text(
+            "COMMENT ON VIEW MyDB.v_Active IS 'Active customer rows';\n"
+            "COMMENT ON COLUMN MyDB.v_Active.customer_id IS 'PII id';\n"
+            "COMMENT ON COLUMN MyDB.v_Active.region IS 'AU state code';\n",
+            encoding="utf-8",
+        )
+
+        ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        cmt = (
+            tmp_project
+            / "payload"
+            / "database"
+            / "DDL"
+            / "comments"
+            / "MyDB.v_Active.cmt"
+        )
+        assert cmt.exists()
+        body = cmt.read_text(encoding="utf-8")
+        assert body.count("COMMENT ON VIEW") == 1
+        assert body.count("COMMENT ON COLUMN") == 2
+        assert "Active customer rows" in body
+        assert "PII id" in body
+        assert "AU state code" in body
+
+    def test_ingest_aggregates_procedure_parameter_comments_with_procedure(
+        self, tmp_path, tmp_project
+    ):
+        """Parameter comments on macros / procedures / functions —
+        ``COMMENT ON COLUMN <db>.<routine>.<arg>`` — aggregate with
+        the routine's own COMMENT ON into one eponymous .cmt file.
+        The mortgage AI-native data product standard recommends this
+        for richer parameter documentation visible to agents."""
+        src = tmp_path / "source"
+        src.mkdir()
+        (src / "doc.sql").write_text(
+            "COMMENT ON PROCEDURE MyDB.sp_LoadLoans "
+            "IS 'Loads a batch of loans';\n"
+            "COMMENT ON COLUMN MyDB.sp_LoadLoans.batch_size "
+            "IS 'rows per batch';\n"
+            "COMMENT ON COLUMN MyDB.sp_LoadLoans.dry_run "
+            "IS '1 = simulate only';\n",
+            encoding="utf-8",
+        )
+
+        ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        cmt = (
+            tmp_project
+            / "payload"
+            / "database"
+            / "DDL"
+            / "comments"
+            / "MyDB.sp_LoadLoans.cmt"
+        )
+        assert cmt.exists()
+        body = cmt.read_text(encoding="utf-8")
+        assert body.count("COMMENT ON PROCEDURE") == 1
+        assert body.count("COMMENT ON COLUMN") == 2
+        assert "rows per batch" in body
+        assert "1 = simulate only" in body
 
     def test_ingest_dml_with_comment_on_inside_string_lands_eponymously(
         self, tmp_path, tmp_project
