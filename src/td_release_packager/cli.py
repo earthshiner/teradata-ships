@@ -851,6 +851,8 @@ def _cmd_ingest(args):
             print(f"  Skipped (exist):  {result.skipped_existing}")
         print(f"  Unclassified:     {result.unclassified}")
         print(f"  MULTISET inject:  {result.multiset_injected}")
+        if result.multi_table_targets:
+            print(f"  Multi-table DML:  {len(result.multi_table_targets)} file(s)")
 
         if apply_tokens:
             print(f"  Tokens applied:   {len(apply_tokens)} mappings")
@@ -860,6 +862,13 @@ def _cmd_ingest(args):
             for src, dest, obj_type in result.files_placed:
                 print(f"    {obj_type:15s} {src}")
                 print(f"    {'':15s} → {dest}")
+
+        if result.multi_table_targets:
+            print("\n  Multi-table DML (kept together — order preserved):")
+            for dest, targets in sorted(result.multi_table_targets.items()):
+                print(f"    {dest}")
+                for tgt in targets:
+                    print(f"      target → {tgt}")
 
         if result.unclassified_files:
             print("\n  Unclassified files (manual review needed):")
