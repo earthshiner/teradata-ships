@@ -190,6 +190,23 @@ _DML_NAME_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
+# -- Name extraction for GRANT / REVOKE statements --
+# Captures the qualified object the privilege applies to so the
+# harvested file can be named eponymously (e.g. ``<db>.dcl`` for a
+# database-level grant or ``<db>.<table>.dcl`` for a table-level
+# grant). Aggregates multiple grants on the same object into one
+# .dcl file rather than the source-filename fallback.
+#   GRANT  privileges  ON  {{DB}}[.t]  TO    grantee [WITH GRANT OPTION]
+#   REVOKE privileges  ON  {{DB}}[.t]  FROM  grantee
+# The ``ON`` clause is the unambiguous marker; the privilege list
+# between the verb and ON varies (``SELECT``, ``ALL PRIVILEGES``,
+# ``EXECUTE FUNCTION``, etc.) and is consumed by ``.*?``.
+_GRANT_REVOKE_NAME_RE = re.compile(
+    r"\b(?:GRANT|REVOKE)\b.*?\bON\s+"
+    rf"({_NAME_PART}(?:\.{_NAME_PART})?)",
+    re.IGNORECASE | re.DOTALL,
+)
+
 # -- Detect REPLACE VIEW vs CREATE VIEW --
 _HAS_REPLACE_VIEW_RE = re.compile(
     r"REPLACE\s+VIEW",
@@ -392,6 +409,15 @@ def ingest_directory(
             from td_release_packager.classifier import classify, base_type
 
             for content in statements:
+                # Strip leading source-structure comments (file
+                # banner, section letter, execution-order notes) —
+                # these reference the original layout that no longer
+                # exists once SHIPS renames each statement
+                # eponymously, so they're noise in the package.
+                # Inline / trailing comments inside the statement
+                # are preserved.
+                content = _strip_leading_chunk_comments(content)
+
                 # Strip comments for safe classification and name
                 # extraction — prevents false matches from DDL keywords
                 # in comments (e.g. 'CREATE DATABASE IF NOT EXISTS' in
@@ -941,6 +967,73 @@ def _split_multi_statement(
 # ---------------------------------------------------------------
 
 
+def _strip_leading_chunk_comments(chunk: str) -> str:
+    """
+    Strip leading whitespace and SQL comment blocks from a chunk.
+
+    Source files typically have header comments above each
+    statement that describe the file structure, section letter,
+    or execution order — e.g.::
+
+        -- ===========================================
+        -- D. MEMORY  -  CHANGE LOG
+        -- ===========================================
+
+        INSERT INTO ...
+
+    Once SHIPS classifies and renames the file eponymously, these
+    headers reference a layout that no longer exists in the
+    package. They survive only as noise. This helper drops every
+    blank line and ``--`` / ``/* ... */`` comment block above the
+    first non-comment statement and returns the rest of the chunk
+    unchanged. Inline / trailing comments inside or below the
+    statement are preserved.
+
+    Args:
+        chunk: A single statement (post-split, pre-write).
+
+    Returns:
+        The chunk with leading comments and blank lines removed.
+        Returns the original chunk unchanged if it contains only
+        comments and whitespace (defensive — avoids producing an
+        empty file).
+    """
+    lines = chunk.splitlines(keepends=True)
+    i = 0
+    in_block = False
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if in_block:
+            # Already inside a block comment from a previous line
+            if "*/" in stripped:
+                in_block = False
+            i += 1
+            continue
+        if not stripped:
+            # Blank line
+            i += 1
+            continue
+        if stripped.startswith("--"):
+            # Single-line comment
+            i += 1
+            continue
+        if stripped.startswith("/*"):
+            # Block comment — may span multiple lines
+            if "*/" not in stripped[2:]:
+                in_block = True
+            i += 1
+            continue
+        # First non-blank, non-comment line — stop here
+        break
+
+    # All lines were comments / whitespace — return original to
+    # avoid producing an empty .dml / .cmt / .dcl file.
+    if i >= len(lines):
+        return chunk
+
+    return "".join(lines[i:])
+
+
 def _strip_comments(content: str) -> str:
     """
     Strip SQL comments from content before classification.
@@ -1003,18 +1096,37 @@ def _extract_qualified_name(content: str) -> Tuple[Optional[str], Optional[str]]
         1. Standard DDL: CREATE/REPLACE ... Database.Object
         2. COMMENT ON TABLE/COLUMN Database.Object[.column]
         3. COLLECT STATISTICS ... ON Database.Object
+        4. INSERT / UPDATE / DELETE / MERGE — DML target
+        5. GRANT / REVOKE ... ON Database[.Object]
 
     For COMMENT ON COLUMN, the column name is ignored — only the
     database.table portion is used for eponymous naming.
 
+    String literals are blanked before matching so that text inside
+    an IS-clause (``COMMENT ON TABLE x IS '... COMMENT ON TABLE
+    other'``) or a sql_template column in an INSERT cannot
+    masquerade as a real statement and produce nonsense filenames
+    like ``and.dml``.
+
     Args:
-        content: The DDL file content.
+        content: The DDL file content (already comment-stripped).
 
     Returns:
         Tuple of (database_name, object_name), either may be None.
     """
+    from td_release_packager.sql_text import (
+        strip_string_literals_preserving_positions,
+    )
+
+    # Blank string literals so embedded SQL-looking text inside
+    # quoted values (CHANGE_LOG descriptions, sql_template columns,
+    # COMMENT ON IS clauses) cannot be mistaken for real statements.
+    # Position-preserving so capture groups still align with the
+    # original characters when needed.
+    scan = strip_string_literals_preserving_positions(content)
+
     # --- Standard DDL (CREATE/REPLACE) ---
-    match = _QUALIFIED_NAME_RE.search(content)
+    match = _QUALIFIED_NAME_RE.search(scan)
     if match:
         qualified = match.group(1)
         parts = qualified.replace('"', "").split(".")
@@ -1025,7 +1137,7 @@ def _extract_qualified_name(content: str) -> Tuple[Optional[str], Optional[str]]
 
     # --- COMMENT ON {TABLE|VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER|
     #                 COLUMN|DATABASE|USER|ROLE|PROFILE} ---
-    match = _COMMENT_ON_NAME_RE.search(content)
+    match = _COMMENT_ON_NAME_RE.search(scan)
     if match:
         qualified = match.group(1)
         parts = qualified.replace('"', "").split(".")
@@ -1041,7 +1153,7 @@ def _extract_qualified_name(content: str) -> Tuple[Optional[str], Optional[str]]
             return (None, parts[0].strip())
 
     # --- COLLECT / UPDATE STATISTICS ... ON ---
-    match = _COLLECT_STATS_NAME_RE.search(content)
+    match = _COLLECT_STATS_NAME_RE.search(scan)
     if match:
         qualified = match.group(1)
         parts = qualified.replace('"', "").split(".")
@@ -1049,7 +1161,19 @@ def _extract_qualified_name(content: str) -> Tuple[Optional[str], Optional[str]]
             return (parts[0].strip(), parts[1].strip())
 
     # --- INSERT / UPDATE / DELETE / MERGE → DML target ---
-    match = _DML_NAME_RE.search(content)
+    match = _DML_NAME_RE.search(scan)
+    if match:
+        qualified = match.group(1)
+        parts = qualified.replace('"', "").split(".")
+        if len(parts) == 2:
+            return (parts[0].strip(), parts[1].strip())
+        elif len(parts) == 1:
+            return (None, parts[0].strip())
+
+    # --- GRANT / REVOKE ... ON object ---
+    # Last because GRANT/REVOKE statements may appear alongside
+    # other patterns; the ON clause is the unambiguous marker.
+    match = _GRANT_REVOKE_NAME_RE.search(scan)
     if match:
         qualified = match.group(1)
         parts = qualified.replace('"', "").split(".")
