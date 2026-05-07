@@ -36,10 +36,18 @@ def _display_name(obj) -> str:
     """
     Build a display name for an object.
 
+    Accepts either an ObjectDeployResult or a plain dict (as returned
+    by manifest.get_prior_completed()).
+
     For two-part names (DB.Object): 'MyDB.Customer'
     For single-part names (system-scope, DCL): 'analyst_role'
     Avoids the '.analyst_role' leading-period bug.
     """
+    if isinstance(obj, dict):
+        qname = obj.get("qualified_name", "")
+        if qname and "." in qname:
+            return qname
+        return obj.get("ddl_file") or qname or "(unknown)"
     if obj.database_name:
         return f"{obj.database_name}.{obj.object_name}"
     return obj.object_name or "(unknown)"
@@ -938,14 +946,21 @@ def _build_wave_graph_data(result: "PackageDeployResult") -> str:
 
     all_objs = list(result.results) + list(getattr(result, "prior_completed", []))
     for obj in all_objs:
-        type_val = (
-            obj.object_type.value
-            if hasattr(obj.object_type, "value")
-            else str(obj.object_type)
-        )
+        # prior_completed items are plain dicts from the manifest; results
+        # are ObjectDeployResult objects. Handle both.
+        if isinstance(obj, dict):
+            type_val = obj.get("object_type") or "UNKNOWN"
+            state = obj.get("state") or "unknown"
+            wave_n = obj.get("wave_number")
+        else:
+            type_val = (
+                obj.object_type.value
+                if hasattr(obj.object_type, "value")
+                else str(obj.object_type)
+            )
+            state = obj.state.value if hasattr(obj.state, "value") else str(obj.state)
+            wave_n = getattr(obj, "wave_number", None)
         name = _display_name(obj)
-        state = obj.state.value if hasattr(obj.state, "value") else str(obj.state)
-        wave_n = getattr(obj, "wave_number", None)
         node = {"name": name, "type": type_val, "state": state}
 
         if type_val in _PREREQ_TYPES or wave_n is None:

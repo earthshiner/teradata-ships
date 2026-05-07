@@ -525,7 +525,7 @@ def _connect(args):
         )
         sys.exit(1)
 
-    params = {"host": host, "user": user, "charset": "UTF8"}
+    params = {"host": host, "user": user}
     if password:
         params["password"] = password
     if logmech:
@@ -533,7 +533,12 @@ def _connect(args):
 
     try:
         conn = teradatasql.connect(**params)
-        return conn.cursor()
+        cursor = conn.cursor()
+        # teradatasql's "charset" JSON field is not recognised by the Go-side
+        # parser in current shipped versions — setting it via a post-connect
+        # session statement is the safe cross-version alternative.
+        cursor.execute("SET SESSION CHARACTER SET UNICODE")
+        return cursor
     except Exception as e:
         # Strip the Go stack trace from teradatasql errors.
         # Show user-friendly message with just the Teradata
