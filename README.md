@@ -6,6 +6,8 @@ An autonomous deployment agent for Teradata. SHIPS takes raw DDL from any source
 
 Equally usable by humans at the command line, CI/CD pipelines, and autonomous AI agents.
 
+> For the full mission, design philosophy, and the role SHIPS plays in the emerging agentic Teradata ecosystem, see [docs/MISSION.md](docs/MISSION.md).
+
 ---
 
 ## Quick Start
