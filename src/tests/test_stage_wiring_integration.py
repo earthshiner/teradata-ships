@@ -27,7 +27,13 @@ from pathlib import Path
 
 import pytest
 
-from td_release_packager.cli import _cmd_scaffold, _cmd_ingest, _cmd_analyze
+from td_release_packager.cli import (
+    _cmd_analyze,
+    _cmd_generate,
+    _cmd_ingest,
+    _cmd_process,
+    _cmd_scaffold,
+)
 from td_release_packager.orchestrator import issue_codes
 
 
@@ -349,3 +355,259 @@ class TestAnalyseStageRecording:
         _run(_cmd_analyze, args)
 
         assert not (loose / "decisions.json").exists()
+
+
+# ---------------------------------------------------------------
+# Generate stage (item 7)
+# ---------------------------------------------------------------
+
+
+def _make_generate_args(source: Path, **overrides) -> Namespace:
+    args = Namespace(
+        source=str(source),
+        modules=None,
+        dry_run=False,
+    )
+    for k, v in overrides.items():
+        setattr(args, k, v)
+    return args
+
+
+class TestGenerateStageRecording:
+    """generate stage wires onto _stage_recording and records result."""
+
+    def _seed_table(self, project: Path) -> None:
+        tables = project / "payload" / "database" / "DDL" / "tables"
+        tables.mkdir(parents=True, exist_ok=True)
+        # Minimal table using the SHIPS token convention expected by the generator
+        (tables / "{{DOM_DATABASE_T}}.t_loan.tbl").write_text(
+            "CREATE MULTISET TABLE {{DOM_DATABASE_T}}.t_loan "
+            "(loan_id INTEGER NOT NULL) "
+            "PRIMARY INDEX (loan_id);",
+            encoding="utf-8",
+        )
+
+    def test_generate_writes_stage_to_decisions(self, tmp_path):
+        project = _make_project(tmp_path)
+        self._seed_table(project)
+
+        args = _make_generate_args(project)
+        _run(_cmd_generate, args)
+
+        d = _read_decisions(project)
+        stages = [s["stage"] for r in d["runs"] for s in r["stages"]]
+        assert "generate" in stages
+
+    def test_generate_records_outputs(self, tmp_path):
+        project = _make_project(tmp_path)
+        self._seed_table(project)
+
+        args = _make_generate_args(project)
+        _run(_cmd_generate, args)
+
+        d = _read_decisions(project)
+        gen_run = next(r for r in d["runs"] if r["stages"][0]["stage"] == "generate")
+        stage = gen_run["stages"][0]
+        assert "locking_views_written" in stage["outputs"]
+        assert "business_views_rewritten" in stage["outputs"]
+
+    def test_generate_no_tables_emits_error_issue(self, tmp_path):
+        """No tables in payload → generator errors; GENERATE_ERROR emitted."""
+        project = _make_project(tmp_path)
+        # Don't seed any tables
+
+        args = _make_generate_args(project)
+        _run(_cmd_generate, args)
+
+        d = _read_decisions(project)
+        gen_run = next(r for r in d["runs"] if r["stages"][0]["stage"] == "generate")
+        stage = gen_run["stages"][0]
+        codes = [i["code"] for i in stage["issues"]]
+        assert issue_codes.GENERATE_ERROR in codes
+
+
+# ---------------------------------------------------------------
+# --auto-tokenise (item 9)
+# ---------------------------------------------------------------
+
+
+class TestAutoTokenise:
+    """--auto-tokenise detects literals and applies tokens in one pass."""
+
+    def test_auto_tokenise_applies_tokens(self, tmp_path):
+        project = _make_project(tmp_path)
+        source = tmp_path / "src"
+        source.mkdir()
+        (source / "HardDB.t.tbl").write_text(
+            "CREATE MULTISET TABLE HardDB.t (id INTEGER);", encoding="utf-8"
+        )
+
+        args = _make_harvest_args(source, project, auto_tokenise=True)
+        _run(_cmd_ingest, args)
+
+        # Payload should contain a tokenised file ({{HardDB}}.t.tbl)
+        tbl_files = list((project / "payload").rglob("*.tbl"))
+        assert tbl_files, "no .tbl placed in payload"
+        content = tbl_files[0].read_text(encoding="utf-8")
+        # Token was auto-applied — the raw qualified reference HardDB.t should
+        # be replaced; the literal may still appear inside the token name
+        # ({{HardDB_T}}) which is correct kind-aware output.
+        assert "HardDB.t" not in content, (
+            f"raw qualified reference HardDB.t still present: {content}"
+        )
+        assert "{{" in content, "expected a token in harvested content"
+
+    def test_auto_tokenise_records_auto_derived_tokens(self, tmp_path):
+        project = _make_project(tmp_path)
+        source = tmp_path / "src"
+        source.mkdir()
+        (source / "HardDB.t.tbl").write_text(
+            "CREATE MULTISET TABLE HardDB.t (id INTEGER);", encoding="utf-8"
+        )
+
+        args = _make_harvest_args(source, project, auto_tokenise=True)
+        _run(_cmd_ingest, args)
+
+        d = _read_decisions(project)
+        harvest_run = next(r for r in d["runs"] if r["stages"][0]["stage"] == "harvest")
+        stage = harvest_run["stages"][0]
+        # auto_derived_tokens recorded in decisions
+        assert "auto_derived_tokens" in stage.get("decisions", {})
+        assert stage["decisions"]["auto_derived_tokens"] >= 1
+
+    def test_auto_tokenise_already_tokenised_source(self, tmp_path):
+        """Already-tokenised source: --auto-tokenise is a no-op (zero candidates)."""
+        project = _make_project(tmp_path)
+        source = tmp_path / "src"
+        source.mkdir()
+        (source / "{{DB}}.t.tbl").write_text(
+            "CREATE MULTISET TABLE {{DB}}.t (id INTEGER);", encoding="utf-8"
+        )
+
+        args = _make_harvest_args(source, project, auto_tokenise=True)
+        _run(_cmd_ingest, args)
+
+        d = _read_decisions(project)
+        harvest_run = next(r for r in d["runs"] if r["stages"][0]["stage"] == "harvest")
+        stage = harvest_run["stages"][0]
+        assert stage["decisions"].get("auto_derived_tokens", 0) == 0
+
+
+# ---------------------------------------------------------------
+# Process meta-verb (item 5 + --strict from item 8)
+# ---------------------------------------------------------------
+
+
+def _make_process_args(project: Path, source: Path = None, **overrides) -> Namespace:
+    args = Namespace(
+        project=str(project),
+        source=str(source) if source else None,
+        token_map=None,
+        auto_tokenise=False,
+        env_prefix=None,
+        skip_generate=True,  # skip generate by default in tests
+        inspect_config=None,
+        env=None,
+        env_config=None,
+        name=None,
+        output=None,
+        format="zip",
+        author="",
+        description="",
+        commit="",
+        strict=False,
+    )
+    for k, v in overrides.items():
+        setattr(args, k, v)
+    return args
+
+
+class TestProcessMetaVerb:
+    """process command orchestrates stages and records into one run."""
+
+    def _seed_project_with_source(self, tmp_path: Path):
+        """Return (project, source) with a single classifiable source file."""
+        project = _make_project(tmp_path)
+        source = tmp_path / "src"
+        source.mkdir()
+        (source / "Dev.t.tbl").write_text(
+            "CREATE MULTISET TABLE Dev.t (id INTEGER);", encoding="utf-8"
+        )
+        return project, source
+
+    def test_process_writes_single_run_with_multiple_stages(self, tmp_path):
+        """One process run in decisions.json contains multiple stage entries."""
+        project, source = self._seed_project_with_source(tmp_path)
+
+        args = _make_process_args(project, source)
+        _run(_cmd_process, args)
+
+        d = _read_decisions(project)
+        process_run = next(
+            (r for r in d["runs"] if r.get("command") == "process"), None
+        )
+        assert process_run is not None, "expected a 'process' run in decisions.json"
+        stage_names = [s["stage"] for s in process_run["stages"]]
+        assert "harvest" in stage_names
+        assert "inspect" in stage_names
+        assert "analyse" in stage_names
+
+    def test_process_without_source_skips_harvest(self, tmp_path):
+        """--source omitted → harvest stage absent from process run."""
+        project = _make_project(tmp_path)
+        # Seed payload directly (skipping harvest)
+        tables = project / "payload" / "database" / "DDL" / "tables"
+        tables.mkdir(parents=True, exist_ok=True)
+        (tables / "Dev.t.tbl").write_text(
+            "CREATE MULTISET TABLE Dev.t (id INTEGER);", encoding="utf-8"
+        )
+
+        args = _make_process_args(project, source=None)
+        _run(_cmd_process, args)
+
+        d = _read_decisions(project)
+        process_run = next(r for r in d["runs"] if r.get("command") == "process")
+        stage_names = [s["stage"] for s in process_run["stages"]]
+        assert "harvest" not in stage_names
+        assert "inspect" in stage_names
+
+    def test_process_strict_aborts_on_stage_error(self, tmp_path):
+        """--strict mode: cyclic views in inspect/analyse cause sys.exit(1)."""
+        project = _make_project(tmp_path)
+        # Plant a cyclic view pair to force an error in analyse
+        views = project / "payload" / "database" / "DDL" / "views"
+        views.mkdir(parents=True, exist_ok=True)
+        (views / "Dev.v_a.viw").write_text(
+            "REPLACE VIEW Dev.v_a AS SELECT * FROM Dev.v_b;", encoding="utf-8"
+        )
+        (views / "Dev.v_b.viw").write_text(
+            "REPLACE VIEW Dev.v_b AS SELECT * FROM Dev.v_a;", encoding="utf-8"
+        )
+
+        args = _make_process_args(project, source=None, strict=True)
+        rc = _run(_cmd_process, args)
+
+        # With --strict, the cycle in analyse causes a non-zero exit
+        assert rc != 0, "expected non-zero exit under --strict with cyclic views"
+
+    def test_process_developer_mode_continues_past_warnings(self, tmp_path):
+        """Developer mode (no --strict): warnings don't abort the pipeline."""
+        project, source = self._seed_project_with_source(tmp_path)
+
+        # No --strict — pipeline should complete even if warnings exist
+        args = _make_process_args(project, source)
+        rc = _run(_cmd_process, args)
+
+        # Should complete all stages, exit 0 (or non-zero only on hard errors)
+        d = _read_decisions(project)
+        process_run = next(r for r in d["runs"] if r.get("command") == "process")
+        stage_names = [s["stage"] for s in process_run["stages"]]
+        # At minimum inspect and analyse ran
+        assert "inspect" in stage_names
+        assert "analyse" in stage_names
+
+    def test_process_non_project_dir_exits_immediately(self, tmp_path):
+        """process --project on a non-existent dir exits immediately."""
+        args = _make_process_args(tmp_path / "nonexistent")
+        rc = _run(_cmd_process, args)
+        assert rc == 1
