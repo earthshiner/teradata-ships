@@ -259,12 +259,16 @@ class TestFormatPropertiesFile:
 
         assert "MDL_T={{PARENT_NODE}}_MDL_{{SECURITY_TIER}}_T" in out
 
-    def test_emits_outliers_with_literal_suffix(self):
+    def test_emits_outliers_with_kind_variants(self):
+        """Outliers emit per-kind token stubs (_T, _V) for the operator to fill."""
         names = ["PDE_DEV_00_MDL_0_T", "GCFR_APPL_ADMIN_USER"]
         result = decomp.decompose_all(names)
         out = decomp.format_env_config_file("DEV", result)
 
-        assert "GCFR_APPL_ADMIN_USER_LITERAL=GCFR_APPL_ADMIN_USER" in out
+        assert "GCFR_APPL_ADMIN_USER_T=" in out
+        assert "GCFR_APPL_ADMIN_USER_V=" in out
+        # Old monolithic _LITERAL entry must not appear
+        assert "GCFR_APPL_ADMIN_USER_LITERAL=" not in out
 
     def test_renders_full_seven_section_scaffold(self):
         """Output includes all 7 canonical sections — sections 1
@@ -284,7 +288,7 @@ class TestFormatPropertiesFile:
         out = decomp.format_env_config_file("DEV", result)
 
         sec8_pos = out.find("# 8. Outliers")
-        outlier_pos = out.find("EXTERNAL_USER_LITERAL=EXTERNAL_USER")
+        outlier_pos = out.find("EXTERNAL_USER_T=")
         assert sec8_pos > 0
         assert outlier_pos > sec8_pos
 
@@ -494,5 +498,6 @@ class TestRealisticGCFRRoundTrip:
         # Cross-instance form
         assert tokens["MDL_NODE"] == "PDE_DEV_MDL"
 
-        # Outlier kept as literal fallback
-        assert tokens["GCFR_APPL_ADMIN_USER_LITERAL"] == "GCFR_APPL_ADMIN_USER"
+        # Outlier emits per-kind stubs (operator must fill in the values)
+        assert "GCFR_APPL_ADMIN_USER_T" in tokens
+        assert "GCFR_APPL_ADMIN_USER_V" in tokens
