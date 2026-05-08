@@ -31,26 +31,33 @@ from typing import Dict, Optional
 # ---------------------------------------------------------------------------
 # Kind suffix per *base* object type
 # ---------------------------------------------------------------------------
-# Procedures, macros, functions: physically colocate with tables in Teradata
-# in practice, so _T is the sensible default.  Script Table Operators (STO)
-# produce/consume tables → _T.  JARs follow the consuming procedure → _T
-# (best-effort; Phase 3 will introduce consumer-chain lookup).
+# Each code-object kind lives in its own logical layer:
+#   _P  — procedures (code, not data)
+#   _M  — macros
+#   _F  — functions (scalar/aggregate/UDF)
+#   _X  — script table operators (table-function style, distinct from _F)
+#   _T  — tables, indexes, triggers (triggers fire on tables → same DB),
+#          DML targets (data writes always target tables)
+#   _V  — views
+# JARs colocate with the calling procedure or function.  The most common
+# consumer is a stored procedure, so _P is used as the best-effort default.
+# Phase 4 inspect rules will surface mismatches for operator correction.
 TYPE_TO_KIND: Dict[str, str] = {
     "TABLE": "T",
     "VIEW": "V",
-    "MACRO": "T",
-    "PROCEDURE": "T",
-    "PROCEDURE_SPL": "T",
-    "PROCEDURE_JAVA": "T",
-    "FUNCTION": "T",
-    "FUNCTION_C": "T",
-    "FUNCTION_SQL": "T",
+    "MACRO": "M",
+    "PROCEDURE": "P",
+    "PROCEDURE_SPL": "P",
+    "PROCEDURE_JAVA": "P",
+    "FUNCTION": "F",
+    "FUNCTION_C": "F",
+    "FUNCTION_SQL": "F",
     "TRIGGER": "T",
     "JOIN_INDEX": "T",
     "HASH_INDEX": "T",
     "SECONDARY_INDEX": "T",
-    "STO": "T",
-    "JAR": "T",
+    "STO": "X",
+    "JAR": "P",
     "DML": "T",
 }
 
@@ -63,15 +70,15 @@ TYPE_TO_KIND: Dict[str, str] = {
 EXTENSION_TO_KIND: Dict[str, str] = {
     ".tbl": "T",
     ".viw": "V",
-    ".mcr": "T",
-    ".spl": "T",
-    ".fnc": "T",
-    ".trg": "T",
-    ".jix": "T",
+    ".mcr": "M",
+    ".spl": "P",
+    ".fnc": "F",
+    ".trg": "T",  # triggers fire on tables → same _T database
+    ".jix": "T",  # join/hash/secondary indexes colocate with their table
     ".idx": "T",
-    ".sto": "T",
-    ".sjr": "T",
-    ".dml": "T",
+    ".sto": "X",  # script table operators
+    ".sjr": "P",  # JAR install scripts colocate with calling procedure
+    ".dml": "T",  # DML targets are always tables
     ".ins": "T",
 }
 
