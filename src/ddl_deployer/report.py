@@ -60,33 +60,16 @@ _WHITE = "#FFFFFF"
 _LIGHT_BG = "#F8F9FA"
 _BORDER = "#DEE2E6"
 
-# -- Wordmark logo (extracted per standing instruction: grep '^data:image/png;base64,') --
-_LOGO_B64 = (
-    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABVCAMAAADOrBLE"
-    "AAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAGb"
-    "UExURf9fAgAAAP9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9f"
-    "Av9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9f"
-    "Av9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9f"
-    "Av9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9f"
-    "Av9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9f"
-    "Av9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9f"
-    "Av9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9f"
-    "Av9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9f"
-    "Av9fAv///3jJeXQAAACHdFJOUwAA4/Lx9HV8gggMBOHDxL0090PNnJ6YKgGB7pTk"
-    "tAfU3SD8YJ3GGf4QSfOtNgYDHk50g39kIdnqrlFBPT48I4na+u+4Uqr79vXtQNKT"
-    "FGegDyfRd4jeMDkd2JBL+M4ib+nwUwJK0CbimQXoLna8ax8KK1iGyutCwS0sOkRM"
-    "TRXnjBwW5ciKNyCa7VMAAAABYktHRIhrZhZaAAAACXBIWXMAAC4jAAAuIwF4pT92AA"
-    "AAB3RJTUUH6gIDDSMcsQ7WtwAAAeNJREFUWMPt1tlbElEYBvCXMEhGssVwynIBCxBE"
-    "MXQKynBDMAoqSElt0bKgXFpt07LM+bcdRpiGc0jOuaini/Nezjfze76zAo5Ym2py1A"
-    "YLT9CkErELQAAC+E+AY80OOhLYgRYnleOtJziAejl5SgACEMC/B063naHiaucA7JDr"
-    "hAuw8EQAAhCAAAQggL8MnAWXgHMk0MEJnCeBC518QBcJdPfwAa0k4PZwjQG9JKBe"
-    "vMQF2Lwk4HX5OHqAv49qwR0I9v+ZQGhgMDx0ORJ06O9geESlo1wJX43Grhm57qt6"
-    "wOiN+Fi5z/GJyWbtKfqn1LpJTCd/JzVTASD7bxqvJNO3oOW22jjVv3mA37xvvJms"
-    "Btxp4QBG79bO1j0ZCLmYAcg5opC/r7UwqzADcwWykoO2LA+YgfkFsrJYXoiHi2wA"
-    "8IiqWKFP7WNGwE5VvHpBjjxhA8JUZfpgbFJEYQAsWEqQlUJlfZefPmMBVp6TlRcwt"
-    "nhHqjEgkYdfiRqHDsVYptQIQJC4AdNF06lF8eWr1ZL7EECb7rWk+blzvfbYAxuv37"
-    "wNvMu/71sYS5hi/VAdaqfNtGCbH0HfG5Cl7MCnz1++bpkyv23cB9Kgs7Idv33f0T7"
-    "n+xnSu/zhCcSVn7u/9vTx7wNeLG/Yd2GbHAAAAABJRU5ErkJggg=="
+# -- Wordmark logo — inline SVG so there are no base64 or CSP issues --
+_LOGO_SVG = (
+    '<svg width="108" height="28" viewBox="0 0 108 28" '
+    'xmlns="http://www.w3.org/2000/svg" aria-label="Teradata">'
+    '<text x="0" y="22" '
+    'font-family="Inter,-apple-system,BlinkMacSystemFont,sans-serif" '
+    'font-size="21" font-weight="600" letter-spacing="-0.3" fill="#FFFFFF">'
+    "Teradata"
+    "</text>"
+    "</svg>"
 )
 
 # -- Object types treated as pre-requisites in the wave graph --
@@ -320,7 +303,7 @@ def _html_head(result, now, mode):
          line-height: 1.6; color: {_NAVY}; background: {_WHITE}; }}
   .header {{ background: {_NAVY}; color: {_WHITE}; padding: 24px 32px;
              display: flex; align-items: center; justify-content: space-between; }}
-  .header img {{ height: 28px; filter: brightness(0) invert(1); }}
+  .header svg {{ display: block; }}
   .header-right {{ text-align: right; font-size: 13px; opacity: 0.85; }}
   .header h1 {{ font-size: 20px; font-weight: 500; margin: 0; }}
   .header .status {{ display: inline-block; padding: 3px 12px; border-radius: 4px;
@@ -346,7 +329,7 @@ def _html_head(result, now, mode):
   }}
   .action-group > summary::-webkit-details-marker {{ display: none; }}
   .action-group > summary::before {{
-    content: "\25B8"; display: inline-block;
+    content: "❯"; display: inline-block;
     margin-right: 6px; transition: transform 0.15s ease; color: {_ORANGE};
   }}
   .action-group[open] > summary::before {{ transform: rotate(90deg); }}
@@ -411,7 +394,7 @@ def _html_header(result, now, mode, status, status_colour):
     return f"""
 <div class="header">
   <div>
-    <img src="{_LOGO_B64}" alt="Teradata">
+    {_LOGO_SVG}
     <h1 style="margin-top:8px">{mode} Report
       <span class="status" style="background:{status_colour}">{status}</span>
     </h1>
@@ -608,7 +591,7 @@ def _html_action_items(result, provenance: Optional[ProvenanceDocument] = None):
     if failed_items:
         n = len(failed_items)
         parts.append(
-            f'<details class="action-group" open>'
+            f'<details class="action-group">'
             f'<summary class="err">✗ {n} Failed — requires attention</summary>'
             + "\n".join(failed_items)
             + "</details>"
