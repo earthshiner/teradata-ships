@@ -24,9 +24,10 @@ Naming convention:
     Domain prefixes currently in use:
       - TOKEN_*       Token substitution / cascade resolution
       - PROPERTIES_*  .conf file handling
-      - HARVEST_*     Reserved for harvest stage (item 4 rollout)
-      - INSPECT_*     Reserved for inspect stage (item 4 rollout)
-      - PACKAGE_*     Reserved for package stage (item 4 rollout)
+      - HARVEST_*     Harvest / ingest stage (item 4c)
+      - INSPECT_*     Inspect / validate stage (item 4b)
+      - ANALYSE_*     Dependency analysis stage (item 4d)
+      - PACKAGE_*     Package / build stage (item 4f)
       - GENERATE_*    Reserved for generate stage (item 7)
 """
 
@@ -75,11 +76,97 @@ INSPECT_GRANT_VIOLATION = "INSPECT_GRANT_VIOLATION"
 
 
 # ---------------------------------------------------------------
+# Harvest domain (build-order item 4c)
+# ---------------------------------------------------------------
+
+#: A source file could not be classified into any known DDL/DML type.
+#: Unclassified files are not placed in the payload. The filename is
+#: carried in the message body so the operator can investigate.
+HARVEST_UNCLASSIFIED = "HARVEST_UNCLASSIFIED"
+
+#: The rich classifier surfaced a warning for a source file — typically
+#: a filename-vs-content mismatch (e.g. a .tbl file containing a VIEW
+#: statement) or an unrecognised external reference pattern.
+HARVEST_CLASSIFICATION_WARNING = "HARVEST_CLASSIFICATION_WARNING"
+
+#: A hardcoded database or user name was found in the payload that has
+#: not yet been replaced with a {{TOKEN}}. Recorded at ``info`` level —
+#: these are candidates, not errors; the operator decides whether to
+#: tokenise them.
+HARVEST_TOKEN_CANDIDATE = "HARVEST_TOKEN_CANDIDATE"
+
+
+# ---------------------------------------------------------------
+# Analyse domain (build-order item 4d)
+# ---------------------------------------------------------------
+
+#: A circular dependency was detected in the DDL object graph. Objects
+#: involved in the cycle cannot be assigned to waves and will block
+#: deployment. The cycle members are listed in the message body.
+ANALYSE_CYCLE = "ANALYSE_CYCLE"
+
+#: A DDL object references another object that is not present in the
+#: current payload. The reference may resolve at deploy time (the target
+#: already exists on the target system) or may indicate a missing file.
+#: Recorded at ``info`` level so the analyst can decide.
+ANALYSE_EXTERNAL_REF = "ANALYSE_EXTERNAL_REF"
+
+
+# ---------------------------------------------------------------
+# Package domain (build-order item 4f)
+# ---------------------------------------------------------------
+
+#: The builder emitted a warning during package assembly — typically a
+#: token substitution anomaly, a missing rollback script, or a file
+#: that could not be included. The full warning text is in the message.
+PACKAGE_WARNING = "PACKAGE_WARNING"
+
+
+# ---------------------------------------------------------------
 # Registry — code → human description
 # ---------------------------------------------------------------
 
 
 ISSUE_CODES: Dict[str, str] = {
+    HARVEST_UNCLASSIFIED: (
+        "A source file could not be classified into any known DDL/DML type "
+        "and was not placed in the payload. Investigate the file — it may "
+        "use a non-standard SQL dialect, contain only comments, or be "
+        "misnamed. The filename is in the message body."
+    ),
+    HARVEST_CLASSIFICATION_WARNING: (
+        "The classifier surfaced a warning for a source file. Common causes: "
+        "filename extension does not match the DDL verb (e.g. a .tbl file "
+        "containing REPLACE VIEW), or an external reference pattern that "
+        "could not be resolved. Review and rename the file or correct the DDL."
+    ),
+    HARVEST_TOKEN_CANDIDATE: (
+        "A hardcoded database or user name was detected in the payload that "
+        "has not yet been replaced with a {{TOKEN}} reference. This is an "
+        "informational signal — the operator decides whether to tokenise it "
+        "or leave it as a literal. Re-run harvest with --generate-token-map "
+        "to produce a token_map.conf for substitution."
+    ),
+    ANALYSE_CYCLE: (
+        "A circular dependency was detected in the DDL object graph. The "
+        "objects involved cannot be assigned to deployment waves and will "
+        "block wave-parallel deployment. Break the cycle by adding a "
+        "pre-requisite DDL split or restructuring object ownership. The "
+        "cycle members are listed in the message body."
+    ),
+    ANALYSE_EXTERNAL_REF: (
+        "A DDL object references another object that is not present in the "
+        "current payload. The reference may resolve safely at deploy time if "
+        "the target already exists on the target system — or it may indicate "
+        "a missing file that should be included in the project. Review the "
+        "reference and add the target to the payload if needed."
+    ),
+    PACKAGE_WARNING: (
+        "The builder emitted a warning during package assembly. Typical "
+        "causes: a token substitution anomaly (undefined token, double- "
+        "substitution), a missing rollback script, or a file that could not "
+        "be included in the archive. The full warning text is in the message."
+    ),
     TOKEN_UNDEFINED: (
         "A {{TOKEN}} reference in DDL has no corresponding entry in "
         "the resolved properties file. Build will fail at substitution."
