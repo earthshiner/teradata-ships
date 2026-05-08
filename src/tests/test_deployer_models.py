@@ -475,3 +475,85 @@ class TestIsNoopRedeploy:
             manifest_path="/tmp/manifest.json",
         )
         assert result.is_noop_redeploy is False
+
+
+# ---------------------------------------------------------------
+# _execute_ddl — statement splitting (comment + string-literal safe)
+# ---------------------------------------------------------------
+
+
+class _RecordingCursor:
+    """Minimal cursor stub that records every execute() call."""
+
+    def __init__(self):
+        self.executed = []
+
+    def execute(self, sql):
+        self.executed.append(sql)
+
+
+class TestExecuteDdl:
+    """Unit tests for _execute_ddl's statement-splitting logic.
+
+    Uses a recording cursor stub so no real database connection is needed.
+    """
+
+    def _run(self, sql: str) -> list[str]:
+        from ddl_deployer.deployer import _execute_ddl
+
+        cur = _RecordingCursor()
+        _execute_ddl(cur, sql)
+        return cur.executed
+
+    def test_single_statement(self):
+        stmts = self._run("SELECT 1;")
+        assert stmts == ["SELECT 1"]
+
+    def test_two_statements(self):
+        sql = "INSERT INTO t (x) VALUES (1);\nINSERT INTO t (x) VALUES (2);"
+        stmts = self._run(sql)
+        assert len(stmts) == 2
+        assert "VALUES (1)" in stmts[0]
+        assert "VALUES (2)" in stmts[1]
+
+    def test_semicolon_inside_string_literal_not_split(self):
+        """Semicolons embedded in string literals must not split the statement.
+
+        Regression for issue #73 — the VALUES string contains ';' which was
+        previously treated as a statement terminator, producing two broken
+        fragments instead of two complete INSERT statements.
+        """
+        sql = (
+            "INSERT INTO t (cd, desc_col) VALUES ('A', 'Fixed rate; stable');\n"
+            "INSERT INTO t (cd, desc_col) VALUES ('B', 'ARM; rate resets');"
+        )
+        stmts = self._run(sql)
+        assert len(stmts) == 2, f"Expected 2 statements, got {len(stmts)}: {stmts}"
+        assert "Fixed rate; stable" in stmts[0]
+        assert "ARM; rate resets" in stmts[1]
+
+    def test_semicolon_inside_block_comment_not_split(self):
+        """Semicolons inside block comments must not split the statement."""
+        sql = "/* step 1; do this */ INSERT INTO t VALUES (1);"
+        stmts = self._run(sql)
+        assert len(stmts) == 1
+        assert "INSERT INTO t VALUES (1)" in stmts[0]
+
+    def test_semicolon_inside_line_comment_not_split(self):
+        """Semicolons on a -- comment line must not split the statement."""
+        sql = "INSERT INTO t VALUES (1); -- end; of statement"
+        stmts = self._run(sql)
+        assert len(stmts) == 1
+
+    def test_doubled_quote_inside_literal(self):
+        """Teradata escaped quote (doubled '') inside a literal must not
+        prematurely close the string, leaving a trailing semicolon exposed."""
+        sql = "INSERT INTO t (x) VALUES ('it''s fine; really');"
+        stmts = self._run(sql)
+        assert len(stmts) == 1
+        assert "it''s fine; really" in stmts[0]
+
+    def test_no_trailing_semicolon(self):
+        """Content without a trailing semicolon is still executed."""
+        stmts = self._run("INSERT INTO t VALUES (1)")
+        assert len(stmts) == 1

@@ -2495,8 +2495,9 @@ def _execute_ddl(cursor, ddl_text: str):
     Execute one or more DDL statements.
 
     Handles multi-statement content (e.g. .grt files with multiple
-    GRANT statements) by splitting on semicolons -- comment-safe, so
-    semicolons inside SQL comments don't cause false splits.
+    GRANT statements) by splitting on semicolons -- comment- and
+    string-literal-safe, so semicolons inside SQL comments or VALUES
+    strings don't cause false splits.
 
     Each statement is executed individually. This avoids Teradata
     Error 3932 ('Only an ET or null statement is legal after a DDL
@@ -2515,9 +2516,9 @@ def _execute_ddl(cursor, ddl_text: str):
     import re
     import time
 
-    # --- Split multi-statement content (comment-safe) ---
-    # Build a comment-free copy for semicolon detection,
-    # preserving character positions for mapping back.
+    # --- Split multi-statement content (comment + string-literal safe) ---
+    # Build a sanitised copy for semicolon detection, preserving character
+    # positions so offsets map back to the original text exactly.
     stripped = ddl_text
 
     # Replace block comments with same-length whitespace
@@ -2536,7 +2537,20 @@ def _execute_ddl(cursor, ddl_text: str):
             + stripped[match.end() :]
         )
 
-    # Find semicolon positions in the comment-free version
+    # Replace string literals with same-length whitespace so that a
+    # semicolon inside a VALUES string (e.g. 'Fixed rate; stable payments')
+    # is not mistaken for a statement terminator.
+    # Pattern mirrors sql_text._STRING_LITERAL_RE (Teradata single-quoted,
+    # doubled-quote escape). Comments are already blanked above, so any
+    # stray quote inside a comment won't start a spurious literal match.
+    for match in re.finditer(r"'(?:[^']|'')*'", stripped, flags=re.DOTALL):
+        stripped = (
+            stripped[: match.start()]
+            + " " * len(match.group())
+            + stripped[match.end() :]
+        )
+
+    # Find semicolon positions in the sanitised version
     semi_positions = [i for i, c in enumerate(stripped) if c == ";"]
 
     # Extract individual statements from original text
