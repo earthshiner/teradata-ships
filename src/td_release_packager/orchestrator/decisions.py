@@ -426,6 +426,17 @@ class StageRecorder:
 
     # ---- status -----------------------------------------------
 
+    @property
+    def status(self) -> str:
+        """Return the current recorded status for this stage.
+
+        Readable after the stage context has closed — the auto-upgrade
+        logic in ``RunRecorder.__exit__`` may have promoted the status
+        to ``"error"`` if any error-severity issue was added. Use this
+        in the ``process`` meta-verb to decide whether to abort.
+        """
+        return self._entry.get("status", "success")
+
     def set_status(self, status: str) -> None:
         """
         Set the stage status. One of:

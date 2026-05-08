@@ -230,6 +230,10 @@ def main():
         _cmd_decompose_names(args)
     elif args.command == "bootstrap-env-config":
         _cmd_bootstrap_env_config(args)
+    elif args.command == "generate":
+        _cmd_generate(args)
+    elif args.command == "process":
+        _cmd_process(args)
     else:
         parser.print_help()
         sys.exit(1)
@@ -354,6 +358,69 @@ def _stage_recording(project_dir: str, stage_name: str):
         with manifest.run(stage_name) as run:
             with run.stage(stage_name) as stage:
                 yield stage
+
+    return _ctx()
+
+
+# ---------------------------------------------------------------
+# Process meta-verb recording infrastructure
+# ---------------------------------------------------------------
+
+
+class _NullRunRecorder:
+    """
+    Drop-in for ``RunRecorder`` for non-project ``process`` runs.
+
+    Yields ``_NullStageRecorder`` instances so the caller never needs
+    to branch on whether decisions.json is being written.
+    """
+
+    from contextlib import contextmanager as _cm
+
+    @property
+    def run_id(self) -> str:
+        return "(no-op)"
+
+    def stage(self, name: str):
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _ctx():
+            yield _NullStageRecorder()
+
+        return _ctx()
+
+
+def _process_recording(project_dir: str):
+    """
+    Context manager for the ``process`` meta-verb.
+
+    Opens a single run in ``decisions.json`` and yields the
+    ``RunRecorder`` so the caller can open individual stages within
+    it.  One run with multiple stages gives a clean end-to-end audit
+    trail across the whole pipeline — distinct from the per-stage
+    single-run pattern used by individual commands.
+
+    Yields a ``_NullRunRecorder`` when ``project_dir`` is not a SHIPS
+    project, so ad-hoc runs don't litter the filesystem.
+    """
+    from contextlib import contextmanager
+
+    from td_release_packager.orchestrator import (
+        DECISIONS_FILENAME,
+        DecisionsManifest,
+    )
+
+    @contextmanager
+    def _ctx():
+        if not _looks_like_ships_project(project_dir):
+            yield _NullRunRecorder()
+            return
+
+        manifest_path = os.path.join(project_dir, DECISIONS_FILENAME)
+        manifest = DecisionsManifest(manifest_path)
+        with manifest.run("process") as run:
+            yield run
 
     return _ctx()
 
@@ -859,6 +926,37 @@ def _run_ingest(args, stage, issue_codes, apply_tokens) -> int:
         the recorder context closes — for the same reason as inspect
         (calling sys.exit inside trips the BaseException handler).
     """
+    # -- Auto-tokenise: detect, derive, and apply in one pass --
+    # When --auto-tokenise is set (item 9), skip the manual two-step
+    # (harvest → review token_map.conf → re-harvest) by automatically
+    # generating and applying the token map in a single run.
+    auto_tokenise = getattr(args, "auto_tokenise", False)
+    if auto_tokenise and apply_tokens is None:
+        # Pass 1: detect only — no substitution
+        detection = ingest_directory(
+            source_dir=args.source,
+            project_dir=args.project,
+            detect_tokens=True,
+            apply_tokens=None,
+            force=args.force,
+            clean_payload=not getattr(args, "keep_existing", False),
+        )
+        if detection.token_candidates:
+            env_prefix = getattr(args, "env_prefix", None)
+            apply_tokens = generate_token_map(detection.token_candidates, env_prefix)
+            stage.set_decisions(
+                auto_tokenise=True,
+                auto_derived_tokens=len(apply_tokens),
+                env_prefix=env_prefix,
+            )
+            print(
+                f"\n  Auto-tokenise: detected {len(detection.token_candidates)} "
+                f"literal name(s) — derived {len(apply_tokens)} token(s)."
+            )
+        else:
+            # Already tokenised — nothing to do
+            stage.set_decisions(auto_tokenise=True, auto_derived_tokens=0)
+
     # -- Record resolved CLI configuration (Layer 5) --
     stage.set_config_resolved("source", args.source, "layer-5", "cli")
     stage.set_config_resolved("project", args.project, "layer-5", "cli")
@@ -870,7 +968,11 @@ def _run_ingest(args, stage, issue_codes, apply_tokens) -> int:
     stage.set_config_resolved("token_map", token_map_path, "layer-5", "cli")
     stage.set_config_resolved(
         "apply_tokens_mode",
-        "token-map" if token_map_path else ("inline" if apply_tokens else "none"),
+        "auto-tokenise"
+        if auto_tokenise
+        else (
+            "token-map" if token_map_path else ("inline" if apply_tokens else "none")
+        ),
         "layer-5",
         "cli",
     )
@@ -1802,6 +1904,317 @@ def _run_build(args, stage, issue_codes) -> int:
     return 0
 
 
+def _cmd_process(args):
+    """
+    [S-H-I-P-S] Run the full pipeline in sequence.
+
+    Item 5 of the orchestrator build order. Runs:
+      harvest → generate → inspect → analyse → [package]
+
+    All stages write into a single ``process`` run in ``decisions.json``
+    so the audit trail is one coherent record rather than five separate
+    run entries.
+
+    Developer mode (default): continues past warnings; only hard errors
+    abort the run.
+    Platform mode (``--strict``): any stage that finishes with
+    ``status=error`` aborts the pipeline immediately.
+    """
+    from td_release_packager.orchestrator import issue_codes as _ic
+
+    project_dir = args.project
+    if not os.path.isdir(project_dir):
+        print(f"ERROR: Project directory not found: {project_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    strict = getattr(args, "strict", False)
+
+    # -- Pre-build the apply_tokens dict once for reuse by harvest --
+    apply_tokens = None
+    if hasattr(args, "token_map") and args.token_map:
+        token_map_path = _resolve_path(
+            args.token_map, relative_to=project_dir, label="--token-map"
+        )
+        apply_tokens = read_token_map(token_map_path)
+
+    print(f"\n{'=' * 64}")
+    print("  SHIPS Process Pipeline")
+    mode_label = "STRICT" if strict else "DEVELOPER"
+    print(f"  Mode: {mode_label}")
+    print(f"  Project: {project_dir}")
+    print(f"{'=' * 64}\n")
+
+    failed_stages = []
+    package_ran = False
+
+    with _process_recording(project_dir) as run:
+        # ---- [H] Harvest ----------------------------------------
+        if args.source:
+            print("  [H] Harvest …")
+            harvest_args = _build_process_namespace(
+                args,
+                source=args.source,
+                project=project_dir,
+                force=False,
+                keep_existing=False,
+            )
+            with run.stage("harvest") as stage:
+                _run_ingest(harvest_args, stage, _ic, apply_tokens)
+            if stage.status == "error":
+                failed_stages.append("harvest")
+                if strict:
+                    _print_process_aborted("harvest", strict)
+                    sys.exit(1)
+        else:
+            print("  [H] Harvest … skipped (no --source provided)")
+
+        # ---- [G] Generate ---------------------------------------
+        if not getattr(args, "skip_generate", False):
+            print("  [G] Generate …")
+            gen_args = _build_process_namespace(args, source=project_dir)
+            with run.stage("generate") as stage:
+                _run_generate(gen_args, stage, _ic)
+            if stage.status == "error":
+                failed_stages.append("generate")
+                if strict:
+                    _print_process_aborted("generate", strict)
+                    sys.exit(1)
+        else:
+            print("  [G] Generate … skipped (--skip-generate)")
+
+        # ---- [I] Inspect ----------------------------------------
+        print("  [I] Inspect …")
+        inspect_args = _build_process_namespace(
+            args,
+            source=project_dir,
+            strict=strict,
+            config=getattr(args, "inspect_config", None),
+            skip_grants=True,
+            fix_grants=False,
+            skip_tokens=False,
+            skip_keywords=False,
+            skip_commas=False,
+            dcl_dir=None,
+            verbose=False,
+        )
+        with run.stage("inspect") as stage:
+            _run_inspect(inspect_args, stage, _ic)
+        if stage.status == "error":
+            failed_stages.append("inspect")
+            if strict:
+                _print_process_aborted("inspect", strict)
+                sys.exit(1)
+
+        # ---- [A] Analyse ----------------------------------------
+        print("  [A] Analyse …")
+        analyse_args = _build_process_namespace(
+            args,
+            source=project_dir,
+            output=None,
+            overwrite=True,
+            graph=None,
+        )
+        with run.stage("analyse") as stage:
+            _run_analyze(analyse_args, stage, _ic)
+        if stage.status == "error":
+            failed_stages.append("analyse")
+            if strict:
+                _print_process_aborted("analyse", strict)
+                sys.exit(1)
+
+        # ---- [P] Package ----------------------------------------
+        # Only runs when --env + --env-config + --name are all provided.
+        if args.env and args.env_config and args.name:
+            print("  [P] Package …")
+            env_config_path = _resolve_path(
+                args.env_config, relative_to=project_dir, label="--env-config"
+            )
+            pkg_args = _build_process_namespace(
+                args,
+                source=project_dir,
+                env=args.env,
+                env_config=env_config_path,
+                name=args.name,
+                output=getattr(args, "output", None),
+                format=getattr(args, "format", "zip"),
+                author=getattr(args, "author", ""),
+                description=getattr(args, "description", ""),
+                commit=getattr(args, "commit", ""),
+                build_number=None,
+                no_increment=False,
+            )
+            try:
+                with run.stage("package") as stage:
+                    _run_build(pkg_args, stage, _ic)
+                if stage.status == "error":
+                    failed_stages.append("package")
+                    if strict:
+                        _print_process_aborted("package", strict)
+                        sys.exit(1)
+                package_ran = True
+            except (FileNotFoundError, ValueError) as e:
+                print(f"\n  ✗ Package failed: {e}", file=sys.stderr)
+                failed_stages.append("package")
+                if strict:
+                    sys.exit(1)
+        else:
+            print(
+                "  [P] Package … skipped (provide --env --env-config --name to enable)"
+            )
+
+    # -- Summary banner -------------------------------------------
+    print(f"\n{'=' * 64}")
+    if failed_stages:
+        print(f"  Process completed with errors in: {', '.join(failed_stages)}")
+        print("  Review decisions.json for full detail.")
+        print(f"{'=' * 64}\n")
+        sys.exit(1)
+    else:
+        stages_run = [
+            "harvest" if args.source else None,
+            "generate" if not getattr(args, "skip_generate", False) else None,
+            "inspect",
+            "analyse",
+            "package" if package_ran else None,
+        ]
+        stages_run = [s for s in stages_run if s]
+        print(f"  ✓ Process complete: {' → '.join(stages_run)}")
+        print(f"{'=' * 64}\n")
+        sys.exit(0)
+
+
+def _build_process_namespace(base_args, **overrides):
+    """Build a thin Namespace for stage runners called from _cmd_process.
+
+    Copies every attribute from base_args then applies overrides.  This
+    lets each stage runner access its expected args without duplicating
+    the full argparser surface on the process subcommand.
+    """
+    from argparse import Namespace
+
+    d = vars(base_args).copy()
+    d.update(overrides)
+    return Namespace(**d)
+
+
+def _print_process_aborted(stage_name: str, strict: bool) -> None:
+    """Print the pipeline-aborted banner."""
+    print(
+        f"\n  ✗ Process aborted after {stage_name} (--strict mode — "
+        f"errors block continuation).",
+        file=sys.stderr,
+    )
+
+
+def _cmd_generate(args):
+    """
+    Generate view-layer DDL from the harvested table payload.
+
+    Orchestrator wrapper for ``td_release_packager.view_layer_generator``.
+    Wired onto ``_stage_recording`` so every run is captured in
+    ``decisions.json``.
+    """
+    from td_release_packager.orchestrator import issue_codes as _ic
+
+    source_dir = args.source
+    if not os.path.isdir(source_dir):
+        print(f"ERROR: Source directory not found: {source_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    with _stage_recording(source_dir, "generate") as stage:
+        exit_code = _run_generate(args, stage, _ic)
+
+    sys.exit(exit_code)
+
+
+def _run_generate(args, stage, issue_codes) -> int:
+    """
+    Body of the generate command.
+
+    Calls ``view_layer_generator.run()`` and records the result into
+    the stage recorder.  Returns the exit code for the shell.
+
+    Args:
+        args:        Parsed CLI arguments.
+        stage:       StageRecorder or _NullStageRecorder.
+        issue_codes: The issue_codes module (injected for testability).
+
+    Returns:
+        0 on success, 1 if the generator reported errors.
+    """
+    from pathlib import Path
+
+    from td_release_packager.view_layer_generator import run as generate_views
+
+    source_dir = args.source
+    dry_run = getattr(args, "dry_run", False)
+    modules_arg = getattr(args, "modules", None)
+    requested_modules = (
+        {m.strip().upper() for m in modules_arg.split(",") if m.strip()}
+        if modules_arg
+        else None
+    )
+
+    stage.set_config_resolved("source", source_dir, "layer-5", "cli")
+    stage.set_config_resolved("dry_run", dry_run, "layer-5", "cli")
+    stage.set_config_resolved("modules", modules_arg or "(all)", "layer-5", "cli")
+    stage.set_inputs(source_dir=source_dir)
+
+    result = generate_views(
+        project_root=Path(source_dir),
+        requested_modules=requested_modules,
+        dry_run=dry_run,
+    )
+
+    stage.set_outputs(
+        locking_views_written=result.locking_views_written,
+        locking_views_unchanged=result.locking_views_unchanged,
+        business_views_rewritten=result.business_views_rewritten,
+        business_views_unchanged=result.business_views_unchanged,
+        databases_written=result.databases_written,
+        grants_written=result.grants_written,
+    )
+
+    for w in result.warnings:
+        stage.add_issue("warning", issue_codes.GENERATE_WARNING, w)
+    for e in result.errors:
+        stage.add_issue("error", issue_codes.GENERATE_ERROR, e)
+
+    print(f"\n{'=' * 64}")
+    print("  View Layer Generation")
+    print(f"{'=' * 64}")
+    print(f"  Source:           {source_dir}")
+    if dry_run:
+        print("  Mode:             DRY RUN — no files written")
+    if requested_modules:
+        print(f"  Modules:          {', '.join(sorted(requested_modules))}")
+
+    print(
+        f"  Locking views:    {result.locking_views_written} written"
+        f" / {result.locking_views_unchanged} unchanged"
+    )
+    print(
+        f"  Business views:   {result.business_views_rewritten} rewritten"
+        f" / {result.business_views_unchanged} unchanged"
+    )
+    print(f"  Databases:        {result.databases_written} written")
+    print(f"  Grants:           {result.grants_written} written")
+
+    if result.warnings:
+        print("\n  Warnings:")
+        for w in result.warnings:
+            print(f"    ⚠ {w}")
+
+    if result.errors:
+        print("\n  Errors:")
+        for e in result.errors:
+            print(f"    ✗ {e}")
+
+    print(f"{'=' * 64}\n")
+
+    return 1 if result.errors else 0
+
+
 def _cmd_scan(args):
     """
     Scan payload files for token references.
@@ -2205,6 +2618,17 @@ def _build_parser():
         "source state without orphaned artefacts.",
     )
     ig.add_argument(
+        "--auto-tokenise",
+        action="store_true",
+        dest="auto_tokenise",
+        help="Auto-detect hardcoded database names and apply token "
+        "substitutions in a single pass — no manual token_map.conf "
+        "review step required. The token map is derived automatically "
+        "from detected candidates (optionally stripped with "
+        "--env-prefix) and applied immediately. Use in developer "
+        "mode when speed matters more than reviewing every token.",
+    )
+    ig.add_argument(
         "--reconcile",
         action="store_true",
         help="Run interactive reconciliation: detect literal/tokenised "
@@ -2218,6 +2642,30 @@ def _build_parser():
         "(<project>/logs/reconcile_<timestamp>.json) for "
         "--reconcile mode. Relative paths resolve under --project.",
     )
+
+    # -- generate --
+    gn = subs.add_parser(
+        "generate",
+        help="[G] Generate — build view-layer DDL from harvested tables.",
+    )
+    gn.add_argument(
+        "--source",
+        required=True,
+        help="SHIPS project directory containing the harvested payload.",
+    )
+    gn.add_argument(
+        "--modules",
+        default=None,
+        help="Comma-separated module names to generate (e.g. 'DOM,SEM'). "
+        "Omit to generate all discovered modules.",
+    )
+    gn.add_argument(
+        "--dry-run",
+        action="store_true",
+        dest="dry_run",
+        help="Parse and validate without writing any files.",
+    )
+
     # -- inspect --
     vl = subs.add_parser(
         "inspect", help="[I] Inspect — check DDL against Coding Discipline."
@@ -2519,6 +2967,111 @@ def _build_parser():
         action="store_true",
         help="Overwrite an existing .conf file at the target. "
         "Without this, the tool refuses to clobber.",
+    )
+
+    # -- process --
+    pr = subs.add_parser(
+        "process",
+        help="[S-H-I-P-S] Run the full pipeline: harvest → generate → "
+        "inspect → analyse → [package].",
+        description="Orchestrate the complete SHIPS pipeline in a single "
+        "command, recording all stage decisions into one run entry in "
+        "decisions.json.\n\n"
+        "Developer mode (default): continues past warnings; hard errors "
+        "are reported but do not abort.\n"
+        "Platform mode (--strict): any stage error immediately aborts "
+        "the pipeline.",
+    )
+    pr.add_argument(
+        "--project",
+        required=True,
+        help="SHIPS project directory (must already be scaffolded).",
+    )
+    pr.add_argument(
+        "--source",
+        default=None,
+        help="Raw DDL source directory. If omitted, the harvest stage "
+        "is skipped and the existing payload is used.",
+    )
+    pr.add_argument(
+        "--token-map",
+        default=None,
+        help="Path to token_map.conf for harvest token substitution.",
+    )
+    pr.add_argument(
+        "--auto-tokenise",
+        action="store_true",
+        dest="auto_tokenise",
+        default=False,
+        help="Auto-detect and apply token substitutions in one pass "
+        "(harvest stage). Equivalent to --auto-tokenise on harvest.",
+    )
+    pr.add_argument(
+        "--env-prefix",
+        default=None,
+        help="Env prefix for auto-tokenise token derivation.",
+    )
+    pr.add_argument(
+        "--skip-generate",
+        action="store_true",
+        dest="skip_generate",
+        default=False,
+        help="Skip the generate stage (for projects that do not use "
+        "the SHIPS view-layer generator).",
+    )
+    pr.add_argument(
+        "--inspect-config",
+        default=None,
+        help="Path to inspect.conf (passed to the inspect stage).",
+    )
+    pr.add_argument(
+        "--env",
+        default=None,
+        help="Target environment (e.g. DEV). Required to run the package stage.",
+    )
+    pr.add_argument(
+        "--env-config",
+        default=None,
+        help="Path to the .conf file for token resolution. Required "
+        "to run the package stage.",
+    )
+    pr.add_argument(
+        "--name",
+        default=None,
+        help="Package name. Required to run the package stage.",
+    )
+    pr.add_argument(
+        "--output",
+        default=None,
+        help="Output directory for the built package archive.",
+    )
+    pr.add_argument(
+        "--format",
+        default="zip",
+        choices=["zip", "tar.gz"],
+        help="Archive format for the package (default: zip).",
+    )
+    pr.add_argument(
+        "--author",
+        default="",
+        help="Author metadata stamped into the package manifest.",
+    )
+    pr.add_argument(
+        "--description",
+        default="",
+        help="Description metadata stamped into the package manifest.",
+    )
+    pr.add_argument(
+        "--commit",
+        default="",
+        help="Source commit hash stamped into the package manifest.",
+    )
+    pr.add_argument(
+        "--strict",
+        action="store_true",
+        help="Platform mode: abort the pipeline on the first stage that "
+        "finishes with errors. Without --strict, all stages run and "
+        "errors are summarised at the end.",
     )
 
     return parser
