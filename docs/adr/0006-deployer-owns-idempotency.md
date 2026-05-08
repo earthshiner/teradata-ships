@@ -1,4 +1,4 @@
-# ADR 0006: Deployer Owns Idempotency
+﻿# ADR 0006: Deployer Owns Idempotency
 
 ## Status
 
@@ -207,11 +207,11 @@ failure is too late. Pre-flight snapshot is mandatory.
 
 ## References
 
-- `ddl_deployer/deployer.py` — `_deploy_replace_in_place`
+- `database_package_deployer/deployer.py` — `_deploy_replace_in_place`
   (line 1910), `_deploy_drop_and_create` (line 1821), retry
   logic, and checkpoint-based resume.
-- `ddl_deployer/models.py` — `STRATEGY_MAP` (lines 131–144).
-- `ddl_deployer/cli.py` — `tmode='TERA'` connection parameter.
+- `database_package_deployer/models.py` — `STRATEGY_MAP` (lines 131–144).
+- `database_package_deployer/cli.py` — `tmode='TERA'` connection parameter.
 - ADR 0002: SHIPS pipeline phase structure — Ship phase owns
   the deployer execution.
 - ADR 0004: Atomic eponymous DDL files — one object per file

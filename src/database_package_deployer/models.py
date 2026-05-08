@@ -411,7 +411,7 @@ class PreflightResult:
 
 
 @dataclass
-class ParsedDDL:
+class ParsedStatement:
     """
     Result of parsing a single DDL file.
 

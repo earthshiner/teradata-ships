@@ -13,7 +13,7 @@ import logging
 import os
 from typing import Any, Dict
 
-from ddl_deployer.deployer import (
+from database_package_deployer.deployer import (
     deploy_single,
     deploy_package,
     resume_package,

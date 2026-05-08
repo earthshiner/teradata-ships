@@ -35,10 +35,10 @@ import os
 import re
 from typing import Dict, List, Set
 
-from ddl_deployer.ddl_parser import parse_ddl_file
-from ddl_deployer.models import (
+from database_package_deployer.statement_parser import parse_statement_file
+from database_package_deployer.models import (
     ObjectType,
-    ParsedDDL,
+    ParsedStatement,
     PreflightCheck,
     PreflightResult,
     REQUIRED_RIGHTS,
@@ -65,8 +65,8 @@ def run_preflight(
                                this percentage (default: 10%).
 
     Returns:
-        Tuple of (PreflightResult, list_of_ParsedDDL).
-        The ParsedDDL list only includes successfully parsed files.
+        Tuple of (PreflightResult, list_of_ParsedStatement).
+        The ParsedStatement list only includes successfully parsed files.
     """
     checks = []
     parsed_ddls = []
@@ -81,7 +81,7 @@ def run_preflight(
 
     for ddl_file in ddl_files:
         try:
-            parsed = parse_ddl_file(ddl_file)
+            parsed = parse_statement_file(ddl_file)
             parsed_ddls.append(parsed)
 
             # Skip system-scope and DCL objects from database checks.
@@ -316,7 +316,7 @@ def _database_exists(cursor, database_name: str) -> bool:
 
 
 def _collect_required_rights(
-    parsed_ddls: List[ParsedDDL],
+    parsed_ddls: List[ParsedStatement],
 ) -> Dict[str, Set[tuple]]:
     """
     Determine which access rights are needed per target database.
@@ -656,7 +656,7 @@ _EXTERNAL_NAME_JAR_RE = re.compile(
 _LANGUAGE_JAVA_RE = re.compile(r"\bLANGUAGE\s+JAVA\b", re.IGNORECASE)
 
 
-def _extract_installed_aliases(parsed_ddls: List[ParsedDDL]) -> Set[str]:
+def _extract_installed_aliases(parsed_ddls: List[ParsedStatement]) -> Set[str]:
     """Aliases registered by SQLJ.INSTALL_JAR / REPLACE_JAR scripts.
 
     Walks parsed DDLs of type ``ObjectType.JAR`` and pulls the
@@ -674,13 +674,13 @@ def _extract_installed_aliases(parsed_ddls: List[ParsedDDL]) -> Set[str]:
 
 
 def _extract_referenced_aliases(
-    parsed_ddls: List[ParsedDDL],
+    parsed_ddls: List[ParsedStatement],
 ) -> List[tuple]:
     """JAR aliases referenced by Java procedures.
 
     Returns a list of ``(parsed_ddl, alias)`` tuples — one per
     EXTERNAL NAME reference found in a procedure whose body
-    contains LANGUAGE JAVA. The original ParsedDDL is kept so the
+    contains LANGUAGE JAVA. The original ParsedStatement is kept so the
     failing check can name the offending file.
     """
     references: List[tuple] = []
@@ -695,7 +695,7 @@ def _extract_referenced_aliases(
 
 
 def _check_jar_alias_coverage(
-    parsed_ddls: List[ParsedDDL],
+    parsed_ddls: List[ParsedStatement],
 ) -> List[PreflightCheck]:
     """Verify every Java procedure's JAR alias is installed in-package.
 

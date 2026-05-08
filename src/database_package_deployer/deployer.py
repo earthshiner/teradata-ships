@@ -35,24 +35,30 @@ import threading
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from ddl_deployer.ddl_parser import parse_ddl_file, parse_index_parent_table
-from ddl_deployer.manifest import DeploymentManifest
-from ddl_deployer.migration_builder import build_migration_sql
-from ddl_deployer.models import (
+from database_package_deployer.statement_parser import (
+    parse_statement_file,
+    parse_index_parent_table,
+)
+from database_package_deployer.manifest import DeploymentManifest
+from database_package_deployer.migration_builder import build_migration_sql
+from database_package_deployer.models import (
     DeployState,
     DeployStrategy,
     ObjectDeployResult,
     ObjectType,
     PackageDeployResult,
-    ParsedDDL,
+    ParsedStatement,
     DEPLOY_ORDER,
     SHOW_COMMAND_MAP,
     SYSTEM_EXISTENCE_QUERIES,
     TABLE_KIND_MAP,
 )
-from ddl_deployer.preflight import run_preflight
-from ddl_deployer.report import generate_report
-from ddl_deployer.schema_comparator import compare_schemas, get_column_metadata
+from database_package_deployer.preflight import run_preflight
+from database_package_deployer.report import generate_report
+from database_package_deployer.schema_comparator import (
+    compare_schemas,
+    get_column_metadata,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -242,7 +248,7 @@ def deploy_package(
         parsed_ddls = []
         for f in ddl_files:
             try:
-                parsed_ddls.append(parse_ddl_file(f))
+                parsed_ddls.append(parse_statement_file(f))
             except (ValueError, FileNotFoundError) as e:
                 logger.error("Skipping %s: %s", f, e)
                 skipped_files.append((f, str(e)))
@@ -262,7 +268,7 @@ def deploy_package(
     # Databases being created by this package are skipped
     # (automatic creator rights).
     if not dry_run and not skip_preflight:
-        from ddl_deployer.privilege_check import check_deployer_privileges
+        from database_package_deployer.privilege_check import check_deployer_privileges
 
         created_databases = {
             p.qualified_name
@@ -461,7 +467,7 @@ def _execute_waves_sequential(
 ):
     """Execute waves sequentially (1 stream or dry-run), tracking wave numbers."""
     import time
-    from ddl_deployer.models import WaveSummary
+    from database_package_deployer.models import WaveSummary
 
     results = []
     wave_summaries = []
@@ -556,8 +562,8 @@ def _execute_waves_parallel(
     operations (TABLE, VIEW, MACRO, PROCEDURE, FUNCTION,
     TRIGGER, INDEX) remain fully parallel.
     """
-    from ddl_deployer.models import WaveSummary
-    from ddl_deployer.wave_executor import WaveExecutor
+    from database_package_deployer.models import WaveSummary
+    from database_package_deployer.wave_executor import WaveExecutor
 
     if connect_fn is None:
         raise ValueError(
@@ -741,7 +747,7 @@ def resume_package(
             )
             continue
 
-        parsed = parse_ddl_file(ddl_file)
+        parsed = parse_statement_file(ddl_file)
 
         # For FAILED tables, reconcile with database state
         if manifest.get_state(qualified_name) == DeployState.FAILED:
@@ -815,7 +821,7 @@ def rollback_package(cursor, manifest_path: str) -> PackageDeployResult:
         ddl_file = os.path.join(package_dir, record["ddl_file"])
 
         try:
-            parsed = parse_ddl_file(ddl_file)
+            parsed = parse_statement_file(ddl_file)
         except Exception:
             # Can't parse — try table rollback as fallback
             parsed = None
@@ -861,9 +867,9 @@ def deploy_single(cursor, ddl_text: str, dry_run: bool = False) -> ObjectDeployR
     Returns:
         ObjectDeployResult with deployment outcome.
     """
-    from ddl_deployer.ddl_parser import parse_ddl_text
+    from database_package_deployer.statement_parser import parse_statement_text
 
-    parsed = parse_ddl_text(ddl_text)
+    parsed = parse_statement_text(ddl_text)
 
     strategy = parsed.strategy
 
@@ -984,8 +990,8 @@ def explain_package(
     Returns:
         PackageDeployResult with per-object outcomes.
     """
-    from ddl_deployer.ddl_parser import parse_ddl_file
-    from ddl_deployer.report import generate_report
+    from database_package_deployer.statement_parser import parse_statement_file
+    from database_package_deployer.report import generate_report
 
     logger.info("=" * 64)
     logger.info("  EXPLAIN Validation")
@@ -1038,7 +1044,7 @@ def explain_package(
     for ddl_file in ddl_files:
         basename = os.path.basename(ddl_file)
         try:
-            parsed = parse_ddl_file(ddl_file)
+            parsed = parse_statement_file(ddl_file)
             parsed_files.append((ddl_file, parsed))
 
             # Index the object and its components for cross-reference
@@ -1344,7 +1350,7 @@ def _is_package_dependency(error_msg: str, package_objects: set) -> bool:
 
 def _dispatch_deploy(
     cursor,
-    parsed: ParsedDDL,
+    parsed: ParsedStatement,
     manifest: DeploymentManifest,
     dry_run: bool,
 ) -> ObjectDeployResult:
@@ -1492,7 +1498,7 @@ def _dispatch_deploy(
 
 def _deploy_table(
     cursor,
-    parsed: ParsedDDL,
+    parsed: ParsedStatement,
     dry_run: bool,
 ) -> ObjectDeployResult:
     """
@@ -1648,7 +1654,7 @@ def _deploy_table(
 
 def _deploy_direct_execute(
     cursor,
-    parsed: ParsedDDL,
+    parsed: ParsedStatement,
     dry_run: bool,
 ) -> ObjectDeployResult:
     """
@@ -1732,7 +1738,7 @@ def _deploy_direct_execute(
 
 def _deploy_skip_if_exists(
     cursor,
-    parsed: ParsedDDL,
+    parsed: ParsedStatement,
     dry_run: bool,
 ) -> ObjectDeployResult:
     """
@@ -1826,7 +1832,7 @@ def _deploy_skip_if_exists(
 
 def _deploy_create_only(
     cursor,
-    parsed: ParsedDDL,
+    parsed: ParsedStatement,
     manifest: Optional[DeploymentManifest],
     dry_run: bool,
 ) -> ObjectDeployResult:
@@ -1921,7 +1927,7 @@ def _deploy_create_only(
 
 def _deploy_drop_and_create(
     cursor,
-    parsed: ParsedDDL,
+    parsed: ParsedStatement,
     manifest: Optional[DeploymentManifest],
     dry_run: bool,
 ) -> ObjectDeployResult:
@@ -2010,7 +2016,7 @@ def _deploy_drop_and_create(
 
 def _deploy_replace_in_place(
     cursor,
-    parsed: ParsedDDL,
+    parsed: ParsedStatement,
     manifest: Optional[DeploymentManifest],
     dry_run: bool,
 ) -> ObjectDeployResult:
@@ -2091,7 +2097,7 @@ def _deploy_replace_in_place(
 def _rollback_single(
     cursor,
     qualified_name: str,
-    parsed: Optional[ParsedDDL],
+    parsed: Optional[ParsedStatement],
     manifest: DeploymentManifest,
 ) -> ObjectDeployResult:
     """
@@ -2325,7 +2331,7 @@ def _capture_existing_definition(
         os.makedirs(rollback_dir, exist_ok=True)
 
         # Use the appropriate extension
-        from ddl_deployer.models import ObjectType as OT
+        from database_package_deployer.models import ObjectType as OT
 
         ext_map = {
             OT.VIEW: ".viw",

@@ -1,5 +1,5 @@
 """
-test_ddl_parser.py — Tests for the DDL deployer's parser module.
+test_statement_parser.py — Tests for the DDL deployer's parser module.
 
 Covers:
     - Object type detection for all supported types
@@ -14,16 +14,16 @@ Covers:
 
 import pytest
 
-from ddl_deployer.ddl_parser import (
-    parse_ddl_text,
-    parse_ddl_file,
+from database_package_deployer.statement_parser import (
+    parse_statement_text,
+    parse_statement_file,
     _detect_deploy_intent,
     _detect_object_type,
     _inject_multiset_if_missing,
     _split_qualified_name,
     parse_index_parent_table,
 )
-from ddl_deployer.models import (
+from database_package_deployer.models import (
     ObjectType,
     DeployIntent,
     DeployStrategy,
@@ -372,49 +372,55 @@ class TestStrategyDerivation:
 
     def test_replace_view_strategy(self):
         """REPLACE VIEW → REPLACE_IN_PLACE strategy."""
-        parsed = parse_ddl_text("REPLACE VIEW MyDB.V AS SELECT 1;")
+        parsed = parse_statement_text("REPLACE VIEW MyDB.V AS SELECT 1;")
         assert parsed.strategy == DeployStrategy.REPLACE_IN_PLACE
 
     def test_create_view_strategy(self):
         """CREATE VIEW → CREATE_ONLY strategy."""
-        parsed = parse_ddl_text("CREATE VIEW MyDB.V AS SELECT 1;")
+        parsed = parse_statement_text("CREATE VIEW MyDB.V AS SELECT 1;")
         assert parsed.strategy == DeployStrategy.CREATE_ONLY
 
     def test_table_strategy(self):
         """CREATE TABLE → IDEMPOTENT_DEPLOY strategy."""
-        parsed = parse_ddl_text("CREATE MULTISET TABLE MyDB.T (Id INT);")
+        parsed = parse_statement_text("CREATE MULTISET TABLE MyDB.T (Id INT);")
         assert parsed.strategy == DeployStrategy.IDEMPOTENT_DEPLOY
 
     def test_join_index_strategy(self):
         """CREATE JOIN INDEX → DROP_AND_CREATE strategy."""
-        parsed = parse_ddl_text("CREATE JOIN INDEX MyDB.JI AS SELECT * FROM MyDB.T;")
+        parsed = parse_statement_text(
+            "CREATE JOIN INDEX MyDB.JI AS SELECT * FROM MyDB.T;"
+        )
         assert parsed.strategy == DeployStrategy.DROP_AND_CREATE
 
     def test_database_strategy(self):
         """CREATE DATABASE → DIRECT_EXECUTE strategy."""
-        parsed = parse_ddl_text("CREATE DATABASE MyDB FROM DBC AS PERMANENT = 1e9;")
+        parsed = parse_statement_text(
+            "CREATE DATABASE MyDB FROM DBC AS PERMANENT = 1e9;"
+        )
         assert parsed.strategy == DeployStrategy.DIRECT_EXECUTE
 
     def test_map_strategy(self):
         """CREATE MAP → SKIP_IF_EXISTS strategy."""
-        parsed = parse_ddl_text(
+        parsed = parse_statement_text(
             "CREATE MAP TD_GlobalMap CONTIGUOUS AMP BETWEEN 0 AND 7;"
         )
         assert parsed.strategy == DeployStrategy.SKIP_IF_EXISTS
 
     def test_role_strategy(self):
         """CREATE ROLE → SKIP_IF_EXISTS strategy."""
-        parsed = parse_ddl_text("CREATE ROLE analyst_role;")
+        parsed = parse_statement_text("CREATE ROLE analyst_role;")
         assert parsed.strategy == DeployStrategy.SKIP_IF_EXISTS
 
     def test_authorization_strategy(self):
         """CREATE AUTHORIZATION → SKIP_IF_EXISTS strategy."""
-        parsed = parse_ddl_text("CREATE AUTHORIZATION MyAuth AS DEFINER TRUSTED;")
+        parsed = parse_statement_text("CREATE AUTHORIZATION MyAuth AS DEFINER TRUSTED;")
         assert parsed.strategy == DeployStrategy.SKIP_IF_EXISTS
 
     def test_foreign_server_strategy(self):
         """CREATE FOREIGN SERVER → SKIP_IF_EXISTS strategy."""
-        parsed = parse_ddl_text("CREATE FOREIGN SERVER MyRemote USING LINK('host=x');")
+        parsed = parse_statement_text(
+            "CREATE FOREIGN SERVER MyRemote USING LINK('host=x');"
+        )
         assert parsed.strategy == DeployStrategy.SKIP_IF_EXISTS
 
 
@@ -454,30 +460,30 @@ class TestMultisetInjection:
 
 
 # ---------------------------------------------------------------
-# parse_ddl_text — Full parsing
+# parse_statement_text — Full parsing
 # ---------------------------------------------------------------
 
 
 class TestParseDdlText:
-    """Tests for the main parse_ddl_text function."""
+    """Tests for the main parse_statement_text function."""
 
     def test_qualified_name_extraction(self):
         """Database and object names are correctly extracted."""
-        parsed = parse_ddl_text("CREATE MULTISET TABLE MyDB.Customer (Id INT);")
+        parsed = parse_statement_text("CREATE MULTISET TABLE MyDB.Customer (Id INT);")
         assert parsed.database_name == "MyDB"
         assert parsed.object_name == "Customer"
         assert parsed.qualified_name == "MyDB.Customer"
 
     def test_single_part_name_not_duplicated(self):
         """Single-part names are not duplicated (e.g. role.role)."""
-        parsed = parse_ddl_text("CREATE ROLE analyst_role;")
+        parsed = parse_statement_text("CREATE ROLE analyst_role;")
         assert parsed.qualified_name == "analyst_role"
         assert parsed.database_name == ""
         assert parsed.object_name == "analyst_role"
 
     def test_map_single_part_name(self):
         """MAP has single-part qualified name."""
-        parsed = parse_ddl_text(
+        parsed = parse_statement_text(
             "CREATE MAP TD_GlobalMap CONTIGUOUS AMP BETWEEN 0 AND 7;"
         )
         assert parsed.qualified_name == "TD_GlobalMap"
@@ -485,7 +491,9 @@ class TestParseDdlText:
 
     def test_quoted_identifiers(self):
         """Quoted identifiers have quotes stripped."""
-        parsed = parse_ddl_text('CREATE MULTISET TABLE "MyDB"."My Table" (Id INT);')
+        parsed = parse_statement_text(
+            'CREATE MULTISET TABLE "MyDB"."My Table" (Id INT);'
+        )
         assert parsed.database_name == "MyDB"
         assert parsed.object_name == "My Table"
 
@@ -497,33 +505,33 @@ class TestParseDdlText:
             "SPECIFIC MyDB.fn_Calc_Int\n"
             "RETURN parm1 * 2;\n"
         )
-        parsed = parse_ddl_text(ddl)
+        parsed = parse_statement_text(ddl)
         assert parsed.object_name == "fn_Calc_Int"
         assert parsed.object_type == ObjectType.FUNCTION
 
     def test_empty_ddl_raises(self):
         """Empty/whitespace DDL raises ValueError."""
         with pytest.raises(ValueError, match="[Cc]ould not classify"):
-            parse_ddl_text("   ")
+            parse_statement_text("   ")
 
     def test_unclassifiable_raises(self):
         """Unclassifiable DDL raises ValueError."""
         with pytest.raises(ValueError, match="[Cc]ould not classify"):
-            parse_ddl_text("ALTER SESSION SET TIMEZONE TO 'UTC';")
+            parse_statement_text("ALTER SESSION SET TIMEZONE TO 'UTC';")
 
     def test_multiset_injected_flag(self):
         """multiset_injected flag is set when MULTISET is auto-injected."""
-        parsed = parse_ddl_text("CREATE TABLE MyDB.T (Id INT);")
+        parsed = parse_statement_text("CREATE TABLE MyDB.T (Id INT);")
         assert parsed.multiset_injected is True
 
     def test_deploy_intent_set(self):
         """deploy_intent field is populated."""
-        parsed = parse_ddl_text("REPLACE VIEW MyDB.V AS SELECT 1;")
+        parsed = parse_statement_text("REPLACE VIEW MyDB.V AS SELECT 1;")
         assert parsed.deploy_intent == DeployIntent.REPLACE_WITH_BACKUP
 
 
 # ---------------------------------------------------------------
-# parse_ddl_file
+# parse_statement_file
 # ---------------------------------------------------------------
 
 
@@ -535,7 +543,7 @@ class TestParseDdlFile:
         f = tmp_path / "MyDB.Customer.tbl"
         f.write_text("CREATE MULTISET TABLE MyDB.Customer (Id INT);", encoding="utf-8")
 
-        parsed = parse_ddl_file(str(f))
+        parsed = parse_statement_file(str(f))
 
         assert parsed.object_name == "Customer"
         assert parsed.file_path == str(f)
@@ -543,7 +551,7 @@ class TestParseDdlFile:
     def test_missing_file_raises(self, tmp_path):
         """Missing file raises FileNotFoundError."""
         with pytest.raises(FileNotFoundError):
-            parse_ddl_file(str(tmp_path / "missing.tbl"))
+            parse_statement_file(str(tmp_path / "missing.tbl"))
 
 
 # ---------------------------------------------------------------
@@ -628,7 +636,7 @@ class TestDmlDetection:
 
     def test_dml_uses_direct_execute_strategy(self):
         """DML deploy_intent and strategy are both DIRECT_EXECUTE."""
-        parsed = parse_ddl_text(
+        parsed = parse_statement_text(
             "INSERT INTO MyDB.Customer (Id, Name) VALUES (1, 'a');",
             file_path="MyDB.Customer.dml",
         )
@@ -639,7 +647,7 @@ class TestDmlDetection:
     def test_dml_qualified_name_is_filename_keyed(self):
         """Manifest key is DML:<basename> so multi-target scripts
         never collide on a shared first target."""
-        parsed = parse_ddl_text(
+        parsed = parse_statement_text(
             "INSERT INTO MyDB.Customer (Id) VALUES (1);\n"
             "INSERT INTO MyDB.Order (Id) VALUES (1);",
             file_path="/some/path/source_a.multi_table.dml",

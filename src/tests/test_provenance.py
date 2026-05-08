@@ -13,7 +13,7 @@ import tempfile
 
 import pytest
 
-from ddl_deployer.provenance import (
+from database_package_deployer.provenance import (
     ProvenanceChain,
     ProvenanceDocument,
     SCHEMA_VERSION,

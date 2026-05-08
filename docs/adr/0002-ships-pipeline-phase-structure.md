@@ -1,4 +1,4 @@
-# ADR 0002: SHIPS Pipeline Phase Structure
+﻿# ADR 0002: SHIPS Pipeline Phase Structure
 
 ## Status
 
@@ -101,7 +101,7 @@ contract:
 
 Phases are invoked via the CLI as subcommands: `ships scaffold`,
 `ships harvest`, `ships inspect`, `ships package`, `ships ship`
-(or `td_release_packager <subcommand>` / `ddl_deployer deploy`
+(or `td_release_packager <subcommand>` / `database_package_deployer deploy`
 for their respective packages).
 
 No phase is permitted to write to the artefact produced by a
@@ -185,13 +185,13 @@ Rollback remains a Ship subcommand (`ships ship --rollback`).
 
 - `td_release_packager/cli.py` — top-level CLI dispatcher for
   phases 1–4.
-- `ddl_deployer/cli.py` — CLI dispatcher for phase 5 (Ship).
+- `database_package_deployer/cli.py` — CLI dispatcher for phase 5 (Ship).
 - `td_release_packager/scaffolder.py` — Scaffold phase
   implementation.
 - `td_release_packager/ingest.py` — Harvest phase implementation.
 - `td_release_packager/validate.py` — Inspect phase implementation.
 - `td_release_packager/builder.py` — Package phase implementation.
-- `ddl_deployer/deployer.py` — Ship phase implementation.
+- `database_package_deployer/deployer.py` — Ship phase implementation.
 - ADR 0005: Wave ordering for deployment — governs the execution
   sequence within the Ship phase.
 - ADR 0006: Deployer owns idempotency — governs the per-object

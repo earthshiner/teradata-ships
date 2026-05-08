@@ -106,7 +106,7 @@ The signing infrastructure is designed (see [ADR 0011](adr/0011-sha256-package-i
 Every SQL statement executed by SHIPS carries the package fingerprint in the Teradata session query band:
 
 ```
-BUILD=0002;PKG=MortgagePlatform_SHIPS;ENV=PROD;PKG_HASH=a3f8c2d1e9b74056;DEPLOYER=ddl_deployer_v2;
+BUILD=0002;PKG=MortgagePlatform_SHIPS;ENV=PROD;PKG_HASH=a3f8c2d1e9b74056;DEPLOYER=database_package_deployer_v2;
 ```
 
 Because DBQL records every executed statement against its session's query band, this creates a **permanent, queryable link between every DDL statement executed in the database and the exact package version that produced it**. An auditor can run a DBQL query and confirm: "all DDL executed in this deployment window came from build 0002 of package MortgagePlatform_SHIPS with fingerprint a3f8c2d1e9b74056." The log cannot be retroactively altered.

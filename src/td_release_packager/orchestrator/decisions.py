@@ -40,7 +40,7 @@ Concurrency / safety
 - ``threading.Lock`` on all mutating operations.
 - Atomic file writes via tempfile + os.replace, with retry on
   Windows file-locking failures (matches the pattern used by
-  ``ddl_deployer.manifest``).
+  ``database_package_deployer.manifest``).
 - Append-only: prior runs are never rewritten or trimmed unless
   the caller explicitly invokes a (future) prune helper.
 

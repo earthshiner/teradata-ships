@@ -1,4 +1,4 @@
-# ADR 0010: UTF-8 Session Charset for All teradatasql Connections
+﻿# ADR 0010: UTF-8 Session Charset for All teradatasql Connections
 
 ## Status
 
@@ -32,7 +32,7 @@ character outside the session charset. The error is non-obvious because:
 
 The affected connection sites are:
 
-- `ddl_deployer/cli.py` — the `_connect()` function used by the
+- `database_package_deployer/cli.py` — the `_connect()` function used by the
   deployer CLI and the connection pool factory.
 - The `connect()` function in the generated `deploy.py` script embedded
   in every release package.
@@ -115,7 +115,7 @@ cognitive tax.
 
 ## References
 
-- `ddl_deployer/cli.py` — `_connect()` function (the fix site for the
+- `database_package_deployer/cli.py` — `_connect()` function (the fix site for the
   deployer CLI).
 - `td_release_packager/builder.py` — `connect()` function inside
   `_generate_deploy_script()` (the fix site for the generated package
