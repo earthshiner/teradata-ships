@@ -731,12 +731,36 @@ def _cmd_scaffold(args):
     envs = [e.strip().upper() for e in args.environments.split(",")]
     repair = getattr(args, "repair", False)
 
+    # Run scaffold first — the project directory must exist before
+    # _stage_recording can detect it as a SHIPS project and open
+    # decisions.json. Errors are fatal so they exit before recording starts.
     try:
         project_dir = scaffold_project(
             project_name=args.name,
             output_dir=args.output,
             environments=envs,
             repair=repair,
+        )
+    except FileExistsError as e:
+        print(f"\nERROR: {e}", file=sys.stderr)
+        print(
+            "  Tip: use --repair to add missing directories and files", file=sys.stderr
+        )
+        sys.exit(1)
+    except FileNotFoundError as e:
+        print(f"\nERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Project exists — record the scaffold decisions and print the banner.
+    with _stage_recording(project_dir, "scaffold") as stage:
+        stage.set_config_resolved("name", args.name, "layer-5", "cli")
+        stage.set_config_resolved("output", args.output, "layer-5", "cli")
+        stage.set_config_resolved("environments", envs, "layer-5", "cli")
+        stage.set_config_resolved("repair", repair, "layer-5", "cli")
+        stage.set_outputs(
+            project_dir=project_dir,
+            environment_count=len(envs),
+            action="repair" if repair else "scaffold",
         )
 
         action = "repaired" if repair else "scaffolded"
@@ -766,16 +790,6 @@ def _cmd_scaffold(args):
             print("    [S] Ship      python deploy.py --host <host> --user <user>")
 
         print(f"{'=' * 64}\n")
-
-    except FileExistsError as e:
-        print(f"\nERROR: {e}", file=sys.stderr)
-        print(
-            "  Tip: use --repair to add missing directories and files", file=sys.stderr
-        )
-        sys.exit(1)
-    except FileNotFoundError as e:
-        print(f"\nERROR: {e}", file=sys.stderr)
-        sys.exit(1)
 
 
 def _cmd_ingest(args):
@@ -820,231 +834,258 @@ def _cmd_ingest(args):
             literal, token = pair.split("=", 1)
             apply_tokens[literal.strip()] = token.strip()
 
+    from td_release_packager.orchestrator import issue_codes as _ic
+
     try:
-        result = ingest_directory(
-            source_dir=args.source,
-            project_dir=args.project,
-            detect_tokens=True,
-            apply_tokens=apply_tokens,
-            force=args.force,
-            clean_payload=not args.keep_existing,
-        )
-
-        print(f"\n{'=' * 64}")
-        print("  DDL Harvest Results")
-        print(f"{'=' * 64}")
-        print(f"  Source:           {args.source}")
-        print(f"  Project:          {args.project}")
-        if args.keep_existing:
-            print("  Mode:             KEEP-EXISTING (overlay)")
-            if args.force:
-                print("                    + FORCE (overwrite collisions)")
-        else:
-            print("  Mode:             CLEAN (default — payload wiped first)")
-        if result.cleaned:
-            print(f"  Cleaned:          {result.cleaned} stale file(s)")
-        print(f"  Files scanned:    {result.total_files}")
-        print(f"  Classified:       {result.classified}")
-        if result.overwritten:
-            print(f"  Overwritten:      {result.overwritten}")
-        if result.skipped_existing:
-            print(f"  Skipped (exist):  {result.skipped_existing}")
-        print(f"  Unclassified:     {result.unclassified}")
-        print(f"  MULTISET inject:  {result.multiset_injected}")
-        if result.multi_table_targets:
-            print(f"  Multi-table DML:  {len(result.multi_table_targets)} file(s)")
-
-        if apply_tokens:
-            print(f"  Tokens applied:   {len(apply_tokens)} mappings")
-
-        if result.files_placed:
-            print("\n  Files placed:")
-            for src, dest, obj_type in result.files_placed:
-                print(f"    {obj_type:15s} {src}")
-                print(f"    {'':15s} → {dest}")
-
-        if result.multi_table_targets:
-            print("\n  Multi-table DML (kept together — order preserved):")
-            for dest, targets in sorted(result.multi_table_targets.items()):
-                print(f"    {dest}")
-                for tgt in targets:
-                    print(f"      target → {tgt}")
-
-        if result.unclassified_files:
-            print("\n  Unclassified files (manual review needed):")
-            for f in result.unclassified_files:
-                print(f"    ⚠ {f}")
-
-        # -- Generate token map if requested --
-        env_prefix = getattr(args, "env_prefix", None)
-        generate_map = getattr(args, "generate_token_map", False)
-
-        # Track the generated token-map path so the Next Steps
-        # banner can reference it without re-deriving it. None when
-        # --generate-token-map was not used (or produced nothing).
-        generated_token_map_path = None
-
-        if generate_map and result.token_candidates:
-            token_map = generate_token_map(result.token_candidates, env_prefix)
-            map_path = os.path.join(args.project, "config", "token_map.conf")
-            write_token_map(
-                map_path, token_map, result.token_candidates, env_prefix or "(none)"
-            )
-            generated_token_map_path = map_path
-
-            # Header — prominent path so it's the first thing the
-            # user sees in the token-map block, before any per-
-            # mapping listing pushes it off-screen.
-            print()
-            print("  +-- Token map ----------------------------------------------+")
-            print(f"  |   Path:     {map_path}")
-            print(f"  |   Mappings: {len(token_map)}")
-            if env_prefix:
-                print(f"  |   Prefix:   {env_prefix} (stripped from token names)")
-            else:
-                print("  |   Prefix:   none (full names used as tokens)")
-            print("  +------------------------------------------------------------+")
-
-            # Sample of mappings — capped to keep the output short.
-            # Anything past the cap stays in the file; the user can
-            # cat / open the path printed above to see them all.
-            CAP = 10
-            sorted_mappings = sorted(token_map.items())
-            print(
-                f"\n  Sample mappings (showing {min(CAP, len(token_map))} of {len(token_map)}):"
-            )
-            for literal, token in sorted_mappings[:CAP]:
-                files = result.token_candidates.get(literal, [])
-                print(f"    {literal} → {token}  ({len(files)} refs)")
-            if len(token_map) > CAP:
-                print(f"    ... {len(token_map) - CAP} more — see the file above.")
-
-            # Footer — repeat the path as the LAST line of the block
-            # so even if the listing is long the user finds it again
-            # right above the Next Steps banner.
-            print(f"\n  ✓ Token map written to: {map_path}")
-
-        elif generate_map and not result.token_candidates:
-            # User asked for a token map but no hardcoded names were
-            # detected. The most common cause is that the source is
-            # ALREADY TOKENISED — the end-state most users have to
-            # work toward. Tell them clearly, and route them to
-            # bootstrap-env-config (the third bootstrap path) since
-            # they no longer need a token map at all.
-            print(
-                "\n  ✓ No hardcoded database names detected.\n"
-                "    The source DDL appears to be already tokenised — you're at\n"
-                "    the end-state most projects have to work toward. Skip the\n"
-                "    token map and go straight to .conf bootstrap below."
-            )
-
-        elif result.token_candidates and not apply_tokens:
-            print("\n  Token candidates (hardcoded database names):")
-            for db_name, files in sorted(result.token_candidates.items()):
-                print(f"    '{db_name}' ({len(files)} refs)")
-            if not generate_map:
-                print("\n  Tip: re-run with --generate-token-map --env-prefix <PREFIX>")
-                print("  to auto-generate a token mapping file.")
-
-        if result.warnings:
-            print("\n  Warnings:")
-            for w in result.warnings:
-                print(f"    ⚠ {w}")
-
-        # -- Classification warnings (from the rich classifier) --
-        # Filename mismatches and unrecognised externals get their
-        # own section so they don't drown in the generic warnings
-        # list. These are the "you're going to want to act on this"
-        # diagnostics — surface them prominently.
-        if result.classification_warnings:
-            print("\n  Classification warnings:")
-            for w in result.classification_warnings:
-                print(f"    ⚠ {w}")
-
-        # -- Sub-types detected --
-        # Show counts per sub-type so users see at a glance how
-        # many C UDFs / Java procedures the harvester recognised.
-        if result.subtypes:
-            from collections import Counter
-
-            subtype_counts = Counter(result.subtypes.values())
-            print("\n  Sub-types detected:")
-            for subtype, count in sorted(subtype_counts.items()):
-                print(f"    {subtype:20s} {count}")
-
-        # -- External references --
-        # FUNCTION_C → .c/.h paths; PROCEDURE_JAVA → JAR alias.
-        # Capped to keep banner short — full list is in the
-        # decisions.json once item 4 of the orchestrator wires
-        # ingest into the recording context.
-        if result.external_references:
-            print("\n  External references discovered:")
-            for staged_path, refs in sorted(result.external_references.items())[:5]:
-                print(f"    {staged_path}")
-                for ref in refs:
-                    print(f"        → {ref}")
-            extra = len(result.external_references) - 5
-            if extra > 0:
-                print(f"    ... and {extra} more file(s) with externals.")
-
-        # -- Binary artefacts physically copied into the payload --
-        # JAR archives (for SQLJ install) and C source/header files
-        # (for C UDFs) get copied alongside their SQL scripts so
-        # the deployer can ship them. Show counts per kind plus a
-        # sample.
-        if result.binaries_placed:
-            from collections import Counter
-
-            kind_counts = Counter(k for _, _, k in result.binaries_placed)
-            print("\n  Binary artefacts copied into payload:")
-            for kind, count in sorted(kind_counts.items()):
-                print(f"    {kind:14s} {count}")
-            print()
-            for src, dest, kind in result.binaries_placed[:5]:
-                print(f"    {kind}  {os.path.basename(src)}")
-                print(f"      → {dest}")
-            extra = len(result.binaries_placed) - 5
-            if extra > 0:
-                print(f"    ... and {extra} more binary file(s).")
-
-        if result.errors:
-            print("\n  Errors:")
-            for e in result.errors:
-                print(f"    ✗ {e}")
-
-        print(f"{'=' * 64}\n")
-
-        # -- Legacy-placeholder banner --
-        # Prints its own self-framed banner immediately after the
-        # harvest results so the user sees it before Next Steps.
-        # Empty-finding case suppresses the banner entirely.
-        if result.legacy_placeholders:
-            from td_release_packager.legacy_placeholders import (
-                format_legacy_placeholders_report,
-            )
-
-            print(
-                format_legacy_placeholders_report(
-                    result.legacy_placeholders,
-                    source_dir=args.source,
-                    project_dir_hint=args.project,
-                )
-            )
-
-        # -- Next Steps banner --
-        # Four distinct flows produce four distinct sets of next
-        # steps. Get the recommendation right per flow so the user
-        # isn't left guessing.
-        _print_harvest_next_steps(
-            args=args,
-            generated_token_map_path=generated_token_map_path,
-            substitutions_applied=bool(apply_tokens),
-            already_tokenised=(generate_map and not result.token_candidates),
-        )
-
+        with _stage_recording(args.project, "harvest") as stage:
+            exit_code = _run_ingest(args, stage, _ic, apply_tokens)
     except FileNotFoundError as e:
         print(f"\nERROR: {e}", file=sys.stderr)
         sys.exit(1)
+
+    sys.exit(exit_code)
+
+
+def _run_ingest(args, stage, issue_codes, apply_tokens) -> int:
+    """
+    Body of the harvest command, factored out so ``_cmd_ingest``
+    can wrap it in ``_stage_recording`` without indenting 250 lines.
+
+    ``stage`` is either a real ``StageRecorder`` (project mode) or a
+    ``_NullStageRecorder`` (ad-hoc mode); the call sites don't branch.
+
+    Returns:
+        The exit code for the shell. The caller calls ``sys.exit`` AFTER
+        the recorder context closes — for the same reason as inspect
+        (calling sys.exit inside trips the BaseException handler).
+    """
+    # -- Record resolved CLI configuration (Layer 5) --
+    stage.set_config_resolved("source", args.source, "layer-5", "cli")
+    stage.set_config_resolved("project", args.project, "layer-5", "cli")
+    token_map_path = (
+        _resolve_path(args.token_map, relative_to=args.project, label="--token-map")
+        if hasattr(args, "token_map") and args.token_map
+        else None
+    )
+    stage.set_config_resolved("token_map", token_map_path, "layer-5", "cli")
+    stage.set_config_resolved(
+        "apply_tokens_mode",
+        "token-map" if token_map_path else ("inline" if apply_tokens else "none"),
+        "layer-5",
+        "cli",
+    )
+    stage.set_config_resolved(
+        "clean_payload", not getattr(args, "keep_existing", False), "layer-5", "cli"
+    )
+
+    result = ingest_directory(
+        source_dir=args.source,
+        project_dir=args.project,
+        detect_tokens=True,
+        apply_tokens=apply_tokens,
+        force=args.force,
+        clean_payload=not args.keep_existing,
+    )
+
+    # -- Record inputs and outputs --
+    stage.set_inputs(
+        source_dir=args.source,
+        total_files=result.total_files,
+    )
+    stage.set_outputs(
+        classified=result.classified,
+        unclassified=result.unclassified,
+        files_placed=len(result.files_placed),
+        multiset_injected=result.multiset_injected,
+        token_candidates=len(result.token_candidates),
+        cleaned=result.cleaned,
+        binaries_placed=len(result.binaries_placed),
+    )
+
+    # -- Record issues --
+    for f in result.unclassified_files:
+        stage.add_issue("warning", issue_codes.HARVEST_UNCLASSIFIED, f)
+    for w in result.classification_warnings:
+        stage.add_issue("warning", issue_codes.HARVEST_CLASSIFICATION_WARNING, w)
+    for db_name, files in result.token_candidates.items():
+        stage.add_issue(
+            "info",
+            issue_codes.HARVEST_TOKEN_CANDIDATE,
+            f"{db_name} ({len(files)} reference(s))",
+        )
+
+    print(f"\n{'=' * 64}")
+    print("  DDL Harvest Results")
+    print(f"{'=' * 64}")
+    print(f"  Source:           {args.source}")
+    print(f"  Project:          {args.project}")
+    if args.keep_existing:
+        print("  Mode:             KEEP-EXISTING (overlay)")
+        if args.force:
+            print("                    + FORCE (overwrite collisions)")
+    else:
+        print("  Mode:             CLEAN (default — payload wiped first)")
+    if result.cleaned:
+        print(f"  Cleaned:          {result.cleaned} stale file(s)")
+    print(f"  Files scanned:    {result.total_files}")
+    print(f"  Classified:       {result.classified}")
+    if result.overwritten:
+        print(f"  Overwritten:      {result.overwritten}")
+    if result.skipped_existing:
+        print(f"  Skipped (exist):  {result.skipped_existing}")
+    print(f"  Unclassified:     {result.unclassified}")
+    print(f"  MULTISET inject:  {result.multiset_injected}")
+    if result.multi_table_targets:
+        print(f"  Multi-table DML:  {len(result.multi_table_targets)} file(s)")
+
+    if apply_tokens:
+        print(f"  Tokens applied:   {len(apply_tokens)} mappings")
+
+    if result.files_placed:
+        print("\n  Files placed:")
+        for src, dest, obj_type in result.files_placed:
+            print(f"    {obj_type:15s} {src}")
+            print(f"    {'':15s} → {dest}")
+
+    if result.multi_table_targets:
+        print("\n  Multi-table DML (kept together — order preserved):")
+        for dest, targets in sorted(result.multi_table_targets.items()):
+            print(f"    {dest}")
+            for tgt in targets:
+                print(f"      target → {tgt}")
+
+    if result.unclassified_files:
+        print("\n  Unclassified files (manual review needed):")
+        for f in result.unclassified_files:
+            print(f"    ⚠ {f}")
+
+    # -- Generate token map if requested --
+    env_prefix = getattr(args, "env_prefix", None)
+    generate_map = getattr(args, "generate_token_map", False)
+
+    # Track the generated token-map path so the Next Steps
+    # banner can reference it without re-deriving it. None when
+    # --generate-token-map was not used (or produced nothing).
+    generated_token_map_path = None
+
+    if generate_map and result.token_candidates:
+        token_map = generate_token_map(result.token_candidates, env_prefix)
+        map_path = os.path.join(args.project, "config", "token_map.conf")
+        write_token_map(
+            map_path, token_map, result.token_candidates, env_prefix or "(none)"
+        )
+        generated_token_map_path = map_path
+
+        print()
+        print("  +-- Token map ----------------------------------------------+")
+        print(f"  |   Path:     {map_path}")
+        print(f"  |   Mappings: {len(token_map)}")
+        if env_prefix:
+            print(f"  |   Prefix:   {env_prefix} (stripped from token names)")
+        else:
+            print("  |   Prefix:   none (full names used as tokens)")
+        print("  +------------------------------------------------------------+")
+
+        CAP = 10
+        sorted_mappings = sorted(token_map.items())
+        print(
+            f"\n  Sample mappings (showing {min(CAP, len(token_map))} of {len(token_map)}):"
+        )
+        for literal, token in sorted_mappings[:CAP]:
+            files = result.token_candidates.get(literal, [])
+            print(f"    {literal} → {token}  ({len(files)} refs)")
+        if len(token_map) > CAP:
+            print(f"    ... {len(token_map) - CAP} more — see the file above.")
+
+        print(f"\n  ✓ Token map written to: {map_path}")
+
+    elif generate_map and not result.token_candidates:
+        print(
+            "\n  ✓ No hardcoded database names detected.\n"
+            "    The source DDL appears to be already tokenised — you're at\n"
+            "    the end-state most projects have to work toward. Skip the\n"
+            "    token map and go straight to .conf bootstrap below."
+        )
+
+    elif result.token_candidates and not apply_tokens:
+        print("\n  Token candidates (hardcoded database names):")
+        for db_name, files in sorted(result.token_candidates.items()):
+            print(f"    '{db_name}' ({len(files)} refs)")
+        if not generate_map:
+            print("\n  Tip: re-run with --generate-token-map --env-prefix <PREFIX>")
+            print("  to auto-generate a token mapping file.")
+
+    if result.warnings:
+        print("\n  Warnings:")
+        for w in result.warnings:
+            print(f"    ⚠ {w}")
+
+    if result.classification_warnings:
+        print("\n  Classification warnings:")
+        for w in result.classification_warnings:
+            print(f"    ⚠ {w}")
+
+    if result.subtypes:
+        from collections import Counter
+
+        subtype_counts = Counter(result.subtypes.values())
+        print("\n  Sub-types detected:")
+        for subtype, count in sorted(subtype_counts.items()):
+            print(f"    {subtype:20s} {count}")
+
+    if result.external_references:
+        print("\n  External references discovered:")
+        for staged_path, refs in sorted(result.external_references.items())[:5]:
+            print(f"    {staged_path}")
+            for ref in refs:
+                print(f"        → {ref}")
+        extra = len(result.external_references) - 5
+        if extra > 0:
+            print(f"    ... and {extra} more file(s) with externals.")
+
+    if result.binaries_placed:
+        from collections import Counter
+
+        kind_counts = Counter(k for _, _, k in result.binaries_placed)
+        print("\n  Binary artefacts copied into payload:")
+        for kind, count in sorted(kind_counts.items()):
+            print(f"    {kind:14s} {count}")
+        print()
+        for src, dest, kind in result.binaries_placed[:5]:
+            print(f"    {kind}  {os.path.basename(src)}")
+            print(f"      → {dest}")
+        extra = len(result.binaries_placed) - 5
+        if extra > 0:
+            print(f"    ... and {extra} more binary file(s).")
+
+    if result.errors:
+        print("\n  Errors:")
+        for e in result.errors:
+            print(f"    ✗ {e}")
+
+    print(f"{'=' * 64}\n")
+
+    if result.legacy_placeholders:
+        from td_release_packager.legacy_placeholders import (
+            format_legacy_placeholders_report,
+        )
+
+        print(
+            format_legacy_placeholders_report(
+                result.legacy_placeholders,
+                source_dir=args.source,
+                project_dir_hint=args.project,
+            )
+        )
+
+    _print_harvest_next_steps(
+        args=args,
+        generated_token_map_path=generated_token_map_path,
+        substitutions_applied=bool(apply_tokens),
+        already_tokenised=(generate_map and not result.token_candidates),
+    )
+
+    return 0
 
 
 def _cmd_harvest_reconcile(args):
@@ -1621,6 +1662,36 @@ def _cmd_build(args):
                 f"— environment cross-check skipped.",
             )
 
+    from td_release_packager.orchestrator import issue_codes as _ic
+
+    try:
+        with _stage_recording(args.source, "package") as stage:
+            exit_code = _run_build(args, stage, _ic)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"\nERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    sys.exit(exit_code)
+
+
+def _run_build(args, stage, issue_codes) -> int:
+    """
+    Body of the package command, factored out so ``_cmd_build``
+    can wrap it in ``_stage_recording`` without indenting the body.
+
+    Returns:
+        Exit code for the shell.
+    """
+    stage.set_config_resolved("source", args.source, "layer-5", "cli")
+    stage.set_config_resolved("env", args.env.upper(), "layer-5", "cli")
+    stage.set_config_resolved("name", args.name, "layer-5", "cli")
+    stage.set_config_resolved("env_config", args.env_config, "layer-5", "cli")
+    stage.set_config_resolved("output", getattr(args, "output", None), "layer-5", "cli")
+    stage.set_config_resolved(
+        "format", getattr(args, "format", "zip"), "layer-5", "cli"
+    )
+    stage.set_inputs(source_dir=args.source)
+
     # Resolve build number: explicit, no-increment, or auto-increment
     build_number = args.build_number  # None if not specified
 
@@ -1666,64 +1737,69 @@ def _cmd_build(args):
         source_commit=args.commit or "",
     )
 
-    try:
-        (main_pair, companion_pair) = build_package(config)
-        archive_path, manifest = main_pair
+    (main_pair, companion_pair) = build_package(config)
+    archive_path, manifest = main_pair
 
-        print(f"\n{'=' * 64}")
-        print("  ✓ Package built successfully")
-        print(f"{'=' * 64}")
+    # -- Record outputs and issues --
+    stage.set_outputs(
+        archive_path=archive_path,
+        environment=manifest.environment,
+        build_number=manifest.build_number,
+        file_count=manifest.file_count,
+        token_count=manifest.token_count,
+        has_companion=companion_pair is not None,
+        companion_archive_path=(
+            companion_pair[0] if companion_pair is not None else None
+        ),
+    )
+    for w in manifest.warnings:
+        stage.add_issue("warning", issue_codes.PACKAGE_WARNING, w)
 
-        # -- Auto-split banner (intra_package_dependency Phase 2) --
-        # When the build produced a paired prereqs + main bundle,
-        # surface BOTH archives and the explicit deploy order before
-        # the per-archive details. The user should never have to
-        # interpret which to deploy first.
-        if companion_pair is not None:
-            prereqs_archive, prereqs_manifest = companion_pair
-            print(
-                "  Auto-split: this source contains both CREATE DATABASE/USER\n"
-                "  statements and objects that depend on them. Two archives\n"
-                "  were emitted so deploy --explain can validate each cleanly."
-            )
-            print()
-            print("  Deploy order:")
-            print(f"    1. {os.path.basename(prereqs_archive)}")
-            print(f"    2. {os.path.basename(archive_path)}")
-            print()
-            print(f"  release_group: {manifest.release_group}")
-            print()
+    print(f"\n{'=' * 64}")
+    print("  ✓ Package built successfully")
+    print(f"{'=' * 64}")
 
-        print(f"  Archive:     {archive_path}")
-        print(f"  Environment: {manifest.environment}")
-        print(f"  Build:       {manifest.build_number}")
-        print(f"  Files:       {manifest.file_count}")
-        print(f"  Tokens:      {manifest.token_count} substitutions")
-        print(f"{'=' * 64}")
-
-        for phase, count in sorted(manifest.phase_inventory.items()):
-            print(f"    {phase}: {count} file(s)")
-
-        # -- Companion archive details (paired build only) --
-        if companion_pair is not None:
-            prereqs_archive, prereqs_manifest = companion_pair
-            print()
-            print(f"  Companion (deploy first): {prereqs_archive}")
-            print(f"  Files:                    {prereqs_manifest.file_count}")
-            print(f"{'=' * 64}")
-            for phase, count in sorted(prereqs_manifest.phase_inventory.items()):
-                print(f"    {phase}: {count} file(s)")
-
-        if manifest.warnings:
-            print("\n  Warnings:")
-            for w in manifest.warnings:
-                print(f"    ⚠ {w}")
-
+    if companion_pair is not None:
+        prereqs_archive, prereqs_manifest = companion_pair
+        print(
+            "  Auto-split: this source contains both CREATE DATABASE/USER\n"
+            "  statements and objects that depend on them. Two archives\n"
+            "  were emitted so deploy --explain can validate each cleanly."
+        )
+        print()
+        print("  Deploy order:")
+        print(f"    1. {os.path.basename(prereqs_archive)}")
+        print(f"    2. {os.path.basename(archive_path)}")
+        print()
+        print(f"  release_group: {manifest.release_group}")
         print()
 
-    except (FileNotFoundError, ValueError) as e:
-        print(f"\nERROR: {e}", file=sys.stderr)
-        sys.exit(1)
+    print(f"  Archive:     {archive_path}")
+    print(f"  Environment: {manifest.environment}")
+    print(f"  Build:       {manifest.build_number}")
+    print(f"  Files:       {manifest.file_count}")
+    print(f"  Tokens:      {manifest.token_count} substitutions")
+    print(f"{'=' * 64}")
+
+    for phase, count in sorted(manifest.phase_inventory.items()):
+        print(f"    {phase}: {count} file(s)")
+
+    if companion_pair is not None:
+        prereqs_archive, prereqs_manifest = companion_pair
+        print()
+        print(f"  Companion (deploy first): {prereqs_archive}")
+        print(f"  Files:                    {prereqs_manifest.file_count}")
+        print(f"{'=' * 64}")
+        for phase, count in sorted(prereqs_manifest.phase_inventory.items()):
+            print(f"    {phase}: {count} file(s)")
+
+    if manifest.warnings:
+        print("\n  Warnings:")
+        for w in manifest.warnings:
+            print(f"    ⚠ {w}")
+
+    print()
+    return 0
 
 
 def _cmd_scan(args):
@@ -1848,14 +1924,64 @@ def _cmd_analyze(args):
     portable formats (DOT, Mermaid, JSON, CSV, OpenLineage)
     when --graph is specified.
     """
-    from td_release_packager.analyser import analyse_project, format_summary
-
     source_dir = args.source
     if not os.path.isdir(source_dir):
         print(f"ERROR: Source directory not found: {source_dir}", file=sys.stderr)
         sys.exit(1)
 
+    from td_release_packager.orchestrator import issue_codes as _ic
+
+    with _stage_recording(source_dir, "analyse") as stage:
+        exit_code = _run_analyze(args, stage, _ic)
+
+    sys.exit(exit_code)
+
+
+def _run_analyze(args, stage, issue_codes) -> int:
+    """
+    Body of the analyse command, factored out so ``_cmd_analyze``
+    can wrap it in ``_stage_recording`` without indenting the body.
+
+    Returns:
+        Exit code for the shell.
+    """
+    from td_release_packager.analyser import analyse_project, format_summary
+
+    source_dir = args.source
+
+    stage.set_config_resolved("source", source_dir, "layer-5", "cli")
+    stage.set_config_resolved("output", getattr(args, "output", None), "layer-5", "cli")
+    stage.set_config_resolved(
+        "overwrite", getattr(args, "overwrite", False), "layer-5", "cli"
+    )
+
     result = analyse_project(source_dir)
+
+    # Count total external refs across all objects
+    external_ref_count = sum(len(v) for v in result.external_deps.values())
+
+    stage.set_inputs(source_dir=source_dir)
+    stage.set_outputs(
+        object_count=len(result.objects),
+        wave_count=len(result.waves),
+        dependency_count=sum(len(v) for v in result.dependencies.values()),
+        cycle_count=len(result.cycles),
+        external_ref_count=external_ref_count,
+    )
+
+    for cycle in result.cycles:
+        stage.add_issue(
+            "error",
+            issue_codes.ANALYSE_CYCLE,
+            " → ".join(cycle),
+        )
+    for obj_name, ext_refs in result.external_deps.items():
+        for ref in ext_refs:
+            stage.add_issue(
+                "info",
+                issue_codes.ANALYSE_EXTERNAL_REF,
+                f"{obj_name} references external object {ref}",
+            )
 
     print(f"\n{'=' * 64}")
     print("  SHIPS Dependency Analysis")
@@ -1865,7 +1991,7 @@ def _cmd_analyze(args):
     if not result.objects:
         print("  No DDL objects found. Check the payload directory.")
         print()
-        return
+        return 0
 
     # -- Write _waves.txt -----------------------------------------
     if args.output:
@@ -1879,6 +2005,7 @@ def _cmd_analyze(args):
         else:
             with open(waves_path, "w", encoding="utf-8") as f:
                 f.write(result.waves_file_content)
+            stage.set_outputs(waves_path=waves_path)
             print(f"\n  ✓ Wave file written: {waves_path}")
             print(f"    {len(result.waves)} waves, {len(result.objects)} objects")
 
@@ -1890,6 +2017,7 @@ def _cmd_analyze(args):
         _export_graph(result, args)
 
     print(f"{'=' * 64}\n")
+    return 0
 
 
 def _export_graph(result, args):
