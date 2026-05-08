@@ -1,148 +1,645 @@
-# User Guide
-
-## Overview
-
-SHIPS automates the packaging and deployment of Teradata DDL across environments. The workflow has five phases, each represented by a letter in the SHIPS acronym:
-
-```
-[S] Scaffold  →  One-time project setup
-[H] Harvest   →  Import and tokenise raw DDL
-    Analyse   →  Dependency analysis and wave ordering
-[I] Inspect   →  Lint against configurable rules
-[P] Package   →  Build an environment-specific release
-[S] Ship      →  Deploy to Teradata
-```
-
-All commands use the same entry point:
-
-```bash
-python -m td_release_packager <command> [options]
-```
-
-> **Why does SHIPS work this way?** The pipeline is built around three design principles — *eponymous, atomic scripts*, *object-type extensions*, and a careful approach to *DML naming*. For the rationale rather than the mechanics, see [docs/design-rationale/](./design-rationale/README.md).
+# SHIPS User Guide
+### For SQL Developers
 
 ---
 
-## [S] Scaffold — Create a New Project
+## The short version
+
+You write SQL the way you always have. SHIPS takes that SQL, figures out what it is, puts it in the right place, replaces the hardcoded database names with environment tokens, validates it, and hands the DBA a self-contained package they can deploy to any environment without asking you a single question.
+
+That's it. The rest of this guide is how.
+
+---
+
+## What changes for you
+
+Here is the honest before-and-after.
+
+| Before | With SHIPS |
+|---|---|
+| Email scripts to the DBA and hope for the best | Hand off a package with a trust score — the DBA knows exactly what they're deploying |
+| "Hardcode DEV database names and manually fix for PRD" | Write `{{MY_DATABASE}}` once; the package resolves it per environment |
+| One giant `create_everything.sql` | One file per object — SHIPS enforces it and names the file for you |
+| No idea what deployed where | `decisions.json` and `BUILD.json` tell you what ran, when, from what source |
+| "The DBA handles deployment" | You still just write SQL — SHIPS is what turns your SQL into the package the DBA deploys |
+| Fix forward — patch live DDL | Fix in source, re-harvest, re-package — the audit trail is intact |
+
+**What you do not have to change:** how you write SQL. Your CREATE TABLE, REPLACE VIEW, REPLACE PROCEDURE — all fine as-is. SHIPS reads them and figures the rest out.
+
+---
+
+## Installation
 
 ```bash
-python -m td_release_packager scaffold --name OMR --output C:\Projects
+pip install ships   # or however your organisation distributes it
+python -m td_release_packager --version
 ```
 
-This creates a complete project structure:
+See `docs/INSTALLATION.md` for organisation-specific setup.
+
+---
+
+## The five-minute start
+
+If you want to see SHIPS work before reading anything else:
+
+```bash
+# 1. Create a project
+python -m td_release_packager scaffold --name MyProject --output C:\Projects
+
+# 2. Drop your SQL files in a folder, then harvest them
+python -m td_release_packager harvest \
+    --source C:\MySQL \
+    --project C:\Projects\MyProject
+
+# 3. Run the full pipeline (inspect + analyse + optional package)
+python -m td_release_packager process \
+    --project C:\Projects\MyProject \
+    --source C:\MySQL
+```
+
+SHIPS will classify everything, tell you what it found and what needs fixing, and leave you with a project ready to package.
+
+---
+
+## Core concepts
+
+### One object, one file
+
+SHIPS requires each DDL object to live in its own file. If you have a `create_everything.sql` that creates five tables, SHIPS splits it automatically on first harvest. Each table gets its own file, named for the object it contains.
+
+**You do not have to do this split yourself.** Harvest handles it.
+
+### Eponymous naming
+
+Every file in the payload is named `Database.ObjectName.ext`. This makes the payload human-readable — you can see exactly what is in it without opening a file.
+
+Examples:
+```
+{{STD_DATABASE}}.Customer.tbl
+{{STD_DATABASE}}.v_ActiveCustomers.viw
+{{STD_DATABASE}}.sp_ProcessOrder.spl
+```
+
+The `{{STD_DATABASE}}` part is a token — a placeholder that gets resolved to the real database name at package time. This is how SHIPS makes the same source work across DEV, TST, and PRD.
+
+### Tokens replace hardcoded database names
+
+If your SQL says `FROM A_D01_OMR_STD.Customer`, that is a hardcoded DEV database name. It will not work in PRD (`P_OMR_STD.Customer`) or TST (`T_OMR_STD.Customer`).
+
+SHIPS detects this and can replace it automatically with `{{OMR_STD}}` — a token that each environment resolves to its own value. You write SQL once; SHIPS handles environment promotion.
+
+**The token map** (`config/token_map.conf`) declares the mapping:
+```
+A_D01_OMR_STD={{OMR_STD}}
+```
+
+**The environment config** (`config/env/DEV.conf`) declares the resolution:
+```
+OMR_STD=A_D01_OMR_STD
+```
+
+In PRD: `OMR_STD=P_OMR_STD`. Same source, different value, no manual find-and-replace.
+
+### The deployment phase
+
+The DBA does not get your SQL files. They get a **package** — a `.zip` that contains:
+- Fully resolved DDL (tokens replaced, no `{{...}}` remaining)
+- A deployment manifest listing every object, its type, and its deployment strategy
+- A SHA-256 fingerprint that proves the package was not tampered with
+- A `deploy.py` script — the DBA runs `python deploy.py --host myserver --user dbc`
+
+You never touch the deployment. You produce the package; the DBA runs it.
+
+---
+
+## How to: start a new project from scratch
+
+### Step 1 — Scaffold
+
+```bash
+python -m td_release_packager scaffold \
+    --name OMR \
+    --output C:\Projects \
+    --environments DEV,TST,PRD
+```
+
+This creates the project directory with the right folder structure and an initial `ships.yaml`, three empty `config/env/` files, and a `.build_counter`.
 
 ```
 OMR/
     config/
-        properties/
+        env/
             DEV.conf
             TST.conf
             PRD.conf
         inspect.conf
+        token_map.conf      ← not yet created; harvest generates it
     payload/database/
-        system/
-            maps/
-            roles/
-            profiles/
-            authorizations/
-            foreign_servers/
-        pre-requisites/
-            databases/
-            users/
-        DCL/
-            roles/
-            users/
-            inter_db/
-        DDL/
-            tables/
-            views/
-            macros/
-            procedures/
-            functions/
-            triggers/
-            join_indexes/
-            JARs/
-            script_table_operators/
-        DML/
-        post-install/
+        pre-requisites/databases/
+        pre-requisites/users/
+        DDL/tables/
+        DDL/views/
+        DDL/procedures/
+        ...
     releases/
+    ships.yaml
     .build_counter
-    .gitignore
-    README.md
 ```
 
-### Options
+### Step 2 — Write your SQL normally
 
-| Flag | Description |
-|---|---|
-| `--name` | Project name (required) |
-| `--output` | Parent directory for the project (default: current directory) |
-| `--environments` | Comma-separated environment list (default: `DEV,TST,PRD`) |
+Drop your SQL files in a source folder. Name them whatever you like. Use your existing hardcoded database names. You'll deal with tokenisation in a moment.
 
----
+Example source folder:
+```
+C:\MySQL\
+    create_customer_table.sql
+    create_order_table.sql
+    customer_view.sql
+    sp_ProcessOrder.sql
+```
 
-## [H] Harvest — Import Raw DDL
+### Step 3 — First harvest (detect mode)
 
-Harvest takes raw DDL files from any source and normalises them into the project structure.
-
-### Basic Harvest
+Run harvest without a token map to see what SHIPS finds:
 
 ```bash
 python -m td_release_packager harvest \
-    --source /raw/ddl/ \
+    --source C:\MySQL \
     --project C:\Projects\OMR
 ```
 
 SHIPS will:
-1. Classify each file by DDL content (table, view, procedure, etc.)
-2. Extract the qualified `Database.ObjectName`
-3. Inject `MULTISET` where missing (tables only)
-4. Rename to eponymous convention (`Database.ObjectName.ext`)
-5. Place in the correct payload subdirectory
-6. Report any unclassifiable files
-7. Detect hardcoded database names as token candidates
+- Classify every file (TABLE, VIEW, PROCEDURE, etc.)
+- Split multi-statement files
+- Inject `MULTISET` on tables that are missing it
+- Report hardcoded database names it found
+- Report any files it could not classify
 
-### Programmatic Tokenisation
+Read the output. If there are unclassified files, they usually have syntax SHIPS doesn't recognise — open them and check they are valid Teradata DDL.
 
-Tokenisation replaces hardcoded database names with `{{TOKEN}}` placeholders, making DDL portable across environments.
+### Step 4 — Generate a token map
 
-#### Step 1 — Generate a token map
+If your SQL uses hardcoded database names (most legacy SQL does), generate a mapping:
 
 ```bash
 python -m td_release_packager harvest \
-    --source /raw/ddl/ \
+    --source C:\MySQL \
     --project C:\Projects\OMR \
-    --generate-token-map --env-prefix A_D01
+    --generate-token-map \
+    --env-prefix A_D01
 ```
 
-This scans all DDL, finds hardcoded database names, strips the environment prefix, and writes `config/token_map.conf`:
+`--env-prefix A_D01` tells SHIPS to strip `A_D01_` from the front of database names when deriving token names. So `A_D01_OMR_STD` becomes `{{OMR_STD}}`.
 
-```properties
+If your databases do not have an environment prefix (e.g. they are global shared databases), omit `--env-prefix`. The full name becomes the token: `SHARED_DB` → `{{SHARED_DB}}`.
+
+This writes `config/token_map.conf`:
+```
 # 14 references across 8 files
 A_D01_OMR_STD={{OMR_STD}}
 
 # 9 references across 6 files
 A_D01_OMR_SEM={{OMR_SEM}}
-
-# 3 references across 2 files
-A_D01_OMR_UTL={{OMR_UTL}}
 ```
 
-If your databases have no environment prefix (global/shared databases), omit `--env-prefix` and the full name becomes the token:
+**Review the token map.** If a name is a genuine constant (e.g. `DBC`) and should not be tokenised, remove its entry. If you want a different token name, rename it. This file goes in Git — the whole team shares one mapping.
+
+### Step 5 — Fill in the environment configs
+
+Open `config/env/DEV.conf` and fill it in:
+
+```properties
+SHIPS_ENV=DEV
+ENV_PREFIX=A_D01
+SHIPS_PROJECT=OMR
+OMR_STD={{ENV_PREFIX}}_{{SHIPS_PROJECT}}_STD
+OMR_SEM={{ENV_PREFIX}}_{{SHIPS_PROJECT}}_SEM
+```
+
+The `{{ENV_PREFIX}}_{{SHIPS_PROJECT}}_STD` pattern means you define the prefix once and everything else composes from it. Change `ENV_PREFIX` for each environment:
+
+```properties
+# config/env/TST.conf
+SHIPS_ENV=TST
+ENV_PREFIX=T
+SHIPS_PROJECT=OMR
+OMR_STD={{ENV_PREFIX}}_{{SHIPS_PROJECT}}_STD
+OMR_SEM={{ENV_PREFIX}}_{{SHIPS_PROJECT}}_SEM
+```
+
+Same source, different values. DEV gets `A_D01_OMR_STD`; TST gets `T_OMR_STD`.
+
+### Step 6 — Re-harvest with the token map
 
 ```bash
 python -m td_release_packager harvest \
-    --source /raw/ddl/ \
-    --project C:\Projects\SHARED \
-    --generate-token-map
-# CORE_STD → {{CORE_STD}}
+    --source C:\MySQL \
+    --project C:\Projects\OMR \
+    --token-map config/token_map.conf
 ```
 
-#### Step 2 — Review
+Now every occurrence of `A_D01_OMR_STD` in the payload becomes `{{OMR_STD}}`.
 
-The token map is a plain text file. Review it, rename tokens if needed, remove mappings you want left hardcoded, or add ones SHIPS missed. Commit it to Git so the team shares one mapping.
+### Step 7 — Run the full pipeline
 
-#### Step 3 — Re-harvest with the mapping
+```bash
+python -m td_release_packager process \
+    --project C:\Projects\OMR \
+    --source C:\MySQL \
+    --token-map config/token_map.conf \
+    --env DEV \
+    --env-config config/env/DEV.conf \
+    --name OMR
+```
+
+This runs harvest → generate (view layer, if applicable) → inspect → analyse → package in one command, writing the full audit trail to `decisions.json`.
+
+The result is a `.zip` in `releases/` ready for the DBA.
+
+---
+
+## How to: one command for everything (auto-tokenise)
+
+If you do not want to manually review the token map, use `--auto-tokenise`:
+
+```bash
+python -m td_release_packager process \
+    --project C:\Projects\OMR \
+    --source C:\MySQL \
+    --auto-tokenise \
+    --env-prefix A_D01 \
+    --env DEV \
+    --env-config config/env/DEV.conf \
+    --name OMR
+```
+
+SHIPS detects the literal database names, derives tokens automatically, applies them, and proceeds straight to inspect and package. No intermediate `token_map.conf` review step.
+
+Use `--auto-tokenise` when speed matters more than reviewing every token — for example, in a first-pass onboarding or a developer sandbox. For production pipelines, generate the token map once, review it, commit it, and use `--token-map` on subsequent runs.
+
+---
+
+## How to: onboard an existing codebase
+
+You have years of scripts in a folder. They have hardcoded database names, inconsistent naming, maybe multiple statements per file. Here is the fastest path to a SHIPS project.
+
+### Option A — Auto-tokenise in one pass
+
+```bash
+# 1. Scaffold
+python -m td_release_packager scaffold --name OMR --output C:\Projects
+
+# 2. Fill in config/env/DEV.conf first (SHIPS_ENV, ENV_PREFIX, etc.)
+
+# 3. Process with auto-tokenise
+python -m td_release_packager process \
+    --project C:\Projects\OMR \
+    --source C:\Legacy\SQL \
+    --auto-tokenise \
+    --env-prefix A_D01 \
+    --env DEV \
+    --env-config config/env/DEV.conf \
+    --name OMR
+```
+
+Check the output. Inspect errors tell you what to fix. Unclassified files tell you what SHIPS could not understand.
+
+### Option B — Gradual review
+
+If you want to review the token map before applying it (recommended for large codebases or production onboarding):
+
+```bash
+# Step 1 — detect mode
+python -m td_release_packager harvest \
+    --source C:\Legacy\SQL \
+    --project C:\Projects\OMR \
+    --generate-token-map --env-prefix A_D01
+
+# Step 2 — review config/token_map.conf, edit it, commit it
+
+# Step 3 — apply
+python -m td_release_packager process \
+    --project C:\Projects\OMR \
+    --source C:\Legacy\SQL \
+    --token-map config/token_map.conf \
+    --env DEV \
+    --env-config config/env/DEV.conf \
+    --name OMR
+```
+
+### What about files SHIPS could not classify?
+
+Harvest will list them under "Unclassified files (manual review needed)." Common causes:
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| File listed as unclassified | File contains no classifiable DDL/DML | Open it; if it's not object DDL (e.g. it's a session banding script or a BTEQ macro), exclude it from `--source` |
+| `CREATE TABLE` classified as unknown | Missing database qualifier (`CREATE TABLE my_table` with no `DB.`) | Add the qualifier; SHIPS requires it |
+| Procedure not found | Stored procedure uses non-standard header comment that hides the `CREATE PROCEDURE` | Move the CREATE statement above the comment block |
+
+---
+
+## How to: add a new object to an existing project
+
+### The short version
+
+Add your SQL file to the source directory and re-run harvest. SHIPS handles the rest.
+
+```bash
+# Add your new SQL to the source folder, then:
+python -m td_release_packager harvest \
+    --source C:\MySQL \
+    --project C:\Projects\OMR \
+    --token-map config/token_map.conf
+```
+
+The clean-payload mode (default) wipes harvest-managed files and rebuilds from source. Your new object appears in the right place; removed objects disappear cleanly. No manual payload editing.
+
+### What if my new object references a new database?
+
+If you have added a reference to a database that is not yet in `config/token_map.conf`:
+
+1. Harvest will list it under "Token candidates"
+2. Add an entry to `config/token_map.conf`: `NEW_DB={{NEW_DB}}`
+3. Add `NEW_DB=<actual_name>` to each `config/env/*.conf`
+4. Re-run harvest with `--token-map`
+
+---
+
+## How to: fix inspect errors
+
+Run inspect to see what SHIPS's linter found:
+
+```bash
+python -m td_release_packager inspect --source C:\Projects\OMR
+```
+
+### Common errors and fixes
+
+**`db_qualifier` — ERROR**
+```
+OMR/payload/database/DDL/tables/Customer.tbl: missing database qualifier
+```
+Your `CREATE TABLE` statement has no database prefix. Change `CREATE TABLE Customer` to `CREATE TABLE {{STD_DATABASE}}.Customer`. Every object must be qualified.
+
+**`type_suffix` — ERROR**
+```
+OMR/payload/database/DDL/views/VW_ActiveCustomers.viw: type suffix in object name
+```
+Object names like `VW_CustomerSales` or `SP_ProcessOrder` encode the type in the name. SHIPS enforces the encoding in the file extension (`.viw`, `.spl`) — not the name. Rename to `ActiveCustomers.viw` and `ProcessOrder.spl`. The type is obvious from the extension.
+
+**`hardcoded_name` — WARNING**
+```
+OMR/payload/database/DDL/tables/{{STD_DATABASE}}.Customer.tbl: hardcoded reference to A_D01_OMR_SEM
+```
+The file body still contains a literal database name. Add an entry to `token_map.conf` and re-run harvest with `--token-map`. This warning becomes an error if you use `--strict`.
+
+**`deploy_intent` — WARNING**
+```
+OMR/payload/database/DDL/views/{{STD_DATABASE}}.MyView.viw: CREATE VIEW without REPLACE
+```
+Use `REPLACE VIEW` instead of `CREATE VIEW` for objects you intend to be re-runnable. `CREATE` fails if the object already exists; `REPLACE` does not.
+
+**`eponymous` — WARNING**
+```
+OMR/payload/database/DDL/tables/{{STD_DATABASE}}.Orders.tbl: filename says Orders but DDL creates {{STD_DATABASE}}.Customers
+```
+The file's name does not match the object it contains. This usually means harvest placed the file before tokenisation, or the source file was renamed without updating the DDL. Open the file and correct the object name.
+
+### Suppressing rules you do not want
+
+Edit `config/inspect.conf` in your project:
+
+```properties
+# Set to OFF to silence, WARNING for advisory, ERROR to block packaging
+keyword_case=OFF
+leading_commas=OFF
+deploy_intent=WARNING
+db_qualifier=ERROR
+```
+
+---
+
+## How to: promote a build from DEV to TST
+
+You have a DEV build that has been approved. You want to produce the TST package from the same source, same build number.
+
+```bash
+python -m td_release_packager package \
+    --source C:\Projects\OMR \
+    --env TST \
+    --name OMR \
+    --env-config config/env/TST.conf \
+    --output releases/ \
+    --no-increment
+```
+
+`--no-increment` reuses the current build counter value — the same build number, different environment. The package filename will be `OMR_TST_BUILD_0005_...zip` instead of `OMR_DEV_BUILD_0005_...zip`.
+
+The token resolution is now driven by `config/env/TST.conf`. No source changes, no manual find-and-replace. The same `{{OMR_STD}}` in the DDL resolves to `T_OMR_STD` instead of `A_D01_OMR_STD`.
+
+---
+
+## How to: verify a package is ready before handing it off
+
+```bash
+python -m td_release_packager verify --project C:\Projects\OMR
+```
+
+This checks:
+- The archive file exists on disk
+- No package warnings were recorded
+- The package stage completed successfully
+- If the build auto-split (contains a prereqs companion archive), the companion exists too
+
+Exit code 0 = READY. Exit code 1 = something to fix first.
+
+Typical output:
+```
+================================================================
+  SHIPS Verify — Package Readiness
+================================================================
+  Archive:     releases/OMR_DEV_BUILD_0005_20260509.zip
+  Environment: DEV
+  Build:       5
+  Files:       47
+  Tokens:      134 substitutions
+
+  Checklist:
+    ✓ Archive exists on disk
+    ✓ No package issues recorded
+    ✓ Package stage status: success
+
+  ✓ Verdict: READY
+================================================================
+```
+
+---
+
+## How to: explain what the last pipeline run did
+
+```bash
+python -m td_release_packager explain --project C:\Projects\OMR
+```
+
+This reads `decisions.json` and produces a human-readable report of the last run: stage statuses, key outputs, and any issues. Use it to see what happened before deciding whether to promote.
+
+To see the last `process` run specifically:
+```bash
+python -m td_release_packager explain --project C:\Projects\OMR --command process
+```
+
+---
+
+## How to: work with stored procedures
+
+Stored procedures are classified as `PROCEDURE` (`.spl` extension). SHIPS handles them like any other DDL object with a few considerations.
+
+### Procedures that call other procedures
+
+If `sp_ProcessOrder` calls `sp_ValidateCustomer`, the analyser will detect this dependency and ensure `sp_ValidateCustomer` deploys first. You do not need to document this manually.
+
+### Procedures that reference external databases
+
+If your procedure references a database not in your payload (e.g. a system database or another project's database), the analyser will flag it as an external dependency. This is normal — SHIPS notes it but does not block packaging. The DBA will need that database to exist on the target server.
+
+### Java stored procedures and JARs
+
+If your procedure uses `LANGUAGE JAVA`, SHIPS expects the JAR file to be present alongside the SQL. On harvest, SHIPS copies the JAR into the payload next to the install script. Ensure your source directory contains both the `.sql` install script and the `.jar` binary.
+
+---
+
+## How to: work with DML (INSERT / UPDATE / DELETE)
+
+Seed data and reference data loads are supported as DML files (`.dml` extension).
+
+SHIPS places them in `payload/database/DML/` and deploys them after all DDL — the target tables exist before the data loads.
+
+```sql
+-- ReferenceData.dml
+INSERT INTO {{STD_DATABASE}}.AmortisationType (code, name)
+VALUES ('FRM', 'Fixed Rate Mortgage');
+
+INSERT INTO {{STD_DATABASE}}.AmortisationType (code, name)
+VALUES ('ARM', 'Adjustable Rate Mortgage');
+```
+
+Notes:
+- Semicolons inside string literals (e.g. in description columns) are handled correctly — SHIPS will not split on them.
+- Multiple DML statements that target different tables in a specific order should be kept in a single file and marked with `-- MULTI_TABLE_DML` at the top — this preserves the statement order.
+
+---
+
+## How to: work with grants
+
+SHIPS infers grants from your DDL. If you have a view `{{STD_DATABASE}}.CustomerSummary`, SHIPS can generate a grant to the appropriate role automatically via the `generate` command.
+
+If you want to manage grants explicitly, place them as `.dcl` files in `payload/database/DCL/inter_db/`.
+
+The inspect rule `skip_grants` is `true` by default in the `process` command — grant validation is advisory. In a stricter pipeline, run inspect with `--fix-grants` to generate missing grants.
+
+---
+
+## The daily workflow
+
+Once a project is set up, your day-to-day is:
+
+1. **Write or modify SQL** in your source folder
+2. **Run process** to validate and package:
+   ```bash
+   python -m td_release_packager process \
+       --project C:\Projects\OMR \
+       --source C:\MySQL \
+       --token-map config/token_map.conf \
+       --env DEV \
+       --env-config config/env/DEV.conf \
+       --name OMR
+   ```
+3. **Check the output** — inspect errors must be resolved before a package is produced
+4. **Run verify** if handing off to a DBA:
+   ```bash
+   python -m td_release_packager verify --project C:\Projects\OMR
+   ```
+5. **Hand the package** from `releases/` to the DBA
+
+That is the complete cycle. Steps 2–4 take seconds for most projects.
+
+---
+
+## The `process` command — all stages in one
+
+`process` is the recommended way to run the pipeline. It runs all stages in sequence under one `decisions.json` run entry:
+
+```
+harvest → generate → inspect → analyse → [package]
+```
+
+```bash
+python -m td_release_packager process \
+    --project C:\Projects\OMR \
+    --source C:\MySQL \
+    --token-map config/token_map.conf \
+    --env DEV \
+    --env-config config/env/DEV.conf \
+    --name OMR \
+    [--strict]              # abort on first error (default: continue + summarise)
+    [--skip-generate]       # skip view-layer generation
+    [--pause]               # pause after each stage for interactive review
+    [--auto-tokenise]       # detect and apply tokens in one pass
+```
+
+**Package stage is optional.** If you omit `--env`, `--env-config`, and `--name`, the pipeline stops after analyse. Use this for a quick lint-and-dependency-check without building a package.
+
+### `--strict` vs default
+
+Without `--strict` (default, developer mode): all stages run; errors are summarised at the end. You see everything that needs fixing in one pass.
+
+With `--strict` (platform mode): the pipeline aborts the moment any stage reports an error. Use this in CI/CD pipelines where a partial run is worse than no run.
+
+### `--pause` for supervised runs
+
+```bash
+python -m td_release_packager process ... --pause
+```
+
+After each stage, SHIPS pauses and asks:
+
+```
+  ── Pause after inspect [⚠ warning] ──
+  Continue? [Y/n/q]
+```
+
+Press Enter or `y` to continue, `n` to abort, `q` to quit cleanly. Suppressed automatically when running in CI (`CI=true`) or when output is not a terminal.
+
+---
+
+## Command reference
+
+### `ships scaffold`
+
+Create a new project structure.
+
+```bash
+python -m td_release_packager scaffold \
+    --name OMR \
+    --output C:\Projects \
+    --environments DEV,TST,PRD
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--name` | Yes | Project name (used as directory name) |
+| `--output` | No | Parent directory (default: current) |
+| `--environments` | No | Comma-separated env names (default: DEV,TST,PRD) |
+| `--repair` | No | Add missing directories/files without overwriting |
+
+---
+
+### `ships harvest`
+
+Import and tokenise raw DDL.
 
 ```bash
 python -m td_release_packager harvest \
@@ -151,125 +648,74 @@ python -m td_release_packager harvest \
     --token-map config/token_map.conf
 ```
 
-Every file is tokenised automatically. The process is repeatable — re-run it any time the source DDL changes.
-
-### Harvest Options
-
-| Flag | Description |
-|---|---|
-| `--source` | Directory containing raw DDL files (required) |
-| `--project` | Target project directory (required, must be scaffolded) |
-| `--token-map` | Path to `token_map.conf` — applies mappings during harvest |
-| `--generate-token-map` | Scan for hardcoded names and write `config/token_map.conf` |
-| `--env-prefix` | Environment prefix to strip for token name derivation (optional) |
-| `--apply-tokens` | Legacy: inline comma-separated `name={{TOKEN}}` pairs |
-| `--no-detect-tokens` | Skip hardcoded name detection |
+| Flag | Required | Description |
+|---|---|---|
+| `--source` | Yes* | Source directory of raw DDL (*not required with `--reconcile`) |
+| `--project` | Yes | Target project directory |
+| `--token-map` | No | Path to `token_map.conf` — applies substitutions |
+| `--generate-token-map` | No | Scan and write `config/token_map.conf` |
+| `--env-prefix` | No | Prefix to strip when deriving token names |
+| `--auto-tokenise` | No | Detect and apply tokens in one pass (no manual review) |
+| `--keep-existing` | No | Overlay new files without wiping payload first |
+| `--force` | No | Overwrite collisions in overlay mode |
 
 ---
 
-## Analyse — Dependency Analysis
+### `ships generate`
+
+Generate view-layer DDL from harvested tables (SHIPS topology projects).
 
 ```bash
-python -m td_release_packager analyze --source C:\Projects\OMR
+python -m td_release_packager generate \
+    --source C:\Projects\OMR \
+    --modules DOM,SEM
 ```
 
-Scans all DDL files, builds a directed dependency graph, and produces a topologically sorted wave ordering. The output `_waves.txt` tells the deployer which objects to deploy in parallel and which must wait.
-
-### What It Handles
-
-- Cross-database references (flagged as external dependencies)
-- Function overloads (SPECIFIC name → function group index)
-- Table alias filtering (short prefixes like `c.`, `o.` excluded)
-- Circular dependency detection
-- System database filtering (DBC, SYSLIB, etc.)
-
-### Options
-
-| Flag | Description |
-|---|---|
-| `--source` | Project directory to analyse (required) |
-| `--output` | Output path for `_waves.txt` (default: `<source>/_waves.txt`) |
-| `--overwrite` | Overwrite existing `_waves.txt` |
+| Flag | Required | Description |
+|---|---|---|
+| `--source` | Yes | Project directory containing harvested payload |
+| `--modules` | No | Comma-separated modules to generate (default: all) |
+| `--dry-run` | No | Validate without writing files |
 
 ---
 
-## [I] Inspect — Coding Discipline Linter
+### `ships inspect`
+
+Lint payload DDL against configurable rules.
 
 ```bash
 python -m td_release_packager inspect --source C:\Projects\OMR
 ```
 
-Checks DDL files against configurable engineering discipline rules.
-
-### Rules
-
-| Rule | Default | What It Checks |
+| Flag | Required | Description |
 |---|---|---|
-| `db_qualifier` | ERROR | Database qualifier present (`DB.ObjectName`) |
-| `set_multiset` | WARNING | `SET` or `MULTISET` specified for tables |
-| `deploy_intent` | WARNING | `CREATE` without `REPLACE` for replaceable types |
-| `one_object` | WARNING | One DDL statement per file |
-| `eponymous` | WARNING | Filename matches DDL content |
-| `extension` | WARNING | Correct file extension per object type |
-| `type_suffix` | ERROR | No type suffixes (`_V`, `_T`, `VW_`, `SP_`) |
-| `hardcoded_name` | WARNING | `{{TOKENS}}` used instead of hardcoded names |
-| `keyword_case` | WARNING | SQL keywords in UPPERCASE |
-| `leading_commas` | WARNING | Leading comma convention in column lists |
-
-System-scope objects (Maps, Roles, Profiles, Authorisations, Foreign Servers) are automatically excluded from `db_qualifier` and `hardcoded_name` checks.
-
-### Configuring Rules
-
-Create or edit `config/inspect.conf` in your project:
-
-```properties
-# Structural rules
-db_qualifier=ERROR
-set_multiset=WARNING
-deploy_intent=WARNING
-one_object=WARNING
-eponymous=WARNING
-extension=WARNING
-type_suffix=ERROR
-
-# Style rules — turn off what you don't want
-hardcoded_name=WARNING
-keyword_case=OFF
-leading_commas=OFF
-```
-
-Valid severities: `ERROR`, `WARNING`, `OFF`.
-
-SHIPS auto-detects `config/inspect.conf` in the project directory. You can also specify it explicitly:
-
-```bash
-python -m td_release_packager inspect --source . --config path/to/inspect.conf
-```
-
-### Strict Mode
-
-`--strict` promotes all `WARNING` rules to `ERROR`. Rules set to `OFF` remain off.
-
-```bash
-python -m td_release_packager inspect --source . --strict
-```
-
-Use for production builds where re-runnability is mandatory.
-
-### Options
-
-| Flag | Description |
-|---|---|
-| `--source` | Directory to validate (required) |
-| `--config` | Path to `inspect.conf` (default: auto-detect in project) |
-| `--strict` | Promote all `WARNING` rules to `ERROR` |
-| `--skip-tokens` | Legacy: disable hardcoded name checks |
-| `--skip-keywords` | Legacy: disable keyword case checks |
-| `--skip-commas` | Legacy: disable leading comma checks |
+| `--source` | Yes | Project directory to inspect |
+| `--config` | No | Path to `inspect.conf` (default: auto-detect in project) |
+| `--strict` | No | Promote all WARNING rules to ERROR |
+| `--skip-grants` | No | Skip grant validation |
+| `--fix-grants` | No | Re-generate missing grant files |
 
 ---
 
-## [P] Package — Build a Release
+### `ships analyse`
+
+Build the dependency graph and wave ordering.
+
+```bash
+python -m td_release_packager analyze --source C:\Projects\OMR
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--source` | Yes | Project directory to analyse |
+| `--output` | No | Output path for `_waves.txt` (default: `<source>/_waves.txt`) |
+| `--overwrite` | No | Overwrite existing `_waves.txt` |
+
+---
+
+### `ships package`
+
+Build a release archive for a specific environment.
 
 ```bash
 python -m td_release_packager package \
@@ -280,170 +726,258 @@ python -m td_release_packager package \
     --output releases/
 ```
 
-This produces a self-contained release archive (e.g. `DEV_OMR_BUILD_0012_20260421.zip`) containing:
+| Flag | Required | Description |
+|---|---|---|
+| `--source` | Yes | Project directory |
+| `--env` | Yes | Target environment (DEV / TST / PRD) |
+| `--name` | Yes | Package name |
+| `--env-config` | Yes | Path to environment `.conf` file |
+| `--output` | No | Output directory (default: current) |
+| `--no-increment` | No | Reuse current build number (for promotion) |
+| `--build-number` | No | Explicit build number |
+| `--format` | No | `zip` or `tar.gz` (default: `zip`) |
+| `--author` | No | Author metadata |
+| `--description` | No | Release description |
+| `--commit` | No | Git commit hash for traceability |
 
-- Resolved DDL files (all `{{TOKENS}}` replaced with environment values)
-- Resolved filenames (e.g. `P_CORE.Customer.tbl`, not `DEV01_CORE.Customer.tbl`)
-- The deployment engine (`ddl_deployer` package)
-- `BUILD.json` manifest with full traceability
-- `deploy.py` entry point for the DBA
-- `README.txt` with deployment instructions
+---
 
-### Environment Promotion
+### `ships process`
 
-Build the same source for a different environment without incrementing the build number:
+Run the full pipeline in one command.
 
 ```bash
-# DEV build — increments counter
-python -m td_release_packager package \
-    --source . --env DEV --name OMR \
+python -m td_release_packager process \
+    --project C:\Projects\OMR \
+    --source C:\MySQL \
+    --token-map config/token_map.conf \
+    --env DEV \
     --env-config config/env/DEV.conf \
-    --output releases/
-
-# PRD promotion — same build number
-python -m td_release_packager package \
-    --source . --env PRD --name OMR \
-    --env-config config/env/PRD.conf \
-    --output releases/ --no-increment
+    --name OMR
 ```
 
-### Token Interpolation in Properties
-
-Config files support `{{TOKEN}}` references within values:
-
-```properties
-SHIPS_ENV=PRD
-ENV_PREFIX=P
-SHIPS_PROJECT=OMR
-STD_DATABASE={{ENV_PREFIX}}_{{SHIPS_PROJECT}}_STD
-SEM_DATABASE={{ENV_PREFIX}}_{{SHIPS_PROJECT}}_SEM
-```
-
-Resolution is iterative with circular reference detection.
-
-### Options
-
-| Flag | Description |
-|---|---|
-| `--source` | Source project directory (required) |
-| `--env` | Target environment, e.g. `DEV`, `TST`, `PRD` (required) |
-| `--name` | Package name (required) |
-| `--env-config` | Path to environment `.conf` file (required) |
-| `--output` | Output directory (default: current directory) |
-| `--no-increment` | Reuse current build number (for promotion) |
-| `--format` | Archive format: `zip` or `tar.gz` (default: `zip`) |
-| `--author` | Builder's name |
-| `--description` | Release description |
-| `--commit` | Git commit hash for traceability |
+| Flag | Required | Description |
+|---|---|---|
+| `--project` | Yes | Project directory (must already be scaffolded) |
+| `--source` | No | Raw DDL source directory (harvest is skipped if omitted) |
+| `--token-map` | No | Token substitution map |
+| `--auto-tokenise` | No | Detect and apply tokens in one pass |
+| `--env-prefix` | No | Env prefix for auto-tokenise derivation |
+| `--skip-generate` | No | Skip the generate stage |
+| `--env` | No | Target environment (package stage requires this) |
+| `--env-config` | No | Environment config file (package stage requires this) |
+| `--name` | No | Package name (package stage requires this) |
+| `--strict` | No | Abort on first stage error |
+| `--pause` | No | Pause after each stage for interactive review |
+| `--author` | No | Package author metadata |
+| `--description` | No | Package description |
+| `--commit` | No | Source commit hash |
 
 ---
 
-## [S] Ship — Deploy to Teradata
+### `ships scan`
 
-The DBA receives the package, extracts it, and runs:
+Scan payload files for token references and optionally validate against an environment config.
 
 ```bash
-# Dry run — simulate without connecting
-python deploy.py --dry-run
-
-# Live deployment
-python deploy.py --host myserver --user dbc --streams 4
-
-# With options
-python deploy.py \
-    --host myserver \
-    --user dbc \
-    --logmech LDAP \
-    --streams 4 \
-    --continue-on-error
+python -m td_release_packager scan \
+    --source C:\Projects\OMR \
+    --env-config config/env/DEV.conf
 ```
 
-### What the Deployer Does
-
-1. **Pre-flight checks** — validates permissions, space, object existence
-2. **Wave-parallel execution** — deploys objects in dependency order, parallelising within waves
-3. **Intent-aware strategy** — each object is deployed according to the developer's DDL verb
-4. **Rollback on failure** — compensating actions for each strategy
-5. **Manifest tracking** — records the state of every object in the deployment
-6. **HTML report** — generates a deployment report
-
-### Options
-
-| Flag | Description |
-|---|---|
-| `--host` | Teradata host (not required for `--dry-run`) |
-| `--user` | Teradata user (not required for `--dry-run`) |
-| `--password` | Teradata password (prompted if not provided) |
-| `--logmech` | Logon mechanism (`LDAP`, `TD2`, etc.) |
-| `--dry-run` | Simulate without connecting |
-| `--streams` | Parallel deployment streams (default: 1) |
-| `--continue-on-error` | Continue past individual object failures |
+Use this to confirm every `{{TOKEN}}` in the payload has a corresponding value in the config before packaging.
 
 ---
 
-## Properties Files
+### `ships explain`
 
-Each environment has a `.conf` file in `config/env/`:
+Human-readable report of a prior pipeline run from `decisions.json`.
 
-```properties
-# config/env/DEV.conf
-SHIPS_ENV=DEV
-ENV_PREFIX=A_D01
-SHIPS_PROJECT=OMR
-STD_DATABASE={{ENV_PREFIX}}_{{SHIPS_PROJECT}}_STD
-SEM_DATABASE={{ENV_PREFIX}}_{{SHIPS_PROJECT}}_SEM
+```bash
+python -m td_release_packager explain --project C:\Projects\OMR
+python -m td_release_packager explain --project C:\Projects\OMR --command process
+python -m td_release_packager explain --project C:\Projects\OMR --run-id 2026-05-09T14:30:00Z-abcd
 ```
 
-### Reserved Properties
+| Flag | Required | Description |
+|---|---|---|
+| `--project` | Yes | Project directory |
+| `--command` | No | Filter to last run of this command (e.g. `process`) |
+| `--run-id` | No | Report a specific run by ID |
 
-These property names are reserved and excluded from "unused token" warnings:
-
-| Property | Purpose |
-|---|---|
-| `SHIPS_ENV` | Declares the target environment. Cross-checked against `--env`. |
-| `SHIPS_PROJECT` | Project identifier. Available for use in token composition. |
-| `ENV_PREFIX` | Environment prefix. The foundation for database name composition. |
+Exit 0 if the run status was success or warning. Exit 1 on error status or missing `decisions.json`.
 
 ---
 
-## Project Layout
+### `ships verify`
 
-After scaffolding and harvesting, a project looks like:
+Pre-deploy package readiness check.
+
+```bash
+python -m td_release_packager verify --project C:\Projects\OMR
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--project` | Yes | Project directory |
+
+Exit 0 = READY. Exit 1 = NOT READY. Checks: archive exists, no package warnings, stage status success.
+
+---
+
+### `ships decompose-names`
+
+Decompose literal database names against the SHIPS naming grammar and emit a cascade-form `.conf` file.
+
+Useful when onboarding a new codebase — pass your `token_map.conf` and SHIPS will try to infer the composition roots (`ENV_PREFIX`, `SHIPS_ENV`, `INSTANCE`, etc.) and write a starter `DEV.conf`.
+
+```bash
+python -m td_release_packager decompose-names config/token_map.conf \
+    --env DEV \
+    --output-dir config
+```
+
+---
+
+### `ships bootstrap-env-config`
+
+Bootstrap an environment config from a decomposed token map. Alternative entry point to `decompose-names` for sites that have already identified their composition roots.
+
+---
+
+### `ships import-legacy`
+
+Bootstrap from a legacy sed substitution script. Use when your pre-SHIPS build harness already has a sed file defining marker-to-value pairs.
+
+---
+
+## Project layout reference
 
 ```
-OMR/
+MyProject/
+    ships.yaml                  ← Orchestrator config and stage settings
+    .build_counter              ← Auto-incremented build number
+    decisions.json              ← Audit trail: every pipeline run recorded here
     config/
-        properties/
-            DEV.conf
+        env/
+            DEV.conf            ← Token values for DEV environment
             TST.conf
             PRD.conf
-        inspect.conf
-        token_map.conf          ← Generated by --generate-token-map
+        inspect.conf            ← Lint rule configuration
+        token_map.conf          ← Literal → {{TOKEN}} mapping
     payload/database/
-        system/                 ← System-scope (00_system phase)
+        system/                 ← 00_system: maps, roles, profiles, authorisations
             maps/
             roles/
             profiles/
             authorizations/
             foreign_servers/
-        pre-requisites/         ← 01_pre_requisites phase
+        pre-requisites/         ← 01_pre_requisites: databases and users
             databases/
             users/
-        DCL/                    ← 02_dcl phase
+        DCL/                    ← 02_dcl: grants and revokes
             inter_db/
-        DDL/                    ← 03_ddl phase
-            tables/
-                {{STD_DATABASE}}.Customer.tbl
-                {{STD_DATABASE}}.Orders.tbl
-            views/
-                {{STD_DATABASE}}.ActiveCustomers.viw
-            functions/
-                {{STD_DATABASE}}.fn_Calc.fnc
-                fn_Calc.c       ← C source co-artefact
-            ...
-        DML/                    ← 04_dml phase
-        post-install/           ← 05_post_install phase
-    releases/
-    _waves.txt                  ← Generated by analyze
-    .build_counter
+        DDL/                    ← 03_ddl: all object DDL
+            tables/             {{DB}}.ObjectName.tbl
+            views/              {{DB}}.ObjectName.viw
+            macros/             {{DB}}.ObjectName.mcr
+            procedures/         {{DB}}.ObjectName.spl
+            functions/          {{DB}}.ObjectName.fnc
+            triggers/           {{DB}}.ObjectName.trg
+            join_indexes/       {{DB}}.ObjectName.jix
+            jar_install/        {{DB}}.ObjectName.sjr + binary.jar
+            script_table_operators/  {{DB}}.ObjectName.sto
+            comments/           {{DB}}.ObjectName.cmt
+            statistics/         {{DB}}.ObjectName.stt
+        DML/                    ← 04_dml: seed and reference data
+        post-install/           ← 05_post_install: post-deployment scripts
+    releases/                   ← Built package archives
+    _waves.txt                  ← Deployment wave order (generated by analyse)
 ```
+
+### File extensions
+
+| Extension | Object type |
+|---|---|
+| `.tbl` | Table |
+| `.viw` | View |
+| `.mcr` | Macro |
+| `.spl` | Stored procedure |
+| `.fnc` | Function |
+| `.trg` | Trigger |
+| `.jix` | Join index |
+| `.idx` | Hash / secondary index |
+| `.sjr` | SQLJ JAR install script |
+| `.sto` | Script table operator |
+| `.dcl` | Grant / revoke |
+| `.cmt` | Comment on |
+| `.stt` | Collect statistics |
+| `.dml` | DML (INSERT / UPDATE / DELETE / MERGE) |
+| `.db` | Create database |
+| `.usr` | Create user |
+| `.rol` | Create role |
+
+---
+
+## FAQ
+
+**Q: My table already exists in DEV — will SHIPS drop it?**
+
+No. Deployment strategy is controlled by the DDL verb in your file. `REPLACE TABLE` performs `DROP + CREATE`. `CREATE TABLE` will fail if the object already exists (which is intentional — it is saying "create it new"). To make a table re-runnable without data loss, use backup-and-replace strategy via deploy intent configuration.
+
+**Q: I changed a column — how do I re-package?**
+
+Edit the source SQL, re-run harvest, and re-run process. The payload is rebuilt clean from source each time. The DBA deploys the new package, which will detect the existing object and apply the correct strategy (backup, recreate, migrate data).
+
+**Q: Can I skip the token map if I handle environments myself?**
+
+Yes. If you are not ready to tokenise, omit `--token-map` from harvest. SHIPS will place the hardcoded-name files in the payload as-is. Inspect will flag them as `hardcoded_name` warnings. You can suppress that rule in `config/inspect.conf` while you transition.
+
+**Q: The analyser says I have a circular dependency. What does that mean?**
+
+Two or more objects depend on each other — for example, View A references View B, and View B references View A. Teradata cannot create them in any order without the other already existing. You need to restructure one of them, typically by introducing an interim base view that breaks the cycle.
+
+**Q: How do I handle objects that must exist before my DDL (e.g. CREATE DATABASE)?**
+
+SHIPS auto-detects objects that create databases/users and the objects that depend on them. It auto-splits the package into a `_prereqs_` archive and a main archive. Deploy the prereqs archive first, then the main archive. The deploy order is printed explicitly in the package banner.
+
+**Q: I got a `MULTISET` inject notice — what does that mean?**
+
+SHIPS automatically adds `MULTISET` to `CREATE TABLE` statements that have neither `SET` nor `MULTISET`. This is the safe Teradata default. If you intentionally want a SET table, add `CREATE SET TABLE` explicitly — SHIPS will not override it.
+
+**Q: Can multiple developers work on the same project?**
+
+Yes. The project directory (including `payload/`) should be in version control. Each developer harvests their own source into the shared project. Because harvest wipes and rebuilds from source, the payload always reflects what is in source control — it is not a hand-curated artefact.
+
+**Q: What is `decisions.json`?**
+
+It is an append-only audit trail written by every SHIPS pipeline run. Every stage records what config it used, what it processed, what it produced, and any issues it found. Run `ships explain --project .` at any time to see a formatted report of the last run.
+
+---
+
+## Troubleshooting
+
+**Harvest produces no files / all files unclassified**
+
+Check that your SQL files contain valid Teradata DDL with `CREATE` or `REPLACE` statements. A file of only `SELECT` statements or only comments will not classify. Files that contain only whitespace after comment stripping are skipped silently.
+
+**`KeyError: 'force'` or `AttributeError: Namespace has no attribute...`**
+
+You are using an old version of SHIPS that predates the `process` command. Update to the latest version.
+
+**Token `{{MY_TOKEN}}` appears in deployed DDL**
+
+The token was not resolved. Check:
+1. `MY_TOKEN` is defined in `config/env/DEV.conf`
+2. You passed `--env-config config/env/DEV.conf` to the package command
+3. There is no whitespace inside the braces (`{{ MY_TOKEN }}` is invalid — must be `{{MY_TOKEN}}`)
+
+Run `ships scan --source . --env-config config/env/DEV.conf` to identify all undefined tokens before packaging.
+
+**Build counter keeps resetting to 0**
+
+Do not delete `.build_counter`. If it is missing, SHIPS cannot auto-increment and will fail. Create a file named `.build_counter` containing `0` to restart from build 1.
+
+**Inspect fails with `db_qualifier` on system objects**
+
+System-scope objects (Maps, Roles, Profiles, Authorisations, Foreign Servers) are automatically exempt from the `db_qualifier` rule — they live in `system/` and do not have a database owner. If you are seeing this error on a non-system object, the object is probably in the wrong payload subdirectory.
