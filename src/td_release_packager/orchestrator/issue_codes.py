@@ -28,7 +28,7 @@ Naming convention:
       - INSPECT_*     Inspect / validate stage (item 4b)
       - ANALYSE_*     Dependency analysis stage (item 4d)
       - PACKAGE_*     Package / build stage (item 4f)
-      - GENERATE_*    Reserved for generate stage (item 7)
+      - GENERATE_*    Generate / view-layer stage (item 7)
 """
 
 from __future__ import annotations
@@ -123,6 +123,23 @@ PACKAGE_WARNING = "PACKAGE_WARNING"
 
 
 # ---------------------------------------------------------------
+# Generate domain (build-order item 7)
+# ---------------------------------------------------------------
+
+#: The view-layer generator emitted a non-fatal warning — typically
+#: a requested module that has no matching table files, a column that
+#: couldn't be resolved for SELECT * expansion, or a REPLACE/CREATE
+#: rewrite that may need manual review.
+GENERATE_WARNING = "GENERATE_WARNING"
+
+#: The view-layer generator encountered a fatal error that prevented
+#: output from being written — typically no tables found in the
+#: payload (suggesting the project has not been harvested yet) or
+#: no matching modules after filtering.
+GENERATE_ERROR = "GENERATE_ERROR"
+
+
+# ---------------------------------------------------------------
 # Registry — code → human description
 # ---------------------------------------------------------------
 
@@ -160,6 +177,20 @@ ISSUE_CODES: Dict[str, str] = {
         "the target already exists on the target system — or it may indicate "
         "a missing file that should be included in the project. Review the "
         "reference and add the target to the payload if needed."
+    ),
+    GENERATE_WARNING: (
+        "The view-layer generator emitted a warning during generation. "
+        "Common causes: a requested module has no matching table files in "
+        "the payload (check that harvest ran first), a column could not be "
+        "resolved for SELECT * expansion, or a business-view rewrite "
+        "produced output that may need manual review."
+    ),
+    GENERATE_ERROR: (
+        "The view-layer generator encountered a fatal error and could not "
+        "write output. Most common cause: no tables found in the payload "
+        "(run harvest first to populate payload/database/DDL/tables/). "
+        "Also occurs when requested modules don't match any discovered "
+        "table files."
     ),
     PACKAGE_WARNING: (
         "The builder emitted a warning during package assembly. Typical "
