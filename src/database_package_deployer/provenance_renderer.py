@@ -39,7 +39,7 @@ from __future__ import annotations
 import html
 from typing import Optional
 
-from ddl_deployer.provenance import (
+from database_package_deployer.provenance import (
     ProvenanceChain,
     STAGE_ORDER,
     Stage,

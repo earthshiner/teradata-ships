@@ -10,12 +10,12 @@ malformed input.
 
 import pytest
 
-from ddl_deployer.provenance import (
+from database_package_deployer.provenance import (
     ProvenanceChain,
     Stage,
     Status,
 )
-from ddl_deployer.provenance_renderer import (
+from database_package_deployer.provenance_renderer import (
     PROVENANCE_CSS,
     render_chain,
 )

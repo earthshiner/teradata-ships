@@ -37,7 +37,7 @@ import threading
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
-from ddl_deployer.models import DeployState
+from database_package_deployer.models import DeployState
 
 logger = logging.getLogger(__name__)
 

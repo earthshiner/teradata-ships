@@ -1,4 +1,4 @@
-# SHIPS — Teradata Deployment Agent
+﻿# SHIPS — Teradata Deployment Agent
 
 **S**caffold · **H**arvest · **I**nspect · **P**ackage · **S**hip
 
@@ -59,10 +59,10 @@ python -m td_release_packager package \
     --output releases/
 
 # Ship (deploy)
-python -m ddl_deployer deploy ./releases/MyProject_DEV_b0001 --dry-run                       # No database — validates pipeline, parsing, wave ordering
-python -m ddl_deployer deploy ./releases/MyProject_DEV_b0001 --host myserver --user dbc      # Connect and execute DDL
-python -m ddl_deployer resume   ./releases/MyProject_DEV_b0001/.deploy_manifest.json --host myserver --user dbc   # Resume an interrupted deployment
-python -m ddl_deployer status   ./releases/MyProject_DEV_b0001/.deploy_manifest.json         # Show manifest state
+python -m database_package_deployer deploy ./releases/MyProject_DEV_b0001 --dry-run                       # No database — validates pipeline, parsing, wave ordering
+python -m database_package_deployer deploy ./releases/MyProject_DEV_b0001 --host myserver --user dbc      # Connect and execute DDL
+python -m database_package_deployer resume   ./releases/MyProject_DEV_b0001/.deploy_manifest.json --host myserver --user dbc   # Resume an interrupted deployment
+python -m database_package_deployer status   ./releases/MyProject_DEV_b0001/.deploy_manifest.json         # Show manifest state
 ```
 
 ## Architecture
@@ -72,7 +72,7 @@ SHIPS consists of two Python packages:
 | Package | Purpose |
 |---|---|
 | `td_release_packager` | Developer-side tooling: scaffold, harvest, inspect, analyse, package |
-| `ddl_deployer` | DBA-side deployment engine: parse, pre-flight, deploy, rollback, report |
+| `database_package_deployer` | DBA-side deployment engine: parse, pre-flight, deploy, rollback, report |
 
 ### The SHIPS Workflow
 
@@ -124,7 +124,7 @@ The deployer has two CLI-exposed modes plus an EXPLAIN engine and an automatic R
 
 **REPLAY** is automatic. When you re-run `deploy` against a package whose manifest already records every object as `COMPLETED`, SHIPS verifies each object against the live database (resetting any stale entries to `PENDING`) and, if there's nothing new to deploy, produces a `REPLAY Report` rather than a misleading `DEPLOYMENT Report`. The summary cards switch to `Verified (prior)` / `Deployed (this run)=0` so a DBA reading the report can tell at a glance that this run did no work.
 
-**Explain** is implemented at the engine level (`ddl_deployer.deployer.explain_package`) — it wraps each DDL in Teradata's `EXPLAIN` to validate syntax, object resolution, column types, and permissions against the live catalogue without modifying anything. It is **not currently wired to the `ddl_deployer` subcommand list**; call it programmatically if you need it before that lands.
+**Explain** is implemented at the engine level (`database_package_deployer.deployer.explain_package`) — it wraps each DDL in Teradata's `EXPLAIN` to validate syntax, object resolution, column types, and permissions against the live catalogue without modifying anything. It is **not currently wired to the `database_package_deployer` subcommand list**; call it programmatically if you need it before that lands.
 
 | | Dry-run | Deploy | REPLAY (auto) |
 |---|---|---|---|
@@ -136,8 +136,8 @@ The deployer has two CLI-exposed modes plus an EXPLAIN engine and an automatic R
 
 ```bash
 # Recommended workflow
-python -m ddl_deployer deploy ./releases/MyProject_DEV_b0001 --dry-run                  # Pipeline validation
-python -m ddl_deployer deploy ./releases/MyProject_DEV_b0001 --host myserver --user dbc # Execute
+python -m database_package_deployer deploy ./releases/MyProject_DEV_b0001 --dry-run                  # Pipeline validation
+python -m database_package_deployer deploy ./releases/MyProject_DEV_b0001 --host myserver --user dbc # Execute
 ```
 
 ### Dependency Analysis
@@ -227,7 +227,7 @@ teradata-deployment-agent/
         td_release_packager/    ← Packager pipeline
             orchestrator/       ← Orchestrator foundation (ships.yaml, cascade, decisions)
             view_layer_generator.py   ← Engine: importable view-layer generator
-        ddl_deployer/           ← Deployment engine
+        database_package_deployer/           ← Deployment engine
         tests/                  ← Test suite
     tools/                      ← Standalone CLI shims and demos
         generate_view_layer.py  ← CLI shim around view_layer_generator

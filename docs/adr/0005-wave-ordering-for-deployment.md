@@ -1,4 +1,4 @@
-# ADR 0005: Wave Ordering for Deployment
+﻿# ADR 0005: Wave Ordering for Deployment
 
 ## Status
 
@@ -193,10 +193,10 @@ within a combined wave.
 
 - `td_release_packager/builder.py` — computes wave assignments
   and writes the deploy manifest.
-- `ddl_deployer/deployer.py` — reads the manifest and executes
+- `database_package_deployer/deployer.py` — reads the manifest and executes
   waves 1–3 in order; manages the thread pool for intra-Wave 3
   parallelism.
-- `ddl_deployer/models.py` — `STRATEGY_MAP` defines which
+- `database_package_deployer/models.py` — `STRATEGY_MAP` defines which
   deployer strategy applies per object type within Wave 3.
 - ADR 0002: SHIPS pipeline phase structure — the Ship phase
   executes the three waves.

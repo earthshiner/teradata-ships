@@ -1,5 +1,5 @@
 """
-ddl_parser.py — Teradata DDL parser with object type detection.
+statement_parser.py — Teradata DDL parser with object type detection.
 
 Parses DDL files to extract:
     - Qualified database.object name
@@ -27,11 +27,11 @@ import os
 import re
 from typing import Tuple, Optional
 
-from ddl_deployer.models import (
+from database_package_deployer.models import (
     ObjectType,
     DeployIntent,
     DeployStrategy,
-    ParsedDDL,
+    ParsedStatement,
     STRATEGY_MAP,
 )
 
@@ -304,7 +304,7 @@ def _strip_sql_comments(text: str) -> str:
 # ---------------------------------------------------------------
 
 
-def parse_ddl_file(file_path: str) -> ParsedDDL:
+def parse_statement_file(file_path: str) -> ParsedStatement:
     """
     Parse a DDL file: detect object type, extract name, inject MULTISET.
 
@@ -316,7 +316,7 @@ def parse_ddl_file(file_path: str) -> ParsedDDL:
         file_path: Path to the DDL file.
 
     Returns:
-        ParsedDDL with all extracted metadata.
+        ParsedStatement with all extracted metadata.
 
     Raises:
         FileNotFoundError: If the file does not exist.
@@ -328,10 +328,10 @@ def parse_ddl_file(file_path: str) -> ParsedDDL:
     if not original_text.strip():
         raise ValueError(f"DDL file is empty: {file_path}")
 
-    return parse_ddl_text(original_text, file_path=file_path)
+    return parse_statement_text(original_text, file_path=file_path)
 
 
-def parse_ddl_text(ddl_text: str, file_path: str = "<inline>") -> ParsedDDL:
+def parse_statement_text(ddl_text: str, file_path: str = "<inline>") -> ParsedStatement:
     """
     Parse DDL text: detect object type, extract name, inject MULTISET.
 
@@ -340,7 +340,7 @@ def parse_ddl_text(ddl_text: str, file_path: str = "<inline>") -> ParsedDDL:
         file_path:  Source file path (for error messages).
 
     Returns:
-        ParsedDDL with all extracted metadata.
+        ParsedStatement with all extracted metadata.
 
     Raises:
         ValueError: If the DDL cannot be parsed or classified.
@@ -464,7 +464,7 @@ def parse_ddl_text(ddl_text: str, file_path: str = "<inline>") -> ParsedDDL:
         if db_name is None:
             db_name = ""
 
-    return ParsedDDL(
+    return ParsedStatement(
         file_path=file_path,
         ddl_text=ddl_text,
         original_text=original_text,

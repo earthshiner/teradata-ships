@@ -15,13 +15,13 @@ Tests cover:
     - Normal-mode rendering still works (no regressions)
 """
 
-from ddl_deployer.models import (
+from database_package_deployer.models import (
     DeployState,
     ObjectDeployResult,
     ObjectType,
     PackageDeployResult,
 )
-from ddl_deployer.report import (
+from database_package_deployer.report import (
     _build_html,
     _html_action_items,
     _html_object_results,

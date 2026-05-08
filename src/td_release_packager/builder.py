@@ -12,7 +12,7 @@ Build process:
     3. Validate: all referenced tokens must be defined.
     4. Create package directory structure.
     5. Copy and resolve payload files (substitute tokens).
-    6. Embed the deployment engine (ddl_deployer library).
+    6. Embed the deployment engine (database_package_deployer library).
     7. Generate BUILD.json manifest.
     8. Generate deploy.py (DBA entry point).
     9. Generate README.txt (DBA instructions).
@@ -47,7 +47,7 @@ from td_release_packager.token_engine import (
     validate_tokens,
 )
 from td_release_packager.eponymous_rename import extract_eponymous_name
-from ddl_deployer.provenance import (
+from database_package_deployer.provenance import (
     ProvenanceChain,
     ProvenanceDocument,
     Stage,
@@ -56,7 +56,7 @@ from ddl_deployer.provenance import (
 
 logger = logging.getLogger(__name__)
 
-# -- Regex for MULTISET injection (duplicated from ddl_deployer --
+# -- Regex for MULTISET injection (duplicated from database_package_deployer --
 # to avoid import dependency at build time)
 
 _HAS_SET_MULTISET_RE = re.compile(
@@ -1301,23 +1301,23 @@ def _copy_waves_file(
 
 def _embed_deployer(pkg_dir: str):
     """
-    Copy the ddl_deployer package into the package's lib/ directory.
+    Copy the database_package_deployer package into the package's lib/ directory.
 
     The deploy.py script adds lib/ to sys.path so the DBA does not
-    need to install ddl_deployer separately.
+    need to install database_package_deployer separately.
 
     Args:
         pkg_dir: Package root directory.
     """
-    # Find ddl_deployer package location
-    import ddl_deployer
+    # Find database_package_deployer package location
+    import database_package_deployer
 
-    deployer_src = os.path.dirname(ddl_deployer.__file__)
+    deployer_src = os.path.dirname(database_package_deployer.__file__)
 
-    dest = os.path.join(pkg_dir, "lib", "ddl_deployer")
+    dest = os.path.join(pkg_dir, "lib", "database_package_deployer")
     shutil.copytree(deployer_src, dest)
 
-    logger.debug("Embedded ddl_deployer from %s", deployer_src)
+    logger.debug("Embedded database_package_deployer from %s", deployer_src)
 
 
 # ---------------------------------------------------------------
@@ -1329,7 +1329,7 @@ def _generate_deploy_script(pkg_dir: str, manifest: BuildManifest):
     """
     Generate deploy.py — the DBA's single entry point.
 
-    This script bootstraps the embedded ddl_deployer, reads the
+    This script bootstraps the embedded database_package_deployer, reads the
     BUILD.json for context, and orchestrates the deployment with
     query banding and logging.
 
@@ -1372,8 +1372,8 @@ from datetime import datetime, timezone
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(SCRIPT_DIR, "lib"))
 
-from ddl_deployer.deployer import deploy_package, explain_package
-from ddl_deployer.wave_parser import parse_waves_file
+from database_package_deployer.deployer import deploy_package, explain_package
+from database_package_deployer.wave_parser import parse_waves_file
 
 # -- Build metadata --
 BUILD_NUMBER = "{manifest.build_number}"

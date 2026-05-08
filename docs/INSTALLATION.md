@@ -1,4 +1,4 @@
-# Installation Guide
+﻿# Installation Guide
 
 ## Prerequisites
 
@@ -50,7 +50,7 @@ pip install -r requirements-dev.txt
 python -m td_release_packager --help
 
 # Check the deployer loads
-python -m ddl_deployer --help
+python -m database_package_deployer --help
 
 # Run the test suite
 python -m pytest src/tests/ -v --tb=short

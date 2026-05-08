@@ -30,7 +30,7 @@ if _REPO_SRC not in sys.path:
 
 from td_release_packager.builder import _copy_payload  # noqa: E402
 from td_release_packager.models import SOURCE_DIR_MAP  # noqa: E402
-from ddl_deployer.provenance import (  # noqa: E402
+from database_package_deployer.provenance import (  # noqa: E402
     STAGE_ORDER,
     Status,
 )
@@ -323,7 +323,7 @@ class TestProvenanceJSONOutput:
         json_path = str(tmp_path / "_provenance.json")
         doc.write(json_path)
 
-        from ddl_deployer.provenance import ProvenanceDocument
+        from database_package_deployer.provenance import ProvenanceDocument
 
         loaded = ProvenanceDocument.load(json_path)
 

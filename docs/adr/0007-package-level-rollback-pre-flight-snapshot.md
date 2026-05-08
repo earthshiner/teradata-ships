@@ -1,4 +1,4 @@
-# ADR 0007: Package-Level Rollback via Pre-Flight Snapshot
+﻿# ADR 0007: Package-Level Rollback via Pre-Flight Snapshot
 
 ## Status
 
@@ -210,12 +210,12 @@ snapshot mechanism is stable.
 
 ## References
 
-- `ddl_deployer/deployer.py` — snapshot capture logic,
+- `database_package_deployer/deployer.py` — snapshot capture logic,
   `--rollback` flag implementation, wave-reverse replay.
-- `ddl_deployer/models.py` — `DeployManifest` schema including
+- `database_package_deployer/models.py` — `DeployManifest` schema including
   `snapshot_ddl` field per object entry.
 - `td_release_packager/builder.py` — SHA-256 sidecar generation.
-- `ddl_deployer/cli.py` — `--rollback` and `--force` flags.
+- `database_package_deployer/cli.py` — `--rollback` and `--force` flags.
 - ADR 0005: Wave ordering for deployment — rollback replays in
   reverse wave order.
 - ADR 0006: Deployer owns idempotency — the pre-flight snapshot

@@ -9,13 +9,13 @@ Commands:
     status     Show the current state of a deployment manifest.
 
 Usage:
-    python -m ddl_deployer deploy /path/to/ddl/ --host myserver --user dbc
-    python -m ddl_deployer deploy /path/to/ddl/ --dry-run
-    python -m ddl_deployer analyze /path/to/project/ --graph /path/to/output/
-    python -m ddl_deployer analyze /path/to/project/ --graph . --formats dot,json
-    python -m ddl_deployer resume /path/to/ddl/.deploy_manifest.json --host myserver
-    python -m ddl_deployer rollback /path/to/ddl/.deploy_manifest.json --host myserver
-    python -m ddl_deployer status /path/to/ddl/.deploy_manifest.json
+    python -m database_package_deployer deploy /path/to/ddl/ --host myserver --user dbc
+    python -m database_package_deployer deploy /path/to/ddl/ --dry-run
+    python -m database_package_deployer analyze /path/to/project/ --graph /path/to/output/
+    python -m database_package_deployer analyze /path/to/project/ --graph . --formats dot,json
+    python -m database_package_deployer resume /path/to/ddl/.deploy_manifest.json --host myserver
+    python -m database_package_deployer rollback /path/to/ddl/.deploy_manifest.json --host myserver
+    python -m database_package_deployer status /path/to/ddl/.deploy_manifest.json
 """
 
 import argparse
@@ -24,8 +24,12 @@ import logging
 import os
 import sys
 
-from ddl_deployer.deployer import deploy_package, resume_package, rollback_package
-from ddl_deployer.models import DeployState
+from database_package_deployer.deployer import (
+    deploy_package,
+    resume_package,
+    rollback_package,
+)
+from database_package_deployer.models import DeployState
 
 # -- Graph format registry (name -> file extension) ---------------
 _GRAPH_FORMATS = {
@@ -570,7 +574,7 @@ def _connect(args):
 def _build_arg_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser."""
     parser = argparse.ArgumentParser(
-        prog="ddl_deployer",
+        prog="database_package_deployer",
         description=(
             "Idempotent Teradata DDL Deployment with "
             "Restartability. Handles tables, join indexes, hash "

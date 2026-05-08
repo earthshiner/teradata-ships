@@ -11,7 +11,7 @@ Covers:
     - PackageDeployResult properties
 """
 
-from ddl_deployer.models import (
+from database_package_deployer.models import (
     ObjectType,
     DeployStrategy,
     DeployState,
@@ -499,7 +499,7 @@ class TestExecuteDdl:
     """
 
     def _run(self, sql: str) -> list[str]:
-        from ddl_deployer.deployer import _execute_ddl
+        from database_package_deployer.deployer import _execute_ddl
 
         cur = _RecordingCursor()
         _execute_ddl(cur, sql)

@@ -22,9 +22,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ddl_deployer.deployer import resume_package
-from ddl_deployer.manifest import DeploymentManifest, MANIFEST_FILENAME
-from ddl_deployer.models import DeployState
+from database_package_deployer.deployer import resume_package
+from database_package_deployer.manifest import DeploymentManifest, MANIFEST_FILENAME
+from database_package_deployer.models import DeployState
 
 
 # ---------------------------------------------------------------
