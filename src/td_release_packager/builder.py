@@ -1434,7 +1434,7 @@ def main():
                 band = (
                     f"BUILD={{BUILD_NUMBER}};PKG={{PACKAGE_NAME}};"
                     f"ENV={{ENVIRONMENT}};PKG_HASH={{pkg_hash[:16]}};"
-                    f"DEPLOYER=ddl_deployer_v2;"
+                    f"DEPLOYER=database_package_deployer_v2;"
                 )
                 cursor.execute(f"SET QUERY_BAND = '{{band}}' FOR SESSION")
                 logger.info("Query band set: %s", band)

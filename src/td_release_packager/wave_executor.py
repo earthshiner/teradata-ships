@@ -110,7 +110,7 @@ class WaveExecutor:
                     f"PKG={self.package_name};"
                     f"ENV={self.environment};"
                     f"STREAM={stream_id};"
-                    f"DEPLOYER=ddl_deployer_v2;"
+                    f"DEPLOYER=database_package_deployer_v2;"
                 )
                 cursor.execute(f"SET QUERY_BAND = '{band}' FOR SESSION")
                 logger.debug("Stream %d: query band set", stream_id)
