@@ -234,6 +234,10 @@ def main():
         _cmd_generate(args)
     elif args.command == "process":
         _cmd_process(args)
+    elif args.command == "explain":
+        _cmd_explain(args)
+    elif args.command == "verify":
+        _cmd_verify(args)
     else:
         parser.print_help()
         sys.exit(1)
@@ -1965,6 +1969,7 @@ def _cmd_process(args):
                 if strict:
                     _print_process_aborted("harvest", strict)
                     sys.exit(1)
+            _maybe_pause("harvest", stage.status, args)
         else:
             print("  [H] Harvest … skipped (no --source provided)")
 
@@ -1979,6 +1984,7 @@ def _cmd_process(args):
                 if strict:
                     _print_process_aborted("generate", strict)
                     sys.exit(1)
+            _maybe_pause("generate", stage.status, args)
         else:
             print("  [G] Generate … skipped (--skip-generate)")
 
@@ -2004,6 +2010,7 @@ def _cmd_process(args):
             if strict:
                 _print_process_aborted("inspect", strict)
                 sys.exit(1)
+        _maybe_pause("inspect", stage.status, args)
 
         # ---- [A] Analyse ----------------------------------------
         print("  [A] Analyse …")
@@ -2021,6 +2028,7 @@ def _cmd_process(args):
             if strict:
                 _print_process_aborted("analyse", strict)
                 sys.exit(1)
+        _maybe_pause("analyse", stage.status, args)
 
         # ---- [P] Package ----------------------------------------
         # Only runs when --env + --env-config + --name are all provided.
@@ -2051,6 +2059,7 @@ def _cmd_process(args):
                     if strict:
                         _print_process_aborted("package", strict)
                         sys.exit(1)
+                _maybe_pause("package", stage.status, args)
                 package_ran = True
             except (FileNotFoundError, ValueError) as e:
                 print(f"\n  ✗ Package failed: {e}", file=sys.stderr)
@@ -2104,6 +2113,360 @@ def _print_process_aborted(stage_name: str, strict: bool) -> None:
         f"errors block continuation).",
         file=sys.stderr,
     )
+
+
+def _maybe_pause(stage_name: str, stage_status: str, args) -> None:
+    """
+    Item 10 — Pause-point UX for the ``process`` meta-verb.
+
+    When ``--pause`` is set and the process is running interactively
+    (not in CI), print a brief stage summary and prompt the operator
+    to decide whether to continue.
+
+    Silently returns if:
+      - ``--pause`` was not passed (default developer-mode behaviour).
+      - Running non-interactively (``CI``, ``SHIPS_CI``, or
+        ``NO_PROMPT`` env var is set, or stdout is not a TTY).
+
+    Prompts:
+      ``[Enter] / y`` — continue to the next stage.
+      ``n``           — abort (sys.exit(1)).
+      ``q``           — quit cleanly (sys.exit(0)).
+
+    Args:
+        stage_name:   Name of the stage that just completed.
+        stage_status: Status string ("success", "warning", "error", …).
+        args:         The parsed process args (checked for ``--pause``).
+    """
+    if not getattr(args, "pause", False):
+        return
+
+    # Suppress in CI / non-interactive environments
+    ci_vars = ("CI", "SHIPS_CI", "NO_PROMPT")
+    if any(os.environ.get(v) for v in ci_vars):
+        return
+    if not sys.stdout.isatty():
+        return
+
+    icon = _STATUS_ICONS.get(stage_status, "?")
+    print(f"\n  ── Pause after {stage_name} [{icon} {stage_status}] ──")
+    try:
+        response = input("  Continue? [Y/n/q] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        sys.exit(0)
+
+    if response in ("n", "no"):
+        print("  Aborted by operator.", file=sys.stderr)
+        sys.exit(1)
+    if response in ("q", "quit"):
+        print("  Quit by operator.")
+        sys.exit(0)
+    # Y, enter, or anything else → continue
+
+
+# ---------------------------------------------------------------
+# explain — human-readable read-only view of decisions.json
+# ---------------------------------------------------------------
+
+#: Status badge colouring for terminal output.
+_STATUS_ICONS = {
+    "success": "✓",
+    "warning": "⚠",
+    "error": "✗",
+    "skipped": "○",
+    "no-op": "–",
+}
+
+
+def _cmd_explain(args):
+    """
+    Item 6a — explain: human-readable report of a prior process run.
+
+    Reads decisions.json without modifying it.  Finds the most recent
+    run (or the run specified by ``--run-id``) and prints a concise
+    report showing: run metadata, per-stage status + key outputs, and
+    a full issues table.  Designed as a pre-promotion checklist — the
+    DBA reads this before promoting from DEV to TST.
+    """
+    from td_release_packager.orchestrator import DECISIONS_FILENAME, DecisionsManifest
+
+    project_dir = args.project
+    if not os.path.isdir(project_dir):
+        print(f"ERROR: Project directory not found: {project_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    manifest_path = os.path.join(project_dir, DECISIONS_FILENAME)
+    if not os.path.exists(manifest_path):
+        print(
+            f"ERROR: No decisions.json found in {project_dir}.\n"
+            "  Run the pipeline first:  ships process --project <dir>",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    manifest = DecisionsManifest(manifest_path)
+    runs = manifest.data.get("runs", [])
+    if not runs:
+        print("  No runs recorded yet.", file=sys.stderr)
+        sys.exit(1)
+
+    # Select run — last run matching --command filter, or --run-id
+    run_id_filter = getattr(args, "run_id", None)
+    cmd_filter = getattr(args, "command_filter", None)
+
+    if run_id_filter:
+        selected = next(
+            (r for r in reversed(runs) if r["run_id"] == run_id_filter), None
+        )
+        if selected is None:
+            print(f"ERROR: Run ID {run_id_filter!r} not found.", file=sys.stderr)
+            sys.exit(1)
+    elif cmd_filter:
+        selected = next(
+            (r for r in reversed(runs) if r.get("command") == cmd_filter), None
+        )
+        if selected is None:
+            print(f"ERROR: No run found with command={cmd_filter!r}.", file=sys.stderr)
+            sys.exit(1)
+    else:
+        selected = runs[-1]
+
+    # ---- Render ------------------------------------------------
+    _print_explain_report(selected, project_dir)
+
+    final = selected.get("final_status", "unknown")
+    sys.exit(0 if final in ("success", "warning") else 1)
+
+
+def _print_explain_report(run: dict, project_dir: str) -> None:
+    """Render one run from decisions.json as a human-readable report."""
+    final = run.get("final_status", "unknown")
+    icon = _STATUS_ICONS.get(final, "?")
+    duration_ms = run.get("duration_ms", 0)
+    duration_s = f"{duration_ms / 1000:.1f}s" if duration_ms else "—"
+
+    print(f"\n{'=' * 64}")
+    print("  SHIPS Explain")
+    print(f"{'=' * 64}")
+    print(f"  Run:      {run.get('run_id', '—')}")
+    print(f"  Command:  {run.get('command', '—')}")
+    print(f"  Status:   {icon} {final.upper()}")
+    print(f"  Started:  {run.get('started_at', '—')}")
+    print(f"  Duration: {duration_s}")
+
+    stages = run.get("stages", [])
+    if stages:
+        print(f"\n  {'Stage':<12} {'Status':<10} {'Dur':>6}  Issues   Key output")
+        print(f"  {'─' * 60}")
+        for s in stages:
+            s_icon = _STATUS_ICONS.get(s.get("status", ""), "?")
+            s_dur_ms = s.get("duration_ms", 0)
+            s_dur = f"{s_dur_ms / 1000:.1f}s" if s_dur_ms else "—"
+            issue_counts = _count_issues(s.get("issues", []))
+            issues_str = _format_issue_counts(issue_counts)
+            key_out = _key_output_line(s)
+            print(
+                f"  {s['stage']:<12} {s_icon} {s.get('status', '?'):<8} "
+                f"{s_dur:>6}  {issues_str:<8} {key_out}"
+            )
+
+    # ---- Issues table ----------------------------------------
+    all_issues = [(s["stage"], i) for s in stages for i in s.get("issues", [])]
+    if all_issues:
+        print(f"\n  {'─' * 64}")
+        print("  Issues:")
+        for stage_name, issue in all_issues:
+            sev = issue.get("severity", "?")
+            sev_icon = {"error": "✗", "warning": "⚠", "info": "ℹ"}.get(sev, "?")
+            code = issue.get("code", "?")
+            msg = issue.get("message", "")
+            loc = issue.get("location", "")
+            loc_str = f" [{loc}]" if loc else ""
+            print(f"    {sev_icon} [{stage_name}] {code}{loc_str}")
+            # Wrap long messages
+            for line in _wrap(msg, 56, "      "):
+                print(line)
+    else:
+        print("\n  ✓ No issues recorded.")
+
+    print(f"\n{'=' * 64}\n")
+
+
+def _count_issues(issues: list) -> dict:
+    counts: dict = {}
+    for i in issues:
+        sev = i.get("severity", "?")
+        counts[sev] = counts.get(sev, 0) + 1
+    return counts
+
+
+def _format_issue_counts(counts: dict) -> str:
+    parts = []
+    for sev, icon in [("error", "✗"), ("warning", "⚠"), ("info", "ℹ")]:
+        if counts.get(sev, 0):
+            parts.append(f"{icon}{counts[sev]}")
+    return " ".join(parts) if parts else "—"
+
+
+def _key_output_line(stage: dict) -> str:
+    """Return a short summary of the most interesting output for a stage."""
+    name = stage.get("stage", "")
+    out = stage.get("outputs", {})
+    if name == "harvest":
+        return f"{out.get('classified', '?')} classified, {out.get('unclassified', 0)} unclassified"
+    if name == "generate":
+        lv = out.get("locking_views_written", 0)
+        bv = out.get("business_views_rewritten", 0)
+        return f"{lv} locking views, {bv} business views"
+    if name == "inspect":
+        return ""
+    if name == "analyse":
+        return (
+            f"{out.get('object_count', '?')} objects, "
+            f"{out.get('wave_count', '?')} waves, "
+            f"{out.get('cycle_count', 0)} cycles"
+        )
+    if name == "package":
+        arch = out.get("archive_path", "")
+        return os.path.basename(arch) if arch else ""
+    return ""
+
+
+def _wrap(text: str, width: int, indent: str) -> list:
+    words = text.split()
+    lines = []
+    current = indent
+    for w in words:
+        if len(current) + len(w) + 1 > width:
+            lines.append(current.rstrip())
+            current = indent + w + " "
+        else:
+            current += w + " "
+    if current.strip():
+        lines.append(current.rstrip())
+    return lines
+
+
+# ---------------------------------------------------------------
+# verify — pre-deploy sanity check against decisions.json
+# ---------------------------------------------------------------
+
+
+def _cmd_verify(args):
+    """
+    Item 6b — verify: pre-deploy sanity check from decisions.json.
+
+    Reads decisions.json and finds the most recent package stage.
+    Checks: the archive file still exists on disk, no PACKAGE_WARNING
+    issues were recorded, and the build looks complete.  Intended as
+    the final gate before an operator runs ``deploy``.
+    """
+    from td_release_packager.orchestrator import DECISIONS_FILENAME, DecisionsManifest
+
+    project_dir = args.project
+    if not os.path.isdir(project_dir):
+        print(f"ERROR: Project directory not found: {project_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    manifest_path = os.path.join(project_dir, DECISIONS_FILENAME)
+    if not os.path.exists(manifest_path):
+        print(
+            f"ERROR: No decisions.json found in {project_dir}.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    manifest = DecisionsManifest(manifest_path)
+    runs = manifest.data.get("runs", [])
+
+    # Find the last stage named "package" across all runs
+    pkg_stage = None
+    pkg_run = None
+    for run in reversed(runs):
+        for stage in reversed(run.get("stages", [])):
+            if stage.get("stage") == "package":
+                pkg_stage = stage
+                pkg_run = run
+                break
+        if pkg_stage:
+            break
+
+    if pkg_stage is None:
+        print(
+            "  No package stage found in decisions.json.\n"
+            "  Run the pipeline with packaging enabled:\n"
+            "    ships process ... --env DEV --env-config ... --name ...",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    out = pkg_stage.get("outputs", {})
+    issues = pkg_stage.get("issues", [])
+    archive_path = out.get("archive_path", "")
+    archive_exists = bool(archive_path) and os.path.exists(archive_path)
+
+    warnings = [i for i in issues if i.get("severity") in ("warning", "error")]
+
+    # ---- Checklist -----------------------------------------------
+    print(f"\n{'=' * 64}")
+    print("  SHIPS Verify — Package Readiness")
+    print(f"{'=' * 64}")
+    print(f"  Run:         {pkg_run.get('run_id', '—')}")
+    print(f"  Archive:     {archive_path or '—'}")
+    print(f"  Environment: {out.get('environment', '—')}")
+    print(f"  Build:       {out.get('build_number', '—')}")
+    print(f"  Files:       {out.get('file_count', '—')}")
+    print(f"  Tokens:      {out.get('token_count', '—')} substitutions")
+
+    print(f"\n  Checklist:")
+    checks = []
+
+    # 1. Archive exists
+    if archive_exists:
+        print(f"    ✓ Archive exists on disk")
+        checks.append(True)
+    else:
+        print(f"    ✗ Archive NOT found: {archive_path}")
+        checks.append(False)
+
+    # 2. No errors / warnings in package stage
+    if not warnings:
+        print(f"    ✓ No package issues recorded")
+        checks.append(True)
+    else:
+        for i in warnings:
+            sev_icon = "✗" if i.get("severity") == "error" else "⚠"
+            print(f"    {sev_icon} {i.get('code', '?')}: {i.get('message', '')}")
+        checks.append(False)
+
+    # 3. Package stage status
+    pkg_status = pkg_stage.get("status", "unknown")
+    if pkg_status == "success":
+        print(f"    ✓ Package stage status: success")
+        checks.append(True)
+    else:
+        print(f"    ✗ Package stage status: {pkg_status}")
+        checks.append(False)
+
+    # 4. Companion (prereqs) awareness
+    if out.get("has_companion"):
+        companion = out.get("companion_archive_path", "")
+        companion_exists = bool(companion) and os.path.exists(companion)
+        if companion_exists:
+            print(f"    ✓ Companion (prereqs) archive exists")
+        else:
+            print(f"    ✗ Companion archive NOT found: {companion}")
+            checks.append(False)
+
+    ready = all(checks)
+    verdict = "READY" if ready else "NOT READY"
+    verdict_icon = "✓" if ready else "✗"
+
+    print(f"\n  {verdict_icon} Verdict: {verdict}")
+    print(f"{'=' * 64}\n")
+
+    sys.exit(0 if ready else 1)
 
 
 def _cmd_generate(args):
@@ -3072,6 +3435,61 @@ def _build_parser():
         help="Platform mode: abort the pipeline on the first stage that "
         "finishes with errors. Without --strict, all stages run and "
         "errors are summarised at the end.",
+    )
+    pr.add_argument(
+        "--pause",
+        action="store_true",
+        help="Pause after each stage and prompt before continuing. "
+        "Useful for supervised runs where you want to inspect output "
+        "before proceeding. Suppressed automatically in CI environments "
+        "(CI, SHIPS_CI, NO_PROMPT env vars) or when stdout is not a TTY.",
+    )
+
+    # -- explain --
+    ex = subs.add_parser(
+        "explain",
+        help="[E] Explain — human-readable report of a prior pipeline run.",
+        description="Read decisions.json and render a concise report of the "
+        "most recent (or specified) run: stage statuses, key outputs, "
+        "and full issues table. Use before promoting to the next environment.",
+    )
+    ex.add_argument(
+        "--project",
+        required=True,
+        help="SHIPS project directory containing decisions.json.",
+    )
+    ex.add_argument(
+        "--run-id",
+        default=None,
+        dest="run_id",
+        help="Report a specific run by ID. Defaults to the last run.",
+    )
+    ex.add_argument(
+        "--command",
+        default=None,
+        dest="command_filter",
+        help="Filter by command name (e.g. 'process', 'harvest'). "
+        "Selects the last run of that type.",
+    )
+
+    # -- verify --
+    vr = subs.add_parser(
+        "verify",
+        help="[V] Verify — pre-deploy package readiness check.",
+        description="Read decisions.json, locate the most recent package stage, "
+        "and confirm the archive exists on disk and the build was clean. "
+        "Exit code 0 = READY, 1 = NOT READY.",
+    )
+    vr.add_argument(
+        "--project",
+        required=True,
+        help="SHIPS project directory containing decisions.json.",
+    )
+    vr.add_argument(
+        "--run-id",
+        default=None,
+        dest="run_id",
+        help="Locate the package stage in a specific run.",
     )
 
     return parser
