@@ -489,23 +489,42 @@ def format_env_config_file(env: str, result: DecompositionResult) -> str:
         seen_tokens[d.token_name] = d
         section_2_lines.append(f"{d.token_name}={d.cascade_form()}")
 
-    # Section 8 (outliers) — only emit if there are any
+    # Section 8 (outliers) — only emit if there are any.
+    # Outliers are flat legacy names that don't fit the SHIPS grammar.
+    # The kind-aware harvester emits {{LITERAL_T}}, {{LITERAL_V}} etc.
+    # for each, so this section enumerates the required per-kind entries
+    # rather than a single monolithic placeholder.
     final_title = None
     final_purpose = None
     final_content = None
     if result.outliers:
+        from td_release_packager.kind_suffix import TYPE_TO_KIND
+
+        # Standard kinds emitted for outlier databases: _T (tables) and
+        # _V (views).  These are the two mandatory kinds in a SHIPS
+        # topology.  Operators who also route procedures, macros, or
+        # functions to separate databases should add _M / _P / _F entries
+        # manually (or extend via token_map.conf structured sections in
+        # Phase 4).
+        _OUTLIER_KINDS = ("T", "V")
+
         final_title = "Outliers"
         final_purpose = [
             "Names that did not match the SHIPS naming grammar.",
-            "Review each entry: if the name should fit the grammar,",
-            "rename it in source. If it's legitimately ad-hoc",
-            "(e.g. an external user or legacy database) keep the",
-            "literal value here, ideally moved into section 3 if",
-            "user-shaped or section 1/2 if database-shaped.",
+            "Each outlier emits per-kind token entries (_T for tables,",
+            "_V for views) matching what the kind-aware harvester writes",
+            "into payload files.  Set each to the resolved database name",
+            "for that kind in this environment.",
+            "Example: MortgagePlatform_Domain_T=PDE_DEV_00_DOM_0_T",
+            "         MortgagePlatform_Domain_V=PDE_DEV_00_DOM_0_V",
         ]
-        final_content = "\n".join(
-            f"{_safe_token_name_for_outlier(o)}={o}" for o in result.outliers
-        )
+        outlier_lines: List[str] = []
+        for o in result.outliers:
+            outlier_lines.append(f"# {o}")
+            for k in _OUTLIER_KINDS:
+                outlier_lines.append(f"{o}_{k}=")
+            outlier_lines.append("")
+        final_content = "\n".join(outlier_lines).rstrip()
 
     return render_scaffold(
         env=env,

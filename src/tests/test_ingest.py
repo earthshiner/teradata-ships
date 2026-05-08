@@ -1591,3 +1591,192 @@ class TestIngestDirectory:
         assert (prereq_db_dir / "_order.txt").read_text(
             encoding="utf-8"
         ) == "a.db\nb.db\n"
+
+
+# ---------------------------------------------------------------
+# Kind-aware token substitution
+# ---------------------------------------------------------------
+
+
+class TestKindAwareTokenSubstitution:
+    """Integration tests for kind-aware {{TOKEN_T}} / {{TOKEN_V}} emission.
+
+    Each test writes source files into a temp directory, runs
+    ``ingest_directory`` with an ``apply_tokens`` map, then reads the
+    harvested payload to verify that kind-specific tokens were emitted
+    correctly.
+    """
+
+    def test_owner_clause_uses_file_kind_T(self, tmp_path, tmp_project):
+        """A .tbl file's CREATE TABLE owner reference becomes {{TOKEN_T}}."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "LegacyDB.my_table.tbl").write_text(
+            "CREATE MULTISET TABLE LegacyDB.my_table (id INTEGER);",
+            encoding="utf-8",
+        )
+        result = ingest_directory(
+            str(src),
+            str(tmp_project),
+            detect_tokens=False,
+            apply_tokens={"LegacyDB": "{{LegacyDB}}"},
+        )
+        assert result.classified == 1
+        harvested = list((tmp_project / "payload").rglob("*.tbl"))
+        assert harvested, "no .tbl file placed"
+        content = harvested[0].read_text(encoding="utf-8")
+        assert "{{LegacyDB_T}}" in content, f"Expected {{{{LegacyDB_T}}}} in: {content}"
+        assert "LegacyDB" not in content.replace("{{LegacyDB_T}}", ""), (
+            "raw literal must be fully replaced"
+        )
+
+    def test_owner_clause_uses_file_kind_V(self, tmp_path, tmp_project):
+        """A .viw file's REPLACE VIEW owner reference becomes {{TOKEN_V}}."""
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "LegacyDB.v_loans.viw").write_text(
+            "REPLACE VIEW LegacyDB.v_loans AS SELECT 1 AS x;",
+            encoding="utf-8",
+        )
+        result = ingest_directory(
+            str(src),
+            str(tmp_project),
+            detect_tokens=False,
+            apply_tokens={"LegacyDB": "{{LegacyDB}}"},
+        )
+        assert result.classified == 1
+        harvested = list((tmp_project / "payload").rglob("*.viw"))
+        assert harvested, "no .viw file placed"
+        content = harvested[0].read_text(encoding="utf-8")
+        assert "{{LegacyDB_V}}" in content, f"Expected {{{{LegacyDB_V}}}} in: {content}"
+
+    def test_cross_reference_resolved_from_kind_index(self, tmp_path, tmp_project):
+        """A view body FROM clause referencing a table gets {{TOKEN_T}},
+        even though the view file itself is kind V.
+
+        Layer B cross-reference resolution: the kind index maps
+        LegacyDB.my_table → T (from the .tbl source), so the FROM
+        clause in the view gets {{LegacyDB_T}} while the view's own
+        owner clause gets {{LegacyDB_V}}.
+        """
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "LegacyDB.my_table.tbl").write_text(
+            "CREATE MULTISET TABLE LegacyDB.my_table (id INTEGER);",
+            encoding="utf-8",
+        )
+        (src / "LegacyDB.v_loans.viw").write_text(
+            "REPLACE VIEW LegacyDB.v_loans AS\nSELECT id FROM LegacyDB.my_table;",
+            encoding="utf-8",
+        )
+        result = ingest_directory(
+            str(src),
+            str(tmp_project),
+            detect_tokens=False,
+            apply_tokens={"LegacyDB": "{{LegacyDB}}"},
+        )
+        assert result.classified == 2
+
+        # The view file should have _V for its own owner and _T for the cross-ref
+        views = list((tmp_project / "payload").rglob("*.viw"))
+        assert views, "no .viw file placed"
+        view_content = views[0].read_text(encoding="utf-8")
+
+        assert "{{LegacyDB_V}}.v_loans" in view_content, (
+            f"View owner should be {{{{LegacyDB_V}}}}: {view_content}"
+        )
+        assert "{{LegacyDB_T}}.my_table" in view_content, (
+            f"Cross-ref to table should be {{{{LegacyDB_T}}}}: {view_content}"
+        )
+
+    def test_external_reference_defaults_to_V(self, tmp_path, tmp_project):
+        """A qualified reference to an object NOT in the package defaults to _V.
+
+        Per the design: downstream consumers in a SHIPS topology query
+        the view layer, so unresolvable external references default to _V.
+        """
+        src = tmp_path / "src"
+        src.mkdir()
+        # Only define the view — ExternalDB is external (not in package)
+        (src / "LegacyDB.v_joined.viw").write_text(
+            "REPLACE VIEW LegacyDB.v_joined AS\n"
+            "SELECT a.id FROM ExternalDB.some_view a;",
+            encoding="utf-8",
+        )
+        result = ingest_directory(
+            str(src),
+            str(tmp_project),
+            detect_tokens=False,
+            apply_tokens={
+                "LegacyDB": "{{LegacyDB}}",
+                "ExternalDB": "{{ExternalDB}}",
+            },
+        )
+        assert result.classified == 1
+        views = list((tmp_project / "payload").rglob("*.viw"))
+        content = views[0].read_text(encoding="utf-8")
+
+        # External ref: not in kind_index → defaults to EXTERNAL_KIND_DEFAULT = V
+        assert "{{ExternalDB_V}}.some_view" in content, (
+            f"External ref should default to _V: {content}"
+        )
+
+    def test_already_kind_suffixed_literal_not_double_suffixed(
+        self, tmp_path, tmp_project
+    ):
+        """A literal DB name that already ends with _V is applied as-is.
+
+        Backward compatibility: token maps written before kind-aware
+        tokenisation used kind-suffixed DB names directly (e.g.
+        MortgagePlatform_Domain_V). These must not be double-suffixed
+        to {{TOKEN_V_V}}.
+        """
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "Dom_V.v_loans.viw").write_text(
+            "REPLACE VIEW Dom_V.v_loans AS SELECT 1 AS x;",
+            encoding="utf-8",
+        )
+        result = ingest_directory(
+            str(src),
+            str(tmp_project),
+            detect_tokens=False,
+            apply_tokens={"Dom_V": "{{Dom_V}}"},
+        )
+        harvested = list((tmp_project / "payload").rglob("*.viw"))
+        content = harvested[0].read_text(encoding="utf-8")
+
+        # Should be plain {{Dom_V}} — no additional suffix
+        assert "{{Dom_V}}" in content, f"Expected plain {{{{Dom_V}}}} in: {content}"
+        assert "{{Dom_V_V}}" not in content, "double suffix must not appear"
+
+    def test_already_kind_encoded_token_not_double_suffixed(
+        self, tmp_path, tmp_project
+    ):
+        """A token whose name already ends with a kind suffix is applied as-is.
+
+        When the operator writes ``Dom={{DOM_DATABASE_T}}`` in token_map.conf,
+        the base token is ``DOM_DATABASE_T``. Appending another suffix would
+        produce ``{{DOM_DATABASE_T_V}}`` — wrong. The guard on the base token
+        name prevents this.
+        """
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "Dom.v_loans.viw").write_text(
+            "REPLACE VIEW Dom.v_loans AS SELECT 1 AS x;",
+            encoding="utf-8",
+        )
+        result = ingest_directory(
+            str(src),
+            str(tmp_project),
+            detect_tokens=False,
+            apply_tokens={"Dom": "{{DOM_DATABASE_T}}"},
+        )
+        harvested = list((tmp_project / "payload").rglob("*.viw"))
+        content = harvested[0].read_text(encoding="utf-8")
+
+        # Token already encodes kind — apply as-is
+        assert "{{DOM_DATABASE_T}}" in content, (
+            f"Pre-encoded token should be preserved: {content}"
+        )
+        assert "{{DOM_DATABASE_T_V}}" not in content, "double suffix must not appear"
