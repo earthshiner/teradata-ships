@@ -1,5 +1,5 @@
 """
-ddl_deployer — Idempotent Teradata DDL Deployment with Restartability
+database_package_deployer — Idempotent Teradata DDL Deployment with Restartability
 =====================================================================
 
 Deploys all Teradata DDL object types idempotently via
@@ -26,7 +26,7 @@ Runs as a standalone CLI or as an MCP Server tool.
 
 __version__ = "2.0.0"
 
-from ddl_deployer.models import (
+from database_package_deployer.models import (
     ObjectType,
     DeployStrategy,
     DeployState,
@@ -34,11 +34,11 @@ from ddl_deployer.models import (
     CompatibilityResult,
     PreflightCheck,
     PreflightResult,
-    ParsedDDL,
+    ParsedStatement,
     ObjectDeployResult,
     PackageDeployResult,
 )
-from ddl_deployer.deployer import (
+from database_package_deployer.deployer import (
     deploy_single,
     deploy_package,
     resume_package,
@@ -54,7 +54,7 @@ __all__ = [
     "CompatibilityResult",
     "PreflightCheck",
     "PreflightResult",
-    "ParsedDDL",
+    "ParsedStatement",
     "ObjectDeployResult",
     "PackageDeployResult",
     # deployer

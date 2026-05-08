@@ -1,4 +1,4 @@
-# ADR 0009: Configurable `deploy_intent` Rule with Audit Waiver
+﻿# ADR 0009: Configurable `deploy_intent` Rule with Audit Waiver
 
 ## Status
 
@@ -213,7 +213,7 @@ the enforcement.
   function that implements the rule.
 - `td_release_packager/ships_yaml.py` — the schema for `ships.yaml`
   that gains the new `discipline:` section.
-- `ddl_deployer/deployer.py` — `_deploy_replace_in_place` and
+- `database_package_deployer/deployer.py` — `_deploy_replace_in_place` and
   `_deploy_drop_and_create` implement the existing two-path dispatch;
   `_detect_deploy_intent` in `ddl_parser.py` selects the path from
   the DDL verb.

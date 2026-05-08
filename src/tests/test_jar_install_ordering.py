@@ -17,18 +17,18 @@ Three orthogonal pieces are exercised:
 
 The first two are tiny constant-shape assertions. The third is a
 behavioural test on the preflight helper using small fabricated
-``ParsedDDL`` instances (no live database needed).
+``ParsedStatement`` instances (no live database needed).
 """
 
 from __future__ import annotations
 
-from ddl_deployer.deployer import deploy_package  # noqa: F401 (import sanity)
-from ddl_deployer.models import (
+from database_package_deployer.deployer import deploy_package  # noqa: F401 (import sanity)
+from database_package_deployer.models import (
     DeployStrategy,
     ObjectType,
-    ParsedDDL,
+    ParsedStatement,
 )
-from ddl_deployer.preflight import (
+from database_package_deployer.preflight import (
     _check_jar_alias_coverage,
     _extract_installed_aliases,
     _extract_referenced_aliases,
@@ -86,11 +86,11 @@ class TestDefaultFilePatternsIncludeSjr:
 # ---------------------------------------------------------------
 
 
-def _make_jar_install(alias: str, *, jar_path: str = "lib/foo.jar") -> ParsedDDL:
-    """Build a minimal ParsedDDL of type JAR carrying a CALL
+def _make_jar_install(alias: str, *, jar_path: str = "lib/foo.jar") -> ParsedStatement:
+    """Build a minimal ParsedStatement of type JAR carrying a CALL
     SQLJ.INSTALL_JAR statement with the given alias."""
     text = f"CALL SQLJ.INSTALL_JAR('CJ!{jar_path}', '{alias}', 0);"
-    return ParsedDDL(
+    return ParsedStatement(
         file_path=f"{alias}.sjr",
         ddl_text=text,
         original_text=text,
@@ -102,8 +102,8 @@ def _make_jar_install(alias: str, *, jar_path: str = "lib/foo.jar") -> ParsedDDL
     )
 
 
-def _make_java_procedure(db: str, name: str, *, alias: str) -> ParsedDDL:
-    """Build a minimal ParsedDDL of type PROCEDURE referencing a JAR
+def _make_java_procedure(db: str, name: str, *, alias: str) -> ParsedStatement:
+    """Build a minimal ParsedStatement of type PROCEDURE referencing a JAR
     alias via EXTERNAL NAME inside a LANGUAGE JAVA body."""
     text = (
         f"CREATE PROCEDURE {db}.{name} ()\n"
@@ -111,7 +111,7 @@ def _make_java_procedure(db: str, name: str, *, alias: str) -> ParsedDDL:
         f"EXTERNAL NAME '{alias}:com.example.{name}.run'\n"
         f"PARAMETER STYLE JAVA;\n"
     )
-    return ParsedDDL(
+    return ParsedStatement(
         file_path=f"{db}.{name}.spl",
         ddl_text=text,
         original_text=text,
@@ -123,10 +123,10 @@ def _make_java_procedure(db: str, name: str, *, alias: str) -> ParsedDDL:
     )
 
 
-def _make_spl_procedure(db: str, name: str) -> ParsedDDL:
+def _make_spl_procedure(db: str, name: str) -> ParsedStatement:
     """A regular SPL procedure (no LANGUAGE JAVA, no JAR ref)."""
     text = f"CREATE PROCEDURE {db}.{name} ()\nBEGIN\n    SET v = 1;\nEND;\n"
-    return ParsedDDL(
+    return ParsedStatement(
         file_path=f"{db}.{name}.spl",
         ddl_text=text,
         original_text=text,
@@ -157,7 +157,7 @@ class TestExtractInstalledAliases:
 
     def test_replace_jar_also_collected(self):
         text = "CALL SQLJ.REPLACE_JAR('CJ!lib/foo.jar', 'ReplacedAlias');"
-        parsed = ParsedDDL(
+        parsed = ParsedStatement(
             file_path="ReplacedAlias.sjr",
             ddl_text=text,
             original_text=text,

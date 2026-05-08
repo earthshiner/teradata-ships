@@ -1,4 +1,4 @@
-# ADR 0012: Package Trust Score Design
+﻿# ADR 0012: Package Trust Score Design
 
 ## Status
 
@@ -205,7 +205,7 @@ Score.
   and embedding in `manifest.json`.
 - `td_release_packager/validate.py` — source of the Discipline
   violation data that feeds the Quality and Safety dimensions.
-- `ddl_deployer/report.py` — Trust Score gauge rendering in
+- `database_package_deployer/report.py` — Trust Score gauge rendering in
   the deploy report HTML.
 - ADR 0002: SHIPS pipeline phase structure — Trust Score is
   computed during the Package phase (phase 4).

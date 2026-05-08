@@ -18,7 +18,7 @@ which bundle CREATE + DROP privileges per object type.
 Usage:
     From deployer.py, call after preflight completes:
 
-        from ddl_deployer.privilege_check import check_deployer_privileges
+        from database_package_deployer.privilege_check import check_deployer_privileges
 
         priv_result = check_deployer_privileges(
             cursor=cursor,
@@ -141,7 +141,7 @@ def check_deployer_privileges(
 
     Args:
         cursor:             Active Teradata cursor.
-        parsed_ddls:        List of ParsedDDL objects from preflight.
+        parsed_ddls:        List of ParsedStatement objects from preflight.
         created_databases:  Set of database names being created by
                             this package (automatic creator rights —
                             no check needed).
@@ -285,10 +285,10 @@ def generate_full_prerequisite_script(
     databases in the package, without checking existing rights.
 
     Useful as a standalone CLI command:
-        python -m ddl_deployer prerequisites --source <package>
+        python -m database_package_deployer prerequisites --source <package>
 
     Args:
-        parsed_ddls:    List of ParsedDDL objects.
+        parsed_ddls:    List of ParsedStatement objects.
         user:           Target user for the GRANT statements.
         package_name:   Package name for the header.
         environment:    Environment name for the header.

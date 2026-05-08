@@ -19,7 +19,7 @@ All generated SQL follows Teradata Engineering Discipline:
 import logging
 from typing import List
 
-from ddl_deployer.models import ColumnInfo, CompatibilityResult
+from database_package_deployer.models import ColumnInfo, CompatibilityResult
 
 logger = logging.getLogger(__name__)
 

@@ -81,7 +81,7 @@ On successful verification the `package_hash` is carried into every
 Teradata session query band as `PKG_HASH=<first 16 hex chars>`:
 
 ```
-BUILD=0002;PKG=MortgagePlatform_SHIPS;ENV=DEV;PKG_HASH=a3f8c2d1e9b74056;DEPLOYER=ddl_deployer_v2;
+BUILD=0002;PKG=MortgagePlatform_SHIPS;ENV=DEV;PKG_HASH=a3f8c2d1e9b74056;DEPLOYER=database_package_deployer_v2;
 ```
 
 This makes the fingerprint a permanent part of the DBQL audit record for
