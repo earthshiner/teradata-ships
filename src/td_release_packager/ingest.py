@@ -400,6 +400,14 @@ def ingest_directory(
     result.total_files = len(source_files)
     logger.info("Found %d files in %s", len(source_files), source_dir)
 
+    # -- Pre-scan: build object kind index for kind-aware tokenisation --
+    # When apply_tokens is supplied, scan all source files first to build
+    # a {db.obj → kind} index.  The main loop uses this index to emit
+    # {{TOKEN_T}} vs {{TOKEN_V}} per reference rather than a monolithic token.
+    kind_index: Optional[Dict[str, str]] = None
+    if apply_tokens:
+        kind_index = _build_source_kind_index(source_files)
+
     # -- Track all database names seen (for token detection) --
     all_db_names: Dict[str, List[str]] = defaultdict(list)
 
@@ -478,6 +486,7 @@ def ingest_directory(
                     project_dir=project_dir,
                     payload_base=payload_base,
                     apply_tokens=apply_tokens,
+                    kind_index=kind_index,
                     dml_targets=dml_targets,
                     result=result,
                 )
@@ -541,19 +550,19 @@ def ingest_directory(
                 # will inform them of the implications.
 
                 # -- Apply token substitutions if provided --
-                # Use word-boundary regex rather than naive substring
-                # replacement: a plain str.replace('DBC', '{{DBC_DATABASE}}')
-                # also matches the 'DBC' that's INSIDE an existing
-                # '{{DBC_DATABASE}}' token, corrupting it into
-                # '{{{{DBC_DATABASE}}_DATABASE}}'. Word boundaries
-                # (\b) treat the surrounding braces and digits as
-                # non-word characters but underscores as word chars,
-                # so '\bDBC\b' won't match inside '_DATABASE' or
-                # '{{DBC_DATABASE}}' — only standalone 'DBC' tokens.
+                # Kind-aware path: emit {{TOKEN_T}} for table contexts,
+                # {{TOKEN_V}} for view contexts, etc. based on a pre-built
+                # package-wide object index and this file's classified type.
+                # Substitution is position-aware (uses a scratch copy with
+                # comments and string literals blanked) so semicolons, dots,
+                # or identifiers inside literals never confuse the rewriter.
                 if apply_tokens:
-                    for literal, token in apply_tokens.items():
-                        pattern = r"\b" + re.escape(literal) + r"\b"
-                        content = re.sub(pattern, token, content)
+                    from td_release_packager.kind_suffix import TYPE_TO_KIND
+
+                    file_kind = TYPE_TO_KIND.get(obj_type, "T")
+                    content = _apply_kind_aware_tokens(
+                        content, file_kind, apply_tokens, kind_index or {}
+                    )
 
                     # Defense in depth: if substitution produced any
                     # malformed {{...}} markers (orphan braces, double-
@@ -897,6 +906,7 @@ def _place_multi_table_dml(
     project_dir: str,
     payload_base: str,
     apply_tokens: Optional[Dict[str, str]],
+    kind_index: Optional[Dict[str, str]],
     dml_targets: Set[Tuple[Optional[str], Optional[str]]],
     result: "IngestResult",
 ) -> None:
@@ -934,10 +944,8 @@ def _place_multi_table_dml(
     content = _strip_leading_chunk_comments(raw_content)
 
     if apply_tokens:
-        for literal, token in apply_tokens.items():
-            pattern = r"\b" + re.escape(literal) + r"\b"
-            content = re.sub(pattern, token, content)
-
+        # Multi-table DML targets are always tables (_T kind).
+        content = _apply_kind_aware_tokens(content, "T", apply_tokens, kind_index or {})
         bad = find_malformed_tokens(content)
         if bad:
             result.warnings.append(
@@ -1751,3 +1759,185 @@ def _build_token_candidates(
         candidates[db_name] = files
 
     return candidates
+
+
+# ---------------------------------------------------------------
+# Kind-aware token substitution (Phase 1 + 2)
+# ---------------------------------------------------------------
+
+
+def _build_source_kind_index(source_files: List[str]) -> Dict[str, str]:
+    """Build a ``"db.obj" → kind_suffix`` index from a list of source files.
+
+    Called before the main ingest loop so that cross-reference rewrites
+    in Layer B know the kind of every object defined in the source set.
+
+    Multi-statement files are split; each statement contributes its
+    (db, obj, kind) independently.  Classification errors in individual
+    statements are silently skipped — unresolvable references will fall
+    back to ``EXTERNAL_KIND_DEFAULT`` at substitution time.
+
+    Args:
+        source_files: Paths to the raw source files to pre-scan.
+
+    Returns:
+        Dict mapping lowercased ``"db.obj"`` keys to kind-suffix letters.
+    """
+    from td_release_packager.classifier import classify, base_type
+    from td_release_packager.kind_suffix import TYPE_TO_KIND
+
+    kind_index: Dict[str, str] = {}
+
+    for src_path in source_files:
+        content = _read_file(src_path)
+        if content is None:
+            continue
+        try:
+            statements = _split_multi_statement(content, src_path)
+        except Exception:
+            statements = [content]
+
+        for stmt in statements:
+            clean = _strip_comments(stmt)
+            try:
+                cls = classify(path=src_path, content=clean)
+                bt = base_type(cls.type)
+                kind = TYPE_TO_KIND.get(bt)
+                if kind is None:
+                    continue
+                db_name, obj_name = _extract_qualified_name(clean)
+                if db_name and obj_name:
+                    key = f"{db_name.lower()}.{obj_name.lower()}"
+                    kind_index[key] = kind
+            except Exception:
+                pass  # classification errors handled in main loop
+
+    return kind_index
+
+
+def _apply_kind_aware_tokens(
+    content: str,
+    file_kind: str,
+    apply_tokens: Dict[str, str],
+    kind_index: Dict[str, str],
+) -> str:
+    """Apply kind-aware token substitution to DDL content.
+
+    Replaces each literal database name with a kind-specific token:
+    ``{{TOKEN_T}}`` when the qualified reference resolves to a table
+    context, ``{{TOKEN_V}}`` for a view context, etc.
+
+    Layer A (owner clause): the containing file's *file_kind* is used
+    for bare DB references that are not followed by a ``.ObjectName``.
+
+    Layer B (cross-references): ``DB.ObjectName`` pairs are looked up in
+    *kind_index*.  If the pair is missing (external reference), the
+    ``EXTERNAL_KIND_DEFAULT`` (``'V'``) is used.
+
+    All matching is done against a scratch copy with SQL comments and
+    string literals blanked so that semicolons, dots, and identifiers
+    inside literals or comments are never mistaken for SQL structure.
+    Existing ``{{TOKEN}}`` markers in the content are also blanked in
+    the scratch copy so re-running harvest does not double-tokenise.
+
+    Replacements are collected as ``(start, end, new_text)`` tuples and
+    applied in reverse position order so earlier positions remain valid
+    after each substitution (length changes after each replacement).
+
+    Args:
+        content:      Raw DDL text to rewrite.
+        file_kind:    Kind suffix for this file's owner clause (``'T'``,
+                      ``'V'``, etc.).  Derived from the classified type.
+        apply_tokens: Dict of ``{literal_db_name: "{{BASE_TOKEN}}"}``
+                      as produced by ``token_engine.read_token_map()``.
+        kind_index:   Dict of ``{"db.obj" (lowercased): kind_suffix}``
+                      as produced by ``_build_source_kind_index()``.
+
+    Returns:
+        Rewritten content with kind-suffixed tokens in place of literals.
+    """
+    from td_release_packager.sql_text import strip_comments_and_string_literals
+    from td_release_packager.kind_suffix import (
+        EXTERNAL_KIND_DEFAULT,
+        SYSTEM_DATABASES,
+        has_kind_suffix,
+    )
+
+    # Build a scratch copy with comments, string literals, and existing
+    # {{TOKEN}} markers blanked so only real SQL structure is visible.
+    scratch = strip_comments_and_string_literals(content)
+    # Blank existing {{TOKEN}} markers (position-preserving) so a
+    # second harvest run doesn't double-tokenise already-rewritten text.
+    scratch = re.sub(
+        r"\{\{[A-Za-z_][A-Za-z0-9_-]*\}\}",
+        lambda m: " " * len(m.group()),
+        scratch,
+    )
+
+    replacements: List[tuple] = []
+
+    for literal, token_with_braces in apply_tokens.items():
+        # Extract base token name: "{{MortgagePlatform_Domain}}" → "MortgagePlatform_Domain"
+        base_token = token_with_braces.strip("{}")
+
+        # ---- Compatibility / fall-through guards ----
+        # If the literal is a system DB (DBC, SYSLIB, etc.), or if the
+        # literal or base token already carry a kind suffix (_T, _V, etc.),
+        # use plain word-boundary substitution — adding a second kind suffix
+        # would produce double-encoded tokens ({{SEM_DATABASE_V_V}}).
+        # This preserves full backward compatibility with token_map.conf
+        # files that were written before kind-aware tokenisation.
+        if (
+            literal.upper() in SYSTEM_DATABASES
+            or has_kind_suffix(literal)
+            or has_kind_suffix(base_token)
+        ):
+            plain_re = re.compile(r"\b" + re.escape(literal) + r"\b", re.IGNORECASE)
+            for m in plain_re.finditer(scratch):
+                replacements.append((m.start(), m.end(), token_with_braces))
+            continue
+
+        # ---- Layer B: qualified references (DB.ObjectName) ----
+        # Replace only the DB portion; leave ".ObjectName" untouched.
+        qual_re = re.compile(
+            r"\b" + re.escape(literal) + r"\.(\w+)",
+            re.IGNORECASE,
+        )
+        qual_starts: set = set()
+        for m in qual_re.finditer(scratch):
+            obj_name = m.group(1)
+            key = f"{literal.lower()}.{obj_name.lower()}"
+            kind = kind_index.get(key, EXTERNAL_KIND_DEFAULT)
+            db_start = m.start()
+            db_end = db_start + len(literal)
+            kind_token = "{{" + base_token + "_" + kind + "}}"
+            replacements.append((db_start, db_end, kind_token))
+            qual_starts.add(db_start)
+
+        # ---- Layer A: bare DB references (no ".ObjectName") ----
+        # Used for: GRANT ON <database>, comments referencing the DB, etc.
+        # Use the containing file's kind (owner clause context).
+        bare_re = re.compile(
+            r"\b" + re.escape(literal) + r"\b",
+            re.IGNORECASE,
+        )
+        for m in bare_re.finditer(scratch):
+            if m.start() in qual_starts:
+                continue  # already captured as a qualified reference
+            # Skip if immediately followed by a dot (edge case where
+            # qual_re didn't match because \w+ failed — e.g. quoted name)
+            if m.end() < len(scratch) and scratch[m.end()] == ".":
+                continue
+            kind_token = "{{" + base_token + "_" + file_kind + "}}"
+            replacements.append((m.start(), m.end(), kind_token))
+
+    if not replacements:
+        return content
+
+    # Apply in reverse position order so earlier positions stay valid.
+    replacements.sort(key=lambda r: r[0], reverse=True)
+    result = content
+    for start, end, new_text in replacements:
+        result = result[:start] + new_text + result[end:]
+
+    return result
