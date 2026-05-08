@@ -29,10 +29,12 @@ import pytest
 
 from td_release_packager.cli import (
     _cmd_analyze,
+    _cmd_explain,
     _cmd_generate,
     _cmd_ingest,
     _cmd_process,
     _cmd_scaffold,
+    _cmd_verify,
 )
 from td_release_packager.orchestrator import issue_codes
 
@@ -611,3 +613,152 @@ class TestProcessMetaVerb:
         args = _make_process_args(tmp_path / "nonexistent")
         rc = _run(_cmd_process, args)
         assert rc == 1
+
+
+# ---------------------------------------------------------------
+# explain command (item 6a)
+# ---------------------------------------------------------------
+
+
+def _make_explain_args(project: Path, **overrides) -> Namespace:
+    args = Namespace(project=str(project), run_id=None, command_filter=None)
+    for k, v in overrides.items():
+        setattr(args, k, v)
+    return args
+
+
+class TestExplainCommand:
+    """explain renders a human-readable report from decisions.json."""
+
+    def _run_process_and_get_project(self, tmp_path: Path) -> Path:
+        project, source = TestProcessMetaVerb()._seed_project_with_source(tmp_path)
+        args = _make_process_args(project, source)
+        _run(_cmd_process, args)
+        return project
+
+    def test_explain_exits_0_on_success_run(self, tmp_path):
+        project = self._run_process_and_get_project(tmp_path)
+        args = _make_explain_args(project)
+        rc = _run(_cmd_explain, args)
+        assert rc == 0
+
+    def test_explain_no_decisions_json_exits_1(self, tmp_path):
+        project = _make_project(tmp_path)
+        # Don't run any pipeline — no decisions.json content beyond scaffold
+        # (scaffold writes decisions.json but has no process run)
+        # Delete it to simulate truly empty state
+        (project / "decisions.json").unlink(missing_ok=True)
+        args = _make_explain_args(project)
+        rc = _run(_cmd_explain, args)
+        assert rc == 1
+
+    def test_explain_invalid_project_dir_exits_1(self, tmp_path):
+        args = _make_explain_args(tmp_path / "nonexistent")
+        rc = _run(_cmd_explain, args)
+        assert rc == 1
+
+    def test_explain_command_filter_selects_correct_run(self, tmp_path):
+        """--command filter picks the last run with that command name."""
+        project = self._run_process_and_get_project(tmp_path)
+        args = _make_explain_args(project, command_filter="process")
+        rc = _run(_cmd_explain, args)
+        assert rc == 0
+
+    def test_explain_unknown_run_id_exits_1(self, tmp_path):
+        project = self._run_process_and_get_project(tmp_path)
+        args = _make_explain_args(project, run_id="does-not-exist-xyz")
+        rc = _run(_cmd_explain, args)
+        assert rc == 1
+
+    def test_explain_shows_stage_count(self, tmp_path, capsys):
+        """Output contains at least the inspect and analyse stage names."""
+        project = self._run_process_and_get_project(tmp_path)
+        args = _make_explain_args(project)
+        _run(_cmd_explain, args)
+        out = capsys.readouterr().out
+        assert "inspect" in out
+        assert "analyse" in out
+
+
+# ---------------------------------------------------------------
+# verify command (item 6b)
+# ---------------------------------------------------------------
+
+
+def _make_verify_args(project: Path, **overrides) -> Namespace:
+    args = Namespace(project=str(project), run_id=None)
+    for k, v in overrides.items():
+        setattr(args, k, v)
+    return args
+
+
+class TestVerifyCommand:
+    """verify checks package readiness from decisions.json."""
+
+    def test_verify_no_package_stage_exits_1(self, tmp_path):
+        """No package stage in decisions.json → NOT READY."""
+        project = _make_project(tmp_path)
+        # Run process without packaging (no --env etc.)
+        source = tmp_path / "src"
+        source.mkdir()
+        (source / "Dev.t.tbl").write_text(
+            "CREATE MULTISET TABLE Dev.t (id INTEGER);", encoding="utf-8"
+        )
+        args = _make_process_args(project, source)
+        _run(_cmd_process, args)
+
+        vargs = _make_verify_args(project)
+        rc = _run(_cmd_verify, vargs)
+        assert rc == 1
+
+    def test_verify_no_decisions_json_exits_1(self, tmp_path):
+        project = _make_project(tmp_path)
+        (project / "decisions.json").unlink(missing_ok=True)
+        args = _make_verify_args(project)
+        rc = _run(_cmd_verify, args)
+        assert rc == 1
+
+    def test_verify_invalid_project_dir_exits_1(self, tmp_path):
+        args = _make_verify_args(tmp_path / "nonexistent")
+        rc = _run(_cmd_verify, args)
+        assert rc == 1
+
+
+# ---------------------------------------------------------------
+# _maybe_pause (item 10) — non-interactive path
+# ---------------------------------------------------------------
+
+
+class TestMaybePause:
+    """_maybe_pause silently returns when not in pause mode or not interactive."""
+
+    def test_no_pause_flag_returns_immediately(self, tmp_path):
+        """Without --pause, _maybe_pause is a no-op."""
+        from td_release_packager.cli import _maybe_pause
+
+        args = Namespace(pause=False)
+        # Should not raise or prompt
+        _maybe_pause("inspect", "success", args)
+
+    def test_ci_env_suppresses_pause(self, tmp_path, monkeypatch):
+        """CI=true suppresses pause even when --pause is set."""
+        from td_release_packager.cli import _maybe_pause
+
+        monkeypatch.setenv("CI", "true")
+        args = Namespace(pause=True)
+        # Should not raise or prompt (CI mode skips the prompt)
+        _maybe_pause("inspect", "success", args)
+
+    def test_non_tty_suppresses_pause(self, tmp_path, monkeypatch):
+        """Non-TTY stdout suppresses pause."""
+        from td_release_packager.cli import _maybe_pause
+        import io
+
+        args = Namespace(pause=True)
+        monkeypatch.delenv("CI", raising=False)
+        monkeypatch.delenv("SHIPS_CI", raising=False)
+        monkeypatch.delenv("NO_PROMPT", raising=False)
+        # Replace stdout with a non-TTY stream
+        monkeypatch.setattr("sys.stdout", io.StringIO())
+        # Should return silently — stdout.isatty() is False for StringIO
+        _maybe_pause("inspect", "success", args)
