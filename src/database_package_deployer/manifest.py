@@ -506,16 +506,24 @@ class DeploymentManifest:
             )
         ]
 
-    def get_rollback_candidates(self) -> list:
+    def get_rollback_candidates(self, wave_number: "Optional[int]" = None) -> list:
         """
-        List tables that can be rolled back.
+        List objects that can be rolled back.
 
-        A table is rollback-eligible if it has been backed up and/or
+        A object is rollback-eligible if it has been backed up and/or
         created but not yet in a terminal safe state. The order is
         reversed (most recently processed first) for safe unwinding.
 
+        Args:
+            wave_number: When supplied, restrict candidates to objects
+                         deployed in this specific wave.  Objects whose
+                         ``wave_number`` is ``None`` (prereqs phase,
+                         serial execution) are *excluded* from wave-
+                         scoped rollback — they were not part of the
+                         parallel-wave execution.
+
         Returns:
-            List of qualified table names eligible for rollback,
+            List of qualified object names eligible for rollback,
             in reverse processing order.
         """
         rollback_states = {
@@ -528,6 +536,7 @@ class DeploymentManifest:
             name
             for name, record in self.data["objects"].items()
             if record["state"] in rollback_states
+            and (wave_number is None or record.get("wave_number") == wave_number)
         ]
         # Reverse order — unwind most recent first
         return list(reversed(candidates))
