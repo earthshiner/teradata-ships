@@ -40,6 +40,32 @@ from database_package_deployer.models import (
 # Regex patterns — one per object type
 # ---------------------------------------------------------------
 
+# Qualified name capture: DB.OBJ or just OBJ.
+#
+# The dot-separated form allows optional horizontal whitespace and a
+# single newline between the database name and the dot. This handles
+# the Teradata style where the name is split across two lines:
+#
+#   REPLACE PROCEDURE MyDB
+#       .MyProc (...)
+#
+# [ \t]*  — optional spaces/tabs before the dot (same line)
+# \n?     — optional single newline
+# [ \t]*  — optional indent after the newline
+#
+# A bare identifier name (no dot) is also captured for objects that
+# do not require a qualifier (DATABASE, USER, etc.) — those use a
+# narrower single-part pattern below.
+_NP = r'(?:"[^"]+"|[A-Za-z_]\w*)'  # one name part
+
+# Whitespace between name parts and the dot. Teradata accepts any
+# combination of spaces, tabs, and a single newline on either side:
+#   DFJ.wassoc   DFJ .wassoc   DFJ. wassoc   DFJ . wassoc   DFJ\n.wassoc
+# We allow at most one newline to avoid spanning into the object body.
+_WS = r"[ \t]*\n?[ \t]*"
+
+_QNAME = rf"({_NP}(?:{_WS}\.{_WS}{_NP})?)"  # DB . OBJ or OBJ
+
 # CREATE [MULTISET|SET] [VOLATILE|GLOBAL TEMPORARY] [TRACE] TABLE db.tbl
 _TABLE_RE = re.compile(
     r"""
@@ -48,93 +74,65 @@ _TABLE_RE = re.compile(
     (?:(?:VOLATILE|GLOBAL\s+TEMPORARY)\s+)?
     (?:TRACE\s+)?
     TABLE\s+
-    ((?:"[^"]+"|[A-Za-z_]\w*)(?:\.(?:"[^"]+"|[A-Za-z_]\w*))?)
-    """,
+    """
+    + _QNAME,
     re.IGNORECASE | re.VERBOSE,
 )
 
 # CREATE JOIN INDEX db.ji_name AS ...
 _JOIN_INDEX_RE = re.compile(
-    r"""
-    CREATE\s+JOIN\s+INDEX\s+
-    ((?:"[^"]+"|[A-Za-z_]\w*)(?:\.(?:"[^"]+"|[A-Za-z_]\w*))?)
-    """,
-    re.IGNORECASE | re.VERBOSE,
+    r"CREATE\s+JOIN\s+INDEX\s+" + _QNAME,
+    re.IGNORECASE,
 )
 
 # CREATE HASH INDEX db.hi_name (cols) ON db.tbl ...
 _HASH_INDEX_RE = re.compile(
-    r"""
-    CREATE\s+HASH\s+INDEX\s+
-    ((?:"[^"]+"|[A-Za-z_]\w*)(?:\.(?:"[^"]+"|[A-Za-z_]\w*))?)
-    """,
-    re.IGNORECASE | re.VERBOSE,
+    r"CREATE\s+HASH\s+INDEX\s+" + _QNAME,
+    re.IGNORECASE,
 )
 
 # CREATE [UNIQUE] INDEX idx_name (cols) ON db.tbl
 # Note: secondary indexes are named but the ON clause identifies the table.
 # We capture the index name as the object, and extract the table from ON.
 _INDEX_RE = re.compile(
-    r"""
-    CREATE\s+(?:UNIQUE\s+)?INDEX\s+
-    ((?:"[^"]+"|[A-Za-z_]\w*))       # Index name (not qualified)
-    \s*\(                              # Column list
-    """,
-    re.IGNORECASE | re.VERBOSE,
+    r"CREATE\s+(?:UNIQUE\s+)?INDEX\s+" + rf"({_NP})" + r"\s*\(",
+    re.IGNORECASE,
 )
 
 # The ON clause for secondary indexes — captures db.table
 _INDEX_ON_RE = re.compile(
-    r"""
-    \bON\s+
-    ((?:"[^"]+"|[A-Za-z_]\w*)(?:\.(?:"[^"]+"|[A-Za-z_]\w*))?)
-    """,
-    re.IGNORECASE | re.VERBOSE,
+    r"\bON\s+" + _QNAME,
+    re.IGNORECASE,
 )
 
 # REPLACE VIEW / CREATE VIEW
 _VIEW_RE = re.compile(
-    r"""
-    (?:REPLACE|CREATE)\s+VIEW\s+
-    ((?:"[^"]+"|[A-Za-z_]\w*)(?:\.(?:"[^"]+"|[A-Za-z_]\w*))?)
-    """,
-    re.IGNORECASE | re.VERBOSE,
+    r"(?:REPLACE|CREATE)\s+VIEW\s+" + _QNAME,
+    re.IGNORECASE,
 )
 
 # REPLACE MACRO / CREATE MACRO
 _MACRO_RE = re.compile(
-    r"""
-    (?:REPLACE|CREATE)\s+MACRO\s+
-    ((?:"[^"]+"|[A-Za-z_]\w*)(?:\.(?:"[^"]+"|[A-Za-z_]\w*))?)
-    """,
-    re.IGNORECASE | re.VERBOSE,
+    r"(?:REPLACE|CREATE)\s+MACRO\s+" + _QNAME,
+    re.IGNORECASE,
 )
 
 # REPLACE PROCEDURE / CREATE PROCEDURE
 _PROCEDURE_RE = re.compile(
-    r"""
-    (?:REPLACE|CREATE)\s+PROCEDURE\s+
-    ((?:"[^"]+"|[A-Za-z_]\w*)(?:\.(?:"[^"]+"|[A-Za-z_]\w*))?)
-    """,
-    re.IGNORECASE | re.VERBOSE,
+    r"(?:REPLACE|CREATE)\s+PROCEDURE\s+" + _QNAME,
+    re.IGNORECASE,
 )
 
 # REPLACE [SPECIFIC] FUNCTION / CREATE [SPECIFIC] FUNCTION
 _FUNCTION_RE = re.compile(
-    r"""
-    (?:REPLACE|CREATE)\s+(?:SPECIFIC\s+)?FUNCTION\s+
-    ((?:"[^"]+"|[A-Za-z_]\w*)(?:\.(?:"[^"]+"|[A-Za-z_]\w*))?)
-    """,
-    re.IGNORECASE | re.VERBOSE,
+    r"(?:REPLACE|CREATE)\s+(?:SPECIFIC\s+)?FUNCTION\s+" + _QNAME,
+    re.IGNORECASE,
 )
 
 # CREATE TRIGGER / REPLACE TRIGGER
 _TRIGGER_RE = re.compile(
-    r"""
-    (?:CREATE|REPLACE)\s+TRIGGER\s+
-    ((?:"[^"]+"|[A-Za-z_]\w*)(?:\.(?:"[^"]+"|[A-Za-z_]\w*))?)
-    """,
-    re.IGNORECASE | re.VERBOSE,
+    r"(?:CREATE|REPLACE)\s+TRIGGER\s+" + _QNAME,
+    re.IGNORECASE,
 )
 
 # CREATE DATABASE
@@ -219,14 +217,10 @@ _FOREIGN_SERVER_RE = re.compile(
 # REPLACE/CREATE SCRIPT TABLE OPERATOR (uses FUNCTION syntax
 # with RETURNS TABLE and EXTERNAL NAME referencing a script)
 _SCRIPT_TABLE_OPERATOR_RE = re.compile(
-    r"""
-    (?:REPLACE|CREATE)\s+
-    (?:SPECIFIC\s+)?FUNCTION\s+
-    ((?:"[^"]+"|[A-Za-z_]\w*)(?:\.(?:"[^"]+"|[A-Za-z_]\w*))?)
-    .*?
-    TABLE\s+OPERATOR
-    """,
-    re.IGNORECASE | re.VERBOSE | re.DOTALL,
+    r"(?:REPLACE|CREATE)\s+(?:SPECIFIC\s+)?FUNCTION\s+"
+    + _QNAME
+    + r".*?TABLE\s+OPERATOR",
+    re.IGNORECASE | re.DOTALL,
 )
 
 # JAR installation via SQLJ.INSTALL_JAR / SQLJ.REPLACE_JAR
@@ -686,13 +680,21 @@ def _split_qualified_name(qualified: str) -> Tuple[Optional[str], str]:
     """
     Split 'DB.Object' into (database, object). Handles quotes.
 
+    Strips surrounding whitespace from each part so that Teradata's
+    accepted ``DB . Object`` style (spaces or newlines around the dot)
+    does not produce names with leading or trailing whitespace.
+
     Args:
-        qualified: The raw qualified name string.
+        qualified: The raw qualified name string, possibly containing
+                   whitespace around the dot separator.
 
     Returns:
         Tuple of (database_name_or_None, object_name).
     """
     parts = _split_dot_respecting_quotes(qualified)
+    # Strip whitespace from each part — the capture may include spaces
+    # or tabs when DDL uses "DB . OBJ" or "DB\n.OBJ" style.
+    parts = [p.strip() for p in parts]
     if len(parts) == 2:
         return (_strip_quotes(parts[0]), _strip_quotes(parts[1]))
     elif len(parts) == 1:
