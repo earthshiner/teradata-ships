@@ -788,32 +788,47 @@ def resume_package(
     return pkg_result
 
 
-def rollback_package(cursor, manifest_path: str) -> PackageDeployResult:
+def rollback_package(
+    cursor, manifest_path: str, dry_run: bool = False
+) -> PackageDeployResult:
     """
     Roll back a deployment, restoring objects to pre-deployment state.
 
     Processes rollback candidates in reverse order. For tables:
-    drops new table and renames backup. For indexes/JIs: drops the
-    newly created object (original was already dropped — cannot
-    restore, but the table data is intact). For replaceable objects:
-    no rollback possible (REPLACE overwrites in place).
+    drops new table and renames backup. For replaceable objects
+    (views, procedures, macros, functions): drops the current object
+    and re-executes the SHOW DDL captured before deployment. For
+    newly created objects with no prior state: drops the object.
 
     Args:
         cursor:         Active Teradata database cursor.
         manifest_path:  Path to the .deploy_manifest.json file.
+        dry_run:        If True, report what *would* be rolled back
+                        without executing any DDL or mutating the
+                        manifest. The manifest is read but never
+                        written; the returned results carry
+                        ``dry_run=True`` and describe the planned
+                        action for each candidate.
 
     Returns:
-        PackageDeployResult with rollback outcomes.
+        PackageDeployResult with rollback outcomes (or planned
+        actions when dry_run=True).
     """
     if not os.path.exists(manifest_path):
         raise FileNotFoundError(f"Manifest not found: {manifest_path}")
 
     package_dir = os.path.dirname(manifest_path)
     manifest = DeploymentManifest(package_dir)
-    manifest.set_package_status("ROLLING_BACK")
+
+    if not dry_run:
+        manifest.set_package_status("ROLLING_BACK")
 
     candidates = manifest.get_rollback_candidates()
-    logger.info("Rolling back %d objects", len(candidates))
+    logger.info(
+        "%s %d objects",
+        "[DRY RUN] Would roll back" if dry_run else "Rolling back",
+        len(candidates),
+    )
 
     results = []
     for qualified_name in candidates:
@@ -826,10 +841,13 @@ def rollback_package(cursor, manifest_path: str) -> PackageDeployResult:
             # Can't parse — try table rollback as fallback
             parsed = None
 
-        result = _rollback_single(cursor, qualified_name, parsed, manifest)
+        result = _rollback_single(
+            cursor, qualified_name, parsed, manifest, dry_run=dry_run
+        )
         results.append(result)
 
-    manifest.set_package_status("ROLLED_BACK")
+    if not dry_run:
+        manifest.set_package_status("ROLLED_BACK")
 
     summary = manifest.summary()
     pkg_result = PackageDeployResult(
@@ -2094,11 +2112,68 @@ def _deploy_replace_in_place(
 # ---------------------------------------------------------------
 
 
+def _rollback_single_dry_run(
+    db: str,
+    obj: str,
+    obj_type: "ObjectType",
+    qualified_name: str,
+    backup_name: Optional[str],
+    rollback_file: Optional[str],
+) -> "ObjectDeployResult":
+    """
+    Preview what ``_rollback_single`` *would* do without executing DDL.
+
+    Reads exclusively from the manifest record and checks disk for the
+    rollback file — no database connection required. Called by
+    ``_rollback_single`` when ``dry_run=True``.
+    """
+    if obj_type == ObjectType.TABLE:
+        if backup_name:
+            msg = (
+                f"[DRY RUN] Would restore {qualified_name} — "
+                f"drop current table and rename backup {backup_name} back to original."
+            )
+        else:
+            msg = (
+                f"[DRY RUN] Would drop {qualified_name} — "
+                f"newly created table; no backup to restore."
+            )
+    elif rollback_file:
+        if os.path.exists(rollback_file):
+            msg = (
+                f"[DRY RUN] Would restore {qualified_name} — "
+                f"drop current {obj_type.value} and re-execute "
+                f"{os.path.basename(rollback_file)}."
+            )
+        else:
+            msg = (
+                f"[DRY RUN] CANNOT restore {qualified_name} — "
+                f"rollback file recorded in manifest but missing from disk: "
+                f"{rollback_file}. Manual intervention required."
+            )
+    else:
+        msg = (
+            f"[DRY RUN] Would drop {qualified_name} — "
+            f"newly created {obj_type.value}; no prior definition to restore."
+        )
+
+    return ObjectDeployResult(
+        database_name=db,
+        object_name=obj,
+        object_type=obj_type,
+        state=DeployState.COMPLETED,  # represents "would succeed"
+        message=msg,
+        dry_run=True,
+        rollback_file=rollback_file,
+    )
+
+
 def _rollback_single(
     cursor,
     qualified_name: str,
     parsed: Optional[ParsedStatement],
     manifest: DeploymentManifest,
+    dry_run: bool = False,
 ) -> ObjectDeployResult:
     """
     Roll back a single object deployment.
@@ -2113,6 +2188,11 @@ def _rollback_single(
     definition.
 
     For newly created objects (no prior state): drop the object.
+
+    When ``dry_run=True``, no DDL is executed and the manifest is not
+    mutated. The returned ObjectDeployResult describes the *planned*
+    action using the manifest's recorded backup_table and rollback_file
+    fields, plus a disk-existence check for the rollback file.
     """
     parts = qualified_name.split(".", 1)
     db, obj = parts[0], parts[1]
@@ -2123,6 +2203,24 @@ def _rollback_single(
 
     if parsed:
         obj_type = parsed.object_type
+    elif record and record.get("object_type"):
+        # Fall back to manifest-recorded type when DDL file could not be parsed.
+        # This matters for dry-run, where the file may be on a different machine.
+        try:
+            obj_type = ObjectType(record["object_type"])
+        except ValueError:
+            pass  # keep TABLE default
+
+    # -- Dry-run path: describe planned action without executing anything --
+    if dry_run:
+        return _rollback_single_dry_run(
+            db,
+            obj,
+            obj_type,
+            qualified_name,
+            backup_name,
+            rollback_file,
+        )
 
     try:
         # Tables use the RENAME-based rollback path

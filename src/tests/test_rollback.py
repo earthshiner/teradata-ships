@@ -298,7 +298,7 @@ class TestRollbackPackage:
 
         processed_order = []
 
-        def fake_rollback_single(cursor, qn, parsed, mfst):
+        def fake_rollback_single(cursor, qn, parsed, mfst, dry_run=False):
             processed_order.append(qn)
             mfst.update_state(qn, DeployState.ROLLED_BACK)
             return ObjectDeployResult(
@@ -319,3 +319,127 @@ class TestRollbackPackage:
             f"expected reverse order but got: {processed_order}"
         )
         assert result.rolled_back == 2
+
+
+# ---------------------------------------------------------------
+# Rollback dry-run
+# ---------------------------------------------------------------
+
+
+class TestRollbackDryRun:
+    """
+    Verify rollback --dry-run previews planned actions without
+    executing DDL or mutating the manifest.
+    """
+
+    def test_dry_run_describes_table_restore(self, tmp_path):
+        """Table with a backup: dry-run reports the rename plan."""
+        manifest = DeploymentManifest(str(tmp_path))
+        manifest.register_object(
+            qualified_name="Dev.Customer",
+            ddl_file="DDL/tables/Dev.Customer.tbl",
+            object_type="TABLE",
+        )
+        manifest.update_state(
+            "Dev.Customer",
+            DeployState.COMPLETED,
+            backup_table="Dev.Customer_bk_20260509",
+        )
+
+        result = rollback_package(MagicMock(), manifest.path, dry_run=True)
+
+        assert len(result.results) == 1
+        r = result.results[0]
+        assert r.dry_run is True
+        assert "DRY RUN" in r.message
+        assert "Customer_bk_20260509" in r.message
+
+    def test_dry_run_describes_view_restore_from_rollback_file(self, tmp_path):
+        """View with a rollback file on disk: dry-run confirms it can be restored."""
+        rollback_dir = tmp_path / "_rollback"
+        rollback_dir.mkdir()
+        rollback_file = rollback_dir / "Dev.v_active.sql"
+        rollback_file.write_text(
+            "REPLACE VIEW Dev.v_active AS SELECT 0;", encoding="utf-8"
+        )
+
+        manifest = DeploymentManifest(str(tmp_path))
+        manifest.register_object(
+            qualified_name="Dev.v_active",
+            ddl_file="DDL/views/Dev.v_active.viw",
+            object_type="VIEW",
+        )
+        manifest.update_state(
+            "Dev.v_active",
+            DeployState.COMPLETED,
+            rollback_file=str(rollback_file),
+        )
+
+        result = rollback_package(MagicMock(), manifest.path, dry_run=True)
+
+        r = result.results[0]
+        assert r.dry_run is True
+        assert "DRY RUN" in r.message
+        assert "Dev.v_active.sql" in r.message
+
+    def test_dry_run_flags_missing_rollback_file(self, tmp_path):
+        """Rollback file recorded in manifest but deleted from disk: dry-run warns."""
+        manifest = DeploymentManifest(str(tmp_path))
+        manifest.register_object(
+            qualified_name="Dev.v_active",
+            ddl_file="DDL/views/Dev.v_active.viw",
+            object_type="VIEW",
+        )
+        manifest.update_state(
+            "Dev.v_active",
+            DeployState.COMPLETED,
+            rollback_file="/deleted/Dev.v_active.sql",
+        )
+
+        result = rollback_package(MagicMock(), manifest.path, dry_run=True)
+
+        r = result.results[0]
+        assert r.dry_run is True
+        assert "CANNOT" in r.message or "missing" in r.message.lower()
+
+    def test_dry_run_does_not_mutate_manifest(self, tmp_path):
+        """Manifest state must be unchanged after a dry-run rollback."""
+        import json
+
+        manifest = DeploymentManifest(str(tmp_path))
+        manifest.register_object(
+            qualified_name="Dev.v_active",
+            ddl_file="DDL/views/Dev.v_active.viw",
+            object_type="VIEW",
+        )
+        manifest.update_state("Dev.v_active", DeployState.COMPLETED)
+
+        # Read manifest before dry-run
+        before = json.loads(open(manifest.path, encoding="utf-8").read())
+
+        rollback_package(MagicMock(), manifest.path, dry_run=True)
+
+        # Manifest must be identical after dry-run
+        after = json.loads(open(manifest.path, encoding="utf-8").read())
+        assert before["objects"] == after["objects"], (
+            "dry-run must not mutate manifest object states"
+        )
+        assert before.get("status") == after.get("status"), (
+            "dry-run must not mutate package-level status"
+        )
+
+    def test_dry_run_requires_no_database_connection(self, tmp_path):
+        """Dry-run works with cursor=None — no DB connection needed."""
+        manifest = DeploymentManifest(str(tmp_path))
+        manifest.register_object(
+            qualified_name="Dev.v_active",
+            ddl_file="DDL/views/Dev.v_active.viw",
+            object_type="VIEW",
+        )
+        manifest.update_state("Dev.v_active", DeployState.COMPLETED)
+
+        # cursor=None simulates the CLI passing no connection in dry-run mode
+        result = rollback_package(None, manifest.path, dry_run=True)
+
+        assert len(result.results) == 1
+        assert result.results[0].dry_run is True
