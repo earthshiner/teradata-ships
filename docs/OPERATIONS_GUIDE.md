@@ -94,7 +94,30 @@ This recomputes the SHA-256 hash of every file in the payload and compares it to
 
 **If integrity fails:** do not deploy. Contact the developer to rebuild the package. A tampered package indicates either a transmission error or a deliberate modification — both require investigation before proceeding.
 
-### 2. Check what the SHIPS tool says
+### 2. Read the Package Trust Report
+
+Every SHIPS package carries a Trust Report in `BUILD.json`, stamped at build time. The `deploy.py` script reads it and prints the label before connecting to the database:
+
+```
+================================================================
+  Package Trust: ✓ READY
+================================================================
+  ✓ inspect_token_format     No malformed token markers found
+  ✓ inspect_lint             No lint violations found
+  ✓ inspect_grants           Grant validation clean
+  ✓ provenance_complete      _provenance.json present
+================================================================
+```
+
+| Label | Action |
+|---|---|
+| **READY** ✓ | Proceed to deployment |
+| **READY-WITH-CAVEATS** ⚠ | Proceed but investigate the warnings |
+| **BLOCKED** ✗ | Do not deploy — fix the failing signals first |
+
+If the label is **BLOCKED**, `deploy.py` will exit before making a database connection unless you pass `--skip-trust-check` (development override only).
+
+### 4. Check what the SHIPS tool says
 
 If you have access to the SHIPS project directory on the build machine, run:
 
@@ -104,7 +127,7 @@ python -m td_release_packager verify --project /path/to/project
 
 This confirms the package was built cleanly with no warnings. Exit 0 = READY. Exit 1 = something to investigate.
 
-### 3. Dry run
+### 5. Dry run
 
 Always run a dry run before the first live deployment:
 
@@ -114,7 +137,7 @@ python deploy.py --dry-run --host myserver --user dba_user
 
 The dry run connects to the database, runs all pre-flight checks (permissions, space, object existence), and validates the wave ordering — but executes no DDL. The HTML report at `logs/` shows exactly what would happen.
 
-### 4. Review the pre-flight report
+### 6. Review the pre-flight report
 
 After the dry run, open `logs/.deploy_report_<id>.html`. Check:
 
@@ -124,7 +147,7 @@ After the dry run, open `logs/.deploy_report_<id>.html`. Check:
 
 Address any pre-flight errors before proceeding to live deployment.
 
-### 5. Confirm the companion archive is deployed first (if applicable)
+### 7. Confirm the companion archive is deployed first (if applicable)
 
 Some packages are auto-split into a `_prereqs_` companion archive and a main archive. If `BUILD.json` shows `"role": "main"` and `"requires": ["OMR_prereqs_DEV_BUILD_0005_...zip"]`, deploy the prereqs archive first:
 
@@ -576,16 +599,29 @@ Rollback processes all eligible objects in reverse deployment order. The manifes
 
 ### Wave-level rollback
 
-**There is no wave-level rollback command.** Rollback is always at the package level — it processes every eligible object from the manifest, not just those from a specific wave.
+Use `--wave N` to roll back only the objects deployed in wave N, leaving earlier waves untouched.
 
-If you need to undo only the objects from a specific wave:
+```bash
+# Roll back only wave-3 objects
+python deploy.py rollback logs/.deploy_manifest_<id>.json \
+    --wave 3 \
+    --host myserver --user dba_user
+```
 
-1. Identify the objects in that wave from `_waves.txt` or the Wave Graph tab in the report
-2. For tables: manually run `RENAME TABLE` to restore the backup (backups are named `<Table>_bk_<timestamp>`)
-3. For views/procedures: manually re-execute the saved DDL from the `_rollback/` directory
-4. Update the manifest to reflect the restored state, or re-deploy from the source
+Wave rollback is the natural complement to wave-parallel deployment. When wave 3 fails, `--wave 3` undoes only the objects that changed in that wave — waves 1 and 2 remain intact.
 
-This is an advanced operation. If you need selective rollback regularly, raise it with the SHIPS development team as a future feature.
+**Package status after wave rollback:** `PARTIALLY_ROLLED_BACK` — indicates that only a subset of objects was rolled back.
+
+**Objects excluded from wave rollback:** Objects with no wave assignment (serial prereqs phase — CREATE DATABASE, CREATE USER) are always excluded. They can only be rolled back via full package rollback.
+
+**Dry-run a wave rollback (offline, no connection needed):**
+
+```bash
+python deploy.py rollback logs/.deploy_manifest_<id>.json \
+    --wave 3 --dry-run
+```
+
+Describes exactly which objects would be rolled back and by what mechanism. Does not execute any DDL and does not mutate the manifest.
 
 ### Checking what is eligible for rollback before running it
 

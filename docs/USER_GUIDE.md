@@ -615,6 +615,56 @@ Press Enter or `y` to continue, `n` to abort, `q` to quit cleanly. Suppressed au
 
 ---
 
+## Package Trust Report
+
+Every package built with `ships package` or `ships process` (with packaging enabled) carries a **Trust Report** in `BUILD.json`. It tells you — and any agent or CI pipeline — whether the package is safe to promote.
+
+### Labels
+
+| Label | Meaning |
+|---|---|
+| **READY ✓** | All signals pass — package is clean |
+| **READY-WITH-CAVEATS ⚠** | Warnings present (lint warnings, provenance missing) — deploy with awareness |
+| **BLOCKED ✗** | At least one critical signal failed — fix before deploying |
+
+The label is printed in the `ships package` banner and again in `deploy.py` before any database connection is opened.
+
+### Signals (Phase 1)
+
+| Signal | Fails when |
+|---|---|
+| `inspect_token_format` | A `{{TOKEN}}` marker is malformed |
+| `inspect_lint` | An inspect ERROR-severity lint violation exists |
+| `inspect_grants` | Grant drift is detected at ERROR level |
+| `provenance_complete` | `_provenance.json` is absent from the payload |
+
+### What to do when BLOCKED
+
+Run `ships inspect` to see the specific errors, fix them in source, and re-run the pipeline. The Trust Report reads `decisions.json` — inspect must run before package for the signals to be accurate.
+
+---
+
+## Verifying a package before handoff
+
+```bash
+ships verify --project C:\Projects\OMR
+```
+
+Checks: archive exists on disk, no package warnings, stage succeeded, Trust label not BLOCKED. Exit 0 = READY. Use this as your final gate before sending the package to the DBA.
+
+---
+
+## Reading prior run results
+
+```bash
+# Show the last pipeline run in a human-readable format
+ships explain --project C:\Projects\OMR --command process
+```
+
+Shows stage statuses, key outputs, and all issues. Use before promoting to confirm no blocking issues remain.
+
+---
+
 ## Command reference
 
 ### `ships scaffold`
