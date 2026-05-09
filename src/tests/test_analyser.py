@@ -145,6 +145,71 @@ class TestScanReferences:
         assert "MyDB.Customer" in internal
         assert "MyDB.Orders" in internal
 
+    def test_spl_cursor_alias_not_a_graph_node(self):
+        """Regression for issue #29.
+
+        Teradata SPL cursor FOR loops bind a row alias to the cursor result:
+
+            FOR pm AS cur CURSOR FOR
+                SELECT Target_TableDatabaseName, Target_TableName
+                FROM GCFR_DB.Process_Metadata
+            DO
+                SET v_sql = pm.Target_TableDatabaseName || ...;
+            END FOR;
+
+        Without the DO terminator in _FROM_TERM_RE, the FROM clause scan
+        extends past DO into the loop body and picks up pm.Target_TableDatabaseName
+        as a graph node. pm is a cursor alias, not a database name.
+        """
+        ddl = (
+            "REPLACE PROCEDURE MyDB.MyProc ()\n"
+            "BEGIN\n"
+            "    DECLARE v_sql VARCHAR(5000);\n"
+            "    FOR pm AS cur CURSOR FOR\n"
+            "        SELECT Target_TableDatabaseName, Target_TableName\n"
+            "        FROM GCFR_DB.Process_Metadata\n"
+            "    DO\n"
+            "        SET v_sql = pm.Target_TableDatabaseName || '.' || pm.Target_TableName;\n"
+            "    END FOR;\n"
+            "END;\n"
+        )
+        known_dbs = {"GCFR_DB", "MYDB"}
+        internal, external = _scan_references(
+            ddl, "PROCEDURE", "MyDB.MyProc", known_dbs
+        )
+        # The real table reference must be found
+        assert "GCFR_DB.Process_Metadata" in internal
+
+        # Cursor alias pm.* must NOT appear as a dependency
+        all_refs = internal | external
+        pm_refs = {r for r in all_refs if r.upper().startswith("PM.")}
+        assert not pm_refs, (
+            f"Cursor alias references incorrectly captured as graph nodes: {pm_refs}"
+        )
+
+    def test_subquery_in_from_alias_not_a_graph_node(self):
+        """Column aliases from a subquery are not captured as graph nodes.
+
+        FROM (SELECT pm.col FROM GCFR_DB.T pm) sub
+        should contribute GCFR_DB.T but NOT pm.col.
+        """
+        ddl = (
+            "REPLACE VIEW MyDB.V AS\n"
+            "SELECT sub.col\n"
+            "FROM (\n"
+            "    SELECT pm.col\n"
+            "    FROM GCFR_DB.Process_Metadata pm\n"
+            ") sub;\n"
+        )
+        known_dbs = {"GCFR_DB", "MYDB"}
+        internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
+
+        assert "GCFR_DB.Process_Metadata" in internal
+
+        all_refs = internal | external
+        pm_refs = {r for r in all_refs if r.upper().startswith("PM.")}
+        assert not pm_refs, f"Subquery alias references incorrectly captured: {pm_refs}"
+
     def test_system_database_filtered(self):
         """System databases (DBC, SYSLIB) are filtered out."""
         ddl = "SELECT * FROM DBC.TablesV WHERE 1=1;"
