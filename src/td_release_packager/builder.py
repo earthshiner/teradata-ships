@@ -1443,6 +1443,105 @@ def main():
     else:
         logger.info("Dry run — no database connection required")
 
+    # -- Deploy chaining: deploy companion prereqs package first (if any) --
+    #
+    # When this package's BUILD.json has a non-empty ``requires`` list, a
+    # companion prereqs package was auto-generated alongside it (Phase 2 of
+    # the intra-package dependency trilogy).  The prereqs package contains
+    # CREATE DATABASE / CREATE USER statements that must be deployed before
+    # the schema objects in this (main) package.
+    #
+    # Chaining rule:
+    #   - Dry-run: skip chaining (no database connection).
+    #   - Explain OR live deploy: always deploy prereqs LIVE first.
+    #     Prereqs objects (DATABASE/USER) are SKIP_IF_EXISTS — idempotent
+    #     and safe to deploy even before an EXPLAIN run on main.
+    #     This ensures parent databases physically exist when EXPLAIN
+    #     validates the main package's DDL (fixes issue #53 Option 2).
+    #
+    build_json_path = os.path.join(SCRIPT_DIR, "BUILD.json")
+    requires = []
+    if os.path.exists(build_json_path):
+        with open(build_json_path, encoding="utf-8") as _f:
+            _build_data = json.load(_f)
+        requires = _build_data.get("requires", [])
+
+    if requires and not args.dry_run:
+        _prereqs_zip_name = requires[0]
+        _prereqs_basename = os.path.splitext(_prereqs_zip_name)[0]
+        _prereqs_dir = os.path.join(os.path.dirname(SCRIPT_DIR), _prereqs_basename)
+
+        if not os.path.isdir(_prereqs_dir):
+            logger.error(
+                "Deploy chaining: companion prereqs package not found at: %s\\n"
+                "  Extract '%s' alongside this package directory and retry.",
+                _prereqs_dir, _prereqs_zip_name,
+            )
+            sys.exit(1)
+
+        logger.info("=" * 64)
+        logger.info("  Deploy chaining — companion prereqs")
+        logger.info("  Prereqs: %s", _prereqs_basename)
+        logger.info("  (Deploying prereqs live so parent databases exist)")
+        logger.info("=" * 64)
+
+        _pre_payload = os.path.join(_prereqs_dir, "payload")
+        _pre_waves, _pre_files, _pre_use_waves = [], [], False
+        for _ph in sorted(d for d in os.listdir(_pre_payload)
+                          if os.path.isdir(os.path.join(_pre_payload, d))):
+            _ph_path = os.path.join(_pre_payload, _ph)
+            _wf = os.path.join(_ph_path, "_waves.txt")
+            _of = os.path.join(_ph_path, "_order.txt")
+            if os.path.exists(_wf):
+                _pre_use_waves = True
+                _pw = parse_waves_file(_wf, _ph_path)
+                _pre_waves.extend(_pw)
+                for _w in _pw:
+                    _pre_files.extend(_w)
+            elif os.path.exists(_of):
+                _pf = read_order_file(_of, _ph_path)
+                _pre_waves.append(_pf)
+                _pre_files.extend(_pf)
+            else:
+                _pf = discover_files(_ph_path)
+                if _pf:
+                    _pre_waves.append(_pf)
+                    _pre_files.extend(_pf)
+
+        if _pre_files:
+            _pre_log_dir = os.path.join(_prereqs_dir, "logs")
+            os.makedirs(_pre_log_dir, exist_ok=True)
+            _pre_result = deploy_package(
+                cursor=cursor,
+                package_dir=_pre_log_dir,
+                ordered_files=_pre_files if not _pre_use_waves else None,
+                waves=_pre_waves if _pre_use_waves else None,
+                stop_on_failure=True,
+                dry_run=False,   # live — prereqs are idempotent (SKIP_IF_EXISTS)
+            )
+            if not _pre_result.success:
+                logger.error(
+                    "Companion prereqs deployment FAILED (%d failure(s)). "
+                    "Aborting main package deployment.",
+                    _pre_result.failed,
+                )
+                if _pre_result.report_path:
+                    logger.error("  Prereqs report: %s", _pre_result.report_path)
+                sys.exit(1)
+            logger.info(
+                "Companion prereqs deployed (%d objects). Proceeding with main.",
+                _pre_result.completed,
+            )
+        else:
+            logger.info("Companion prereqs package contains no deployable files — skipping.")
+
+    elif requires and args.dry_run:
+        logger.info(
+            "Deploy chaining: skipped in dry-run mode "
+            "(prereqs '%s' require a live connection).",
+            requires[0],
+        )
+
     # -- Collect files per phase, building waves where defined --
     payload_dir = os.path.join(SCRIPT_DIR, "payload")
     phases = sorted(
