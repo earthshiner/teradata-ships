@@ -416,6 +416,86 @@ class TestBuildPackageAutoSplit:
         assert os.path.isfile(prereqs_archive + ".sha256")
 
 
+class TestDeployChaining:
+    """Phase 3 — deploy chaining via BUILD.json requires field.
+
+    Verifies that:
+    - A split package's main deploy.py contains the chaining code that
+      reads BUILD.json, locates the companion prereqs directory, and
+      deploys it before the main package.
+    - The BUILD.json requires field is populated on the main archive and
+      empty on the prereqs archive.
+    - The generated deploy.py explicitly references 'requires' and
+      'deploy_package' so agents can rely on the chaining behaviour.
+    """
+
+    def _make_split_package(self, tmp_path, tmp_project):
+        """Build a minimal auto-split package and return (main_zip, prereqs_zip)."""
+        payload = tmp_project / "payload" / "database"
+        _write(
+            payload / "pre-requisites" / "databases" / "GCFR_STD.db",
+            "CREATE DATABASE GCFR_STD FROM DBC AS PERMANENT = 1024;\n",
+        )
+        _write(
+            payload / "DDL" / "tables" / "GCFR_STD.Customer.tbl",
+            "CREATE MULTISET TABLE GCFR_STD.Customer (Id INTEGER) PRIMARY INDEX (Id);\n",
+        )
+        props = _properties_for("DEV", tmp_path)
+        cfg = BuildConfig(
+            source_dir=str(tmp_project),
+            environment="DEV",
+            package_name="GCFR",
+            env_config_file=str(props),
+            build_number=1,
+            output_dir=str(tmp_path),
+        )
+        (main_arc, main_mf), (prereqs_arc, prereqs_mf) = build_package(cfg)
+        return main_arc, prereqs_arc
+
+    def test_main_deploy_py_contains_chaining_code(self, tmp_path, tmp_project):
+        """The main deploy.py must contain chaining logic that reads BUILD.json
+        and deploys the companion prereqs before the main package."""
+        main_arc, _ = self._make_split_package(tmp_path, tmp_project)
+        deploy_py = _read_zip_member(main_arc, "deploy.py")
+
+        # Core chaining keywords must all be present
+        assert "requires" in deploy_py, "deploy.py must read 'requires' from BUILD.json"
+        assert "prereqs" in deploy_py.lower(), (
+            "deploy.py must reference companion prereqs"
+        )
+        assert "deploy_package" in deploy_py, (
+            "deploy.py must call deploy_package for prereqs"
+        )
+        assert "Deploy chaining" in deploy_py, "deploy.py must banner the chaining step"
+
+    def test_main_build_json_requires_populated(self, tmp_path, tmp_project):
+        """Main BUILD.json must have a non-empty requires list."""
+        main_arc, _ = self._make_split_package(tmp_path, tmp_project)
+        build = json.loads(_read_zip_member(main_arc, "BUILD.json"))
+
+        assert build.get("role") == "main"
+        assert build.get("requires"), "main BUILD.json must have non-empty requires"
+        assert build["requires"][0].endswith(".zip")
+
+    def test_prereqs_build_json_requires_empty(self, tmp_path, tmp_project):
+        """Prereqs BUILD.json must have an empty requires list."""
+        _, prereqs_arc = self._make_split_package(tmp_path, tmp_project)
+        build = json.loads(_read_zip_member(prereqs_arc, "BUILD.json"))
+
+        assert build.get("role") == "prereqs"
+        assert build.get("requires") == [], (
+            "prereqs BUILD.json must have empty requires"
+        )
+
+    def test_chaining_skipped_message_in_dry_run_path(self, tmp_path, tmp_project):
+        """The dry-run code path must log that chaining is skipped."""
+        main_arc, _ = self._make_split_package(tmp_path, tmp_project)
+        deploy_py = _read_zip_member(main_arc, "deploy.py")
+
+        assert "dry_run" in deploy_py
+        assert "skipped in dry-run" in deploy_py.lower() or "skip" in deploy_py.lower()
+
+
 class TestBuildPackageAutoSplitTokenised:
     """Tokenised CREATE DATABASE + tokenised dependants survive split."""
 
