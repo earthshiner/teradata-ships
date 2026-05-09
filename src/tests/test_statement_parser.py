@@ -553,6 +553,38 @@ class TestParseDdlText:
         assert parsed.database_name == "DFJ"
         assert parsed.object_name == "wassoc"
 
+    def test_dot_at_end_of_line_name_on_next(self):
+        """Dot at the end of the DB-name line, object on next line.
+
+        Teradata accepts:
+            replace view DFJ .
+            wassoc
+            as select * from dbc.columnsV;
+        """
+        ddl = (
+            "replace view DFJ .\n"
+            "wassoc\n"
+            "as select * from dbc.columnsV;\n"
+        )
+        parsed = parse_statement_text(ddl)
+        assert parsed.database_name == "DFJ"
+        assert parsed.object_name == "wassoc"
+
+    def test_dot_at_start_of_line_with_leading_space(self):
+        """DB name on one line, dot + space + object name on next line.
+
+        Teradata accepts:
+            drop view DFJ
+            . wassoc;
+
+        (SHIPS does not deploy DROP statements — but the parser must
+        handle this whitespace style in REPLACE/CREATE DDL too.)
+        """
+        ddl = "REPLACE VIEW DFJ\n. wassoc AS SELECT 1 AS x;\n"
+        parsed = parse_statement_text(ddl)
+        assert parsed.database_name == "DFJ"
+        assert parsed.object_name == "wassoc"
+
     def test_single_part_name_not_duplicated(self):
         """Single-part names are not duplicated (e.g. role.role)."""
         parsed = parse_statement_text("CREATE ROLE analyst_role;")
