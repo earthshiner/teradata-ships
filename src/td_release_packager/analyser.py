@@ -268,6 +268,24 @@ _FROM_KEYWORD_RE = re.compile(
 # -- FROM clause terminators ------------------------------------
 # Keywords that end a FROM clause (so we can bound the clause
 # and scan for comma-separated qualified names within it).
+#
+# DO is included because Teradata SPL cursor FOR loops use it to
+# end the SELECT statement the cursor is based on:
+#
+#   FOR pm AS cur CURSOR FOR
+#       SELECT col1, col2
+#       FROM DB.ProcessMetadata
+#   DO
+#       -- pm.col1 / pm.col2 references appear here — NOT in the FROM clause
+#   END FOR;
+#
+# Without DO as a terminator the FROM clause scan extends past DO into
+# the loop body, picking up cursor alias references (pm.col1) as false-
+# positive graph nodes — the root cause of issue #29.
+#
+# ) is included to bound subquery FROM clauses: FROM (SELECT ... FROM t)
+# terminates the inner FROM at the closing parenthesis so that alias
+# references within the subquery body are not attributed to the outer FROM.
 _FROM_TERM_RE = re.compile(
     r"\b(?:"
     r"WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|"
@@ -276,8 +294,9 @@ _FROM_TERM_RE = re.compile(
     r"(?:INNER\s+)?JOIN|"
     r"(?:LEFT|RIGHT|FULL)\s+(?:OUTER\s+)?JOIN|"
     r"CROSS\s+JOIN|NATURAL\s+JOIN|"
-    r"WHEN\s+(?:MATCHED|NOT)"
-    r")\b|;",
+    r"WHEN\s+(?:MATCHED|NOT)|"
+    r"DO"
+    r")\b|;|\)",
     re.IGNORECASE,
 )
 
@@ -441,6 +460,17 @@ def _extract_from_refs(body: str) -> List[str]:
         # qualified names (db.obj) within it.  Qualified names
         # in a FROM clause are always table references — column
         # aliases (c.Cust_Id) appear in SELECT/WHERE, not FROM.
+        #
+        # Skip when the FROM clause starts with '(' — that is a
+        # subquery (FROM (SELECT ...)).  The inner FROM keyword is
+        # picked up by a separate _FROM_KEYWORD_RE match that
+        # correctly bounds its own clause; scanning the outer
+        # parenthetical region here would capture alias.column
+        # references from inside the subquery as false positives.
+        after_from = body[start:].lstrip()
+        if after_from.startswith("("):
+            continue
+
         term_m = _FROM_TERM_RE.search(body[start:])
         clause_end = start + term_m.start() if term_m else len(body)
         from_clause = body[start:clause_end]
