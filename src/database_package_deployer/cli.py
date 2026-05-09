@@ -73,6 +73,8 @@ def main():
 
 def _cmd_deploy(args):
     """Execute the 'deploy' command with mandatory pre-flight."""
+    from database_package_deployer.otel import deployer_span
+
     cursor = _connect(args)
 
     # Parse file patterns from comma-separated string
@@ -84,14 +86,25 @@ def _cmd_deploy(args):
         ordered_files = _read_order_file(args.order_file, args.package_dir)
 
     try:
-        result = deploy_package(
-            cursor=cursor,
-            package_dir=args.package_dir,
-            file_patterns=patterns,
-            ordered_files=ordered_files,
-            stop_on_failure=not args.continue_on_error,
-            dry_run=args.dry_run,
-        )
+        with deployer_span(
+            "ships.deploy",
+            {
+                "ships.package_dir": args.package_dir,
+                "ships.dry_run": args.dry_run,
+            },
+        ) as otel_span:
+            result = deploy_package(
+                cursor=cursor,
+                package_dir=args.package_dir,
+                file_patterns=patterns,
+                ordered_files=ordered_files,
+                stop_on_failure=not args.continue_on_error,
+                dry_run=args.dry_run,
+            )
+            otel_span.set_attribute("ships.deploy.completed", result.completed)
+            otel_span.set_attribute("ships.deploy.failed", result.failed)
+            otel_span.set_attribute("ships.deploy.skipped", result.skipped)
+            otel_span.set_attribute("ships.deploy.success", result.success)
         _print_preflight_result(result.preflight_result)
         _print_package_result(result)
         sys.exit(0 if result.success else 1)
