@@ -57,7 +57,14 @@ from database_package_deployer.models import (
 # do not require a qualifier (DATABASE, USER, etc.) — those use a
 # narrower single-part pattern below.
 _NP = r'(?:"[^"]+"|[A-Za-z_]\w*)'  # one name part
-_QNAME = rf"({_NP}(?:[ \t]*\n?[ \t]*\.{_NP})?)"  # DB.OBJ or OBJ
+
+# Whitespace between name parts and the dot. Teradata accepts any
+# combination of spaces, tabs, and a single newline on either side:
+#   DFJ.wassoc   DFJ .wassoc   DFJ. wassoc   DFJ . wassoc   DFJ\n.wassoc
+# We allow at most one newline to avoid spanning into the object body.
+_WS = r"[ \t]*\n?[ \t]*"
+
+_QNAME = rf"({_NP}(?:{_WS}\.{_WS}{_NP})?)"  # DB . OBJ or OBJ
 
 # CREATE [MULTISET|SET] [VOLATILE|GLOBAL TEMPORARY] [TRACE] TABLE db.tbl
 _TABLE_RE = re.compile(
@@ -673,13 +680,21 @@ def _split_qualified_name(qualified: str) -> Tuple[Optional[str], str]:
     """
     Split 'DB.Object' into (database, object). Handles quotes.
 
+    Strips surrounding whitespace from each part so that Teradata's
+    accepted ``DB . Object`` style (spaces or newlines around the dot)
+    does not produce names with leading or trailing whitespace.
+
     Args:
-        qualified: The raw qualified name string.
+        qualified: The raw qualified name string, possibly containing
+                   whitespace around the dot separator.
 
     Returns:
         Tuple of (database_name_or_None, object_name).
     """
     parts = _split_dot_respecting_quotes(qualified)
+    # Strip whitespace from each part — the capture may include spaces
+    # or tabs when DDL uses "DB . OBJ" or "DB\n.OBJ" style.
+    parts = [p.strip() for p in parts]
     if len(parts) == 2:
         return (_strip_quotes(parts[0]), _strip_quotes(parts[1]))
     elif len(parts) == 1:

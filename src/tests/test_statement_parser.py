@@ -520,6 +520,39 @@ class TestParseDdlText:
         assert parsed.database_name == "MyDB"
         assert parsed.object_name == "fn_Calc"
 
+    def test_spaced_dot_both_sides(self):
+        """Teradata accepts spaces on both sides of the dot separator.
+
+        ``create view DFJ . wassoc`` is valid DDL. The parser must
+        capture both parts without stray whitespace in the names.
+        """
+        ddl = "CREATE VIEW DFJ . wassoc AS SELECT * FROM DBC.ColumnsV;"
+        parsed = parse_statement_text(ddl)
+        assert parsed.database_name == "DFJ"
+        assert parsed.object_name == "wassoc"
+        assert parsed.qualified_name == "DFJ.wassoc"
+
+    def test_spaced_dot_before_only(self):
+        """Space before dot only: ``DB .OBJ``."""
+        ddl = "REPLACE VIEW MyDB .v_test AS SELECT 1 AS x;"
+        parsed = parse_statement_text(ddl)
+        assert parsed.database_name == "MyDB"
+        assert parsed.object_name == "v_test"
+
+    def test_spaced_dot_after_only(self):
+        """Space after dot only: ``DB. OBJ``."""
+        ddl = "REPLACE PROCEDURE MyDB. sp_Run () BEGIN END;"
+        parsed = parse_statement_text(ddl)
+        assert parsed.database_name == "MyDB"
+        assert parsed.object_name == "sp_Run"
+
+    def test_newline_after_dot(self):
+        """Newline after the dot as well as before is handled."""
+        ddl = "REPLACE VIEW DFJ\n.\nwassoc AS SELECT * FROM DBC.ColumnsV;\n"
+        parsed = parse_statement_text(ddl)
+        assert parsed.database_name == "DFJ"
+        assert parsed.object_name == "wassoc"
+
     def test_single_part_name_not_duplicated(self):
         """Single-part names are not duplicated (e.g. role.role)."""
         parsed = parse_statement_text("CREATE ROLE analyst_role;")
