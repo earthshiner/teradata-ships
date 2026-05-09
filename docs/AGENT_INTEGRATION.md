@@ -1,178 +1,307 @@
-# Agent Integration Guide
+# SHIPS Agent Integration Guide
 
-## Overview
+## Primary integration: MCP server
 
-SHIPS is designed to be operated by autonomous AI agents as well as humans. Every operation is a deterministic CLI command with structured output. No interactive prompts, no ambiguous steps, no manual file editing required.
+The recommended way for an agent to operate SHIPS is via the MCP server. It exposes all pipeline stages as tools over the Model Context Protocol, which any MCP-compatible client (Claude Code, Claude Desktop, Cursor, custom agent frameworks) can discover and invoke directly.
 
-An agent's workflow is identical to a human's — the same commands, the same files, the same artefacts. The difference is who drives.
+**See [docs/MCP_GUIDE.md](./MCP_GUIDE.md) for the complete MCP server reference** — setup, tool schemas, agentic workflows, and Trust Report integration.
 
-## Agent Workflow
+---
 
-### Single-Command Tokenisation
+## Secondary integration: subprocess CLI
 
-The token map workflow is the key enabler for autonomous operation. An agent needs one piece of domain knowledge — the environment prefix — and SHIPS does the rest:
+When MCP is not available (e.g. a headless CI environment without MCP client support), agents can drive SHIPS via subprocess calls. Every command is deterministic and returns a structured exit code.
+
+---
+
+## Why SHIPS is built for agents
+
+Most database deployment tooling was designed for humans: interactive prompts, manual file editing, tribal knowledge baked into runbooks. An agent trying to operate those tools hits ambiguity at every step.
+
+SHIPS inverts this. Every operation is a deterministic CLI command. Every output is a structured artefact. Every decision is recorded in a machine-readable audit trail (`decisions.json`). An agent driving SHIPS has the same capabilities as a human — and in some respects more, because agents do not skip steps, do not misremember environment names, and do not get impatient with validation warnings.
+
+The guiding principle: **an agent should be able to take a folder of raw SQL and produce a deployment-ready, governance-compliant package for any target environment — from scratch, without human intervention.**
+
+---
+
+## The single-command pipeline
+
+The `process` command is the primary agentic primitive for the CLI path. It runs the full SHIPS pipeline — harvest → generate → inspect → analyse → package — in one invocation, writing all stage decisions into a single run entry in `decisions.json`:
 
 ```bash
-# Step 1: Harvest and generate token map (one command)
-python -m td_release_packager harvest \
-    --source /raw/ddl/ \
+python -m td_release_packager process \
     --project /projects/OMR \
-    --generate-token-map --env-prefix A_D01
-
-# Step 2: Re-harvest with the generated map (one command)
-python -m td_release_packager harvest \
     --source /raw/ddl/ \
-    --project /projects/OMR \
-    --token-map config/token_map.conf
-```
-
-For global databases without an environment prefix:
-
-```bash
-python -m td_release_packager harvest \
-    --source /raw/ddl/ \
-    --project /projects/SHARED \
-    --generate-token-map
-```
-
-### Full Autonomous Pipeline
-
-```bash
-# [S] Scaffold
-python -m td_release_packager scaffold --name OMR --output /projects
-
-# [H] Harvest + tokenise
-python -m td_release_packager harvest \
-    --source /raw/ddl/ --project /projects/OMR \
-    --generate-token-map --env-prefix A_D01
-
-python -m td_release_packager harvest \
-    --source /raw/ddl/ --project /projects/OMR \
-    --token-map config/token_map.conf
-
-# Analyse dependencies
-python -m td_release_packager analyze --source /projects/OMR --overwrite
-
-# [I] Inspect
-python -m td_release_packager inspect --source /projects/OMR --strict
-
-# [P] Package
-python -m td_release_packager package \
-    --source /projects/OMR --env DEV --name OMR \
+    --auto-tokenise \
+    --env-prefix A_D01 \
+    --env DEV \
     --env-config config/env/DEV.conf \
-    --output releases/
-
-# [S] Ship (dry run first, then live)
-python deploy.py --dry-run
-python deploy.py --host myserver --user svc_deploy --streams 4
+    --name OMR \
+    --strict
 ```
 
-Every step is a single command. Every step produces deterministic output. No human intervention required.
+`--auto-tokenise` detects hardcoded database names and applies token substitution in one pass — no manual review step. `--strict` makes the pipeline abort immediately on any stage error, which is the correct behaviour for unattended operation.
 
-## MCP Tool Integration
+Exit code 0 = package produced and all stages passed. Exit code 1 = something failed; read `decisions.json` for detail.
 
-For agents operating via the Model Context Protocol, SHIPS commands map directly to tool calls:
+---
+
+## Zero-configuration tokenisation
+
+```bash
+# Agent knows only the environment prefix; SHIPS does the rest
+python -m td_release_packager process \
+    --project /projects/OMR \
+    --source /raw/ddl/ \
+    --auto-tokenise \
+    --env-prefix A_D01 \
+    --strict
+```
+
+For codebases without an environment prefix (global or shared databases), omit `--env-prefix`. SHIPS derives `{{SHARED_DB}}` from `SHARED_DB` — the full name becomes the token.
+
+---
+
+## Machine-readable audit trail: `decisions.json`
+
+Every SHIPS pipeline run writes to `decisions.json` in the project directory. This is the agent's primary feedback channel — a structured, append-only record of what every stage did, what config it used, what it produced, and what issues it found.
+
+### Schema
 
 ```json
 {
-    "tool": "ships_scaffold",
-    "parameters": {
-        "name": "OMR",
-        "output": "/projects"
+  "schema_version": 1,
+  "project": { "name": "OMR" },
+  "runs": [
+    {
+      "run_id": "2026-05-09T14:30:00Z-a3f8",
+      "command": "process",
+      "started_at": "2026-05-09T14:30:00+00:00",
+      "finished_at": "2026-05-09T14:30:12+00:00",
+      "duration_ms": 12340,
+      "final_status": "success",
+      "stages": [
+        {
+          "stage": "harvest",
+          "status": "success",
+          "config_resolved": { "source": { "value": "/raw/ddl/", ... } },
+          "inputs": { "source_dir": "/raw/ddl/", "total_files": 47 },
+          "outputs": { "classified": 45, "unclassified": 2 },
+          "decisions": { "auto_tokenise": true, "auto_derived_tokens": 3 },
+          "issues": [
+            { "severity": "warning", "code": "HARVEST_UNCLASSIFIED", "message": "session_setup.sql" }
+          ]
+        }
+      ]
     }
+  ]
 }
 ```
 
-```json
-{
-    "tool": "ships_harvest",
-    "parameters": {
-        "source": "/raw/ddl/",
-        "project": "/projects/OMR",
-        "env_prefix": "A_D01",
-        "generate_token_map": true
-    }
-}
+### Reading `decisions.json` in agent code
+
+```python
+import json, pathlib, subprocess
+
+result = subprocess.run(
+    ["python", "-m", "td_release_packager", "process",
+     "--project", project_dir, "--source", source_dir,
+     "--auto-tokenise", "--env-prefix", env_prefix, "--strict"],
+    capture_output=True, text=True
+)
+
+if result.returncode != 0:
+    decisions = json.loads(
+        pathlib.Path(project_dir, "decisions.json").read_text()
+    )
+    last_run = decisions["runs"][-1]
+    failed_stages = [s for s in last_run["stages"] if s["status"] == "error"]
+    for stage in failed_stages:
+        for issue in stage["issues"]:
+            print(f"[{stage['stage']}] {issue['severity']}: {issue['code']} — {issue['message']}")
 ```
 
-```json
-{
-    "tool": "ships_harvest",
-    "parameters": {
-        "source": "/raw/ddl/",
-        "project": "/projects/OMR",
-        "token_map": "config/token_map.conf"
-    }
-}
-```
+---
 
-```json
-{
-    "tool": "ships_inspect",
-    "parameters": {
-        "source": "/projects/OMR",
-        "strict": true
-    }
-}
-```
+## Trust Report
 
-```json
-{
-    "tool": "ships_package",
-    "parameters": {
-        "source": "/projects/OMR",
-        "env": "DEV",
-        "name": "OMR",
-        "env_config": "config/env/DEV.conf",
-        "output": "releases/"
-    }
-}
-```
+Every `ships package` call (or `process` with package stage enabled) stamps a Trust Report into `BUILD.json`. The `trust.label` field is the primary deployment gate:
 
-```json
-{
-    "tool": "ships_deploy",
-    "parameters": {
-        "host": "myserver",
-        "user": "svc_deploy",
-        "streams": 4,
-        "dry_run": false
-    }
-}
-```
-
-## Contract-Based Operation
-
-Every artefact SHIPS produces is a contract — a deterministic, reviewable, reusable file:
-
-| Artefact | Purpose | Agent uses it to... |
-|---|---|---|
-| `config/token_map.conf` | Literal → `{{TOKEN}}` mapping | Tokenise DDL without understanding naming conventions |
-| `config/inspect.conf` | Rule severity configuration | Know which rules to enforce |
-| `config/env/*.conf` | Environment token values | Resolve tokens for any target environment |
-| `_waves.txt` | Dependency-ordered deployment sequence | Deploy in the correct order |
-| `BUILD.json` | Package manifest | Verify build contents and traceability |
-
-An agent does not need to understand Teradata naming conventions, deployment strategies, or environment topologies. SHIPS encodes all of that into the contracts. The agent just drives the workflow.
-
-## Error Handling for Agents
-
-SHIPS uses standard exit codes:
-
-| Code | Meaning |
+| Label | Meaning |
 |---|---|
-| `0` | Success |
-| `1` | Error (missing files, validation failures, deployment errors) |
+| `READY` | All signals pass — safe to deploy |
+| `READY-WITH-CAVEATS` | Warnings present — deploy with awareness |
+| `BLOCKED` | At least one signal failed — do not deploy |
 
-Agents should check the exit code after each command. If non-zero, the output contains diagnostic information. The inspect command's `ValidationResult.passed` property (reflected in the exit code) is the gate for proceeding to package.
+**Phase 1 signals** (computable at build time):
 
-## Observability
+| Signal | BLOCKED when |
+|---|---|
+| `inspect_token_format` | Any malformed `{{TOKEN}}` marker found |
+| `inspect_lint` | Any Coding Discipline ERROR-severity violation |
+| `inspect_grants` | Any grant drift ERROR detected |
+| `provenance_complete` | `_provenance.json` absent from payload |
 
-The deployment manifest (`BUILD.json`) and deployment report provide full observability:
+**Reading trust in a CLI pipeline:**
+```bash
+# Check trust label from BUILD.json inside the archive
+python -c "
+import zipfile, json, sys
+with zipfile.ZipFile('$ARCHIVE_PATH') as z:
+    name = next(n for n in z.namelist() if n.endswith('BUILD.json'))
+    build = json.loads(z.read(name))
+label = build['trust']['label']
+print(f'Trust: {label}')
+sys.exit(0 if label in ('READY', 'READY-WITH-CAVEATS') else 1)
+"
+```
 
-- What was built, when, by whom, from which commit
-- What tokens were resolved to which values
-- Which objects were deployed, skipped, failed, or rolled back
-- Wave execution timing and parallelism metrics
+---
 
-An agent can read these artefacts to verify deployment outcomes and report status.
+## Structured gate commands
+
+Two commands are designed specifically as agentic decision gates.
+
+### `explain` — what did the last run do?
+
+```bash
+python -m td_release_packager explain \
+    --project /projects/OMR \
+    --command process
+```
+
+Exit 0 if the last process run had status success or warning. Exit 1 if it had errors or the file is missing.
+
+### `verify` — is the package ready to deploy?
+
+```bash
+python -m td_release_packager verify --project /projects/OMR
+```
+
+Exit 0 = READY. Exit 1 = NOT READY. Checks: archive exists, no package issues, package stage succeeded, trust label not BLOCKED.
+
+---
+
+## Agentic deployment scenarios (CLI path)
+
+### Scenario 1 — Chat-driven packaging
+
+```python
+import subprocess, json, pathlib
+
+def ships_cli(cmd: list) -> tuple[int, str]:
+    r = subprocess.run(["python", "-m", "td_release_packager"] + cmd,
+                       capture_output=True, text=True)
+    return r.returncode, r.stdout + r.stderr
+
+# Create project
+ships_cli(["scaffold", "--name", "OMR", "--output", "/projects"])
+
+# Fill in config/env/DEV.conf from known topology (agent writes this)
+
+# Run full pipeline
+rc, out = ships_cli([
+    "process", "--project", "/projects/OMR",
+    "--source", "/raw/ddl/",
+    "--auto-tokenise", "--env-prefix", "A_D01",
+    "--env", "DEV", "--env-config", "config/env/DEV.conf",
+    "--name", "OMR", "--strict",
+])
+
+if rc != 0:
+    raise RuntimeError(f"Pipeline failed:\n{out}")
+
+# Verify
+rc, _ = ships_cli(["verify", "--project", "/projects/OMR"])
+if rc == 0:
+    print("Package ready for deployment")
+```
+
+### Scenario 2 — CI/CD pipeline
+
+```bash
+# .github/workflows/ships.yml excerpt
+- name: Run SHIPS pipeline
+  run: |
+    uv run python -m td_release_packager process \
+        --project $PROJECT_DIR \
+        --source src/ddl/ \
+        --token-map config/token_map.conf \
+        --env DEV \
+        --env-config config/env/DEV.conf \
+        --name $PACKAGE_NAME \
+        --commit $GITHUB_SHA \
+        --author "ci-pipeline" \
+        --strict
+
+- name: Verify package readiness
+  run: uv run python -m td_release_packager verify --project $PROJECT_DIR
+```
+
+### Scenario 3 — Autonomous environment promotion
+
+```bash
+# DEV package approved; promote to TST with same build number
+python -m td_release_packager package \
+    --source /projects/OMR \
+    --env TST \
+    --name OMR \
+    --env-config config/env/TST.conf \
+    --output releases/ \
+    --no-increment \
+    --commit $APPROVED_SHA
+
+python -m td_release_packager verify --project /projects/OMR
+```
+
+---
+
+## All exit codes
+
+| Code | Command | Meaning |
+|---|---|---|
+| `0` | Any | Success or success-with-warnings |
+| `1` | `process --strict` | A stage failed and pipeline was aborted |
+| `1` | `package` | Trust label is BLOCKED (unless `--skip-trust-check`) |
+| `1` | `verify` | Package is NOT READY |
+| `1` | `explain` | Last run had error status or file missing |
+| `1` | `deploy` | One or more objects failed |
+| `1` | `rollback` | One or more rollback operations failed |
+
+---
+
+## Structured artefacts for agent consumption
+
+| Artefact | Location | What an agent reads |
+|---|---|---|
+| `decisions.json` | `<project>/decisions.json` | Stage outcomes, issue codes, config provenance, output counts |
+| `BUILD.json` | Inside the package `.zip` | Build number, environment, file list, token count, integrity hash, **trust report** |
+| `_waves.txt` | `<project>/_waves.txt` | Topologically sorted deployment order |
+| `config/token_map.conf` | `<project>/config/token_map.conf` | Literal → `{{TOKEN}}` mapping |
+| `config/env/*.conf` | `<project>/config/env/` | Token → resolved value per environment |
+| Deploy manifest | `<package>/logs/.deploy_manifest_*.json` | Per-object deployment outcomes, wave timing |
+
+---
+
+## Issue codes
+
+Every issue recorded in `decisions.json` carries a stable code. Agents branch on codes, not free-text messages.
+
+| Domain | Code | Severity | Meaning |
+|---|---|---|---|
+| Harvest | `HARVEST_UNCLASSIFIED` | warning | File not classified |
+| Harvest | `HARVEST_TOKEN_CANDIDATE` | info | Hardcoded DB name detected |
+| Inspect | `INSPECT_TOKEN_MALFORMED` | error | Malformed `{{TOKEN}}` marker |
+| Inspect | `INSPECT_LINT_VIOLATION` | varies | Coding Discipline rule fired |
+| Inspect | `INSPECT_GRANT_VIOLATION` | varies | Grant drift detected |
+| Analyse | `ANALYSE_CYCLE` | error | Circular dependency |
+| Analyse | `ANALYSE_EXTERNAL_REF` | info | Reference not in package |
+| Generate | `GENERATE_ERROR` | error | View generator failed |
+| Package | `PACKAGE_WARNING` | warning | Build-time anomaly |
+| Token | `TOKEN_UNDEFINED` | error | `{{TOKEN}}` has no value in env config |
+
+---
+
+## MCP server
+
+For agents that prefer tool calls over subprocess invocation, the SHIPS MCP server exposes all pipeline stages as FastMCP tools. See **[docs/MCP_GUIDE.md](./MCP_GUIDE.md)** for the full reference.
