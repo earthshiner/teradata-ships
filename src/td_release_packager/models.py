@@ -220,6 +220,16 @@ class BuildManifest:
                           an auto-split pair lists the prereqs zip
                           here; the prereqs zip's list is empty.
                           Empty for single-zip builds.
+        discovery:        Resolved discovery configuration stamped at
+                          build time. Contains ``extensions`` — a
+                          sorted list of all file extensions that were
+                          in scope for harvest (defaults plus any
+                          project-level additions from
+                          ``ships.yaml``'s ``discovery.extensions``).
+                          The embedded deployer reads this at startup
+                          to drive its walk, eliminating the hard-coded
+                          extension list and ensuring custom extensions
+                          are honoured end-to-end.
     """
 
     build_number: str
@@ -240,6 +250,7 @@ class BuildManifest:
     role: str = ""
     requires: List[str] = field(default_factory=list)
     trust: Dict[str, object] = field(default_factory=dict)
+    discovery: Dict[str, object] = field(default_factory=dict)
 
 
 @dataclass

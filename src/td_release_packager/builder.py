@@ -410,6 +410,9 @@ def _build_package_impl(
     _embed_deployer(pkg_dir)
 
     # -- Phase 8: Generate BUILD.json --
+    from td_release_packager.discovery import resolve_harvest_extensions
+
+    resolved_extensions = resolve_harvest_extensions(config.source_dir)
     manifest = BuildManifest(
         build_number=build_no,
         environment=config.environment,
@@ -425,6 +428,7 @@ def _build_package_impl(
         phase_inventory=phase_inventory,
         tokens_resolved={k: v for k, v in sorted(token_values.items())},
         warnings=warnings,
+        discovery={"extensions": sorted(resolved_extensions)},
     )
 
     # -- Phase 8a: Compute and stamp Phase 1 Trust Report --
@@ -724,6 +728,7 @@ def _split_into_paired_packages(
         release_group=release_group,
         role="prereqs",
         requires=[],
+        discovery=dict(manifest.discovery),
     )
 
     # 7. Re-write BUILD.json on both sides.
