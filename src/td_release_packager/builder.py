@@ -331,9 +331,21 @@ def build_package(
         warnings=warnings,
     )
 
+    # -- Phase 8a: Compute and stamp Phase 1 Trust Report --
+    # Discrete signals (inspect results + provenance) derive a label
+    # (READY / READY-WITH-CAVEATS / BLOCKED) that tells a DBA or
+    # deployment agent whether this package is safe to promote.
+    from td_release_packager.trust import compute_trust_report, format_trust_banner
+
+    trust_report = compute_trust_report(config.source_dir, pkg_dir)
+    manifest.trust = trust_report.to_dict()
+
     manifest_path = os.path.join(pkg_dir, "BUILD.json")
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest.__dict__, f, indent=2, ensure_ascii=False)
+
+    # Print trust banner to CLI
+    print(format_trust_banner(trust_report))
 
     # -- Phase 8b: Write provenance document (v2) --
     # Records the full filename-transformation chain (source →
@@ -1416,6 +1428,35 @@ def main():
     # -- Package integrity verification (before any database connection) --
     pkg_hash = _verify_integrity(SCRIPT_DIR, logger, args.skip_integrity_check)
 
+    # -- Trust Report banner --
+    # Read the trust block computed at build time and surface the
+    # label and per-signal status before any database connection is
+    # opened.  A BLOCKED label means the package should not be
+    # deployed without investigating and resolving the blocking signals.
+    _build_json = os.path.join(SCRIPT_DIR, "BUILD.json")
+    if os.path.exists(_build_json):
+        with open(_build_json, encoding="utf-8") as _f:
+            _bdata = json.load(_f)
+        _trust = _bdata.get("trust", {{}})
+        if _trust:
+            _label = _trust.get("label", "UNKNOWN")
+            _icons = {{"READY": "\\u2713", "READY-WITH-CAVEATS": "\\u26a0", "BLOCKED": "\\u2717"}}
+            _licon = _icons.get(_label, "?")
+            logger.info("=" * 64)
+            logger.info("  Package Trust: %s %s", _licon, _label)
+            for _sname, _sig in _trust.get("signals", {{}}).items():
+                _sicons = {{"pass": "\\u2713", "warn": "\\u26a0", "fail": "\\u2717", "unknown": "?"}}
+                _sicon = _sicons.get(_sig.get("status", "unknown"), "?")
+                logger.info("  %s %-28s %s", _sicon, _sname, _sig.get("message", ""))
+            logger.info("=" * 64)
+            if _label == "BLOCKED":
+                logger.error(
+                    "Package trust is BLOCKED. Fix the failing signals before "
+                    "deploying. Use --skip-trust-check to override (development only)."
+                )
+                if not getattr(args, "skip_trust_check", False):
+                    sys.exit(1)
+
     # -- Connect (skip in dry-run — no database needed) --
     cursor = None
     make_cursor = None
@@ -1946,6 +1987,9 @@ def parse_args():
                    help="Debug logging.")
     p.add_argument("--skip-integrity-check", action="store_true",
                    help="Skip package integrity verification (development use only).")
+    p.add_argument("--skip-trust-check", action="store_true",
+                   help="Deploy even when the Trust Report label is BLOCKED "
+                        "(development use only — never use in production).")
     args = p.parse_args()
 
     # Validate: --host and --user are required unless --dry-run
