@@ -26,8 +26,9 @@ import hashlib
 import json
 import logging
 import os
-import shutil
 import re
+import shutil
+import subprocess
 import sys
 from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple
@@ -161,6 +162,68 @@ def build_package(
         return result
 
 
+def _check_working_tree(source_dir: str, allow_dirty: bool) -> bool:
+    """
+    Check whether the git working tree under ``source_dir`` is clean.
+
+    Returns True if dirty (uncommitted tracked-file changes exist).
+    Raises ``ValueError`` when dirty and ``allow_dirty`` is False.
+    Emits a warning log when dirty and ``allow_dirty`` is True.
+    Returns False (and logs nothing) when git is unavailable or the
+    directory is not inside a git repository — those environments
+    cannot enforce the gate.
+
+    Args:
+        source_dir:  Directory to check (typically the SHIPS project root).
+        allow_dirty: When True, permit a dirty tree but stamp the manifest.
+
+    Raises:
+        ValueError: Dirty working tree and ``allow_dirty`` is False.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=no"],
+            cwd=source_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        logger.debug("git not available — skipping dirty-tree check")
+        return False
+
+    if result.returncode != 0:
+        # Not a git repo, or git error — skip silently
+        logger.debug(
+            "git status failed (rc=%d) — skipping dirty-tree check", result.returncode
+        )
+        return False
+
+    dirty_lines = [l for l in result.stdout.splitlines() if l.strip()]
+    if not dirty_lines:
+        return False
+
+    summary = "\n".join(f"  {l}" for l in dirty_lines[:10])
+    if len(dirty_lines) > 10:
+        summary += f"\n  ... and {len(dirty_lines) - 10} more"
+
+    if not allow_dirty:
+        raise ValueError(
+            f"Working tree has uncommitted changes — package not built.\n"
+            f"{summary}\n\n"
+            f"Commit or stash your changes, or pass --allow-dirty to override.\n"
+            f"Note: --allow-dirty stamps source_dirty=true in BUILD.json so the\n"
+            f"Trust Report will flag this package as READY-WITH-CAVEATS."
+        )
+
+    logger.warning(
+        "Building from dirty working tree (--allow-dirty). "
+        "source_dirty=true will be stamped in BUILD.json.\n%s",
+        summary,
+    )
+    return True
+
+
 def _build_package_impl(
     config: BuildConfig,
 ) -> Tuple[Tuple[str, BuildManifest], Optional[Tuple[str, BuildManifest]]]:
@@ -210,6 +273,9 @@ def _build_package_impl(
     # -- Validate source directory --
     if not os.path.isdir(config.source_dir):
         raise FileNotFoundError(f"Source directory not found: {config.source_dir}")
+
+    # -- Dirty working tree gate --
+    source_dirty = _check_working_tree(config.source_dir, config.allow_dirty)
 
     # -- Phase 1: Read token values --
     token_values = read_env_config(config.env_config_file)
@@ -353,6 +419,7 @@ def _build_package_impl(
         author=config.author,
         description=config.description,
         source_commit=config.source_commit,
+        source_dirty=source_dirty,
         token_count=total_subs,
         file_count=file_count,
         phase_inventory=phase_inventory,
@@ -648,6 +715,7 @@ def _split_into_paired_packages(
         author=manifest.author,
         description=manifest.description,
         source_commit=manifest.source_commit,
+        source_dirty=manifest.source_dirty,
         token_count=manifest.token_count,  # pre-split count covers both halves
         file_count=sum(prereqs_inventory.values()),
         phase_inventory=prereqs_inventory,

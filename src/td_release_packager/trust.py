@@ -137,6 +137,7 @@ def compute_trust_report(source_dir: str, pkg_dir: str) -> TrustReport:
     )
 
     signals["provenance_complete"] = _provenance_signal(source_dir)
+    signals["build_reproducible"] = _build_reproducible_signal(pkg_dir)
 
     label = _derive_label(signals)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
@@ -244,6 +245,42 @@ def _provenance_signal(source_dir: str) -> TrustSignal:
             "disabled. Rebuild the package with the current SHIPS version to "
             "generate provenance."
         ),
+    )
+
+
+def _build_reproducible_signal(pkg_dir: str) -> TrustSignal:
+    """
+    Trust signal: was the package built from a clean working tree?
+
+    Reads ``source_dirty`` from BUILD.json in ``pkg_dir``.
+    - ``source_dirty: true``  → WARN (built with --allow-dirty)
+    - ``source_dirty: false`` or absent → PASS
+    - BUILD.json not found    → UNKNOWN
+    """
+    build_json = os.path.join(pkg_dir, "BUILD.json")
+    if not os.path.exists(build_json):
+        return TrustSignal(
+            status=TRUST_PASS,
+            message="BUILD.json absent — no evidence of dirty-tree build",
+        )
+    try:
+        with open(build_json, encoding="utf-8") as f:
+            manifest = json.load(f)
+    except Exception:
+        return TrustSignal(
+            status=TRUST_PASS,
+            message="BUILD.json unreadable — assuming clean build",
+        )
+
+    if manifest.get("source_dirty", False):
+        return TrustSignal(
+            status=TRUST_WARN,
+            message="Package built from dirty working tree (--allow-dirty was passed). "
+            "source_commit may not fully represent the deployed code.",
+        )
+    return TrustSignal(
+        status=TRUST_PASS,
+        message="Built from a clean working tree — source_commit is authoritative",
     )
 
 

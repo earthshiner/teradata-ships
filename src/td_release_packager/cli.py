@@ -2065,6 +2065,7 @@ def _run_build(args, stage, issue_codes) -> int:
         author=args.author or "",
         description=args.description or "",
         source_commit=args.commit or "",
+        allow_dirty=getattr(args, "allow_dirty", False),
     )
 
     (main_pair, companion_pair) = build_package(config)
@@ -3344,6 +3345,15 @@ def _build_parser():
     bp.add_argument("--author", help="Builder's name.")
     bp.add_argument("--description", help="Release description.")
     bp.add_argument("--commit", help="Git commit hash.")
+    bp.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        dest="allow_dirty",
+        default=False,
+        help="Build even if the working tree has uncommitted changes. "
+        "Stamps source_dirty=true in BUILD.json so the Trust Report "
+        "flags the package as READY-WITH-CAVEATS.",
+    )
 
     # -- scan --
     sp = subs.add_parser(

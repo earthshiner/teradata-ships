@@ -6,9 +6,83 @@ Covers:
     - Environment-specific prefix replacement in filenames
     - Binary/non-DDL file preservation
     - Hidden/underscore file preservation
+    - Dirty working tree gate (_check_working_tree)
 """
 
-from td_release_packager.builder import _resolve_filename
+from unittest.mock import patch
+
+import pytest
+
+from td_release_packager.builder import _check_working_tree, _resolve_filename
+
+
+# ---------------------------------------------------------------
+# _check_working_tree
+# ---------------------------------------------------------------
+
+
+class TestCheckWorkingTree:
+    """Tests for the dirty working tree gate."""
+
+    def _run(self, stdout="", returncode=0, side_effect=None):
+        """Helper: mock subprocess.run and call _check_working_tree."""
+        import subprocess
+
+        mock_result = type("R", (), {"returncode": returncode, "stdout": stdout})()
+        with patch("td_release_packager.builder.subprocess.run") as mock_run:
+            if side_effect:
+                mock_run.side_effect = side_effect
+            else:
+                mock_run.return_value = mock_result
+            return _check_working_tree("/fake/dir", allow_dirty=False), mock_run
+
+    def test_clean_tree_returns_false(self):
+        dirty, _ = self._run(stdout="")
+        assert dirty is False
+
+    def test_dirty_tree_raises_without_flag(self):
+        import subprocess
+
+        mock_result = type("R", (), {"returncode": 0, "stdout": " M some_file.tbl\n"})()
+        with patch(
+            "td_release_packager.builder.subprocess.run", return_value=mock_result
+        ):
+            with pytest.raises(ValueError, match="uncommitted changes"):
+                _check_working_tree("/fake/dir", allow_dirty=False)
+
+    def test_dirty_tree_returns_true_with_allow_dirty(self):
+        import subprocess
+
+        mock_result = type("R", (), {"returncode": 0, "stdout": " M some_file.tbl\n"})()
+        with patch(
+            "td_release_packager.builder.subprocess.run", return_value=mock_result
+        ):
+            dirty = _check_working_tree("/fake/dir", allow_dirty=True)
+        assert dirty is True
+
+    def test_git_not_found_returns_false(self):
+        import subprocess
+
+        dirty, _ = self._run(side_effect=FileNotFoundError("git not found"))
+        assert dirty is False
+
+    def test_nonzero_returncode_returns_false(self):
+        dirty, _ = self._run(returncode=128, stdout="fatal: not a git repository")
+        assert dirty is False
+
+    def test_error_message_lists_changed_files(self):
+        import subprocess
+
+        mock_result = type(
+            "R", (), {"returncode": 0, "stdout": " M file_a.tbl\n M file_b.viw\n"}
+        )()
+        with patch(
+            "td_release_packager.builder.subprocess.run", return_value=mock_result
+        ):
+            with pytest.raises(ValueError) as exc_info:
+                _check_working_tree("/fake/dir", allow_dirty=False)
+        assert "file_a.tbl" in str(exc_info.value)
+        assert "--allow-dirty" in str(exc_info.value)
 
 
 # ---------------------------------------------------------------
