@@ -335,6 +335,10 @@ def _stage_recording(project_dir: str, stage_name: str):
     ``StageRecorder``. Otherwise yields a ``_NullStageRecorder`` so
     ad-hoc one-off invocations don't litter the filesystem.
 
+    Also emits an OpenTelemetry span named ``ships.<stage_name>`` when
+    ``opentelemetry-api`` is installed and an SDK is configured. When
+    OTel is not available this is a zero-overhead no-op.
+
     Usage::
 
         with _stage_recording(args.source, "scan") as stage:
@@ -350,20 +354,64 @@ def _stage_recording(project_dir: str, stage_name: str):
         DECISIONS_FILENAME,
         DecisionsManifest,
     )
+    from td_release_packager.otel import ships_span
 
     @contextmanager
     def _ctx():
-        if not _looks_like_ships_project(project_dir):
-            yield _NullStageRecorder()
-            return
+        with ships_span(
+            f"ships.{stage_name}",
+            {"ships.project_dir": project_dir, "ships.stage": stage_name},
+        ) as otel_span:
+            if not _looks_like_ships_project(project_dir):
+                yield _NullStageRecorder()
+                return
 
-        manifest_path = os.path.join(project_dir, DECISIONS_FILENAME)
-        manifest = DecisionsManifest(manifest_path)
-        with manifest.run(stage_name) as run:
-            with run.stage(stage_name) as stage:
-                yield stage
+            manifest_path = os.path.join(project_dir, DECISIONS_FILENAME)
+            manifest = DecisionsManifest(manifest_path)
+            with manifest.run(stage_name) as run:
+                with run.stage(stage_name) as stage:
+                    yield stage
+
+            # Stage complete — propagate status and key outputs to OTel.
+            # Accessing stage._entry is safe: the inner with block has
+            # exited and RunRecorder.__exit__ has already finalised it.
+            _propagate_stage_to_otel_span(stage, otel_span)
 
     return _ctx()
+
+
+def _propagate_stage_to_otel_span(stage, otel_span) -> None:
+    """Copy key stage attributes to the OTel span after the stage closes."""
+    try:
+        entry = getattr(stage, "_entry", {})
+        status = entry.get("status", "unknown")
+        otel_span.set_attribute("ships.stage.status", status)
+
+        # Propagate scalar outputs as span attributes
+        for key, value in entry.get("outputs", {}).items():
+            if isinstance(value, (str, int, float, bool)):
+                otel_span.set_attribute(f"ships.output.{key}", value)
+
+        # Propagate issue counts
+        issues = entry.get("issues", [])
+        errors = sum(1 for i in issues if i.get("severity") == "error")
+        warnings = sum(1 for i in issues if i.get("severity") == "warning")
+        otel_span.set_attribute("ships.issues.errors", errors)
+        otel_span.set_attribute("ships.issues.warnings", warnings)
+
+        # Mark the OTel span status on error
+        if status == "error":
+            try:
+                from opentelemetry.trace import StatusCode
+
+                otel_span.set_status(
+                    StatusCode.ERROR, f"Stage '{stage._entry.get('stage', '')}' failed"
+                )
+            except ImportError:
+                pass
+    except Exception:
+        # OTel propagation must never break the recording path
+        pass
 
 
 # ---------------------------------------------------------------
@@ -415,16 +463,22 @@ def _process_recording(project_dir: str):
         DecisionsManifest,
     )
 
+    from td_release_packager.otel import ships_span
+
     @contextmanager
     def _ctx():
-        if not _looks_like_ships_project(project_dir):
-            yield _NullRunRecorder()
-            return
+        with ships_span(
+            "ships.process",
+            {"ships.project_dir": project_dir, "ships.stage": "process"},
+        ):
+            if not _looks_like_ships_project(project_dir):
+                yield _NullRunRecorder()
+                return
 
-        manifest_path = os.path.join(project_dir, DECISIONS_FILENAME)
-        manifest = DecisionsManifest(manifest_path)
-        with manifest.run("process") as run:
-            yield run
+            manifest_path = os.path.join(project_dir, DECISIONS_FILENAME)
+            manifest = DecisionsManifest(manifest_path)
+            with manifest.run("process") as run:
+                yield run
 
     return _ctx()
 
