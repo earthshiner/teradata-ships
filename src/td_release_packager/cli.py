@@ -240,6 +240,8 @@ def main():
         _cmd_verify(args)
     elif args.command == "onboard":
         _cmd_onboard(args)
+    elif args.command == "decisions":
+        _cmd_decisions(args)
     else:
         parser.print_help()
         sys.exit(1)
@@ -2403,6 +2405,80 @@ _STATUS_ICONS = {
 }
 
 
+def _cmd_decisions(args):
+    """Dispatch decisions sub-commands."""
+    sub = getattr(args, "decisions_subcommand", None)
+    if sub == "prune":
+        _cmd_decisions_prune(args)
+    else:
+        # No sub-command — print usage
+        print(
+            "Usage: decisions prune --keep-runs N | --keep-days N [--yes] [--dry-run]"
+        )
+        sys.exit(1)
+
+
+def _cmd_decisions_prune(args):
+    """Prune old run entries from decisions.json."""
+    from td_release_packager.orchestrator.decisions import prune_decisions
+
+    project = args.project
+    decisions_path = os.path.join(project, "decisions.json")
+
+    if not os.path.isfile(decisions_path):
+        print(f"ERROR: decisions.json not found in {project}", file=sys.stderr)
+        sys.exit(1)
+
+    keep_runs = getattr(args, "keep_runs", None)
+    keep_days = getattr(args, "keep_days", None)
+    yes = getattr(args, "yes", False)
+    dry_run = getattr(args, "dry_run", False)
+
+    # Dry-run preview
+    preview = prune_decisions(
+        decisions_path, keep_runs=keep_runs, keep_days=keep_days, dry_run=True
+    )
+
+    print(f"\n  decisions.json prune preview")
+    print(f"  {'=' * 44}")
+    print(f"  Total runs  : {preview.total_runs}")
+    print(f"  To keep     : {preview.kept_runs}")
+    print(f"  To prune    : {preview.pruned_runs}")
+
+    if preview.pruned_runs == 0:
+        print("\n  Nothing to prune.")
+        return
+
+    print()
+    for rid, ts in zip(preview.pruned_run_ids[:20], preview.pruned_started_at[:20]):
+        print(f"  - {ts[:19]}  {rid}")
+    if preview.pruned_runs > 20:
+        print(f"  ... and {preview.pruned_runs - 20} more")
+    print()
+
+    if dry_run:
+        print("  --dry-run: no changes written.")
+        return
+
+    if not yes:
+        try:
+            answer = (
+                input(f"  Prune {preview.pruned_runs} run(s)? [y/N] ").strip().lower()
+            )
+        except EOFError:
+            answer = "n"
+        if answer not in ("y", "yes"):
+            print("  Aborted.")
+            return
+
+    prune_decisions(
+        decisions_path, keep_runs=keep_runs, keep_days=keep_days, dry_run=False
+    )
+    print(
+        f"  Pruned {preview.pruned_runs} run(s). {preview.kept_runs} run(s) retained."
+    )
+
+
 def _cmd_explain(args):
     """
     Item 6a — explain: human-readable report of a prior process run.
@@ -3748,6 +3824,53 @@ def _build_parser():
         "--auto",
         action="store_true",
         help="Run the first automatable step of the recommended sequence.",
+    )
+
+    # -- decisions --
+    dc = subs.add_parser(
+        "decisions",
+        help="Manage the decisions.json audit trail.",
+        description="Sub-commands for inspecting and maintaining decisions.json.",
+    )
+    dc_subs = dc.add_subparsers(dest="decisions_subcommand")
+
+    dp = dc_subs.add_parser(
+        "prune",
+        help="Remove old run entries from decisions.json.",
+        description="Prune stale run entries, keeping the most recent N runs or "
+        "runs from the last N days. Always shows a preview before writing. "
+        "Use --yes to skip the confirmation prompt (for CI/scripts).",
+    )
+    dp.add_argument(
+        "--project",
+        required=True,
+        help="SHIPS project directory containing decisions.json.",
+    )
+    dp_mode = dp.add_mutually_exclusive_group(required=True)
+    dp_mode.add_argument(
+        "--keep-runs",
+        type=int,
+        metavar="N",
+        dest="keep_runs",
+        help="Retain the N most recent runs; prune everything older.",
+    )
+    dp_mode.add_argument(
+        "--keep-days",
+        type=int,
+        metavar="N",
+        dest="keep_days",
+        help="Retain runs started within the last N days; prune older ones.",
+    )
+    dp.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip the confirmation prompt and prune immediately.",
+    )
+    dp.add_argument(
+        "--dry-run",
+        action="store_true",
+        dest="dry_run",
+        help="Show what would be pruned without writing any changes.",
     )
 
     return parser
