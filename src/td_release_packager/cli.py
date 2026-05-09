@@ -238,6 +238,8 @@ def main():
         _cmd_explain(args)
     elif args.command == "verify":
         _cmd_verify(args)
+    elif args.command == "onboard":
+        _cmd_onboard(args)
     else:
         parser.print_help()
         sys.exit(1)
@@ -709,6 +711,174 @@ def _print_harvest_next_steps(
             print(f"  {line}" if line else "")
 
     print(f"\n{'=' * 64}\n")
+
+
+# ---------------------------------------------------------------
+# Onboarding wizard
+# ---------------------------------------------------------------
+
+
+def _onboard_scan(source_dir: str) -> dict:
+    """Walk source_dir and classify what placeholder style is in use."""
+    import re as _re
+
+    from td_release_packager.legacy_placeholders import find_legacy_placeholders
+    from td_release_packager.discovery import resolve_harvest_extensions
+
+    _SHIPS_TOKEN_RE = _re.compile(r"\{\{[A-Z][A-Z0-9_]*\}\}")
+
+    extensions = resolve_harvest_extensions(project_dir=source_dir)
+    sql_files = []
+    legacy_files = set()
+    token_files = set()
+    legacy_count = 0
+
+    for root, dirs, files in os.walk(source_dir):
+        dirs.sort()
+        for fname in sorted(files):
+            if os.path.splitext(fname)[1].lower() not in extensions:
+                continue
+            path = os.path.join(root, fname)
+            sql_files.append(path)
+            try:
+                content = open(path, encoding="utf-8", errors="replace").read()
+            except OSError:
+                continue
+            findings = find_legacy_placeholders(content)
+            if findings:
+                legacy_files.add(path)
+                legacy_count += sum(len(f.occurrences) for f in findings)
+            if _SHIPS_TOKEN_RE.search(content):
+                token_files.add(path)
+
+    return {
+        "sql_files": len(sql_files),
+        "legacy_files": len(legacy_files),
+        "legacy_count": legacy_count,
+        "token_files": len(token_files),
+    }
+
+
+def _onboard_classify(scan: dict, source_dir: str) -> str:
+    """Return a state label based on what was found."""
+    has_legacy = scan["legacy_files"] > 0
+    has_tokens = scan["token_files"] > 0
+    has_config = bool(
+        next(
+            (
+                p
+                for p in [
+                    os.path.join(source_dir, "config", "env"),
+                    os.path.join(source_dir, "env"),
+                ]
+                if os.path.isdir(p) and any(f.endswith(".conf") for f in os.listdir(p))
+            ),
+            None,
+        )
+    )
+    if has_legacy:
+        return "LEGACY"
+    if has_tokens and has_config:
+        return "READY"
+    if has_tokens:
+        return "TOKENS_NO_CONFIG"
+    return "CLEAN"
+
+
+def _cmd_onboard(args):
+    """Scan a source directory and recommend the SHIPS onboarding path."""
+    source = os.path.abspath(args.source)
+    auto = getattr(args, "auto", False)
+    env = getattr(args, "env", None) or "DEV"
+
+    if not os.path.isdir(source):
+        print(f"ERROR: source directory not found: {source}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"\n  SHIPS Onboarding Wizard")
+    print(f"  {'=' * 56}")
+    print(f"  Scanning: {source}")
+
+    scan = _onboard_scan(source)
+    state = _onboard_classify(scan, source)
+
+    print(f"\n  Source summary")
+    print(f"    SQL/DDL files found : {scan['sql_files']}")
+    print(
+        f"    Legacy markers ($VAR, &&VAR&&) : {scan['legacy_count']} in {scan['legacy_files']} file(s)"
+    )
+    print(f"    SHIPS {{{{TOKEN}}}} forms : {scan['token_files']} file(s)")
+    print()
+
+    _print_onboard_recommendation(state, source, env, scan)
+
+    if auto:
+        _onboard_run_auto(state, source, env, args)
+
+
+def _print_onboard_recommendation(state: str, source: str, env: str, scan: dict):
+    """Print the recommended command sequence for the detected state."""
+    module = "python -m td_release_packager"
+
+    if state == "LEGACY":
+        print("  Detected: legacy placeholder markers ($VAR / &&VAR&&)")
+        print("  Recommended path: import-legacy → migrate-source → harvest\n")
+        print("  Step 1 — discover all legacy markers and generate the migration sed:")
+        print(f"    {module} import-legacy \\")
+        print(f"      --scan-source {source} \\")
+        print(f"      --env {env} \\")
+        print(f"      --output-dir ./config\n")
+        print("  Step 2 — fill in token values in config/env/DEV.conf, then apply:")
+        print(f"    {module} migrate-source \\")
+        print(f"      --sed config/legacy_migration.sed \\")
+        print(f"      --source {source}\n")
+        print("  Step 3 — harvest the migrated source into a SHIPS project:")
+        print(f"    {module} harvest --source {source} --project <project_dir>")
+
+    elif state == "TOKENS_NO_CONFIG":
+        print("  Detected: SHIPS {{TOKEN}} markers, no env config yet")
+        print("  Recommended path: bootstrap-env-config → fill values → harvest\n")
+        print("  Step 1 — generate a config scaffold from existing tokens:")
+        print(f"    {module} bootstrap-env-config \\")
+        print(f"      --source <project_dir> \\")
+        print(f"      --env {env}\n")
+        print("  Step 2 — fill in token values in config/env/DEV.conf")
+        print("  Step 3 — harvest:")
+        print(f"    {module} harvest --source {source} --project <project_dir>")
+
+    elif state == "READY":
+        print("  Detected: SHIPS {{TOKEN}} markers with env config present")
+        print("  Source looks ready — proceed with harvest:\n")
+        print(f"    {module} harvest --source {source} --project <project_dir>")
+
+    else:  # CLEAN
+        print("  Detected: no placeholder markers found")
+        print("  Recommended path: harvest → decompose-names → bootstrap-env-config\n")
+        print("  Step 1 — harvest (token candidates will be reported):")
+        print(f"    {module} harvest --source {source} --project <project_dir>\n")
+        print("  Step 2 — decompose literal database names into {{TOKEN}} form:")
+        print(f"    {module} decompose-names token_map.conf --env {env}\n")
+        print("  Step 3 — bootstrap env config from the token map:")
+        print(f"    {module} bootstrap-env-config --source <project_dir> --env {env}")
+
+    print()
+
+
+def _onboard_run_auto(state: str, source: str, env: str, args):
+    """Run the first automatable step for the detected state."""
+    if state == "LEGACY":
+        print("  --auto: running import-legacy --scan-source ...\n")
+        from td_release_packager.legacy_importer import main as il_main
+
+        output_dir = getattr(args, "output_dir", None) or "./config"
+        il_main(["--scan-source", source, "--env", env, "--output-dir", output_dir])
+    elif state == "TOKENS_NO_CONFIG":
+        print("  --auto requires a project directory for bootstrap-env-config.")
+        print("  Run manually: python -m td_release_packager bootstrap-env-config ...")
+    elif state == "READY":
+        print("  --auto: source is ready — run harvest manually.")
+    else:
+        print("  --auto: harvest detects literal names; run harvest manually first.")
 
 
 # ---------------------------------------------------------------
@@ -3544,6 +3714,40 @@ def _build_parser():
         default=None,
         dest="run_id",
         help="Locate the package stage in a specific run.",
+    )
+
+    # -- onboard --
+    ob = subs.add_parser(
+        "onboard",
+        help="Scan a legacy source directory and recommend the SHIPS "
+        "onboarding path (import-legacy / bootstrap / harvest).",
+        description="Scans a source DDL directory for legacy placeholder "
+        "markers ($VAR, ${VAR}, &&VAR&&), SHIPS {{TOKEN}} forms, and "
+        "env config files, then recommends the correct onboarding sequence "
+        "with ready-to-run commands. Pass --auto to execute the first "
+        "automatable step immediately.",
+    )
+    ob.add_argument(
+        "--source",
+        required=True,
+        metavar="SOURCE_DIR",
+        help="Raw DDL source directory to scan.",
+    )
+    ob.add_argument(
+        "--env",
+        default="DEV",
+        help="Target environment name used in generated commands (default: DEV).",
+    )
+    ob.add_argument(
+        "--output-dir",
+        default="./config",
+        dest="output_dir",
+        help="Output directory for --auto mode (default: ./config).",
+    )
+    ob.add_argument(
+        "--auto",
+        action="store_true",
+        help="Run the first automatable step of the recommended sequence.",
     )
 
     return parser
