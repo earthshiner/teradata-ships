@@ -474,6 +474,52 @@ class TestParseDdlText:
         assert parsed.object_name == "Customer"
         assert parsed.qualified_name == "MyDB.Customer"
 
+    def test_multiline_procedure_name_qualified(self):
+        """Regression for issue #48.
+
+        Some legacy Teradata DDL splits the qualified name across two
+        lines — DB name on one line, dot + object name on the next.
+        The parser must capture both parts as the qualified name.
+
+            REPLACE PROCEDURE PDE_D01_00_GCFR_UTP_0_P
+                .GCFR_UT_BKEY_S_K_NextId_Log_CT (...)
+
+        Without the fix, only 'PDE_D01_00_GCFR_UTP_0_P' was captured
+        (no dot match), giving db_name=None → ValueError.
+        """
+        ddl = (
+            "REPLACE PROCEDURE PDE_D01_00_GCFR_UTP_0_P\n"
+            "    .GCFR_UT_BKEY_S_K_NextId_Log_CT (IN p1 INTEGER)\n"
+            "BEGIN\n"
+            "    SET p1 = 0;\n"
+            "END;\n"
+        )
+        parsed = parse_statement_text(ddl)
+        assert parsed.database_name == "PDE_D01_00_GCFR_UTP_0_P"
+        assert parsed.object_name == "GCFR_UT_BKEY_S_K_NextId_Log_CT"
+        assert parsed.qualified_name == (
+            "PDE_D01_00_GCFR_UTP_0_P.GCFR_UT_BKEY_S_K_NextId_Log_CT"
+        )
+
+    def test_multiline_view_name_qualified(self):
+        """Multi-line qualified name also works for views."""
+        ddl = "REPLACE VIEW MyDB\n    .v_Active AS SELECT 1 AS x;\n"
+        parsed = parse_statement_text(ddl)
+        assert parsed.database_name == "MyDB"
+        assert parsed.object_name == "v_Active"
+
+    def test_multiline_function_name_qualified(self):
+        """Multi-line qualified name also works for functions."""
+        ddl = (
+            "REPLACE FUNCTION MyDB\n"
+            ".fn_Calc (x INTEGER)\n"
+            "RETURNS INTEGER\n"
+            "RETURN x + 1;\n"
+        )
+        parsed = parse_statement_text(ddl)
+        assert parsed.database_name == "MyDB"
+        assert parsed.object_name == "fn_Calc"
+
     def test_single_part_name_not_duplicated(self):
         """Single-part names are not duplicated (e.g. role.role)."""
         parsed = parse_statement_text("CREATE ROLE analyst_role;")
