@@ -789,7 +789,10 @@ def resume_package(
 
 
 def rollback_package(
-    cursor, manifest_path: str, dry_run: bool = False
+    cursor,
+    manifest_path: str,
+    dry_run: bool = False,
+    wave_number: Optional[int] = None,
 ) -> PackageDeployResult:
     """
     Roll back a deployment, restoring objects to pre-deployment state.
@@ -809,6 +812,11 @@ def rollback_package(
                         written; the returned results carry
                         ``dry_run=True`` and describe the planned
                         action for each candidate.
+        wave_number:    When supplied, restrict rollback to objects
+                        deployed in this specific wave only. Objects
+                        in other waves are untouched. The package-
+                        level status is set to ``PARTIALLY_ROLLED_BACK``
+                        instead of ``ROLLED_BACK``.
 
     Returns:
         PackageDeployResult with rollback outcomes (or planned
@@ -823,11 +831,13 @@ def rollback_package(
     if not dry_run:
         manifest.set_package_status("ROLLING_BACK")
 
-    candidates = manifest.get_rollback_candidates()
+    candidates = manifest.get_rollback_candidates(wave_number=wave_number)
+    scope = f"wave {wave_number}" if wave_number is not None else "package"
     logger.info(
-        "%s %d objects",
+        "%s %d objects (%s)",
         "[DRY RUN] Would roll back" if dry_run else "Rolling back",
         len(candidates),
+        scope,
     )
 
     results = []
@@ -847,7 +857,13 @@ def rollback_package(
         results.append(result)
 
     if not dry_run:
-        manifest.set_package_status("ROLLED_BACK")
+        # Wave rollback leaves the rest of the deployment intact;
+        # use PARTIALLY_ROLLED_BACK to signal that only a subset of
+        # objects was rolled back.
+        final_status = (
+            "PARTIALLY_ROLLED_BACK" if wave_number is not None else "ROLLED_BACK"
+        )
+        manifest.set_package_status(final_status)
 
     summary = manifest.summary()
     pkg_result = PackageDeployResult(

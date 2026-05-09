@@ -443,3 +443,171 @@ class TestRollbackDryRun:
 
         assert len(result.results) == 1
         assert result.results[0].dry_run is True
+
+
+# ---------------------------------------------------------------
+# Wave-scoped rollback (issue #90)
+# ---------------------------------------------------------------
+
+
+class TestWaveRollback:
+    """
+    Wave-scoped rollback: --wave N rolls back only objects deployed
+    in wave N, leaving other waves untouched.
+
+    Test requirements from issue #90:
+    - Wave-filtered candidate selection
+    - Reverse-order processing within the filtered set
+    - --dry-run describes planned action without executing DDL
+    - --dry-run does not mutate manifest
+    - --dry-run works without a database connection
+    - PARTIALLY_ROLLED_BACK package status when only one wave rolled back
+    """
+
+    def _seed_two_wave_manifest(self, tmp_path):
+        """
+        Create a manifest with objects in two waves:
+          wave 1: Dev.v_w1   (VIEW, COMPLETED)
+          wave 2: Dev.v_w2a  (VIEW, COMPLETED)
+                  Dev.v_w2b  (VIEW, COMPLETED)
+        Returns the manifest object.
+        """
+        manifest = DeploymentManifest(str(tmp_path))
+        for name, wave in [
+            ("Dev.v_w1", 1),
+            ("Dev.v_w2a", 2),
+            ("Dev.v_w2b", 2),
+        ]:
+            manifest.register_object(
+                qualified_name=name,
+                ddl_file=f"DDL/views/{name}.viw",
+                object_type="VIEW",
+                wave_number=wave,
+            )
+            manifest.update_state(name, DeployState.COMPLETED)
+        return manifest
+
+    def test_wave_filter_selects_only_matching_wave(self, tmp_path):
+        """get_rollback_candidates(wave_number=2) returns only wave-2 objects."""
+        manifest = self._seed_two_wave_manifest(tmp_path)
+        candidates = manifest.get_rollback_candidates(wave_number=2)
+        assert set(candidates) == {"Dev.v_w2a", "Dev.v_w2b"}
+        assert "Dev.v_w1" not in candidates
+
+    def test_wave_filter_excludes_null_wave_objects(self, tmp_path):
+        """Objects with wave_number=None are excluded from wave-scoped rollback."""
+        manifest = DeploymentManifest(str(tmp_path))
+        manifest.register_object(
+            qualified_name="Dev.serial_obj",
+            ddl_file="DDL/tables/Dev.serial_obj.tbl",
+            object_type="TABLE",
+            wave_number=None,
+        )
+        manifest.update_state("Dev.serial_obj", DeployState.COMPLETED)
+        # wave_number=1 — serial object (wave=None) must be excluded
+        candidates = manifest.get_rollback_candidates(wave_number=1)
+        assert "Dev.serial_obj" not in candidates
+
+    def test_wave_rollback_processes_in_reverse_order(self, tmp_path):
+        """Objects within the wave are processed in reverse deployment order."""
+        manifest = self._seed_two_wave_manifest(tmp_path)
+
+        processed = []
+
+        def fake_rollback(cursor, qn, parsed, mfst, dry_run=False):
+            processed.append(qn)
+            mfst.update_state(qn, DeployState.ROLLED_BACK)
+            return ObjectDeployResult(
+                database_name=qn.split(".")[0],
+                object_name=qn.split(".")[1],
+                object_type=ObjectType.VIEW,
+                state=DeployState.ROLLED_BACK,
+                message=f"ok",
+            )
+
+        with patch(
+            "database_package_deployer.deployer._rollback_single",
+            side_effect=fake_rollback,
+        ):
+            rollback_package(MagicMock(), manifest.path, wave_number=2)
+
+        # v_w2b was registered after v_w2a → reversed → v_w2b first
+        assert processed == ["Dev.v_w2b", "Dev.v_w2a"]
+
+    def test_wave_rollback_sets_partially_rolled_back_status(self, tmp_path):
+        """Wave rollback sets PARTIALLY_ROLLED_BACK, not ROLLED_BACK."""
+        manifest = self._seed_two_wave_manifest(tmp_path)
+
+        def fake_rollback(cursor, qn, parsed, mfst, dry_run=False):
+            mfst.update_state(qn, DeployState.ROLLED_BACK)
+            return ObjectDeployResult(
+                database_name=qn.split(".")[0],
+                object_name=qn.split(".")[1],
+                object_type=ObjectType.VIEW,
+                state=DeployState.ROLLED_BACK,
+                message="ok",
+            )
+
+        with patch(
+            "database_package_deployer.deployer._rollback_single",
+            side_effect=fake_rollback,
+        ):
+            rollback_package(MagicMock(), manifest.path, wave_number=2)
+
+        import json
+
+        data = json.loads(open(manifest.path, encoding="utf-8").read())
+        assert data.get("status") == "PARTIALLY_ROLLED_BACK"
+
+    def test_full_rollback_sets_rolled_back_status(self, tmp_path):
+        """Package rollback (no wave filter) sets ROLLED_BACK."""
+        manifest = self._seed_two_wave_manifest(tmp_path)
+
+        def fake_rollback(cursor, qn, parsed, mfst, dry_run=False):
+            mfst.update_state(qn, DeployState.ROLLED_BACK)
+            return ObjectDeployResult(
+                database_name=qn.split(".")[0],
+                object_name=qn.split(".")[1],
+                object_type=ObjectType.VIEW,
+                state=DeployState.ROLLED_BACK,
+                message="ok",
+            )
+
+        with patch(
+            "database_package_deployer.deployer._rollback_single",
+            side_effect=fake_rollback,
+        ):
+            rollback_package(MagicMock(), manifest.path)
+
+        import json
+
+        data = json.loads(open(manifest.path, encoding="utf-8").read())
+        assert data.get("status") == "ROLLED_BACK"
+
+    def test_wave_dry_run_does_not_mutate_manifest(self, tmp_path):
+        """Wave dry-run leaves manifest completely unchanged."""
+        import json
+
+        manifest = self._seed_two_wave_manifest(tmp_path)
+        before = json.loads(open(manifest.path, encoding="utf-8").read())
+
+        rollback_package(None, manifest.path, dry_run=True, wave_number=2)
+
+        after = json.loads(open(manifest.path, encoding="utf-8").read())
+        assert before["objects"] == after["objects"]
+        assert before.get("status") == after.get("status")
+
+    def test_wave_dry_run_needs_no_connection(self, tmp_path):
+        """Wave dry-run works with cursor=None."""
+        manifest = self._seed_two_wave_manifest(tmp_path)
+        result = rollback_package(None, manifest.path, dry_run=True, wave_number=2)
+        assert len(result.results) == 2
+        assert all(r.dry_run is True for r in result.results)
+
+    def test_wave_dry_run_only_describes_wave_objects(self, tmp_path):
+        """Wave dry-run output includes wave-2 objects but not wave-1."""
+        manifest = self._seed_two_wave_manifest(tmp_path)
+        result = rollback_package(None, manifest.path, dry_run=True, wave_number=2)
+        names = {f"{r.database_name}.{r.object_name}" for r in result.results}
+        assert names == {"Dev.v_w2a", "Dev.v_w2b"}
+        assert "Dev.v_w1" not in str(names)
