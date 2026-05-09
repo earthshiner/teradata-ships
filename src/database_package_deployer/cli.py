@@ -284,12 +284,16 @@ def _cmd_resume(args):
 
 def _cmd_rollback(args):
     """Execute the 'rollback' command."""
-    cursor = _connect(args)
+    dry_run = getattr(args, "dry_run", False)
+
+    # Dry-run reads only from the manifest and disk — no DB connection needed.
+    cursor = None if dry_run else _connect(args)
 
     try:
         result = rollback_package(
             cursor=cursor,
             manifest_path=args.manifest_path,
+            dry_run=dry_run,
         )
         _print_package_result(result)
         sys.exit(0 if result.success else 1)
@@ -298,8 +302,9 @@ def _cmd_rollback(args):
         print(f"\nERROR: {e}", file=sys.stderr)
         sys.exit(1)
     finally:
-        cursor.close()
-        cursor.connection.close()
+        if cursor is not None:
+            cursor.close()
+            cursor.connection.close()
 
 
 def _cmd_status(args):
@@ -699,6 +704,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     rb.add_argument(
         "manifest_path",
         help="Path to .deploy_manifest.json.",
+    )
+    rb.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview what would be rolled back without executing any DDL "
+        "or mutating the manifest. Reads the manifest and checks disk "
+        "for rollback files — no database connection required.",
     )
     _add_conn_args(rb)
 
