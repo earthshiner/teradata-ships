@@ -758,6 +758,38 @@ def validate_directory(
     """
     Validate all DDL files in a directory against the Coding Discipline.
 
+    Thin traced wrapper — see ``_validate_directory_impl`` for the full
+    implementation.  Emits a ``ships.validate`` OpenTelemetry span when
+    ``OTEL_EXPORTER_OTLP_ENDPOINT`` is configured.
+    """
+    from ships_tracing import stage_span
+
+    with stage_span(
+        "ships.validate",
+        **{"ships.source_dir": source_dir, "ships.strict": strict},
+    ) as _span:
+        result = _validate_directory_impl(
+            source_dir,
+            rules_config=rules_config,
+            strict=strict,
+            placement=placement,
+        )
+        _span.set_attribute("ships.files_scanned", result.files_scanned)
+        _span.set_attribute("ships.issues_errors", result.errors)
+        _span.set_attribute("ships.issues_warnings", result.warnings)
+        _span.set_attribute("ships.passed", result.passed)
+        return result
+
+
+def _validate_directory_impl(
+    source_dir: str,
+    rules_config: Dict[str, str] = None,
+    strict: bool = False,
+    placement: "ObjectPlacement" = None,
+) -> ValidationResult:
+    """
+    Validate all DDL files in a directory against the Coding Discipline.
+
     Args:
         source_dir:     Directory to scan.
         rules_config:   Dictionary of rule_name → severity (ERROR,
