@@ -17,6 +17,12 @@ otel = [
     "opentelemetry-exporter-otlp-proto-http>=1.24.0",
     "opentelemetry-sdk>=1.24.0",
 ]
+# Install with: uv pip install -e ".[lineage]"
+# Provides the openlineage-python client for richer transport options.
+# ships_lineage.py works without this extra (stdlib HTTP + file transports).
+lineage = [
+    "openlineage-python>=1.18.0",
+]
 
 [dependency-groups]
 dev = [
