@@ -130,6 +130,57 @@ def deploy_package(
     """
     Deploy all DDL files in a directory idempotently.
 
+    Thin traced wrapper — see ``_deploy_package_impl`` for the full
+    implementation.  Emits a ``ships.deploy`` OpenTelemetry span when
+    ``OTEL_EXPORTER_OTLP_ENDPOINT`` is configured.
+    """
+    from ships_tracing import stage_span
+
+    wave_count = len(waves) if waves else 0
+    with stage_span(
+        "ships.deploy",
+        **{
+            "ships.package_dir": package_dir,
+            "ships.dry_run": dry_run,
+            "ships.num_streams": num_streams,
+            "ships.wave_count": wave_count,
+        },
+    ) as _span:
+        result = _deploy_package_impl(
+            cursor,
+            package_dir,
+            file_patterns=file_patterns,
+            ordered_files=ordered_files,
+            waves=waves,
+            num_streams=num_streams,
+            connect_fn=connect_fn,
+            stop_on_failure=stop_on_failure,
+            dry_run=dry_run,
+            skip_preflight=skip_preflight,
+        )
+        _span.set_attribute("ships.total", result.total)
+        _span.set_attribute("ships.completed", result.completed)
+        _span.set_attribute("ships.failed", result.failed)
+        _span.set_attribute("ships.skipped", result.skipped)
+        _span.set_attribute("ships.success", result.success)
+        return result
+
+
+def _deploy_package_impl(
+    cursor,
+    package_dir: str,
+    file_patterns: List[str] = None,
+    ordered_files: List[str] = None,
+    waves: List[List[str]] = None,
+    num_streams: int = 1,
+    connect_fn=None,
+    stop_on_failure: bool = True,
+    dry_run: bool = False,
+    skip_preflight: bool = False,
+) -> PackageDeployResult:
+    """
+    Deploy all DDL files in a directory idempotently.
+
     Supports three modes:
         1. Glob discovery with type-based ordering (default).
         2. Explicit ordered file list (ordered_files).
@@ -995,6 +1046,42 @@ _PREREQ_EXEMPT_TYPES = {
 
 
 def explain_package(
+    cursor,
+    package_dir: str,
+    ordered_files: List[str] = None,
+    waves: List[List[str]] = None,
+) -> PackageDeployResult:
+    """
+    Validate all DDL files by running EXPLAIN against the live system.
+
+    Thin traced wrapper — see ``_explain_package_impl`` for the full
+    implementation.  Emits a ``ships.explain`` OpenTelemetry span when
+    ``OTEL_EXPORTER_OTLP_ENDPOINT`` is configured.
+    """
+    from ships_tracing import stage_span
+
+    wave_count = len(waves) if waves else 0
+    with stage_span(
+        "ships.explain",
+        **{
+            "ships.package_dir": package_dir,
+            "ships.wave_count": wave_count,
+        },
+    ) as _span:
+        result = _explain_package_impl(
+            cursor,
+            package_dir,
+            ordered_files=ordered_files,
+            waves=waves,
+        )
+        _span.set_attribute("ships.total", result.total)
+        _span.set_attribute("ships.completed", result.completed)
+        _span.set_attribute("ships.failed", result.failed)
+        _span.set_attribute("ships.success", result.success)
+        return result
+
+
+def _explain_package_impl(
     cursor,
     package_dir: str,
     ordered_files: List[str] = None,

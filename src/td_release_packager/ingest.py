@@ -327,6 +327,45 @@ def ingest_directory(
     """
     Ingest raw DDL files from a source directory into a project.
 
+    Thin traced wrapper — see ``_ingest_directory_impl`` for the full
+    implementation.  Emits a ``ships.ingest`` OpenTelemetry span when
+    ``OTEL_EXPORTER_OTLP_ENDPOINT`` is configured.
+    """
+    from ships_tracing import stage_span
+
+    with stage_span(
+        "ships.ingest",
+        **{"ships.source_dir": source_dir, "ships.project_dir": project_dir},
+    ) as _span:
+        result = _ingest_directory_impl(
+            source_dir,
+            project_dir,
+            detect_tokens=detect_tokens,
+            apply_tokens=apply_tokens,
+            file_patterns=file_patterns,
+            force=force,
+            clean_payload=clean_payload,
+        )
+        _span.set_attribute("ships.files_total", result.total_files)
+        _span.set_attribute("ships.files_classified", result.classified)
+        _span.set_attribute("ships.files_unclassified", result.unclassified)
+        _span.set_attribute("ships.warnings", len(result.warnings))
+        _span.set_attribute("ships.errors", len(result.errors))
+        return result
+
+
+def _ingest_directory_impl(
+    source_dir: str,
+    project_dir: str,
+    detect_tokens: bool = True,
+    apply_tokens: Optional[Dict[str, str]] = None,
+    file_patterns: List[str] = None,
+    force: bool = False,
+    clean_payload: bool = True,
+) -> IngestResult:
+    """
+    Ingest raw DDL files from a source directory into a project.
+
     Scans every file, classifies by DDL content, normalises
     (MULTISET injection, REPLACE VIEW injection), renames to
     eponymous convention, and copies to the correct payload

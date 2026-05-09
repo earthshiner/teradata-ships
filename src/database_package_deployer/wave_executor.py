@@ -224,10 +224,26 @@ class WaveExecutor:
                 )
                 continue
 
-            # Execute this wave
+            # Execute this wave — wrapped in an OTel span when configured
+            from ships_tracing import stage_span
+
             wave_start = time.monotonic()
-            w_result = self._execute_single_wave(wave_num, wave, deploy_fn, on_complete)
-            w_result.duration_ms = int((time.monotonic() - wave_start) * 1000)
+            with stage_span(
+                "ships.deploy.wave",
+                **{
+                    "ships.wave_number": wave_num,
+                    "ships.wave_total": len(waves),
+                    "ships.wave_objects": len(wave),
+                    "ships.num_streams": self.num_streams,
+                },
+            ) as _wspan:
+                w_result = self._execute_single_wave(
+                    wave_num, wave, deploy_fn, on_complete
+                )
+                w_result.duration_ms = int((time.monotonic() - wave_start) * 1000)
+                _wspan.set_attribute("ships.wave_completed", w_result.completed)
+                _wspan.set_attribute("ships.wave_failed", w_result.failed)
+                _wspan.set_attribute("ships.wave_duration_ms", w_result.duration_ms)
 
             wave_results.append(w_result)
             completed_count += w_result.completed

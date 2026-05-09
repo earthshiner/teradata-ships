@@ -849,6 +849,28 @@ def analyse_project(project_dir: str) -> AnalysisResult:
     """
     Analyse DDL dependencies in a SHIPS project.
 
+    Thin traced wrapper — see ``_analyse_project_impl`` for the full
+    implementation.  Emits a ``ships.analyse`` OpenTelemetry span when
+    ``OTEL_EXPORTER_OTLP_ENDPOINT`` is configured.
+    """
+    from ships_tracing import stage_span
+
+    with stage_span(
+        "ships.analyse",
+        **{"ships.project_dir": project_dir},
+    ) as _span:
+        result = _analyse_project_impl(project_dir)
+        _span.set_attribute("ships.object_count", len(result.objects))
+        _span.set_attribute("ships.wave_count", len(result.waves))
+        _span.set_attribute("ships.cycle_count", len(result.cycles))
+        _span.set_attribute("ships.external_dep_count", len(result.external_deps))
+        return result
+
+
+def _analyse_project_impl(project_dir: str) -> AnalysisResult:
+    """
+    Analyse DDL dependencies in a SHIPS project.
+
     Scans all DDL files in the project payload, builds a
     dependency graph, detects cycles, and produces a
     topologically sorted wave ordering.

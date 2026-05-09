@@ -561,11 +561,7 @@ class TestParseDdlText:
             wassoc
             as select * from dbc.columnsV;
         """
-        ddl = (
-            "replace view DFJ .\n"
-            "wassoc\n"
-            "as select * from dbc.columnsV;\n"
-        )
+        ddl = "replace view DFJ .\nwassoc\nas select * from dbc.columnsV;\n"
         parsed = parse_statement_text(ddl)
         assert parsed.database_name == "DFJ"
         assert parsed.object_name == "wassoc"
