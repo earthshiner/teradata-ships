@@ -2,11 +2,12 @@
 
 ## Prerequisites
 
-- **Python 3.10+** (tested on 3.12 and 3.13)
+- **Python 3.13+** (the project targets 3.13; earlier versions are not tested)
 - **Git** (for version control and repository cloning)
 - **teradatasql** (required only for live deployment — the Ship phase)
+- **mcp** (required only for the MCP server — installed automatically by `uv sync`)
 
-The Scaffold, Harvest, Inspect, Analyse, and Package phases use only the Python standard library. No database connection is needed until deployment.
+The Scaffold, Harvest, Inspect, Generate, Analyse, and Package phases run entirely offline — no database connection needed until deployment.
 
 ## Installation
 
@@ -46,21 +47,20 @@ pip install -r requirements-dev.txt
 ### 4. Verify the Installation
 
 ```bash
-# Check the packager loads
-python -m td_release_packager --help
+# Check the pipeline CLI loads
+uv run python -m td_release_packager --help
 
-# Check the deployer loads
-python -m database_package_deployer --help
+# Check the deployment CLI loads
+uv run python -m database_package_deployer --help
+
+# Check the MCP server loads (optional — requires mcp)
+uv run python src/ships_mcp.py --help
 
 # Run the test suite
-python -m pytest src/tests/ -v --tb=short
+uv run pytest
 ```
 
-Expected output from the test suite:
-
-```
-============================= 368 passed in 1.5s ==============================
-```
+Expected output from the test suite: all tests pass. If any test fails on a clean install, please open an issue.
 
 ## Running from Any Directory
 
@@ -87,6 +87,19 @@ Then invoke as:
 ```powershell
 ships scaffold --name MyProject --output C:\Projects
 ```
+
+## MCP Server
+
+The `mcp` package is included in the standard `uv sync` and enables any MCP-compatible client to drive SHIPS without subprocess invocation.
+
+```bash
+# Start the MCP server manually (for testing)
+uv run python src/ships_mcp.py
+```
+
+For Claude Code, Claude Desktop, or other clients, see **[docs/MCP_GUIDE.md](./MCP_GUIDE.md)** for the full setup instructions and tool reference.
+
+---
 
 ## Teradata Connectivity
 
