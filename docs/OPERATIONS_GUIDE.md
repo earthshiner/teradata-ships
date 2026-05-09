@@ -272,61 +272,80 @@ BUILD=0005;PKG=OMR;ENV=DEV;PKG_HASH=a3f8c2d1e9b74056;DEPLOYER=database_package_d
 
 ### Querying the audit trail in DBQL
 
-**Find all DDL executed by a specific build:**
+Teradata provides `GetQueryBandValue(queryband, session_no, 'key')` for parsing query bands. Use it instead of `LIKE` — it is correct, efficient, and does not produce false positives from partial string matches.
+
+**Important:** `QueryBand` is a column of `DBC.DBQLogTbl`, not `DBC.DBQLSqlTbl`. When you need the SQL text as well, join `DBC.DBQLogTbl` (query band and session metadata) to `DBC.DBQLSqlTbl` (SQL text rows) on `QueryID`.
+
+**Find all deployments by a specific build (metadata only):**
 
 ```sql
 SELECT
-    LogDate,
-    LogTime,
-    UserName,
-    QueryText,
-    GetQueryBand() AS QueryBand
-FROM DBC.DBQLSqlTbl
-WHERE QueryBand LIKE '%BUILD=0005%'
-  AND QueryBand LIKE '%PKG=OMR%'
-ORDER BY LogDate, LogTime;
+    CAST(t1.CollectTimeStamp AS DATE) AS LogDate,
+    t1.CollectTimeStamp,
+    t1.UserName,
+    GetQueryBandValue(t1.QueryBand, 0, 'PKG')   AS Package,
+    GetQueryBandValue(t1.QueryBand, 0, 'BUILD') AS Build,
+    GetQueryBandValue(t1.QueryBand, 0, 'ENV')   AS Environment
+FROM DBC.DBQLogTbl t1
+WHERE GetQueryBandValue(t1.QueryBand, 0, 'BUILD') = '0005'
+  AND GetQueryBandValue(t1.QueryBand, 0, 'PKG')   = 'OMR'
+ORDER BY t1.CollectTimeStamp;
+```
+
+**Find all deployments by a specific build including the SQL text:**
+
+```sql
+SELECT
+    CAST(t1.CollectTimeStamp AS DATE) AS LogDate,
+    t1.CollectTimeStamp,
+    t1.UserName,
+    t2.SqlTextInfo AS QueryText
+FROM DBC.DBQLogTbl t1
+JOIN DBC.DBQLSqlTbl t2
+  ON t1.QueryID           = t2.QueryID
+ AND t1.CollectTimeStamp  = t2.CollectTimeStamp
+WHERE GetQueryBandValue(t1.QueryBand, 0, 'BUILD') = '0005'
+  AND GetQueryBandValue(t1.QueryBand, 0, 'PKG')   = 'OMR'
+ORDER BY t1.CollectTimeStamp;
 ```
 
 **Find all deployments to PRD in a date range:**
 
 ```sql
 SELECT
-    LogDate,
-    QueryBand,
-    COUNT(*) AS StatementCount
-FROM DBC.DBQLSqlTbl
-WHERE QueryBand LIKE '%DEPLOYER=database_package_deployer_v2%'
-  AND QueryBand LIKE '%ENV=PRD%'
-  AND LogDate BETWEEN '2026-01-01' AND '2026-12-31'
-GROUP BY LogDate, QueryBand
-ORDER BY LogDate;
+    CAST(t1.CollectTimeStamp AS DATE FORMAT 'YYYY-MM-DD')   AS DeployDate,
+    GetQueryBandValue(t1.QueryBand, 0, 'PKG')      AS Package,
+    GetQueryBandValue(t1.QueryBand, 0, 'BUILD')    AS Build,
+    t1.UserName                                     AS DeployUser,
+    COUNT(*)                                        AS StatementCount
+FROM DBC.DBQLogTbl t1
+WHERE GetQueryBandValue(t1.QueryBand, 0, 'DEPLOYER') = 'database_package_deployer_v2'
+  AND GetQueryBandValue(t1.QueryBand, 0, 'ENV')       = 'PRD'
+  AND CAST(t1.CollectTimeStamp AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-12-31'
+GROUP BY DeployDate, Package, Build, DeployUser
+ORDER BY DeployDate, Package;
 ```
 
 **Confirm a specific package hash was deployed:**
 
 ```sql
 SELECT COUNT(*) AS Executions
-FROM DBC.DBQLSqlTbl
-WHERE QueryBand LIKE '%PKG_HASH=a3f8c2d1e9b74056%';
+FROM DBC.DBQLogTbl t1
+WHERE GetQueryBandValue(t1.QueryBand, 0, 'PKG_HASH') = 'a3f8c2d1e9b74056';
 ```
 
-### Reading the query band in DBQL
+### Reading query band fields
 
-If your Teradata version records query bands in `DBC.DBQLSqlTbl.QueryBand`, you can extract individual fields using string functions:
+`GetQueryBandValue` returns the value for a named key — far cleaner than string functions:
 
 ```sql
 SELECT
-    TRIM(
-        REGEXP_SUBSTR(QueryBand, 'BUILD=([^;]+)', 1, 1, 'i', 1)
-    ) AS Build,
-    TRIM(
-        REGEXP_SUBSTR(QueryBand, 'PKG=([^;]+)', 1, 1, 'i', 1)
-    ) AS Package,
-    TRIM(
-        REGEXP_SUBSTR(QueryBand, 'ENV=([^;]+)', 1, 1, 'i', 1)
-    ) AS Environment
-FROM DBC.DBQLSqlTbl
-WHERE QueryBand LIKE '%database_package_deployer_v2%'
+    GetQueryBandValue(t1.QueryBand, 0, 'BUILD')    AS Build,
+    GetQueryBandValue(t1.QueryBand, 0, 'PKG')      AS Package,
+    GetQueryBandValue(t1.QueryBand, 0, 'ENV')      AS Environment,
+    GetQueryBandValue(t1.QueryBand, 0, 'PKG_HASH') AS PackageHash
+FROM DBC.DBQLogTbl t1
+WHERE GetQueryBandValue(t1.QueryBand, 0, 'DEPLOYER') = 'database_package_deployer_v2'
 SAMPLE 10;
 ```
 
@@ -351,7 +370,7 @@ Open the HTML report. Every FAILED object has an error message. Match the error 
 1. Identify which database is out of space:
    ```sql
    SELECT DatabaseName, MaxPerm, CurrentPerm, MaxPerm - CurrentPerm AS FreeSpace
-   FROM DBC.DiskSpace
+   FROM DBC.DiskSpaceV
    WHERE DatabaseName IN ('<dbname>')
    ORDER BY FreeSpace;
    ```
@@ -449,14 +468,21 @@ The deployer automatically retries these errors (3598: up to 3 times with 0.5 / 
 
 **Fix:**
 
-1. Identify which sessions are locking the relevant objects:
+1. Identify blocking sessions via the lock log (if DBQL lock logging is enabled):
    ```sql
-   SELECT SessionNo, UserName, LockStatus, LockedDatabaseName, LockedObjectName
-   FROM DBC.SessionInfoV
-   WHERE LockStatus <> '0';
+   SELECT CollectTimeStamp, UserName, LockType, LockStatus,
+          ObjectDatabaseName, ObjectTableName
+   FROM DBC.LockLogShredV
+   WHERE LockStatus IN ('L','W')   -- L = locked, W = waiting
+   ORDER BY CollectTimeStamp DESC;
    ```
+   If `DBC.LockLogShredV` is not available, use Teradata Viewpoint's Session
+   Viewer or the `SHOW LOCKS ON DATABASE <dbname>` command from a BTEQ session.
 
-2. Wait for competing sessions to complete, or terminate them if appropriate
+2. Wait for competing sessions to complete, or terminate them if appropriate:
+   ```sql
+   ABORT 'session <sessionno>';
+   ```
 3. Re-run using `resume`
 
 ---
@@ -787,16 +813,16 @@ The manifest at `logs/.deploy_manifest_<id>.json` has this structure:
 
 ```sql
 SELECT
-    CAST(LogDate AS DATE FORMAT 'YYYY-MM-DD')       AS DeployDate,
-    TRIM(REGEXP_SUBSTR(QueryBand,'PKG=([^;]+)',1,1,'i',1))   AS Package,
-    TRIM(REGEXP_SUBSTR(QueryBand,'BUILD=([^;]+)',1,1,'i',1)) AS Build,
-    TRIM(REGEXP_SUBSTR(QueryBand,'ENV=([^;]+)',1,1,'i',1))   AS Environment,
-    UserName                                          AS DeployUser,
-    COUNT(*)                                          AS Statements
-FROM DBC.DBQLSqlTbl
-WHERE QueryBand LIKE '%DEPLOYER=database_package_deployer_v2%'
-  AND LogDate BETWEEN DATE '2026-01-01' AND DATE '2026-12-31'
-GROUP BY 1,2,3,4,5
+    CAST(t1.CollectTimeStamp AS DATE FORMAT 'YYYY-MM-DD')          AS DeployDate,
+    GetQueryBandValue(t1.QueryBand, 0, 'PKG')             AS Package,
+    GetQueryBandValue(t1.QueryBand, 0, 'BUILD')           AS Build,
+    GetQueryBandValue(t1.QueryBand, 0, 'ENV')             AS Environment,
+    t1.UserName                                            AS DeployUser,
+    COUNT(*)                                               AS Statements
+FROM DBC.DBQLogTbl t1
+WHERE GetQueryBandValue(t1.QueryBand, 0, 'DEPLOYER') = 'database_package_deployer_v2'
+  AND CAST(t1.CollectTimeStamp AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-12-31'
+GROUP BY DeployDate, Package, Build, Environment, DeployUser
 ORDER BY DeployDate, Package;
 ```
 
@@ -804,10 +830,10 @@ ORDER BY DeployDate, Package;
 
 ```sql
 SELECT COUNT(*) AS StatementsExecuted
-FROM DBC.DBQLSqlTbl
-WHERE QueryBand LIKE '%BUILD=0005%'
-  AND QueryBand LIKE '%PKG=OMR%'
-  AND QueryBand LIKE '%ENV=PRD%';
+FROM DBC.DBQLogTbl t1
+WHERE GetQueryBandValue(t1.QueryBand, 0, 'BUILD') = '0005'
+  AND GetQueryBandValue(t1.QueryBand, 0, 'PKG')   = 'OMR'
+  AND GetQueryBandValue(t1.QueryBand, 0, 'ENV')   = 'PRD';
 -- > 0 confirms deployment ran
 ```
 
@@ -815,11 +841,14 @@ WHERE QueryBand LIKE '%BUILD=0005%'
 
 ```sql
 SELECT DISTINCT
-    TRIM(REGEXP_SUBSTR(QueryBand,'BUILD=([^;]+)',1,1,'i',1)) AS Build,
-    TRIM(REGEXP_SUBSTR(QueryBand,'ENV=([^;]+)',1,1,'i',1))   AS Environment,
-    LogDate
-FROM DBC.DBQLSqlTbl
-WHERE QueryBand LIKE '%database_package_deployer_v2%'
-  AND UPPER(QueryText) LIKE '%OMR_STD.CUSTOMER%'
-ORDER BY LogDate DESC;
+    GetQueryBandValue(t1.QueryBand, 0, 'BUILD') AS Build,
+    GetQueryBandValue(t1.QueryBand, 0, 'ENV')   AS Environment,
+    CAST(t1.CollectTimeStamp AS DATE) AS LogDate
+FROM DBC.DBQLogTbl t1
+JOIN DBC.DBQLSqlTbl t2
+  ON t1.QueryID          = t2.QueryID
+ AND t1.CollectTimeStamp = t2.CollectTimeStamp
+WHERE GetQueryBandValue(t1.QueryBand, 0, 'DEPLOYER') = 'database_package_deployer_v2'
+  AND UPPER(t2.SqlTextInfo) LIKE '%OMR_STD.CUSTOMER%'
+ORDER BY t1.CollectTimeStamp DESC;
 ```
