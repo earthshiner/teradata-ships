@@ -76,7 +76,8 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterator, List, Optional
 
 
@@ -515,6 +516,102 @@ class StageRecorder:
         if location is not None:
             issue["location"] = location
         self._entry["issues"].append(issue)
+
+
+# ---------------------------------------------------------------
+# Pruning
+# ---------------------------------------------------------------
+
+
+@dataclass
+class PruneResult:
+    """Summary of a prune operation (real or dry-run)."""
+
+    total_runs: int
+    kept_runs: int
+    pruned_runs: int
+    pruned_run_ids: List[str] = field(default_factory=list)
+    pruned_started_at: List[str] = field(default_factory=list)
+    dry_run: bool = False
+
+
+def prune_decisions(
+    path: str,
+    keep_runs: Optional[int] = None,
+    keep_days: Optional[int] = None,
+    dry_run: bool = False,
+) -> PruneResult:
+    """
+    Prune old run entries from a ``decisions.json`` file.
+
+    Exactly one of ``keep_runs`` or ``keep_days`` must be provided.
+    The most recent runs (by ``started_at``) are kept; older ones are
+    removed.  When ``dry_run=True`` the file is never written — the
+    returned ``PruneResult`` describes what *would* be removed.
+
+    Args:
+        path:       Path to the ``decisions.json`` file.
+        keep_runs:  Retain the N most recent runs. Older runs are pruned.
+        keep_days:  Retain runs started within the last N calendar days.
+        dry_run:    If True, compute but do not apply the prune.
+
+    Returns:
+        ``PruneResult`` with counts and the run_ids that were (or would
+        be) removed.
+
+    Raises:
+        ValueError:            Neither or both of keep_runs/keep_days given.
+        DecisionsCorruptError: The file cannot be parsed.
+        DecisionsSchemaError:  Unknown schema version.
+        FileNotFoundError:     The file does not exist.
+    """
+    if (keep_runs is None) == (keep_days is None):
+        raise ValueError("Provide exactly one of keep_runs or keep_days.")
+    if keep_runs is not None and keep_runs < 0:
+        raise ValueError("keep_runs must be >= 0.")
+    if keep_days is not None and keep_days < 0:
+        raise ValueError("keep_days must be >= 0.")
+
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"decisions.json not found: {path}")
+
+    data = DecisionsManifest._load_and_migrate(path)
+    runs: List[Dict[str, Any]] = data.get("runs", [])
+
+    # Sort oldest-first so we can slice the tail to keep.
+    def _started(run: Dict[str, Any]) -> str:
+        return run.get("started_at") or ""
+
+    sorted_runs = sorted(runs, key=_started)
+
+    if keep_runs is not None:
+        keep_count = min(keep_runs, len(sorted_runs))
+        to_keep = sorted_runs[-keep_count:] if keep_count > 0 else []
+        to_prune = sorted_runs[:-keep_count] if keep_count > 0 else sorted_runs
+    else:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=keep_days)
+        cutoff_str = cutoff.isoformat()
+        to_keep = [r for r in sorted_runs if _started(r) >= cutoff_str]
+        to_prune = [r for r in sorted_runs if _started(r) < cutoff_str]
+
+    result = PruneResult(
+        total_runs=len(runs),
+        kept_runs=len(to_keep),
+        pruned_runs=len(to_prune),
+        pruned_run_ids=[r.get("run_id", "") for r in to_prune],
+        pruned_started_at=[r.get("started_at", "") for r in to_prune],
+        dry_run=dry_run,
+    )
+
+    if not dry_run and to_prune:
+        data["runs"] = to_keep
+        manifest = DecisionsManifest.__new__(DecisionsManifest)
+        manifest.path = path
+        manifest._lock = threading.Lock()
+        manifest.data = data
+        manifest.save()
+
+    return result
 
 
 # ---------------------------------------------------------------
