@@ -138,6 +138,35 @@ def build_package(
     """
     Build a release package from source files and environment properties.
 
+    Thin traced wrapper — see ``_build_package_impl`` for the full
+    implementation.  Emits a ``ships.build`` OpenTelemetry span when
+    ``OTEL_EXPORTER_OTLP_ENDPOINT`` is configured.
+    """
+    from ships_tracing import stage_span
+
+    with stage_span(
+        "ships.build",
+        **{
+            "ships.source_dir": config.source_dir,
+            "ships.environment": config.environment,
+            "ships.package_name": config.package_name,
+        },
+    ) as _span:
+        result = _build_package_impl(config)
+        main_arc, main_manifest = result[0]
+        _span.set_attribute("ships.package_filename", main_manifest.package_filename)
+        _span.set_attribute("ships.file_count", main_manifest.file_count)
+        _span.set_attribute("ships.token_count", main_manifest.token_count)
+        _span.set_attribute("ships.auto_split", result[1] is not None)
+        return result
+
+
+def _build_package_impl(
+    config: BuildConfig,
+) -> Tuple[Tuple[str, BuildManifest], Optional[Tuple[str, BuildManifest]]]:
+    """
+    Build a release package from source files and environment properties.
+
     Args:
         config: BuildConfig with source directory, environment,
                 package name, build number, and properties file.

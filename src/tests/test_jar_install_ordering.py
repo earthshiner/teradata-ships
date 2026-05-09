@@ -22,7 +22,7 @@ behavioural test on the preflight helper using small fabricated
 
 from __future__ import annotations
 
-from database_package_deployer.deployer import deploy_package  # noqa: F401 (import sanity)
+from database_package_deployer.deployer import _deploy_package_impl as deploy_package  # noqa: F401 (import sanity)
 from database_package_deployer.models import (
     DeployStrategy,
     ObjectType,

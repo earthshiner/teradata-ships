@@ -27,7 +27,7 @@ from td_release_packager.validate import (
     _collect_package_prereqs,
     validate_directory,
 )
-from database_package_deployer.deployer import deploy_package
+from database_package_deployer.deployer import _deploy_package_impl as deploy_package
 
 
 # ---------------------------------------------------------------
