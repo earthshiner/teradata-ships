@@ -173,6 +173,7 @@ class BuildConfig:
     author: str = ""
     description: str = ""
     source_commit: str = ""
+    allow_dirty: bool = False
 
 
 @dataclass
@@ -193,6 +194,8 @@ class BuildManifest:
         author:           Who built it.
         description:      Release description.
         source_commit:    Git commit hash.
+        source_dirty:     True when the working tree had uncommitted changes
+                          at build time (--allow-dirty was passed).
         token_count:      Number of tokens substituted.
         file_count:       Total files in the payload.
         phase_inventory:  Count of files per phase.
@@ -227,6 +230,7 @@ class BuildManifest:
     author: str = ""
     description: str = ""
     source_commit: str = ""
+    source_dirty: bool = False
     token_count: int = 0
     file_count: int = 0
     phase_inventory: Dict[str, int] = field(default_factory=dict)

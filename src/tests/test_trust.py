@@ -447,3 +447,44 @@ class TestBuildPackageStampsTrust:
             build_data = json.loads(zf.read(build_json_name))
 
         assert build_data["trust"]["label"] == LABEL_READY
+
+
+# ---------------------------------------------------------------
+# build_reproducible signal
+# ---------------------------------------------------------------
+
+
+from td_release_packager.trust import _build_reproducible_signal  # noqa: E402
+
+
+class TestBuildReproducibleSignal:
+    def test_pass_when_build_json_absent(self, tmp_path):
+        sig = _build_reproducible_signal(str(tmp_path))
+        assert sig.status == TRUST_PASS
+
+    def test_pass_when_source_dirty_false(self, tmp_path):
+        (tmp_path / "BUILD.json").write_text(
+            '{"source_dirty": false}', encoding="utf-8"
+        )
+        sig = _build_reproducible_signal(str(tmp_path))
+        assert sig.status == TRUST_PASS
+
+    def test_pass_when_source_dirty_absent(self, tmp_path):
+        (tmp_path / "BUILD.json").write_text(
+            '{"build_number": "0001"}', encoding="utf-8"
+        )
+        sig = _build_reproducible_signal(str(tmp_path))
+        assert sig.status == TRUST_PASS
+
+    def test_warn_when_source_dirty_true(self, tmp_path):
+        (tmp_path / "BUILD.json").write_text('{"source_dirty": true}', encoding="utf-8")
+        sig = _build_reproducible_signal(str(tmp_path))
+        assert sig.status == TRUST_WARN
+        assert "dirty" in sig.message.lower()
+
+    def test_dirty_build_triggers_caveats_label(self, tmp_path):
+        (tmp_path / "BUILD.json").write_text('{"source_dirty": true}', encoding="utf-8")
+        (tmp_path / "_provenance.json").write_text("{}", encoding="utf-8")
+        report = compute_trust_report(str(tmp_path), str(tmp_path))
+        assert report.label == LABEL_CAVEATS
+        assert report.signals["build_reproducible"].status == TRUST_WARN
