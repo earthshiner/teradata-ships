@@ -28,6 +28,7 @@ schema checks, but does not execute any DDL/DML.
 """
 
 import glob
+import json
 import logging
 import os
 import re
@@ -108,6 +109,40 @@ def _clean_db_error(raw: str) -> str:
     """
     cleaned = _GO_STACK_RE.sub("", raw).strip()
     return cleaned if cleaned else raw
+
+
+# ---------------------------------------------------------------
+# Package metadata helpers
+# ---------------------------------------------------------------
+
+
+def _load_build_extensions(package_dir: str) -> Optional[list]:
+    """Return the ``discovery.extensions`` list from BUILD.json, or ``None``.
+
+    Reads the ``discovery.extensions`` field stamped by the packager
+    at build time.  Returns ``None`` when BUILD.json is absent, the
+    field is missing, or the value is not a list of strings — callers
+    should fall back to the hard-coded default set in that case.
+
+    Args:
+        package_dir: Directory containing BUILD.json.
+
+    Returns:
+        Sorted list of normalised extension strings (e.g.
+        ``[".bteq", ".sql", ".tbl", ...]``) or ``None``.
+    """
+    build_json = os.path.join(package_dir, "BUILD.json")
+    if not os.path.isfile(build_json):
+        return None
+    try:
+        with open(build_json, encoding="utf-8") as f:
+            data = json.load(f)
+        exts = data.get("discovery", {}).get("extensions")
+        if isinstance(exts, list) and all(isinstance(e, str) for e in exts):
+            return exts
+    except Exception:  # noqa: BLE001
+        logger.debug("deployer: could not read discovery.extensions from BUILD.json")
+    return None
 
 
 # ---------------------------------------------------------------
@@ -225,40 +260,49 @@ def _deploy_package_impl(
         logger.info("Using %d pre-ordered DDL files", len(ddl_files))
     else:
         if file_patterns is None:
-            file_patterns = [
-                "*.tbl",
-                "*.jix",
-                "*.idx",
-                "*.viw",
-                "*.spl",
-                "*.mcr",
-                "*.fnc",
-                "*.trg",
-                "*.db",
-                "*.dcl",
-                "*.usr",
-                "*.rol",
-                "*.prf",
-                # SQLJ install scripts. Without this pattern, the
-                # binary-harvested .sjr files were silently dropped
-                # from the deploy plan, so JAR-binary procedures
-                # found no installed JAR at deploy time.
-                "*.sjr",
-                "*.sql",
-                # BTEQ-style extensions used by legacy Teradata
-                # codebases that name their pure-SQL CREATE TABLE /
-                # CREATE VIEW scripts ``.bteq`` or ``.btq``.
-                # Without these patterns, glob discovery silently
-                # drops them and the deploy plan ships missing the
-                # underlying objects.
-                "*.bteq",
-                "*.btq",
-                # DML scripts (INSERT/UPDATE/DELETE/MERGE). Without
-                # this pattern the packager-emitted .dml artefacts
-                # would be silently dropped, leaving target tables
-                # unpopulated after deploy.
-                "*.dml",
-            ]
+            build_exts = _load_build_extensions(package_dir)
+            if build_exts is not None:
+                file_patterns = [f"*{ext}" for ext in build_exts]
+                logger.debug(
+                    "deployer: using %d extensions from BUILD.json discovery block",
+                    len(file_patterns),
+                )
+            else:
+                # Compile-time fallback for packages built before issue #50.
+                file_patterns = [
+                    "*.tbl",
+                    "*.jix",
+                    "*.idx",
+                    "*.viw",
+                    "*.spl",
+                    "*.mcr",
+                    "*.fnc",
+                    "*.trg",
+                    "*.db",
+                    "*.dcl",
+                    "*.usr",
+                    "*.rol",
+                    "*.prf",
+                    # SQLJ install scripts. Without this pattern, the
+                    # binary-harvested .sjr files were silently dropped
+                    # from the deploy plan, so JAR-binary procedures
+                    # found no installed JAR at deploy time.
+                    "*.sjr",
+                    "*.sql",
+                    # BTEQ-style extensions used by legacy Teradata
+                    # codebases that name their pure-SQL CREATE TABLE /
+                    # CREATE VIEW scripts ``.bteq`` or ``.btq``.
+                    # Without these patterns, glob discovery silently
+                    # drops them and the deploy plan ships missing the
+                    # underlying objects.
+                    "*.bteq",
+                    "*.btq",
+                    # DML scripts (INSERT/UPDATE/DELETE/MERGE). Without
+                    # this pattern the packager-emitted .dml artefacts
+                    # would be silently dropped, leaving target tables
+                    # unpopulated after deploy.
+                    "*.dml",
+                ]
         ddl_files = []
         for pattern in file_patterns:
             ddl_files.extend(sorted(glob.glob(os.path.join(package_dir, pattern))))
@@ -1125,13 +1169,18 @@ def _explain_package_impl(
         ddl_files = [f for wave in waves for f in wave]
     else:
         ddl_files = []
-        for root, dirs, filenames in os.walk(package_dir):
-            dirs.sort()
-            for f in sorted(filenames):
-                if f.startswith(".") or f.startswith("_"):
-                    continue
-                ext = os.path.splitext(f)[1].lower()
-                if ext in (
+        build_exts = _load_build_extensions(package_dir)
+        if build_exts is not None:
+            # Extensions stamped at build time — honours custom ships.yaml entries.
+            ext_set = frozenset(build_exts)
+            logger.debug(
+                "explain: using %d extensions from BUILD.json discovery block",
+                len(ext_set),
+            )
+        else:
+            # Compile-time fallback for packages built before issue #50.
+            ext_set = frozenset(
+                {
                     ".tbl",
                     ".viw",
                     ".spl",
@@ -1148,10 +1197,22 @@ def _explain_package_impl(
                     ".auth",
                     ".fsvr",
                     ".sto",
+                    ".sjr",
+                    ".usr",
                     ".jcl",
                     ".dml",
                     ".sql",
-                ):
+                    ".bteq",
+                    ".btq",
+                }
+            )
+        for root, dirs, filenames in os.walk(package_dir):
+            dirs.sort()
+            for f in sorted(filenames):
+                if f.startswith(".") or f.startswith("_"):
+                    continue
+                ext = os.path.splitext(f)[1].lower()
+                if ext in ext_set:
                     ddl_files.append(os.path.join(root, f))
 
     logger.info("Files to validate: %d", len(ddl_files))
