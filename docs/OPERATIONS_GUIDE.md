@@ -539,14 +539,14 @@ Rollback processes all eligible objects in reverse deployment order. The manifes
 |---|---|---|---|
 | **Table** (existing) | Backup and replace | Pre-deployment RENAME to `<Table>_bk_<timestamp>`; rollback drops new table and renames backup back | ✓ Full — data and definition restored |
 | **Table** (new — did not exist) | Create only | Table dropped on rollback | ✓ Definition removed; no prior state to restore |
-| **View / Procedure / Macro / Function** (DROP_AND_CREATE) | Drop then create | SHOW DDL captured to `_rollback/` before drop; rollback drops new object and re-executes saved DDL | ✓ Prior definition restored |
-| **View / Procedure / Macro / Function** (REPLACE_IN_PLACE) | REPLACE in place | No capture taken — REPLACE does not DROP first | ✗ Cannot roll back — no prior state captured |
-| **Join / Hash index** | Drop and create | Prior definition captured if possible | ~ Partial — depends on SHOW support |
+| **View / Procedure / Macro / Function** (existing, any strategy) | DROP_AND_CREATE or REPLACE_IN_PLACE | SHOW DDL captured to `_rollback/` before any change; rollback drops current object and re-executes captured DDL | ✓ Prior definition restored |
+| **View / Procedure / Macro / Function** (new — did not exist) | REPLACE_IN_PLACE creates new | No prior state to capture; rollback drops the object | ✓ Object removed; no prior definition to restore |
+| **Join / Hash index** | Drop and create | Prior definition captured if SHOW is supported | ~ Partial — depends on SHOW support for index type |
 | **CREATE DATABASE / USER / ROLE** | Direct execute | No backup mechanism | ✗ Cannot roll back — manual DROP required |
 | **GRANT / REVOKE** | Direct execute | No backup mechanism | ✗ Cannot roll back — manual REVOKE/GRANT required |
 | **DML (INSERT / UPDATE / DELETE)** | Direct execute | No row-level backup | ✗ Cannot roll back — data changes are permanent |
 
-**The key limitation:** REPLACE_IN_PLACE objects (most views and stored procedures) cannot be rolled back by the deployer because the REPLACE verb overwrites the prior definition without a DROP — there is no moment to capture the "before" state. The developer should have the prior definition in source control.
+**The key limitation for views and procedures:** rollback restores the prior *definition*, not any data that flowed through it between deployment and rollback. For objects that did not exist before deployment (net-new views, net-new procedures), rollback simply removes them — there is no prior state to restore.
 
 ### Wave-level rollback
 

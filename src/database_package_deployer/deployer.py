@@ -2104,10 +2104,15 @@ def _rollback_single(
     Roll back a single object deployment.
 
     For tables: drop new, rename backup to original.
-    For objects with a rollback file (CREATE_ONLY, DROP_AND_CREATE):
-        drop the newly created object, re-create from the saved
-        rollback file to restore the prior definition.
-    For REPLACE_IN_PLACE without rollback file: cannot roll back.
+
+    For non-table objects with a rollback file (applies to
+    DROP_AND_CREATE *and* REPLACE_IN_PLACE when the object existed
+    before deployment — ``_deploy_replace_in_place`` captures a SHOW
+    snapshot before executing REPLACE): drop the current object, then
+    re-create from the saved rollback DDL to restore the prior
+    definition.
+
+    For newly created objects (no prior state): drop the object.
     """
     parts = qualified_name.split(".", 1)
     db, obj = parts[0], parts[1]
