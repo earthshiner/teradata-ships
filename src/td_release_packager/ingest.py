@@ -436,6 +436,26 @@ def ingest_directory(
                 find_legacy_placeholders(raw_content, src_path)
             )
 
+            # -- Strip BTEQ control commands from raw content --
+            # Legacy codebases wrap SQL of all types (GRANT, CREATE
+            # DATABASE, CREATE USER, etc.) in BTEQ flow-control
+            # scaffolding (.IF ERRORCODE, .GOTO ERR, .LABEL, etc.).
+            # SHIPS deploys SQL directly and owns error handling —
+            # these commands have no meaning here and prevent the
+            # classifier from recognising the real SQL statement.
+            # Stripping before the split applies universally,
+            # ensuring that DCL (.dcl), prereqs (.db, .usr), and
+            # any other BTEQ-wrapped file type classifies correctly.
+            raw_content, n_bteq = _strip_bteq_commands(raw_content)
+            if n_bteq:
+                result.classification_warnings.append(
+                    f"{os.path.relpath(src_path, source_dir)}: "
+                    f"stripped {n_bteq} BTEQ command line(s) "
+                    f"(.IF/.GOTO flow control) — SHIPS deploys "
+                    f"SQL directly and handles errors through its "
+                    f"own mechanisms."
+                )
+
             # -- Split multi-statement files into individual DDL --
             # A file like create_databases.sql with 5 CREATE DATABASE
             # statements becomes 5 individual statements, each
@@ -711,25 +731,6 @@ def ingest_directory(
                     for w in bh_result.warnings:
                         result.classification_warnings.append(
                             f"{os.path.relpath(src_path, source_dir)}: {w}"
-                        )
-
-                # -- Strip BTEQ control commands from prereq files --
-                # DATABASE (.db) and USER (.usr) files in legacy
-                # codebases are often wrapped in BTEQ error-handling
-                # scaffolding (.IF ERRORCODE, .GOTO ERR, etc.). SHIPS
-                # deploys SQL directly and owns error handling — these
-                # BTEQ commands are not only unnecessary but actively
-                # prevent the deployer's parser from classifying the
-                # file. Strip them before writing to the payload.
-                if obj_type in ("DATABASE", "USER"):
-                    content, n_bteq = _strip_bteq_commands(content)
-                    if n_bteq:
-                        result.classification_warnings.append(
-                            f"{os.path.relpath(src_path, source_dir)}: "
-                            f"stripped {n_bteq} BTEQ command line(s) "
-                            f"(.IF/.GOTO flow control) — SHIPS deploys "
-                            f"SQL directly and handles errors through its "
-                            f"own mechanisms."
                         )
 
                 # -- Write normalised content --

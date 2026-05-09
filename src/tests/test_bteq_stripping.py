@@ -1,20 +1,22 @@
 """
-test_bteq_stripping.py — BTEQ command stripping from DATABASE and
-USER payload files.
+test_bteq_stripping.py — BTEQ command stripping applied universally
+before classification.
 
-Legacy Teradata codebases often wrap CREATE DATABASE / CREATE USER
-statements in BTEQ flow-control scaffolding (.IF ERRORCODE, .GOTO,
-.LABEL, etc.). SHIPS deploys SQL directly; these BTEQ commands have
-no meaning to SHIPS' deployer and prevent the parser classifying the
-file. SHIPS strips them at harvest time so the payload contains
-clean SQL only.
+Legacy Teradata codebases often wrap SQL of all types (CREATE DATABASE,
+CREATE USER, GRANT, REVOKE, etc.) in BTEQ flow-control scaffolding
+(.IF ERRORCODE, .GOTO, .LABEL, etc.). SHIPS deploys SQL directly;
+these BTEQ commands have no meaning to SHIPS' deployer and prevent the
+parser classifying the file. SHIPS strips them from raw_content before
+the multi-statement split and classification so that any file type
+classifies correctly.
 
 Two layers:
 
   1. ``_strip_bteq_commands`` unit tests — the BTEQ line regex,
      edge cases, lines-stripped count, unchanged pass-through.
-  2. Integration through ``ingest_directory`` — confirms DATABASE
-     and USER files get stripped while other types do not.
+  2. Integration through ``ingest_directory`` — confirms that
+     DATABASE, USER, and DCL files all get stripped, and that a clean
+     SQL file produces no spurious warning.
 """
 
 from __future__ import annotations
@@ -198,17 +200,47 @@ class TestIngestBteqStripping:
         assert ".IF" not in content
         assert "CREATE USER" in content
 
-    def test_table_file_not_affected(self, tmp_path):
-        """BTEQ stripping is scoped to DATABASE and USER types only.
-        A procedure or table file with a dot-prefixed line (unusual
-        but conceivable) must not have lines silently removed."""
+    def test_dcl_file_with_bteq_preamble_classifies_correctly(self, tmp_path):
+        """Regression for issue #52.
+
+        A GRANT statement preceded by a BTEQ .IF ERRORCODE guard must
+        classify as GRANT after stripping — not UNKNOWN. This was the
+        root cause: stripping was scoped to DATABASE/USER only, so the
+        .IF line survived into the classifier for DCL files.
+        """
+        project = _make_project(tmp_path)
+        (project / "payload/database/DCL/inter_db").mkdir(parents=True, exist_ok=True)
+        source = tmp_path / "source"
+        source.mkdir()
+        (source / "grants.dcl").write_text(
+            ".IF ERRORCODE <> 0 THEN .GOTO ERR\n\n"
+            "GRANT CREATE PROCEDURE ON {{PROC_DB}} TO {{ADMIN_USER}};\n",
+            encoding="utf-8",
+        )
+
+        result = ingest_directory(str(source), str(project), detect_tokens=False)
+
+        assert result.classified == 1, (
+            f"expected GRANT to classify correctly; unclassified: {result.unclassified_files}"
+        )
+        assert result.unclassified == 0
+        # BTEQ warning must still be surfaced so the developer knows
+        # the file contained BTEQ commands that were stripped.
+        assert any("BTEQ" in w for w in result.classification_warnings)
+        # Payload file must not contain the BTEQ command.
+        dcl_files = list(
+            (project / "payload" / "database" / "DCL" / "inter_db").glob("*.dcl")
+        )
+        assert dcl_files, "no DCL file placed in payload"
+        content = dcl_files[0].read_text(encoding="utf-8")
+        assert ".IF" not in content
+        assert "GRANT" in content
+
+    def test_pure_sql_file_no_bteq_warning(self, tmp_path):
+        """A TABLE file with clean SQL must not produce a BTEQ warning."""
         project = _make_project(tmp_path)
         source = tmp_path / "source"
         source.mkdir()
-        # A CREATE TABLE file has no business containing BTEQ —
-        # but if it does, it's a job for the user to fix, not for
-        # SHIPS to silently strip. Scoping to DATABASE/USER is safe
-        # and explicit.
         (source / "MyDB.T.tbl").write_text(
             "CREATE MULTISET TABLE MyDB.T (Id INT) PRIMARY INDEX (Id);\n",
             encoding="utf-8",
