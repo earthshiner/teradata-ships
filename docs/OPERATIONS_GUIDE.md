@@ -275,6 +275,33 @@ failed = [
 
 ---
 
+## Observability: tracing and data catalog integration
+
+SHIPS integrates with two complementary observability standards. Both are off by default — set an environment variable to enable.
+
+**OpenTelemetry tracing** — emits spans for each pipeline stage, including `deploy_package`. Connect to Jaeger, Grafana Tempo, Datadog, or any OTLP-compatible backend:
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://my-collector:4318
+```
+
+**OpenLineage** — emits `START`, `COMPLETE`, and `FAIL` events from `deploy_package` carrying the deployed objects as output datasets. Connect to Marquez, DataHub, Apache Atlas, or OpenMetadata:
+
+```bash
+# Live push to a catalog backend
+export OPENLINEAGE_URL=http://marquez:5000
+export OPENLINEAGE_NAMESPACE=teradata://td-prod.myorg.com:1025
+
+# Or write NDJSON to a file for later ingestion
+export OPENLINEAGE_URL=file:///var/log/ships/lineage.ndjson
+```
+
+A catalog outage never blocks deployment — transport errors are swallowed silently.
+
+See **`docs/OBSERVABILITY.md`** for full setup instructions, backend examples, event schema, and FAQ.
+
+---
+
 ## Audit trails
 
 Every SQL statement executed by SHIPS carries a query band embedded in the Teradata session. This creates a permanent, unforgeable link between every DDL statement in DBQL and the exact package that executed it.
