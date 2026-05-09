@@ -167,9 +167,17 @@ def deploy_package(
 
     Thin traced wrapper — see ``_deploy_package_impl`` for the full
     implementation.  Emits a ``ships.deploy`` OpenTelemetry span when
-    ``OTEL_EXPORTER_OTLP_ENDPOINT`` is configured.
+    ``OTEL_EXPORTER_OTLP_ENDPOINT`` is configured, and OpenLineage
+    ``RunEvent`` messages when ``OPENLINEAGE_URL`` is configured.
     """
+    from ships_lineage import (
+        complete_deploy_run,
+        fail_deploy_run,
+        start_deploy_run,
+    )
     from ships_tracing import stage_span
+
+    _ol_run_id = start_deploy_run(package_dir, dry_run=dry_run)
 
     wave_count = len(waves) if waves else 0
     with stage_span(
@@ -181,23 +189,53 @@ def deploy_package(
             "ships.wave_count": wave_count,
         },
     ) as _span:
-        result = _deploy_package_impl(
-            cursor,
-            package_dir,
-            file_patterns=file_patterns,
-            ordered_files=ordered_files,
-            waves=waves,
-            num_streams=num_streams,
-            connect_fn=connect_fn,
-            stop_on_failure=stop_on_failure,
-            dry_run=dry_run,
-            skip_preflight=skip_preflight,
-        )
+        try:
+            result = _deploy_package_impl(
+                cursor,
+                package_dir,
+                file_patterns=file_patterns,
+                ordered_files=ordered_files,
+                waves=waves,
+                num_streams=num_streams,
+                connect_fn=connect_fn,
+                stop_on_failure=stop_on_failure,
+                dry_run=dry_run,
+                skip_preflight=skip_preflight,
+            )
+        except Exception as exc:
+            fail_deploy_run(
+                _ol_run_id,
+                package_dir,
+                error=str(exc),
+            )
+            raise
+
         _span.set_attribute("ships.total", result.total)
         _span.set_attribute("ships.completed", result.completed)
         _span.set_attribute("ships.failed", result.failed)
         _span.set_attribute("ships.skipped", result.skipped)
         _span.set_attribute("ships.success", result.success)
+
+        _completed = [
+            (r.database_name, r.object_name)
+            for r in result.results
+            if r.state == DeployState.COMPLETED
+        ]
+        if result.success:
+            complete_deploy_run(_ol_run_id, package_dir, _completed)
+        else:
+            _failed = [
+                (r.database_name, r.object_name, r.error or "")
+                for r in result.results
+                if r.state == DeployState.FAILED
+            ]
+            fail_deploy_run(
+                _ol_run_id,
+                package_dir,
+                completed_objects=_completed,
+                failed_objects=_failed,
+            )
+
         return result
 
 
