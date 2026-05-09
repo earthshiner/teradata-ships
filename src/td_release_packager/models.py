@@ -235,6 +235,7 @@ class BuildManifest:
     release_group: str = ""
     role: str = ""
     requires: List[str] = field(default_factory=list)
+    trust: Dict[str, object] = field(default_factory=dict)
 
 
 @dataclass
