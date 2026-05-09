@@ -285,6 +285,7 @@ def _cmd_resume(args):
 def _cmd_rollback(args):
     """Execute the 'rollback' command."""
     dry_run = getattr(args, "dry_run", False)
+    wave_number = getattr(args, "wave", None)
 
     # Dry-run reads only from the manifest and disk — no DB connection needed.
     cursor = None if dry_run else _connect(args)
@@ -294,6 +295,7 @@ def _cmd_rollback(args):
             cursor=cursor,
             manifest_path=args.manifest_path,
             dry_run=dry_run,
+            wave_number=wave_number,
         )
         _print_package_result(result)
         sys.exit(0 if result.success else 1)
@@ -711,6 +713,16 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Preview what would be rolled back without executing any DDL "
         "or mutating the manifest. Reads the manifest and checks disk "
         "for rollback files — no database connection required.",
+    )
+    rb.add_argument(
+        "--wave",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Roll back only objects deployed in wave N. Objects in other "
+        "waves are untouched. The package status becomes "
+        "PARTIALLY_ROLLED_BACK. Objects with no wave assignment (serial "
+        "prereqs phase) are excluded from wave-scoped rollback.",
     )
     _add_conn_args(rb)
 
