@@ -267,3 +267,73 @@ class TestIngestBteqStripping:
 
         bteq_warnings = [w for w in result.classification_warnings if "BTEQ" in w]
         assert bteq_warnings == []
+
+    def test_ddl_table_file_with_bteq_preamble_stripped(self, tmp_path):
+        """DDL files (.tbl) with a BTEQ preamble are stripped and
+        classify correctly. SHIPS does not want BTEQ in DDL output."""
+        project = _make_project(tmp_path)
+        source = tmp_path / "source"
+        source.mkdir()
+        (source / "MyDB.Customer.tbl").write_text(
+            ".IF ERRORCODE <> 0 THEN .GOTO ERR\n\n"
+            "CREATE MULTISET TABLE MyDB.Customer (Id INTEGER) "
+            "PRIMARY INDEX (Id);\n",
+            encoding="utf-8",
+        )
+
+        result = ingest_directory(str(source), str(project), detect_tokens=False)
+
+        assert result.classified == 1
+        assert result.unclassified == 0
+        assert any("BTEQ" in w for w in result.classification_warnings)
+        tbl_files = list(
+            (project / "payload" / "database" / "DDL" / "tables").glob("*.tbl")
+        )
+        assert tbl_files, "no .tbl placed in payload"
+        content = tbl_files[0].read_text(encoding="utf-8")
+        assert ".IF" not in content
+        assert "CREATE MULTISET TABLE" in content
+
+    def test_ddl_view_file_with_bteq_preamble_stripped(self, tmp_path):
+        """DDL files (.viw) with a BTEQ preamble are stripped and
+        classify correctly."""
+        project = _make_project(tmp_path)
+        source = tmp_path / "source"
+        source.mkdir()
+        (source / "MyDB.v_active.viw").write_text(
+            ".IF ERRORCODE <> 0 THEN .GOTO ERR\n\n"
+            "REPLACE VIEW MyDB.v_active AS SELECT 1 AS x;\n",
+            encoding="utf-8",
+        )
+
+        result = ingest_directory(str(source), str(project), detect_tokens=False)
+
+        assert result.classified == 1
+        assert result.unclassified == 0
+        viw_files = list(
+            (project / "payload" / "database" / "DDL" / "views").glob("*.viw")
+        )
+        assert viw_files
+        assert ".IF" not in viw_files[0].read_text(encoding="utf-8")
+
+    def test_dml_file_with_bteq_preamble_stripped(self, tmp_path):
+        """DML files (.dml) with a BTEQ preamble are stripped and
+        classify correctly. SHIPS does not want BTEQ in DML output."""
+        project = _make_project(tmp_path)
+        (project / "payload/database/DML").mkdir(parents=True, exist_ok=True)
+        source = tmp_path / "source"
+        source.mkdir()
+        (source / "load.dml").write_text(
+            ".IF ERRORCODE <> 0 THEN .GOTO ERR\n\n"
+            "INSERT INTO MyDB.Customer (Id) VALUES (1);\n",
+            encoding="utf-8",
+        )
+
+        result = ingest_directory(str(source), str(project), detect_tokens=False)
+
+        assert result.classified == 1
+        assert result.unclassified == 0
+        assert any("BTEQ" in w for w in result.classification_warnings)
+        dml_files = list((project / "payload" / "database" / "DML").glob("*.dml"))
+        assert dml_files, "no .dml placed in payload"
+        assert ".IF" not in dml_files[0].read_text(encoding="utf-8")
