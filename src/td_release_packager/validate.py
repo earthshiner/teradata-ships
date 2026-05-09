@@ -28,6 +28,11 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from td_release_packager.classifier import (
+    TYPE_TO_EXTENSION as _CANONICAL_EXT,
+    _CLASSIFY_PATTERNS as _ALL_CLASSIFY_PATTERNS,
+)
+
 logger = logging.getLogger(__name__)
 
 # -- Optional: Object Placement engine --
@@ -381,114 +386,34 @@ _KEYWORDS = [
 ]
 
 # -- Expected extensions by object type --
+# Derived from the canonical TYPE_TO_EXTENSION in classifier.py.
+# Excludes types that validate does not check extensions for:
+# prerequisites (DATABASE, USER), DCL (GRANT, REVOKE), metadata
+# (COMMENT, STATISTICS), and binary support files (C_SOURCE, C_HEADER).
 _EXPECTED_EXT = {
-    "TABLE": ".tbl",
-    "VIEW": ".viw",
-    "MACRO": ".mcr",
-    "PROCEDURE": ".spl",
-    "FUNCTION": ".fnc",
-    "TRIGGER": ".trg",
-    "JOIN_INDEX": ".jix",
-    "HASH_INDEX": ".idx",
-    "INDEX": ".idx",
-    "MAP": ".map",
-    "ROLE": ".rol",
-    "PROFILE": ".prf",
-    "AUTHORIZATION": ".auth",
-    "FOREIGN_SERVER": ".fsvr",
-    # SQLJ install scripts use ``.sjr`` — see ingest._TYPE_TO_EXTENSION
-    # for the rationale. Keep these two maps in sync.
-    "JAR": ".sjr",
-    "SCRIPT_TABLE_OPERATOR": ".sto",
-    # DML — INSERT / UPDATE / DELETE / MERGE seed/registration scripts.
-    "DML": ".dml",
+    k: v
+    for k, v in _CANONICAL_EXT.items()
+    if k
+    not in {
+        "DATABASE",
+        "USER",
+        "GRANT",
+        "REVOKE",
+        "COMMENT",
+        "STATISTICS",
+        "C_SOURCE",
+        "C_HEADER",
+    }
 }
 
-# -- Classification patterns (mirrors classifier.py order) --
-#
-# All verbs are anchored to the **start of a SQL statement** via
-# ``^\s*`` plus ``re.MULTILINE``. Without the anchor, a file like
-# ``GRANT CREATE PROCEDURE, ALTER PROCEDURE ON db TO user;`` would
-# misclassify as PROCEDURE because the substring ``CREATE PROCEDURE``
-# matches mid-line. With the anchor, only the line-leading verb wins.
-#
-# CRITICAL ORDERING NOTE: PROCEDURE / FUNCTION / MACRO are still
-# checked before TABLE. Anchoring covers most of the dynamic-SQL
-# defence cases, but the ordering is kept as belt-and-braces against
-# pathological multi-statement files.
-_VAL_STMT_FLAGS = re.IGNORECASE | re.MULTILINE
+# -- Classification patterns --
+# Filtered view of the canonical patterns from classifier.py.
+# Excludes types that validate does not lint (prerequisites, DCL, metadata).
+_VALIDATE_OMIT = frozenset(
+    {"DATABASE", "USER", "PROFILE", "ROLE", "COMMENT", "GRANT", "REVOKE"}
+)
 _CLASSIFY_PATTERNS = [
-    (re.compile(r"^\s*CREATE\s+JOIN\s+INDEX\b", _VAL_STMT_FLAGS), "JOIN_INDEX"),
-    (re.compile(r"^\s*CREATE\s+HASH\s+INDEX\b", _VAL_STMT_FLAGS), "HASH_INDEX"),
-    (re.compile(r"^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\b", _VAL_STMT_FLAGS), "INDEX"),
-    (
-        re.compile(
-            r"^\s*(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b"
-            r".*?TABLE\s+OPERATOR",
-            re.IGNORECASE | re.MULTILINE | re.DOTALL,
-        ),
-        "SCRIPT_TABLE_OPERATOR",
-    ),
-    # Procedure-style first — defence in depth alongside the line-start
-    # anchor; procedure bodies can contain dynamic-SQL string literals
-    # building CREATE TABLE etc.
-    (
-        re.compile(r"^\s*(?:CREATE|REPLACE)\s+PROCEDURE\b", _VAL_STMT_FLAGS),
-        "PROCEDURE",
-    ),
-    (
-        re.compile(
-            r"^\s*(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b",
-            _VAL_STMT_FLAGS,
-        ),
-        "FUNCTION",
-    ),
-    (
-        re.compile(r"^\s*(?:CREATE|REPLACE)\s+MACRO\b", _VAL_STMT_FLAGS),
-        "MACRO",
-    ),
-    (
-        re.compile(r"^\s*(?:CREATE|REPLACE)\s+TRIGGER\b", _VAL_STMT_FLAGS),
-        "TRIGGER",
-    ),
-    # Plain DDL types — only reached if no procedural type matched.
-    (
-        re.compile(
-            r"^\s*(?:CREATE|REPLACE)\s+(?:MULTISET|SET)?\s*"
-            r"(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?"
-            r"(?:TRACE\s+)?TABLE\b",
-            _VAL_STMT_FLAGS,
-        ),
-        "TABLE",
-    ),
-    (
-        re.compile(r"^\s*(?:CREATE|REPLACE)\s+VIEW\b", _VAL_STMT_FLAGS),
-        "VIEW",
-    ),
-    (re.compile(r"^\s*CREATE\s+MAP\b", _VAL_STMT_FLAGS), "MAP"),
-    (
-        re.compile(r"^\s*CREATE\s+AUTHORIZATION\b", _VAL_STMT_FLAGS),
-        "AUTHORIZATION",
-    ),
-    (
-        re.compile(r"^\s*CREATE\s+FOREIGN\s+SERVER\b", _VAL_STMT_FLAGS),
-        "FOREIGN_SERVER",
-    ),
-    (
-        re.compile(
-            r"^\s*CALL\s+SQLJ\s*\.\s*(?:INSTALL_JAR|REPLACE_JAR)\s*\(",
-            _VAL_STMT_FLAGS,
-        ),
-        "JAR",
-    ),
-    # DML — must come AFTER all DDL patterns so a CREATE PROCEDURE
-    # whose body contains INSERT/UPDATE classifies as PROCEDURE,
-    # not DML. Mirrors the ordering in classifier.py.
-    (re.compile(r"^\s*INSERT\s+INTO\b", _VAL_STMT_FLAGS), "DML"),
-    (re.compile(r"^\s*UPDATE\s+STATISTICS\b", _VAL_STMT_FLAGS), "STATISTICS"),
-    (re.compile(r"^\s*UPDATE\b", _VAL_STMT_FLAGS), "DML"),
-    (re.compile(r"^\s*DELETE\s+FROM\b", _VAL_STMT_FLAGS), "DML"),
-    (re.compile(r"^\s*MERGE\s+INTO\b", _VAL_STMT_FLAGS), "DML"),
+    (p, t) for p, t in _ALL_CLASSIFY_PATTERNS if t not in _VALIDATE_OMIT
 ]
 
 # -- System-scope types: no database qualifier, no tokens expected --

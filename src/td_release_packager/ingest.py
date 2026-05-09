@@ -28,6 +28,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
+from td_release_packager.classifier import (
+    TYPE_TO_EXTENSION as _TYPE_TO_EXT,
+    TYPE_TO_SUBDIR as _TYPE_TO_SUBDIR,
+)
 from td_release_packager.legacy_placeholders import (
     LegacyPlaceholderFinding,
     find_legacy_placeholders,
@@ -36,82 +40,6 @@ from td_release_packager.token_engine import _TOKEN_RE, find_malformed_tokens
 
 logger = logging.getLogger(__name__)
 
-
-# -- Extension mapping by object type --
-_TYPE_TO_EXT = {
-    # Environment-scoped DDL objects
-    "TABLE": ".tbl",
-    "JOIN_INDEX": ".jix",
-    "HASH_INDEX": ".idx",
-    "INDEX": ".idx",
-    "VIEW": ".viw",
-    "MACRO": ".mcr",
-    "PROCEDURE": ".spl",
-    "FUNCTION": ".fnc",
-    "TRIGGER": ".trg",
-    "DATABASE": ".db",
-    "USER": ".usr",
-    "GRANT": ".dcl",
-    "REVOKE": ".dcl",
-    "COMMENT": ".cmt",
-    "STATISTICS": ".stt",
-    # SQLJ install scripts. Convention: ``.sjr`` (SQLJ Runtime
-    # install script). Deliberately NOT ``.jar`` — these files are
-    # SQL scripts that CALL SQLJ.INSTALL_JAR(...), not binary Java
-    # archives. ``.jar`` stays reserved for actual binary JARs if a
-    # future deployment shipped them alongside the install scripts.
-    "JAR": ".sjr",
-    "SCRIPT_TABLE_OPERATOR": ".sto",
-    # System-scoped objects
-    "MAP": ".map",
-    "ROLE": ".rol",
-    "PROFILE": ".prf",
-    "AUTHORIZATION": ".auth",
-    "FOREIGN_SERVER": ".fsvr",
-    # Supporting artefacts (not deployed)
-    "C_SOURCE": ".c",
-    "C_HEADER": ".h",
-    # Data Manipulation Language — INSERT / UPDATE / DELETE / MERGE.
-    # Seed-data, registration metadata, reference-data loads.
-    "DML": ".dml",
-}
-
-# -- Subdirectory mapping by object type --
-_TYPE_TO_SUBDIR = {
-    # Environment-scoped DDL objects
-    "TABLE": "DDL/tables",
-    "JOIN_INDEX": "DDL/join_indexes",
-    "HASH_INDEX": "DDL/join_indexes",
-    "INDEX": "DDL/join_indexes",
-    "VIEW": "DDL/views",
-    "MACRO": "DDL/macros",
-    "PROCEDURE": "DDL/procedures",
-    "FUNCTION": "DDL/functions",
-    "TRIGGER": "DDL/triggers",
-    "DATABASE": "pre-requisites/databases",
-    "USER": "pre-requisites/users",
-    "GRANT": "DCL/inter_db",
-    "REVOKE": "DCL/inter_db",
-    "COMMENT": "DDL/comments",
-    "STATISTICS": "DDL/statistics",
-    # SQLJ install scripts go under DDL/jar_install — clearer than
-    # the older DDL/JARs which suggested binary archives.
-    "JAR": "DDL/jar_install",
-    "SCRIPT_TABLE_OPERATOR": "DDL/script_table_operators",
-    # System-scoped objects (00_system phase)
-    "MAP": "system/maps",
-    "ROLE": "system/roles",
-    "PROFILE": "system/profiles",
-    "AUTHORIZATION": "system/authorizations",
-    "FOREIGN_SERVER": "system/foreign_servers",
-    # Supporting artefacts travel with their parent
-    "C_SOURCE": "DDL/functions",
-    "C_HEADER": "DDL/functions",
-    # DML lives in its own top-level subdirectory under
-    # payload/database/, deployed after all DDL so the target
-    # tables exist before the data is loaded.
-    "DML": "DML",
-}
 
 # -- Classification patterns: removed --
 #

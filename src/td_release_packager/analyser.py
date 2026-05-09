@@ -39,6 +39,8 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
+from td_release_packager.classifier import _CLASSIFY_PATTERNS
+
 logger = logging.getLogger(__name__)
 
 
@@ -680,91 +682,7 @@ def _scan_references(
 # Object index builder
 # ---------------------------------------------------------------
 
-# Classification patterns (mirror classifier.py).
-#
-# Anchored to start-of-statement (``^\s*`` + ``re.MULTILINE``) so a
-# verb appearing inside another statement -- e.g. ``GRANT CREATE
-# PROCEDURE ON db TO user`` -- does not get misclassified as the
-# inner verb's type. See classifier.py for the full rationale.
-_ANALYSER_STMT_FLAGS = re.IGNORECASE | re.MULTILINE
-_CLASSIFY_PATTERNS = [
-    # Indexes (most specific first)
-    (re.compile(r"^\s*CREATE\s+JOIN\s+INDEX\b", _ANALYSER_STMT_FLAGS), "JOIN_INDEX"),
-    (re.compile(r"^\s*CREATE\s+HASH\s+INDEX\b", _ANALYSER_STMT_FLAGS), "HASH_INDEX"),
-    (re.compile(r"^\s*CREATE\s+(?:UNIQUE\s+)?INDEX\b", _ANALYSER_STMT_FLAGS), "INDEX"),
-    # SCRIPT_TABLE_OPERATOR (FUNCTION syntax + TABLE OPERATOR body)
-    (
-        re.compile(
-            r"^\s*(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b"
-            r".*?TABLE\s+OPERATOR",
-            re.IGNORECASE | re.MULTILINE | re.DOTALL,
-        ),
-        "SCRIPT_TABLE_OPERATOR",
-    ),
-    # Standard DDL objects
-    (
-        re.compile(
-            r"^\s*(?:CREATE|REPLACE)\s+(?:MULTISET|SET)?\s*"
-            r"(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?"
-            r"(?:TRACE\s+)?TABLE\b",
-            _ANALYSER_STMT_FLAGS,
-        ),
-        "TABLE",
-    ),
-    (re.compile(r"^\s*(?:CREATE|REPLACE)\s+VIEW\b", _ANALYSER_STMT_FLAGS), "VIEW"),
-    (re.compile(r"^\s*(?:CREATE\s+|REPLACE\s+)MACRO\b", _ANALYSER_STMT_FLAGS), "MACRO"),
-    (
-        re.compile(r"^\s*(?:CREATE|REPLACE)\s+PROCEDURE\b", _ANALYSER_STMT_FLAGS),
-        "PROCEDURE",
-    ),
-    (
-        re.compile(
-            r"^\s*(?:CREATE|REPLACE)\s+(?:SPECIFIC\s+)?FUNCTION\b", _ANALYSER_STMT_FLAGS
-        ),
-        "FUNCTION",
-    ),
-    (
-        re.compile(r"^\s*(?:CREATE|REPLACE)\s+TRIGGER\b", _ANALYSER_STMT_FLAGS),
-        "TRIGGER",
-    ),
-    # Pre-requisites
-    (re.compile(r"^\s*CREATE\s+DATABASE\b", _ANALYSER_STMT_FLAGS), "DATABASE"),
-    (re.compile(r"^\s*CREATE\s+USER\b", _ANALYSER_STMT_FLAGS), "USER"),
-    # System-scoped objects
-    (re.compile(r"^\s*CREATE\s+MAP\b", _ANALYSER_STMT_FLAGS), "MAP"),
-    (re.compile(r"^\s*CREATE\s+PROFILE\b", _ANALYSER_STMT_FLAGS), "PROFILE"),
-    (re.compile(r"^\s*CREATE\s+ROLE\b", _ANALYSER_STMT_FLAGS), "ROLE"),
-    (
-        re.compile(r"^\s*CREATE\s+AUTHORIZATION\b", _ANALYSER_STMT_FLAGS),
-        "AUTHORIZATION",
-    ),
-    (
-        re.compile(r"^\s*CREATE\s+FOREIGN\s+SERVER\b", _ANALYSER_STMT_FLAGS),
-        "FOREIGN_SERVER",
-    ),
-    # JAR install scripts
-    (
-        re.compile(
-            r"^\s*CALL\s+SQLJ\s*\.\s*(?:INSTALL_JAR|REPLACE_JAR)\s*\(",
-            _ANALYSER_STMT_FLAGS,
-        ),
-        "JAR",
-    ),
-    # Metadata + statistics (before GRANT/DML to avoid false matches)
-    (re.compile(r"^\s*COMMENT\s+ON\b", _ANALYSER_STMT_FLAGS), "COMMENT"),
-    (
-        re.compile(r"^\s*(?:COLLECT|UPDATE)\s+STATISTICS\b", _ANALYSER_STMT_FLAGS),
-        "STATISTICS",
-    ),
-    # DCL
-    (re.compile(r"^\s*GRANT\b", _ANALYSER_STMT_FLAGS), "GRANT"),
-    (re.compile(r"^\s*REVOKE\b", _ANALYSER_STMT_FLAGS), "REVOKE"),
-    # DML (last — any DDL with embedded DML classifies via earlier pattern)
-    (re.compile(r"^\s*INSERT\s+INTO\b", _ANALYSER_STMT_FLAGS), "DML"),
-    (re.compile(r"^\s*UPDATE\b", _ANALYSER_STMT_FLAGS), "DML"),
-    (re.compile(r"^\s*DELETE\s+FROM\b", _ANALYSER_STMT_FLAGS), "DML"),
-    (re.compile(r"^\s*MERGE\s+INTO\b", _ANALYSER_STMT_FLAGS), "DML"),
-]
+# _CLASSIFY_PATTERNS imported from classifier.py at the top of this module.
 
 # Qualified name extraction
 # A name fragment: either a regular identifier, a quoted identifier,
