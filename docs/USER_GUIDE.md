@@ -819,8 +819,11 @@ python -m td_release_packager package \
 | `--format` | No | `zip` or `tar.gz` (default: `zip`) |
 | `--author` | No | Author metadata |
 | `--description` | No | Release description |
-| `--commit` | No | Git commit hash for traceability |
-| `--allow-dirty` | No | Build from a working tree with uncommitted changes. Stamps `source_dirty=true` in BUILD.json; Trust Report shows **READY-WITH-CAVEATS**. For development use only — production packages should always be built from a clean, committed state. |
+| `--commit` | No | Git commit hash for traceability. Set automatically when using `--source-github`. |
+| `--allow-dirty` | No | Build from a working tree with uncommitted changes.
+| `--source-github OWNER/REPO` | No | Fetch DDL source directly from a GitHub repository. Mutually exclusive with `--source`. |
+| `--source-ref REF` | No | Branch, tag, or commit SHA to fetch (default: `main`). Used with `--source-github`. |
+| `--github-token TOKEN` | No | GitHub PAT for private repositories. Falls back to `GITHUB_TOKEN` env var. | Stamps `source_dirty=true` in BUILD.json; Trust Report shows **READY-WITH-CAVEATS**. For development use only — production packages should always be built from a clean, committed state. |
 
 ---
 
@@ -853,7 +856,10 @@ python -m td_release_packager process \
 | `--pause` | No | Pause after each stage for interactive review |
 | `--author` | No | Package author metadata |
 | `--description` | No | Package description |
-| `--commit` | No | Source commit hash |
+| `--commit` | No | Source commit hash. Set automatically when using `--source-github`. |
+| `--source-github OWNER/REPO` | No | Fetch DDL source directly from a GitHub repository. Mutually exclusive with `--source`. |
+| `--source-ref REF` | No | Branch, tag, or commit SHA to fetch (default: `main`). Used with `--source-github`. |
+| `--github-token TOKEN` | No | GitHub PAT for private repositories. Falls back to `GITHUB_TOKEN` env var. |
 
 ---
 
