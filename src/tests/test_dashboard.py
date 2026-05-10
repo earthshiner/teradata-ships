@@ -382,6 +382,10 @@ class TestPackageInfoProperties:
 @pytest.fixture
 def client(tmp_path):
     """TestClient pointed at a project with one READY and one BLOCKED package."""
+    pytest.importorskip(
+        "fastapi",
+        reason="fastapi not installed — install with uv pip install -e '.[dashboard]'",
+    )
     from fastapi.testclient import TestClient
     from ships_dashboard import create_app
 
