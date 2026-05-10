@@ -465,6 +465,8 @@ class ObjectDeployResult:
     dry_run: bool = False
     wave_number: Optional[int] = None
     stream_id: Optional[int] = None
+    drift_detected: bool = False
+    drift_diff: str = ""
 
 
 @dataclass

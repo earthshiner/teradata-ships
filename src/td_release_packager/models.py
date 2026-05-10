@@ -230,6 +230,11 @@ class BuildManifest:
                           to drive its walk, eliminating the hard-coded
                           extension list and ensuring custom extensions
                           are honoured end-to-end.
+        baseline_dir:     Shared filesystem path where the deployer
+                          reads and writes schema drift baselines
+                          (post-deploy SHOW captures).  Configured via
+                          ``ships.yaml``'s ``deployment.baseline_dir``.
+                          Empty string means drift detection is disabled.
     """
 
     build_number: str
@@ -251,6 +256,7 @@ class BuildManifest:
     requires: List[str] = field(default_factory=list)
     trust: Dict[str, object] = field(default_factory=dict)
     discovery: Dict[str, object] = field(default_factory=dict)
+    baseline_dir: str = ""
 
 
 @dataclass
