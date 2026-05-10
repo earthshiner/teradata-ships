@@ -293,7 +293,54 @@ python -m td_release_packager package \
 python -m td_release_packager verify --project /projects/OMR
 ```
 
-### Scenario 4 — Casual packaging: PoC or demo (no DBA, self-deploy)
+### Scenario 4 — GitHub Actions CI/CD pipeline
+
+The repository is already checked out by `actions/checkout`, so SHIPS runs directly on the workspace. The `--commit` flag records the SHA so every deployed object is traceable back to the exact commit.
+
+```yaml
+# .github/workflows/ships.yml
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SHIPS
+        run: pip install uv && uv sync
+
+      - name: Token validation gate
+        run: |
+          uv run python -m td_release_packager scan \
+            --source . \
+            --all-envs \
+            --fail-on-orphan
+
+      - name: Run SHIPS pipeline
+        run: |
+          uv run python -m td_release_packager process \
+            --project . \
+            --source src/ddl/ \
+            --token-map config/token_map.conf \
+            --env DEV \
+            --env-config config/env/DEV.conf \
+            --name ${{ github.event.repository.name }} \
+            --commit ${{ github.sha }} \
+            --author "ci-pipeline" \
+            --strict
+
+      - name: Verify package readiness
+        run: uv run python -m td_release_packager verify --project .
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ships-package
+          path: releases/*.zip
+```
+
+For packaging from a specific branch, tag, or the GitHub API tarball (remote-only access), see the FAQ entry *"Can I package from a GitHub repository directly?"*.
+
+### Scenario 5 — Casual packaging: PoC or demo (no DBA, self-deploy)
 
 ```python
 # Agent or developer wants to deploy a PoC without formal ceremony
@@ -309,7 +356,7 @@ rc, out = ships_cli([
 # even though it was built casually — the quality is there whether you need it or not
 ```
 
-### Scenario 5 — Feature rollback to a previous tag
+### Scenario 6 — Feature rollback to a previous tag
 
 ```python
 # A bad deployment went live; roll back to the last known-good tag
@@ -325,7 +372,7 @@ ships_cli([
 # (restoring a known-good state should overwrite out-of-band changes)
 ```
 
-### Scenario 6 — Drift-aware deployment
+### Scenario 7 — Drift-aware deployment
 
 ```python
 import os

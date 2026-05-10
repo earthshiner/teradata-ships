@@ -706,6 +706,111 @@ The SHIPS Deployment Dashboard also generates this query for you — see the Com
 
 ## General
 
+### Can I package from a GitHub repository directly?
+
+SHIPS always works on a **local directory** — it has no built-in GitHub client. But in practice this is rarely a constraint because the three common patterns all give you a local directory with minimal setup:
+
+---
+
+**Pattern 1 — CI/CD pipeline (most common)**
+
+In GitHub Actions, GitLab CI, or any other pipeline the repository is already checked out before SHIPS runs. Just call SHIPS on the current directory:
+
+```yaml
+# .github/workflows/ships.yml
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SHIPS
+        run: pip install uv && uv sync
+
+      - name: Run SHIPS pipeline
+        run: |
+          uv run python -m td_release_packager process \
+            --project . \
+            --source src/ddl/ \
+            --token-map config/token_map.conf \
+            --env DEV \
+            --env-config config/env/DEV.conf \
+            --name MyProject \
+            --commit ${{ github.sha }} \
+            --strict
+```
+
+The `--commit` flag records the GitHub SHA in `BUILD.json` so every deployed object is traceable back to the exact commit.
+
+---
+
+**Pattern 2 — local git archive (any branch, tag, or commit)**
+
+If you have a local clone and want to package from a specific ref without a full checkout:
+
+```bash
+# Extract the ref into a temp directory
+git archive main | tar -x -C /tmp/ships-source/
+
+# Package from the extracted source
+python -m td_release_packager process \
+    --project /my/project/ \
+    --source /tmp/ships-source/ \
+    --token-map config/token_map.conf \
+    --env DEV \
+    --env-config config/env/DEV.conf \
+    --name MyProject \
+    --commit $(git rev-parse main)
+
+# Clean up
+rm -rf /tmp/ships-source/
+```
+
+`ships rollback --to-tag v1.2.3` does exactly this internally — it runs `git archive` on the named tag and packages the result.
+
+---
+
+**Pattern 3 — GitHub API tarball (no local clone needed)**
+
+GitHub's API returns a tarball for any ref at:
+
+```
+https://api.github.com/repos/{owner}/{repo}/tarball/{ref}
+```
+
+Download, extract, and package:
+
+```bash
+curl -sL \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  "https://api.github.com/repos/myorg/myrepo/tarball/main" \
+  | tar -xz -C /tmp/ships-source/ --strip-components=1
+
+python -m td_release_packager process \
+    --project /my/project/ \
+    --source /tmp/ships-source/ \
+    --token-map config/token_map.conf \
+    --env PRD \
+    --env-config config/env/PRD.conf \
+    --name MyProject
+```
+
+This is useful for one-off packaging from a remote repository without maintaining a local clone — for example, an agent that packages on demand from any repo it has API access to.
+
+---
+
+**Summary**
+
+| Pattern | When to use | Local clone needed? |
+|---|---|---|
+| CI/CD checkout | Standard pipeline — GitHub Actions, GitLab, Jenkins | No (pipeline does it) |
+| `git archive` | Packaging a specific ref locally; also what `ships rollback` uses internally | Yes |
+| GitHub API tarball | Agent or automation that needs to package from a remote repo without a clone | No |
+
+Note: `git archive --remote=https://github.com/...` is not supported by GitHub over HTTPS. Use the API tarball (Pattern 3) for remote-only access.
+
+---
+
 ### Where do I start with an existing codebase?
 
 Run the onboarding wizard. It scans your source directory and recommends the exact steps based on what it finds:
