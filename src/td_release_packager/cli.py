@@ -242,6 +242,8 @@ def main():
         _cmd_onboard(args)
     elif args.command == "decisions":
         _cmd_decisions(args)
+    elif args.command == "rollback":
+        _cmd_rollback(args)
     else:
         parser.print_help()
         sys.exit(1)
@@ -2406,6 +2408,93 @@ _STATUS_ICONS = {
 }
 
 
+def _cmd_rollback(args):
+    """Build a rollback package from a git tag — closes #37."""
+    from td_release_packager.rollback import build_rollback_package
+
+    project = os.path.abspath(args.project)
+    tag = args.to_tag
+    env = args.env.upper()
+    on_drift = getattr(args, "on_drift", "continue")
+
+    env_config_path = _resolve_path(
+        args.env_config,
+        relative_to=project,
+        label="--env-config",
+    )
+    output_dir = os.path.abspath(
+        getattr(args, "output", os.path.join(project, "releases"))
+    )
+    os.makedirs(output_dir, exist_ok=True)
+
+    pkg_name = getattr(args, "name", None) or os.path.basename(project)
+
+    print(f"\n  SHIPS Rollback")
+    print(f"  {'=' * 56}")
+    print(f"  Tag:         {tag}")
+    print(f"  Environment: {env}")
+    print(f"  Project:     {project}")
+    print(f"  Output:      {output_dir}")
+    print()
+
+    try:
+        (main_pair, companion_pair) = build_rollback_package(
+            project_dir=project,
+            tag=tag,
+            environment=env,
+            env_config_file=env_config_path,
+            package_name=pkg_name,
+            output_dir=output_dir,
+            archive_format=getattr(args, "format", "zip"),
+            author=getattr(args, "author", "") or "",
+            description=getattr(args, "description", "") or "",
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        print(f"\nERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    archive_path, manifest = main_pair
+
+    print(f"  ✓ Rollback package built")
+    print(f"    Archive:      {os.path.basename(archive_path)}")
+    print(f"    Build:        {manifest.build_number}")
+    print(f"    Commit:       {manifest.source_commit[:12]}")
+    if companion_pair:
+        companion_archive, _ = companion_pair
+        print(f"    Companion:    {os.path.basename(companion_archive)}")
+
+    print()
+    print(f"  Next steps")
+    print(f"  {'─' * 54}")
+    if companion_pair:
+        companion_archive, _ = companion_pair
+        print(f"  1. Extract and deploy the prereqs archive first:")
+        print(
+            f"       python deploy.py --host <host> --user <user> --on-drift {on_drift}"
+        )
+        print(f"     (inside: {os.path.basename(companion_archive)})")
+        print()
+        print(f"  2. Then deploy the main archive:")
+    else:
+        print(f"  1. Extract the rollback package:")
+        print(f"       unzip {os.path.basename(archive_path)}")
+        print()
+        print(f"  2. Verify integrity:")
+        print(f"       python deploy.py integrity-check")
+        print()
+        print(f"  3. Dry run (recommended):")
+        print(f"       python deploy.py --dry-run --host <host> --user <user>")
+        print()
+        print(f"  4. Deploy:")
+    print(f"       python deploy.py --host <host> --user <user> --on-drift {on_drift}")
+    print()
+    if on_drift == "continue":
+        print(f"  ⚠  --on-drift continue is set: any schema changes made after")
+        print(f"     the broken deploy will be overwritten by this rollback.")
+        print(f"     Use --on-drift skip to preserve a specific hotfix.")
+    print(f"  {'=' * 56}")
+
+
 def _cmd_decisions(args):
     """Dispatch decisions sub-commands."""
     sub = getattr(args, "decisions_subcommand", None)
@@ -3837,6 +3926,75 @@ def _build_parser():
     )
 
     # -- decisions --
+    # -- rollback --
+    rb = subs.add_parser(
+        "rollback",
+        help="[R] Rollback — build a rollback package from a git tag.",
+        description=(
+            "Build a release package from a previous git tag and print the "
+            "deploy command to restore that version.  The rollback package is "
+            "a normal SHIPS package — integrity-checked, trust-scored, and "
+            "deployable via deploy.py.  Recommended: deploy with "
+            "--on-drift continue to overwrite any out-of-band changes made "
+            "after the broken deploy."
+        ),
+    )
+    rb.add_argument(
+        "--to-tag",
+        required=True,
+        metavar="TAG",
+        dest="to_tag",
+        help="Git tag to roll back to (e.g. v1.2.3).  Must exist locally; "
+        "run 'git fetch --tags' first if the tag is only on the remote.",
+    )
+    rb.add_argument(
+        "--env",
+        required=True,
+        help="Target environment (e.g. PRD).  Must match SHIPS_ENV in --env-config.",
+    )
+    rb.add_argument(
+        "--env-config",
+        required=True,
+        help="Path to the environment .conf file.  Use the CURRENT file — "
+        "token values come from today's environment, not the tag.",
+    )
+    rb.add_argument(
+        "--name",
+        default=None,
+        help="Package name (default: project directory name).",
+    )
+    rb.add_argument(
+        "--project",
+        default=".",
+        help="Project directory containing .build_counter and git repo "
+        "(default: current directory).",
+    )
+    rb.add_argument(
+        "--output",
+        default=None,
+        help="Output directory for the rollback package "
+        "(default: <project>/releases/).",
+    )
+    rb.add_argument(
+        "--format",
+        choices=["zip", "tar.gz"],
+        default="zip",
+        help="Archive format (default: zip).",
+    )
+    rb.add_argument(
+        "--on-drift",
+        choices=["abort", "skip", "continue"],
+        default="continue",
+        dest="on_drift",
+        help="Action when schema drift is detected during the subsequent deploy "
+        "(default: continue — rollback overwrites out-of-band changes).",
+    )
+    rb.add_argument("--author", help="Author metadata for BUILD.json.")
+    rb.add_argument(
+        "--description",
+        help="Release description (default: 'Rollback to <tag>').",
+    )
+
     dc = subs.add_parser(
         "decisions",
         help="Manage the decisions.json audit trail.",
