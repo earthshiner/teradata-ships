@@ -46,6 +46,45 @@ Exit code 0 = package produced and all stages passed. Exit code 1 = something fa
 
 ---
 
+## Token validation gate (`ships scan`)
+
+Before building a package, an agent should confirm every token resolves in every target environment. `ships scan --all-envs --format json` provides a structured gate:
+
+```python
+import subprocess, json
+
+result = subprocess.run(
+    ["python", "-m", "td_release_packager", "scan",
+     "--source", project_dir,
+     "--all-envs",
+     "--fail-on-orphan",
+     "--format", "json"],
+    capture_output=True, text=True
+)
+
+data = json.loads(result.stdout)
+for env, v in data["validation"].items():
+    if v["status"] == "error":
+        raise RuntimeError(
+            f"Token errors in {env}: {v['undefined']}"
+        )
+
+# Exit 0 = all tokens defined in all environments, no orphans
+if result.returncode != 0:
+    raise RuntimeError("Token scan failed — see above")
+```
+
+Key flags:
+
+| Flag | Agent use |
+|---|---|
+| `--all-envs` | Sweep `config/env/*.conf` automatically — no need to know environment names |
+| `--format json` | Parse `validation[env].status` and `validation[env].undefined` directly |
+| `--fail-on-orphan` | Exit 1 on dead config entries — keeps env files clean |
+| `--show-map` | Useful for logging which files reference which tokens before a build |
+
+---
+
 ## Zero-configuration tokenisation
 
 ```bash
@@ -254,7 +293,81 @@ python -m td_release_packager package \
 python -m td_release_packager verify --project /projects/OMR
 ```
 
-### Scenario 4 — Casual packaging: PoC or demo (no DBA, self-deploy)
+### Scenario 4 — GitHub Actions CI/CD pipeline
+
+The repository is already checked out by `actions/checkout`, so SHIPS runs directly on the workspace. The `--commit` flag records the SHA so every deployed object is traceable back to the exact commit.
+
+```yaml
+# .github/workflows/ships.yml
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SHIPS
+        run: pip install uv && uv sync
+
+      - name: Token validation gate
+        run: |
+          uv run python -m td_release_packager scan \
+            --source . \
+            --all-envs \
+            --fail-on-orphan
+
+      - name: Run SHIPS pipeline
+        run: |
+          uv run python -m td_release_packager process \
+            --project . \
+            --source src/ddl/ \
+            --token-map config/token_map.conf \
+            --env DEV \
+            --env-config config/env/DEV.conf \
+            --name ${{ github.event.repository.name }} \
+            --commit ${{ github.sha }} \
+            --author "ci-pipeline" \
+            --strict
+
+      - name: Verify package readiness
+        run: uv run python -m td_release_packager verify --project .
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ships-package
+          path: releases/*.zip
+```
+
+For packaging from a specific branch, tag, or commit without a local checkout, use `--source-github` (see Scenario 4b below) or the GitHub API tarball pattern documented in the FAQ entry *"Can I package from a GitHub repository directly?"*.
+
+### Scenario 4b — Agent-driven packaging from GitHub (no local clone)
+
+When an agent needs to package from a GitHub repository without maintaining a local clone, `--source-github` handles the entire fetch-and-package pipeline in one command:
+
+```python
+import subprocess
+
+# Package from the latest release tag
+result = subprocess.run([
+    "python", "-m", "td_release_packager", "process",
+    "--project", "/agent/workdir/OMR",
+    "--source-github", "myorg/myrepo",
+    "--source-ref", "v1.4.2",          # or "main", or a SHA
+    "--github-token", os.environ["GITHUB_TOKEN"],
+    "--env", "PRD",
+    "--env-config", "config/env/PRD.conf",
+    "--name", "OMR",
+    "--strict",
+], capture_output=True, text=True)
+
+# The resolved commit SHA is automatically stamped into BUILD.json
+```
+
+Environment variables accepted:
+- `GITHUB_TOKEN` — PAT for private repos (public repos work without it)
+- `SHIPS_GITHUB_API_URL` — override for GitHub Enterprise Server
+
+### Scenario 5 — Casual packaging: PoC or demo (no DBA, self-deploy)
 
 ```python
 # Agent or developer wants to deploy a PoC without formal ceremony
@@ -270,7 +383,7 @@ rc, out = ships_cli([
 # even though it was built casually — the quality is there whether you need it or not
 ```
 
-### Scenario 5 — Feature rollback to a previous tag
+### Scenario 6 — Feature rollback to a previous tag
 
 ```python
 # A bad deployment went live; roll back to the last known-good tag
@@ -286,7 +399,7 @@ ships_cli([
 # (restoring a known-good state should overwrite out-of-band changes)
 ```
 
-### Scenario 6 — Drift-aware deployment
+### Scenario 7 — Drift-aware deployment
 
 ```python
 import os

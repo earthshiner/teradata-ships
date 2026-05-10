@@ -105,12 +105,18 @@ Open `config/env/DEV.conf` (or whichever env you packaged for). Check that `MY_T
 Run a scan to find all undefined tokens before packaging:
 
 ```bash
+# Check one environment
 python -m td_release_packager scan \
     --source /my/project/ \
     --env-config config/env/DEV.conf
+
+# Check all environments in one pass (recommended)
+python -m td_release_packager scan \
+    --source /my/project/ \
+    --all-envs
 ```
 
-Exit 0 = all tokens resolved. Exit 1 = unresolved tokens listed.
+Exit 0 = all tokens resolved in all environments. Exit 1 = at least one undefined token listed with its file locations.
 
 **3. You packaged without specifying `--env-config`.**
 
@@ -135,6 +141,89 @@ hardcoded_name=OFF
 ```
 
 The package will still build and deploy — you just lose environment portability.
+
+---
+
+### How do I check tokens across all environments at once?
+
+Use `--all-envs`. It discovers every `*.conf` file in `config/env/` and validates tokens against each in one pass:
+
+```bash
+python -m td_release_packager scan \
+    --source /my/project/ \
+    --all-envs
+```
+
+Output shows per-environment status:
+
+```
+  ✓ [DEV] All tokens resolved — no undefined or orphan tokens
+  ✓ [TST] All tokens resolved — no undefined or orphan tokens
+  ✗ [PRD] UNDEFINED tokens (referenced but not defined):
+      Token '{{OMR_SEM}}' is referenced but not defined in properties.
+        → used in: DDL/views/OMR_STD.MySummary.viw
+```
+
+Add `--fail-on-orphan` to also flag tokens defined in a config but never used in the payload — useful for keeping env configs tidy as the codebase evolves:
+
+```bash
+python -m td_release_packager scan --source . --all-envs --fail-on-orphan
+```
+
+This is the recommended pre-promotion gate: run it before every `ships package` to confirm the package will resolve correctly in every target environment.
+
+---
+
+### How do I see which files use a specific token?
+
+Use `--show-map`. It prints the full token → file reverse index:
+
+```bash
+python -m td_release_packager scan --source . --show-map
+```
+
+Output:
+
+```
+  {{OMR_STD}}  (23 references)
+      DDL/tables/OMR_STD.Customer.tbl
+      DDL/views/OMR_STD.ActiveCustomers.viw
+      DCL/inter_db/OMR_STD.grants.dcl
+      … and 20 more
+```
+
+Useful before renaming a token or changing its value — shows exactly which files are affected.
+
+---
+
+### How do I use `scan` in a CI pipeline or with an agent?
+
+Use `--format json`. It emits machine-readable JSON suitable for parsing:
+
+```bash
+python -m td_release_packager scan \
+    --source . \
+    --all-envs \
+    --format json
+```
+
+Output structure:
+
+```json
+{
+  "unique_tokens": 5,
+  "files_with_tokens": 12,
+  "token_map": {
+    "OMR_STD": { "count": 23, "files": ["DDL/tables/OMR_STD.Customer.tbl", ...] }
+  },
+  "validation": {
+    "DEV": { "undefined": [], "orphans": [], "status": "ok" },
+    "PRD": { "undefined": ["Token '{{OMR_SEM}}' is referenced but not defined"], "orphans": [], "status": "error" }
+  }
+}
+```
+
+Exit code: 0 = clean, 1 = at least one environment has undefined tokens (or orphan tokens when `--fail-on-orphan` is set). An agent or CI step can branch on the exit code without parsing the output.
 
 ---
 
@@ -616,6 +705,149 @@ The SHIPS Deployment Dashboard also generates this query for you — see the Com
 ---
 
 ## General
+
+### Can I package from a GitHub repository directly?
+
+SHIPS always works on a **local directory** — it has no built-in GitHub client. But in practice this is rarely a constraint because the three common patterns all give you a local directory with minimal setup:
+
+---
+
+**Pattern 1 — CI/CD pipeline (most common)**
+
+In GitHub Actions, GitLab CI, or any other pipeline the repository is already checked out before SHIPS runs. Just call SHIPS on the current directory:
+
+```yaml
+# .github/workflows/ships.yml
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SHIPS
+        run: pip install uv && uv sync
+
+      - name: Run SHIPS pipeline
+        run: |
+          uv run python -m td_release_packager process \
+            --project . \
+            --source src/ddl/ \
+            --token-map config/token_map.conf \
+            --env DEV \
+            --env-config config/env/DEV.conf \
+            --name MyProject \
+            --commit ${{ github.sha }} \
+            --strict
+```
+
+The `--commit` flag records the GitHub SHA in `BUILD.json` so every deployed object is traceable back to the exact commit.
+
+---
+
+**Pattern 2 — local git archive (any branch, tag, or commit)**
+
+If you have a local clone and want to package from a specific ref without a full checkout:
+
+```bash
+# Extract the ref into a temp directory
+git archive main | tar -x -C /tmp/ships-source/
+
+# Package from the extracted source
+python -m td_release_packager process \
+    --project /my/project/ \
+    --source /tmp/ships-source/ \
+    --token-map config/token_map.conf \
+    --env DEV \
+    --env-config config/env/DEV.conf \
+    --name MyProject \
+    --commit $(git rev-parse main)
+
+# Clean up
+rm -rf /tmp/ships-source/
+```
+
+`ships rollback --to-tag v1.2.3` does exactly this internally — it runs `git archive` on the named tag and packages the result.
+
+---
+
+**Pattern 3 — GitHub API tarball (no local clone needed)**
+
+GitHub's API returns a tarball for any ref at:
+
+```
+https://api.github.com/repos/{owner}/{repo}/tarball/{ref}
+```
+
+Download, extract, and package:
+
+```bash
+curl -sL \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  "https://api.github.com/repos/myorg/myrepo/tarball/main" \
+  | tar -xz -C /tmp/ships-source/ --strip-components=1
+
+python -m td_release_packager process \
+    --project /my/project/ \
+    --source /tmp/ships-source/ \
+    --token-map config/token_map.conf \
+    --env PRD \
+    --env-config config/env/PRD.conf \
+    --name MyProject
+```
+
+This is useful for one-off packaging from a remote repository without maintaining a local clone — for example, an agent that packages on demand from any repo it has API access to.
+
+---
+
+**Summary**
+
+| Pattern | When to use | Local clone needed? |
+|---|---|---|
+| CI/CD checkout | Standard pipeline — GitHub Actions, GitLab, Jenkins | No (pipeline does it) |
+| `git archive` | Packaging a specific ref locally; also what `ships rollback` uses internally | Yes |
+| GitHub API tarball | Manual one-off from a remote repo | No |
+| **`--source-github`** (built-in) | Any scenario — SHIPS fetches and packages in one command | No |
+
+Note: `git archive --remote=https://github.com/...` is not supported by GitHub over HTTPS. Use the API tarball (Pattern 3) or the built-in `--source-github` flag (Pattern 4) for remote-only access.
+
+---
+
+**Pattern 4 — Built-in `--source-github` flag (no git required)**
+
+SHIPS has native support for packaging directly from a GitHub repository using `--source-github`:
+
+```bash
+# Package from main branch
+python -m td_release_packager process \
+    --project /my/project/ \
+    --source-github myorg/myrepo \
+    --source-ref main \
+    --env DEV \
+    --env-config config/env/DEV.conf \
+    --name MyProject
+
+# Package from a specific tag (private repo)
+python -m td_release_packager package \
+    --source-github myorg/myrepo \
+    --source-ref v1.2.3 \
+    --github-token $GITHUB_TOKEN \
+    --env PRD \
+    --env-config config/env/PRD.conf \
+    --name MyProject
+
+# GitHub Enterprise Server
+export SHIPS_GITHUB_API_URL=https://github.mycompany.com/api/v3
+python -m td_release_packager process \
+    --source-github myorg/myrepo \
+    --source-ref main \
+    ...
+```
+
+SHIPS downloads the repository tarball via the GitHub REST API, extracts it to a temporary directory, runs the full pipeline, and then cleans up. The resolved commit SHA is automatically stamped into `BUILD.json` as `source_commit`. No `git` installation required.
+
+Authentication: `--github-token TOKEN` or `GITHUB_TOKEN` environment variable. Public repositories work without a token (subject to 60 req/hr rate limit). Private repositories require a PAT with `repo` scope.
+
+---
 
 ### Where do I start with an existing codebase?
 

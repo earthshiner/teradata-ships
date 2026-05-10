@@ -213,7 +213,10 @@ Build a release package for a target environment. Resolves all `{{TOKEN}}` refer
 | `output` | string | no | Output directory |
 | `author` | string | no | Builder identifier for provenance |
 | `description` | string | no | Release description |
-| `commit` | string | no | Git commit hash |
+| `commit` | string | no | Git commit hash. Set automatically when using `source_github`. |
+| `source_github` | string | no | Fetch DDL source from GitHub: `"owner/repo"`. Mutually exclusive with `project` source DDL. |
+| `source_ref` | string | no | Branch, tag, or SHA to fetch (default: `"main"`). Used with `source_github`. |
+| `github_token` | string | no | GitHub PAT for private repos. Falls back to `GITHUB_TOKEN` env var. |
 
 **Returns:** `{"success": bool, "archive_path": str, "build_number": int, "file_count": int, "token_count": int, "trust_label": str, "warnings": list}`
 
@@ -228,7 +231,10 @@ Run the full pipeline in one call: harvest → generate → inspect → analyse 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `project` | string | yes | SHIPS project directory |
-| `source` | string | no | Raw DDL source (harvest skipped if omitted) |
+| `source` | string | no | Raw DDL source directory. Mutually exclusive with `source_github`. |
+| `source_github` | string | no | Fetch DDL source from GitHub: `"owner/repo"`. Mutually exclusive with `source`. |
+| `source_ref` | string | no | Branch, tag, or SHA to fetch (default: `"main"`). Used with `source_github`. |
+| `github_token` | string | no | GitHub PAT for private repos. Falls back to `GITHUB_TOKEN` env var. |
 | `token_map` | string | no | Token substitution map |
 | `auto_tokenise` | bool | no | Auto-detect and apply tokens |
 | `env_prefix` | string | no | Env prefix for auto-tokenise |
