@@ -697,12 +697,17 @@ Rollback processes all eligible objects in reverse deployment order. The manifes
 |---|---|---|---|
 | **Table** (existing) | Backup and replace | Pre-deployment RENAME to `<Table>_bk_<timestamp>`; rollback drops new table and renames backup back | ✓ Full — data and definition restored |
 | **Table** (new — did not exist) | Create only | Table dropped on rollback | ✓ Definition removed; no prior state to restore |
-| **View / Procedure / Macro / Function** (existing, any strategy) | DROP_AND_CREATE or REPLACE_IN_PLACE | SHOW DDL captured to `_rollback/` before any change; rollback drops current object and re-executes captured DDL | ✓ Prior definition restored |
-| **View / Procedure / Macro / Function** (new — did not exist) | REPLACE_IN_PLACE creates new | No prior state to capture; rollback drops the object | ✓ Object removed; no prior definition to restore |
+| **View / Macro** (existing) | DROP_AND_CREATE or REPLACE_IN_PLACE | SHOW DDL captured to `_rollback/` before any change; rollback drops current object and re-executes captured DDL | ✓ Prior definition restored |
+| **View / Macro** (new — did not exist) | REPLACE_IN_PLACE creates new | No prior state to capture; rollback drops the object | ✓ Object removed; no prior definition to restore |
+| **Procedure / Function** (SQL, not C) | DROP_AND_CREATE or REPLACE_IN_PLACE | SHOW DDL captured; rollback drops and re-executes | ✓ Prior definition restored |
+| **Procedure / Function** (C external — `LANGUAGE C`) | Any | SHOW DDL captured and re-executed, **but the compiled binary is not recoverable** from Teradata — the restored DDL may reference the wrong binary version | ⚠ DDL-only — binary may not match. SHIPS reports `ROLLED_BACK` with an explicit warning. Use `ships rollback --to-tag` for a complete rollback including the binary. |
+| **SQLJ JAR** (`.sjr`) | Direct execute | JAR binaries are stored in Teradata but are not SQL-queryable — cannot be extracted or restored automatically. SHIPS skips JAR rollback and reports `SKIPPED` with an explanation. | ✗ Not rollbackable via technical rollback. Use `ships rollback --to-tag` to rebuild and redeploy the previous JAR version. |
 | **Join / Hash index** | Drop and create | Prior definition captured if SHOW is supported | ~ Partial — depends on SHOW support for index type |
 | **CREATE DATABASE / USER / ROLE** | Direct execute | No backup mechanism | ✗ Cannot roll back — manual DROP required |
 | **GRANT / REVOKE** | Direct execute | No backup mechanism | ✗ Cannot roll back — manual REVOKE/GRANT required |
 | **DML (INSERT / UPDATE / DELETE)** | Direct execute | No row-level backup | ✗ Cannot roll back — data changes are permanent |
+
+**Binary objects (SQLJ JARs and C external routines)** share a fundamental constraint: Teradata stores the compiled binary internally but provides no mechanism to extract it via SQL. This means technical rollback (wave or full) cannot restore binary objects to a previous version. The correct tool for binary rollback is always `ships rollback --to-tag <prev-tag>`, which rebuilds the package from the tagged source — including the old binary — and deploys it through the normal pipeline.
 
 **The key limitation for views and procedures:** rollback restores the prior *definition*, not any data that flowed through it between deployment and rollback. For objects that did not exist before deployment (net-new views, net-new procedures), rollback simply removes them — there is no prior state to restore.
 
