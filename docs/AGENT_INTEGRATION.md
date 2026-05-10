@@ -46,6 +46,45 @@ Exit code 0 = package produced and all stages passed. Exit code 1 = something fa
 
 ---
 
+## Token validation gate (`ships scan`)
+
+Before building a package, an agent should confirm every token resolves in every target environment. `ships scan --all-envs --format json` provides a structured gate:
+
+```python
+import subprocess, json
+
+result = subprocess.run(
+    ["python", "-m", "td_release_packager", "scan",
+     "--source", project_dir,
+     "--all-envs",
+     "--fail-on-orphan",
+     "--format", "json"],
+    capture_output=True, text=True
+)
+
+data = json.loads(result.stdout)
+for env, v in data["validation"].items():
+    if v["status"] == "error":
+        raise RuntimeError(
+            f"Token errors in {env}: {v['undefined']}"
+        )
+
+# Exit 0 = all tokens defined in all environments, no orphans
+if result.returncode != 0:
+    raise RuntimeError("Token scan failed — see above")
+```
+
+Key flags:
+
+| Flag | Agent use |
+|---|---|
+| `--all-envs` | Sweep `config/env/*.conf` automatically — no need to know environment names |
+| `--format json` | Parse `validation[env].status` and `validation[env].undefined` directly |
+| `--fail-on-orphan` | Exit 1 on dead config entries — keeps env files clean |
+| `--show-map` | Useful for logging which files reference which tokens before a build |
+
+---
+
 ## Zero-configuration tokenisation
 
 ```bash

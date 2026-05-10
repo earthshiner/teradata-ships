@@ -105,12 +105,18 @@ Open `config/env/DEV.conf` (or whichever env you packaged for). Check that `MY_T
 Run a scan to find all undefined tokens before packaging:
 
 ```bash
+# Check one environment
 python -m td_release_packager scan \
     --source /my/project/ \
     --env-config config/env/DEV.conf
+
+# Check all environments in one pass (recommended)
+python -m td_release_packager scan \
+    --source /my/project/ \
+    --all-envs
 ```
 
-Exit 0 = all tokens resolved. Exit 1 = unresolved tokens listed.
+Exit 0 = all tokens resolved in all environments. Exit 1 = at least one undefined token listed with its file locations.
 
 **3. You packaged without specifying `--env-config`.**
 
@@ -135,6 +141,89 @@ hardcoded_name=OFF
 ```
 
 The package will still build and deploy — you just lose environment portability.
+
+---
+
+### How do I check tokens across all environments at once?
+
+Use `--all-envs`. It discovers every `*.conf` file in `config/env/` and validates tokens against each in one pass:
+
+```bash
+python -m td_release_packager scan \
+    --source /my/project/ \
+    --all-envs
+```
+
+Output shows per-environment status:
+
+```
+  ✓ [DEV] All tokens resolved — no undefined or orphan tokens
+  ✓ [TST] All tokens resolved — no undefined or orphan tokens
+  ✗ [PRD] UNDEFINED tokens (referenced but not defined):
+      Token '{{OMR_SEM}}' is referenced but not defined in properties.
+        → used in: DDL/views/OMR_STD.MySummary.viw
+```
+
+Add `--fail-on-orphan` to also flag tokens defined in a config but never used in the payload — useful for keeping env configs tidy as the codebase evolves:
+
+```bash
+python -m td_release_packager scan --source . --all-envs --fail-on-orphan
+```
+
+This is the recommended pre-promotion gate: run it before every `ships package` to confirm the package will resolve correctly in every target environment.
+
+---
+
+### How do I see which files use a specific token?
+
+Use `--show-map`. It prints the full token → file reverse index:
+
+```bash
+python -m td_release_packager scan --source . --show-map
+```
+
+Output:
+
+```
+  {{OMR_STD}}  (23 references)
+      DDL/tables/OMR_STD.Customer.tbl
+      DDL/views/OMR_STD.ActiveCustomers.viw
+      DCL/inter_db/OMR_STD.grants.dcl
+      … and 20 more
+```
+
+Useful before renaming a token or changing its value — shows exactly which files are affected.
+
+---
+
+### How do I use `scan` in a CI pipeline or with an agent?
+
+Use `--format json`. It emits machine-readable JSON suitable for parsing:
+
+```bash
+python -m td_release_packager scan \
+    --source . \
+    --all-envs \
+    --format json
+```
+
+Output structure:
+
+```json
+{
+  "unique_tokens": 5,
+  "files_with_tokens": 12,
+  "token_map": {
+    "OMR_STD": { "count": 23, "files": ["DDL/tables/OMR_STD.Customer.tbl", ...] }
+  },
+  "validation": {
+    "DEV": { "undefined": [], "orphans": [], "status": "ok" },
+    "PRD": { "undefined": ["Token '{{OMR_SEM}}' is referenced but not defined"], "orphans": [], "status": "error" }
+  }
+}
+```
+
+Exit code: 0 = clean, 1 = at least one environment has undefined tokens (or orphan tokens when `--fail-on-orphan` is set). An agent or CI step can branch on the exit code without parsing the output.
 
 ---
 
