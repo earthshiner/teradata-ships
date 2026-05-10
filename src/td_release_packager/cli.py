@@ -964,6 +964,93 @@ def _cmd_bootstrap_env_config(args):
 # ---------------------------------------------------------------
 
 
+def _add_github_source_args(parser) -> None:
+    """Add --source-github / --source-ref / --github-token to a subparser."""
+    parser.add_argument(
+        "--source-github",
+        metavar="OWNER/REPO",
+        dest="source_github",
+        default=None,
+        help="Fetch DDL source from a GitHub repository (e.g. 'myorg/myrepo'). "
+        "Downloads the repository tarball for --source-ref via the GitHub "
+        "REST API — no local git clone required.  Mutually exclusive with "
+        "--source.",
+    )
+    parser.add_argument(
+        "--source-ref",
+        metavar="REF",
+        dest="source_ref",
+        default="main",
+        help="Branch, tag, or commit SHA to fetch when using --source-github "
+        "(default: main).",
+    )
+    parser.add_argument(
+        "--github-token",
+        metavar="TOKEN",
+        dest="github_token",
+        default="",
+        help="GitHub personal access token for private repositories.  "
+        "Falls back to the GITHUB_TOKEN environment variable.  "
+        "Public repositories work without a token.",
+    )
+
+
+def _resolve_github_source(args, tmp_dir_holder: list) -> None:
+    """If --source-github is set, fetch the repo and set args.source.
+
+    ``tmp_dir_holder`` is a one-element list; the caller appends the
+    ``TemporaryDirectory`` object so it stays alive for the pipeline run
+    and is cleaned up when the caller disposes it.
+
+    Raises SystemExit on validation errors.
+    """
+    import tempfile
+
+    from td_release_packager.remote_source import fetch_github_source
+
+    source_github = getattr(args, "source_github", None)
+    if not source_github:
+        return
+
+    if getattr(args, "source", None):
+        print(
+            "ERROR: --source and --source-github are mutually exclusive.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if "/" not in source_github or source_github.count("/") != 1:
+        print(
+            f"ERROR: --source-github must be in 'owner/repo' format, "
+            f"got: {source_github!r}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    ref = getattr(args, "source_ref", "main") or "main"
+    token = getattr(args, "github_token", "") or ""
+
+    print(f"\n  Fetching source: github.com/{source_github} @ {ref}")
+
+    tmp = tempfile.TemporaryDirectory(prefix="ships_gh_source_")
+    tmp_dir_holder.append(tmp)
+
+    try:
+        commit_sha = fetch_github_source(source_github, ref, tmp.name, token)
+    except ValueError as exc:
+        print(f"\nERROR: {exc}", file=sys.stderr)
+        tmp.cleanup()
+        sys.exit(1)
+
+    args.source = tmp.name
+    # Record the resolved SHA as the commit unless the user already passed --commit
+    if not getattr(args, "commit", None):
+        args.commit = commit_sha
+
+    print(f"  Resolved commit : {commit_sha[:12]}")
+    print(f"  Extracted to    : {tmp.name}\n")
+
+
 def _resolve_path(
     path: str,
     relative_to: str = None,
@@ -1958,6 +2045,23 @@ def _run_inspect(args, stage, issue_codes) -> int:
 
 def _cmd_build(args):
     """Build a release package."""
+    # -- Materialise remote source if --source-github was given --
+    _gh_tmp: list = []
+    _resolve_github_source(args, _gh_tmp)
+
+    if not args.source:
+        print("ERROR: --source or --source-github is required.", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        _cmd_build_impl(args)
+    finally:
+        for tmp in _gh_tmp:
+            tmp.cleanup()
+
+
+def _cmd_build_impl(args):
+    """Build a release package (inner — after source is resolved)."""
     # -- Resolve properties file path --
     env_config_path = _resolve_path(
         args.env_config,
@@ -2153,6 +2257,19 @@ def _cmd_process(args):
     Platform mode (``--strict``): any stage that finishes with
     ``status=error`` aborts the pipeline immediately.
     """
+    # -- Materialise remote source if --source-github was given --
+    _gh_tmp: list = []
+    _resolve_github_source(args, _gh_tmp)
+
+    try:
+        _cmd_process_impl(args)
+    finally:
+        for tmp in _gh_tmp:
+            tmp.cleanup()
+
+
+def _cmd_process_impl(args):
+    """Run the full pipeline (inner — after source is resolved)."""
     from td_release_packager.orchestrator import issue_codes as _ic
 
     project_dir = args.project
@@ -3586,7 +3703,13 @@ def _build_parser():
 
     # -- package --
     bp = subs.add_parser("package", help="[P] Package — build a release package.")
-    bp.add_argument("--source", required=True, help="Source project directory.")
+    bp.add_argument(
+        "--source",
+        required=False,
+        default=None,
+        help="Source project directory.  Mutually exclusive with --source-github.",
+    )
+    _add_github_source_args(bp)
     bp.add_argument(
         "--env",
         required=True,
@@ -3899,9 +4022,11 @@ def _build_parser():
     pr.add_argument(
         "--source",
         default=None,
-        help="Raw DDL source directory. If omitted, the harvest stage "
-        "is skipped and the existing payload is used.",
+        help="Raw DDL source directory.  If omitted, the harvest stage "
+        "is skipped and the existing payload is used.  "
+        "Mutually exclusive with --source-github.",
     )
+    _add_github_source_args(pr)
     pr.add_argument(
         "--token-map",
         default=None,

@@ -805,9 +805,47 @@ This is useful for one-off packaging from a remote repository without maintainin
 |---|---|---|
 | CI/CD checkout | Standard pipeline — GitHub Actions, GitLab, Jenkins | No (pipeline does it) |
 | `git archive` | Packaging a specific ref locally; also what `ships rollback` uses internally | Yes |
-| GitHub API tarball | Agent or automation that needs to package from a remote repo without a clone | No |
+| GitHub API tarball | Manual one-off from a remote repo | No |
+| **`--source-github`** (built-in) | Any scenario — SHIPS fetches and packages in one command | No |
 
-Note: `git archive --remote=https://github.com/...` is not supported by GitHub over HTTPS. Use the API tarball (Pattern 3) for remote-only access.
+Note: `git archive --remote=https://github.com/...` is not supported by GitHub over HTTPS. Use the API tarball (Pattern 3) or the built-in `--source-github` flag (Pattern 4) for remote-only access.
+
+---
+
+**Pattern 4 — Built-in `--source-github` flag (no git required)**
+
+SHIPS has native support for packaging directly from a GitHub repository using `--source-github`:
+
+```bash
+# Package from main branch
+python -m td_release_packager process \
+    --project /my/project/ \
+    --source-github myorg/myrepo \
+    --source-ref main \
+    --env DEV \
+    --env-config config/env/DEV.conf \
+    --name MyProject
+
+# Package from a specific tag (private repo)
+python -m td_release_packager package \
+    --source-github myorg/myrepo \
+    --source-ref v1.2.3 \
+    --github-token $GITHUB_TOKEN \
+    --env PRD \
+    --env-config config/env/PRD.conf \
+    --name MyProject
+
+# GitHub Enterprise Server
+export SHIPS_GITHUB_API_URL=https://github.mycompany.com/api/v3
+python -m td_release_packager process \
+    --source-github myorg/myrepo \
+    --source-ref main \
+    ...
+```
+
+SHIPS downloads the repository tarball via the GitHub REST API, extracts it to a temporary directory, runs the full pipeline, and then cleans up. The resolved commit SHA is automatically stamped into `BUILD.json` as `source_commit`. No `git` installation required.
+
+Authentication: `--github-token TOKEN` or `GITHUB_TOKEN` environment variable. Public repositories work without a token (subject to 60 req/hr rate limit). Private repositories require a PAT with `repo` scope.
 
 ---
 

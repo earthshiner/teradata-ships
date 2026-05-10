@@ -338,7 +338,34 @@ jobs:
           path: releases/*.zip
 ```
 
-For packaging from a specific branch, tag, or the GitHub API tarball (remote-only access), see the FAQ entry *"Can I package from a GitHub repository directly?"*.
+For packaging from a specific branch, tag, or commit without a local checkout, use `--source-github` (see Scenario 4b below) or the GitHub API tarball pattern documented in the FAQ entry *"Can I package from a GitHub repository directly?"*.
+
+### Scenario 4b — Agent-driven packaging from GitHub (no local clone)
+
+When an agent needs to package from a GitHub repository without maintaining a local clone, `--source-github` handles the entire fetch-and-package pipeline in one command:
+
+```python
+import subprocess
+
+# Package from the latest release tag
+result = subprocess.run([
+    "python", "-m", "td_release_packager", "process",
+    "--project", "/agent/workdir/OMR",
+    "--source-github", "myorg/myrepo",
+    "--source-ref", "v1.4.2",          # or "main", or a SHA
+    "--github-token", os.environ["GITHUB_TOKEN"],
+    "--env", "PRD",
+    "--env-config", "config/env/PRD.conf",
+    "--name", "OMR",
+    "--strict",
+], capture_output=True, text=True)
+
+# The resolved commit SHA is automatically stamped into BUILD.json
+```
+
+Environment variables accepted:
+- `GITHUB_TOKEN` — PAT for private repos (public repos work without it)
+- `SHIPS_GITHUB_API_URL` — override for GitHub Enterprise Server
 
 ### Scenario 5 — Casual packaging: PoC or demo (no DBA, self-deploy)
 
