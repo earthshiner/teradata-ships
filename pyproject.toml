@@ -23,6 +23,12 @@ otel = [
 lineage = [
     "openlineage-python>=1.18.0",
 ]
+# Install with: uv pip install -e ".[dashboard]"
+# Enables the SHIPS Deployment Dashboard web application.
+dashboard = [
+    "fastapi>=0.115",
+    "uvicorn>=0.32",
+]
 
 [dependency-groups]
 dev = [
