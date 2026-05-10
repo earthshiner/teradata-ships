@@ -610,4 +610,240 @@ class TestWaveRollback:
         result = rollback_package(None, manifest.path, dry_run=True, wave_number=2)
         names = {f"{r.database_name}.{r.object_name}" for r in result.results}
         assert names == {"Dev.v_w2a", "Dev.v_w2b"}
-        assert "Dev.v_w1" not in str(names)
+
+
+# ---------------------------------------------------------------
+# Binary object rollback — JAR and C external routines
+# ---------------------------------------------------------------
+
+
+class TestBinaryObjectRollback:
+    """JAR and C external routines require special handling in rollback.
+
+    JARs: binaries are not SQL-queryable; rollback is skipped (SKIPPED
+    state) with an actionable message pointing to feature rollback.
+
+    C external procedures/functions: SHOW capture works (DDL is text),
+    but the compiled binary may not match after rollback. SHIPS restores
+    the DDL and reports ROLLED_BACK with an explicit warning in
+    result.warnings.
+    """
+
+    def _seed_jar_manifest(self, tmp_path) -> DeploymentManifest:
+        manifest = DeploymentManifest(str(tmp_path))
+        manifest.register_object(
+            qualified_name="Dev.my_jar",
+            ddl_file="DDL/jar_install/Dev.my_jar.sjr",
+            object_type="JAR",
+        )
+        manifest.update_state("Dev.my_jar", DeployState.COMPLETED)
+        return manifest
+
+    def _seed_c_proc_manifest(self, tmp_path, rollback_ddl: str) -> DeploymentManifest:
+        """Seed a COMPLETED procedure with a rollback file on disk."""
+        rollback_dir = tmp_path / "_rollback"
+        rollback_dir.mkdir()
+        rb_file = rollback_dir / "Dev.c_proc.spl"
+        rb_file.write_text(rollback_ddl, encoding="utf-8")
+
+        manifest = DeploymentManifest(str(tmp_path))
+        manifest.register_object(
+            qualified_name="Dev.c_proc",
+            ddl_file="DDL/procedures/Dev.c_proc.spl",
+            object_type="PROCEDURE",
+        )
+        manifest.update_state(
+            "Dev.c_proc",
+            DeployState.COMPLETED,
+            rollback_file=str(rb_file),
+        )
+        return manifest
+
+    def _make_jar_parsed(self):
+        return ParsedStatement(
+            file_path="DDL/jar_install/Dev.my_jar.sjr",
+            ddl_text="CALL SQLJ.REPLACE_JAR('CJ!/pkg/my.jar','my_jar');",
+            original_text="CALL SQLJ.REPLACE_JAR('CJ!/pkg/my.jar','my_jar');",
+            database_name="Dev",
+            object_name="my_jar",
+            object_type=ObjectType.JAR,
+            strategy=DeployStrategy.DIRECT_EXECUTE,
+            qualified_name="Dev.my_jar",
+        )
+
+    def _make_c_proc_parsed(self):
+        return ParsedStatement(
+            file_path="DDL/procedures/Dev.c_proc.spl",
+            ddl_text=(
+                "REPLACE PROCEDURE Dev.c_proc (IN p1 INTEGER)\n"
+                "LANGUAGE C\n"
+                "NO SQL\n"
+                "EXTERNAL NAME 'c_proc!libcproc';"
+            ),
+            original_text=(
+                "REPLACE PROCEDURE Dev.c_proc (IN p1 INTEGER)\n"
+                "LANGUAGE C\n"
+                "NO SQL\n"
+                "EXTERNAL NAME 'c_proc!libcproc';"
+            ),
+            database_name="Dev",
+            object_name="c_proc",
+            object_type=ObjectType.PROCEDURE,
+            strategy=DeployStrategy.REPLACE_IN_PLACE,
+            qualified_name="Dev.c_proc",
+        )
+
+    # -- JAR rollback --
+
+    def test_jar_rollback_returns_skipped(self, tmp_path):
+        """JAR objects must be skipped, not rolled back."""
+        manifest = self._seed_jar_manifest(tmp_path)
+        cursor = _make_cursor(object_exists=False)
+        parsed = self._make_jar_parsed()
+
+        result = _rollback_single(cursor, "Dev.my_jar", parsed, manifest)
+
+        assert result.state == DeployState.SKIPPED
+
+    def test_jar_rollback_message_mentions_feature_rollback(self, tmp_path):
+        """The SKIPPED message must direct the operator to feature rollback."""
+        manifest = self._seed_jar_manifest(tmp_path)
+        cursor = _make_cursor(object_exists=False)
+        parsed = self._make_jar_parsed()
+
+        result = _rollback_single(cursor, "Dev.my_jar", parsed, manifest)
+
+        assert (
+            "ships rollback" in result.message.lower()
+            or "rollback --to-tag" in result.message
+        )
+
+    def test_jar_rollback_does_not_execute_any_ddl(self, tmp_path):
+        """SHIPS must not attempt to DROP or CALL anything for a JAR skip."""
+        manifest = self._seed_jar_manifest(tmp_path)
+        cursor = _make_cursor(object_exists=False)
+        parsed = self._make_jar_parsed()
+
+        _rollback_single(cursor, "Dev.my_jar", parsed, manifest)
+
+        cursor.execute.assert_not_called()
+
+    def test_jar_rollback_dry_run_returns_skipped(self, tmp_path):
+        """Dry-run preview for JARs also shows SKIPPED with explanation."""
+        from database_package_deployer.deployer import _rollback_single_dry_run
+
+        result = _rollback_single_dry_run(
+            db="Dev",
+            obj="my_jar",
+            obj_type=ObjectType.JAR,
+            qualified_name="Dev.my_jar",
+            backup_name=None,
+            rollback_file=None,
+        )
+
+        assert result.state == DeployState.SKIPPED
+        assert result.dry_run is True
+        assert (
+            "rollback --to-tag" in result.message
+            or "ships rollback" in result.message.lower()
+        )
+
+    # -- C external procedure rollback --
+
+    def test_c_external_rollback_restores_ddl(self, tmp_path):
+        """C external rollback re-executes the captured DDL."""
+        c_ddl = (
+            "REPLACE PROCEDURE Dev.c_proc (IN p1 INTEGER)\n"
+            "LANGUAGE C NO SQL EXTERNAL NAME 'c_proc!libcproc';"
+        )
+        manifest = self._seed_c_proc_manifest(tmp_path, c_ddl)
+        cursor = _make_cursor(object_exists=True)
+        parsed = self._make_c_proc_parsed()
+
+        result = _rollback_single(cursor, "Dev.c_proc", parsed, manifest)
+
+        assert result.state == DeployState.ROLLED_BACK
+        executed = [str(c.args[0]) for c in cursor.execute.call_args_list]
+        assert any("c_proc" in sql for sql in executed)
+
+    def test_c_external_rollback_has_warning(self, tmp_path):
+        """C external rollback must carry a warning about the binary."""
+        c_ddl = (
+            "REPLACE PROCEDURE Dev.c_proc (IN p1 INTEGER)\n"
+            "LANGUAGE C NO SQL EXTERNAL NAME 'c_proc!libcproc';"
+        )
+        manifest = self._seed_c_proc_manifest(tmp_path, c_ddl)
+        cursor = _make_cursor(object_exists=True)
+        parsed = self._make_c_proc_parsed()
+
+        result = _rollback_single(cursor, "Dev.c_proc", parsed, manifest)
+
+        assert result.warnings, "Expected at least one warning for C external routine"
+        combined = " ".join(result.warnings)
+        assert "binary" in combined.lower() or "external" in combined.lower()
+
+    def test_c_external_dry_run_shows_binary_warning(self, tmp_path):
+        """Dry-run preview for a C external rollback mentions the binary."""
+        from database_package_deployer.deployer import _rollback_single_dry_run
+
+        c_ddl = (
+            "REPLACE PROCEDURE Dev.c_proc (IN p1 INTEGER)\n"
+            "LANGUAGE C NO SQL EXTERNAL NAME 'c_proc!libcproc';"
+        )
+        rollback_dir = tmp_path / "_rollback"
+        rollback_dir.mkdir()
+        rb_file = rollback_dir / "Dev.c_proc.spl"
+        rb_file.write_text(c_ddl, encoding="utf-8")
+
+        result = _rollback_single_dry_run(
+            db="Dev",
+            obj="c_proc",
+            obj_type=ObjectType.PROCEDURE,
+            qualified_name="Dev.c_proc",
+            backup_name=None,
+            rollback_file=str(rb_file),
+        )
+
+        assert (
+            "binary" in result.message.lower() or "external" in result.message.lower()
+        )
+
+    def test_sql_procedure_rollback_has_no_warning(self, tmp_path):
+        """A plain SQL procedure rollback must not carry a binary warning."""
+        sql_ddl = (
+            "REPLACE PROCEDURE Dev.sp_calc (IN p1 INTEGER)\n"
+            "BEGIN\n  SELECT p1 * 2;\nEND;"
+        )
+        rollback_dir = tmp_path / "_rollback"
+        rollback_dir.mkdir()
+        rb_file = rollback_dir / "Dev.sp_calc.spl"
+        rb_file.write_text(sql_ddl, encoding="utf-8")
+
+        manifest = DeploymentManifest(str(tmp_path))
+        manifest.register_object(
+            qualified_name="Dev.sp_calc",
+            ddl_file="DDL/procedures/Dev.sp_calc.spl",
+            object_type="PROCEDURE",
+        )
+        manifest.update_state(
+            "Dev.sp_calc", DeployState.COMPLETED, rollback_file=str(rb_file)
+        )
+
+        proc_parsed = ParsedStatement(
+            file_path="DDL/procedures/Dev.sp_calc.spl",
+            ddl_text=sql_ddl,
+            original_text=sql_ddl,
+            database_name="Dev",
+            object_name="sp_calc",
+            object_type=ObjectType.PROCEDURE,
+            strategy=DeployStrategy.REPLACE_IN_PLACE,
+            qualified_name="Dev.sp_calc",
+        )
+
+        cursor = _make_cursor(object_exists=True)
+        result = _rollback_single(cursor, "Dev.sp_calc", proc_parsed, manifest)
+
+        assert result.state == DeployState.ROLLED_BACK
+        assert not result.warnings, (
+            f"SQL procedure should have no warnings, got: {result.warnings}"
+        )
