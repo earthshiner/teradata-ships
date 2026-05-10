@@ -374,6 +374,115 @@ SAMPLE 10;
 
 ---
 
+## Schema drift
+
+Schema drift means a Teradata object was changed out-of-band — not by SHIPS — since the last SHIPS deployment. SHIPS detects this by comparing the current `SHOW` output from the live database against a baseline it captured immediately after it last deployed that object. Because both sides are in Teradata's canonical format, the comparison is free of false positives.
+
+### When drift is detected
+
+The deployment report shows a unified diff for every drifted object:
+
+```
+⚠ DRIFT ABORT: Schema drift detected on OMR_STD.Customer
+  Object was changed out-of-band since last SHIPS deploy.
+
+  --- OMR_STD.Customer (last SHIPS deploy)
+  +++ OMR_STD.Customer (current database)
+  @@ -3,6 +3,7 @@
+       id INTEGER NOT NULL
+      ,name VARCHAR(100)
+  +   ,region VARCHAR(50)
+   )
+```
+
+**Step 1 — Understand what changed.** The diff tells you exactly which columns, constraints, or attributes differ. Before deciding anything, you need to know *why*.
+
+**Step 2 — Decide who wins.**
+
+| Situation | Recommended action |
+|---|---|
+| **Emergency hotfix** (DBA added a column or index to fix a live incident) | `--on-drift skip` — deploy everything else, leave the hotfix in place. Raise a ticket to absorb the hotfix into source DDL for the next release. |
+| **Unauthorised change** (schema altered without going through SHIPS — governance violation) | `--on-drift abort` (default) is correct — surface it and force a conscious decision. Once reviewed: if SHIPS is right, re-run with `--on-drift continue` to overwrite; if the change is needed, treat it as a hotfix. |
+| **Error / stale state** (manual partial rollback, DBA applied a wrong fix) | `--on-drift continue` — overwrite with what SHIPS knows is correct, reset the baseline. |
+| **Rollback to a previous version** | `ships rollback` defaults to `--on-drift continue` — the entire point of rollback is to restore a known-good state; out-of-band changes made after the broken deploy are part of the problem, not something to preserve. |
+
+**Step 3 — Re-run with the chosen mode.**
+
+```bash
+# Overwrite the out-of-band change — SHIPS wins
+python deploy.py --host myserver --user dba --on-drift continue
+
+# Skip drifted objects — out-of-band change preserved
+python deploy.py --host myserver --user dba --on-drift skip
+
+# Stop on first drifted object (default — forces investigation)
+python deploy.py --host myserver --user dba --on-drift abort
+```
+
+**Step 4 — After deploy completes,** the baseline is updated automatically for every successfully deployed object. No manual step needed.
+
+### Configuring drift detection
+
+Drift detection requires a shared filesystem path that all operators write to. Configure it once in `ships.yaml` — it travels in every package automatically:
+
+```yaml
+# ships.yaml — committed to source control
+deployment:
+  baseline_dir: /shared/nfs/ships-baselines/OMR/
+```
+
+Without this, drift detection is disabled and a warning is printed. To override for a single run:
+
+```bash
+python deploy.py --host myserver --user dba --baseline-dir /alt/path/
+```
+
+### Drift and the audit trail
+
+The baseline files are the record of *what SHIPS last deployed* for each object. They are not a history — each file holds only the most recent deploy's SHOW output (rolling horizon). The full history of what deployed when is in `BUILD.json` (per-package) and DBQL (per-statement). The drift diff in the deployment report is the record of *what changed between SHIPS runs* — include it in incident reports when a hotfix is discovered.
+
+---
+
+## Feature rollback
+
+Feature rollback restores the database to a previous known-good version by re-deploying from a git tag. This is distinct from technical rollback (which undoes a failed mid-deploy via the pre-captured SHOW snapshots in `_rollback/`).
+
+```bash
+python -m td_release_packager rollback \
+    --to-tag v1.2.3 \
+    --env PRD \
+    --env-config config/env/PRD.conf \
+    --name OMR \
+    --project C:\Projects\OMR
+```
+
+SHIPS will:
+1. Verify the tag exists in git
+2. Extract the tagged source tree
+3. Build a rollback package from that source with the current environment config
+4. Write the package to `releases/` (or `--output`)
+5. Print the exact deploy command to run next
+
+The rollback package is a normal SHIPS package — it goes through the same integrity check, Trust Report, and pre-flight validation as any other package. The DBA reviews it and deploys it with:
+
+```bash
+python deploy.py --host myserver --user dba --on-drift continue
+```
+
+**Why `--on-drift continue` for rollback?**
+
+Any out-of-band changes made between the broken deploy and the rollback attempt may be part of the problem. The rollback's purpose is to restore v1.2.3 as the authoritative schema — deferring to those changes defeats that purpose. After the rollback completes, the drift baseline is updated to reflect the restored state, so future deployments detect drift correctly from the v1.2.3 baseline.
+
+**What if you want to preserve a hotfix during rollback?**
+
+Use `--on-drift skip` instead of `--on-drift continue`. SHIPS will roll back all other objects and leave the hotfixed object untouched. Include the hotfix in the next release cycle.
+
+### Rollback and the build counter
+
+Rollback packages get a new build number (auto-incremented from the current `.build_counter`). The `source_commit` in `BUILD.json` records the tag's commit hash, so the audit trail clearly shows "build 0048 was a rollback to tag v1.2.3 / commit abc1234".
+
+---
+
 ## When deployments fail
 
 ### Understanding the failure modes
