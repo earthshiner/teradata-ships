@@ -44,7 +44,15 @@ Developers, release managers, and DBAs can create, review, validate, and deploy 
 AI agents can independently analyse source assets, construct deployment packages, validate dependencies, sequence deployment order, generate manifests, and prepare deployment instructions — all without human intervention. Under governed controls, agents can also execute deployments.
 
 ### 3. Git-Based Packaging
-Packages can be generated directly from source control: from an entire repository, a branch, one or more commits, a tagged release, or a detected changeset. This supports both traditional CI/CD and agent-driven release pipelines.
+
+Packages can be generated directly from source control without requiring a local git clone. SHIPS supports:
+
+- **GitHub repository** — `--source-github owner/repo --source-ref main` downloads the repository tarball via the GitHub REST API, extracts it, and runs the full pipeline. No `git` installation required. The resolved commit SHA is automatically stamped into `BUILD.json`.
+- **Local git archive** — `git archive <ref>` piped into a temp directory, then `ships process --source /tmp/extracted/`. The `ships rollback --to-tag` command uses this internally.
+- **CI/CD checkout** — the repository is already present in the workspace; SHIPS runs on the current directory.
+- **GitHub Enterprise Server** — set `SHIPS_GITHUB_API_URL` to route requests to an enterprise endpoint.
+
+This supports both traditional CI/CD pipelines (GitHub Actions, GitLab CI) and agent-driven release workflows where an autonomous agent packages on demand from any ref in any accessible repository.
 
 ### 3b. Frictionless PoC and Demo Packaging
 
