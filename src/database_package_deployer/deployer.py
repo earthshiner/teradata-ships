@@ -2590,6 +2590,22 @@ def _rollback_single_dry_run(
     rollback file — no database connection required. Called by
     ``_rollback_single`` when ``dry_run=True``.
     """
+    if obj_type == ObjectType.JAR:
+        msg = (
+            f"[DRY RUN] CANNOT roll back {qualified_name} — "
+            f"JAR binaries are not extractable from Teradata. "
+            f"Use 'ships rollback --to-tag <prev-tag>' to restore the "
+            f"previous JAR version, or reinstall manually from the previous package."
+        )
+        return ObjectDeployResult(
+            database_name=db,
+            object_name=obj,
+            object_type=obj_type,
+            state=DeployState.SKIPPED,
+            message=msg,
+            dry_run=True,
+        )
+
     if obj_type == ObjectType.TABLE:
         if backup_name:
             msg = (
@@ -2603,11 +2619,24 @@ def _rollback_single_dry_run(
             )
     elif rollback_file:
         if os.path.exists(rollback_file):
-            msg = (
+            base_msg = (
                 f"[DRY RUN] Would restore {qualified_name} — "
                 f"drop current {obj_type.value} and re-execute "
                 f"{os.path.basename(rollback_file)}."
             )
+            # Warn if the rollback DDL references a C external binary
+            try:
+                with open(rollback_file, encoding="utf-8") as _f:
+                    _rb_text = _f.read()
+                if _is_c_external(_rb_text):
+                    base_msg += (
+                        f" ⚠ C external routine — DDL will be restored but the "
+                        f"compiled binary may not match. Consider 'ships rollback "
+                        f"--to-tag <prev-tag>' for a complete binary rollback."
+                    )
+            except OSError:
+                pass
+            msg = base_msg
         else:
             msg = (
                 f"[DRY RUN] CANNOT restore {qualified_name} — "
@@ -2686,6 +2715,30 @@ def _rollback_single(
         )
 
     try:
+        # -- Binary objects: cannot roll back via SHOW capture --
+        # JAR binaries are stored in Teradata but not SQL-queryable.
+        # Attempting a rollback would either do nothing (no DROP entry
+        # for JAR in _drop_object) or make things worse by removing the
+        # JAR entirely. Skip with an actionable message; the correct path
+        # is feature rollback via 'ships rollback --to-tag'.
+        if obj_type == ObjectType.JAR:
+            _jar_msg = (
+                f"Skipped rollback of {qualified_name} — JAR binaries are not "
+                f"extractable from Teradata and cannot be automatically restored. "
+                f"Use 'ships rollback --to-tag <prev-tag>' to rebuild and redeploy "
+                f"the previous JAR version, or reinstall manually from the previous "
+                f"package archive."
+            )
+            logger.warning("  ⚠ %s", _jar_msg)
+            manifest.update_state(qualified_name, DeployState.SKIPPED, error=_jar_msg)
+            return ObjectDeployResult(
+                database_name=db,
+                object_name=obj,
+                object_type=obj_type,
+                state=DeployState.SKIPPED,
+                message=_jar_msg,
+            )
+
         # Tables use the RENAME-based rollback path
         if obj_type == ObjectType.TABLE:
             return _rollback_table(
@@ -2711,6 +2764,24 @@ def _rollback_single(
             _execute_ddl(cursor, rollback_ddl)
 
             manifest.update_state(qualified_name, DeployState.ROLLED_BACK)
+
+            # -- C external routines: DDL restored but binary may not match --
+            # SHOW PROCEDURE/FUNCTION captures the CREATE statement including
+            # LANGUAGE C EXTERNAL NAME '...'. Re-executing it restores the DDL
+            # but Teradata stores one compiled binary per routine — if the new
+            # deployment replaced the binary, the restored DDL now references
+            # the wrong version. This is DDL-only; the binary must be sourced
+            # separately or via feature rollback.
+            _c_warning = None
+            if _is_c_external(rollback_ddl):
+                _c_warning = (
+                    f"DDL restored for {qualified_name} but this is a C external "
+                    f"routine — the compiled binary may not match the restored "
+                    f"definition. Verify the binary or use 'ships rollback --to-tag "
+                    f"<prev-tag>' to restore the correct version."
+                )
+                logger.warning("  ⚠ %s", _c_warning)
+
             return ObjectDeployResult(
                 database_name=db,
                 object_name=obj,
@@ -2719,7 +2790,9 @@ def _rollback_single(
                 message=(
                     f"Rolled back {qualified_name} — restored "
                     f"from {os.path.basename(rollback_file)}."
+                    + (f" ⚠ {_c_warning}" if _c_warning else "")
                 ),
+                warnings=[_c_warning] if _c_warning else [],
             )
 
         # No rollback file — can only drop the new object
@@ -3226,6 +3299,27 @@ def _rename_table(cursor, database_name: str, old_name: str, new_name: str):
     cursor.execute(
         f'RENAME TABLE "{database_name}"."{old_name}" TO "{database_name}"."{new_name}"'
     )
+
+
+_C_EXTERNAL_RE = __import__("re").compile(
+    r"\bLANGUAGE\s+C\b", __import__("re").IGNORECASE
+)
+
+
+def _is_c_external(ddl_text: str) -> bool:
+    """Return True when the DDL defines a C/C++ external routine.
+
+    Detects ``LANGUAGE C`` (which covers both C and C++) so the rollback
+    path can warn that the compiled binary may not match after DDL-only
+    restoration.
+
+    Args:
+        ddl_text: DDL text from the rollback capture file.
+
+    Returns:
+        True if the routine is C/C++ external, False otherwise.
+    """
+    return bool(_C_EXTERNAL_RE.search(ddl_text))
 
 
 def _drop_object(

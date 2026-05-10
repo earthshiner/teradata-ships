@@ -484,6 +484,15 @@ def _build_package_impl(
     # -- Phase 10: Generate README.txt --
     _generate_readme(pkg_dir, manifest)
 
+    # -- Phase 10a: Generate interactive package report --
+    # Self-contained HTML file embedded in the package.  Opens from
+    # the filesystem (file: URL) — no server, no external requests.
+    # Provides: filterable object inventory, wave visualisation,
+    # Trust Report breakdown, and pre-filled deploy commands.
+    from td_release_packager.package_report import generate_package_report
+
+    generate_package_report(pkg_dir, manifest.__dict__)
+
     # -- Phase 11: Generate shell wrappers --
     _generate_shell_wrappers(pkg_dir)
 
