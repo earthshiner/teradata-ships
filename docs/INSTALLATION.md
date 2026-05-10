@@ -126,6 +126,47 @@ For Claude Code, Claude Desktop, or other clients, see **[docs/MCP_GUIDE.md](./M
 
 ---
 
+## GitHub Source Fetching
+
+SHIPS can package directly from a GitHub repository without requiring a local `git` clone. This is built into the `ships package` and `ships process` commands via `--source-github`.
+
+### No extra installation required
+
+The GitHub source fetcher uses Python's standard library only (`urllib`, `tarfile`, `io`). No additional packages are needed.
+
+### Environment variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `GITHUB_TOKEN` | For private repos | GitHub personal access token with `repo` scope. Public repositories work without it. |
+| `SHIPS_GITHUB_API_URL` | No | Override the GitHub API base URL for GitHub Enterprise Server (e.g. `https://github.mycompany.com/api/v3`). Defaults to `https://api.github.com`. |
+
+### Quick start
+
+```bash
+# Public repository — no token needed
+python -m td_release_packager process \
+    --project /my/project/ \
+    --source-github myorg/myrepo \
+    --source-ref main \
+    --env DEV \
+    --env-config config/env/DEV.conf \
+    --name MyProject
+
+# Private repository
+export GITHUB_TOKEN=ghp_your_token_here
+python -m td_release_packager package \
+    --source-github myorg/myrepo \
+    --source-ref v1.4.2 \
+    --env PRD \
+    --env-config config/env/PRD.conf \
+    --name MyProject
+```
+
+See **[docs/FAQ.md](./FAQ.md)** — *"Can I package from a GitHub repository directly?"* for all patterns including CI/CD pipelines, local `git archive`, and the GitHub API tarball approach.
+
+---
+
 ## Teradata Connectivity
 
 The `teradatasql` driver is required only for the Ship (deploy) phase. All other phases work offline.

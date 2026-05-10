@@ -290,3 +290,28 @@ python deploy.py --host myserver --user dbc
 **For agents:** connect via the MCP server — see [docs/MCP_GUIDE.md](./MCP_GUIDE.md).
 
 **For enterprise governance:** configure `deployment.baseline_dir` in `ships.yaml`, set `OPENLINEAGE_URL`, and add `OTEL_EXPORTER_OTLP_ENDPOINT` — see [docs/OBSERVABILITY.md](./OBSERVABILITY.md).
+
+**To package directly from GitHub** (no local clone needed):
+
+```bash
+# Public repository — no token
+python -m td_release_packager process \
+    --project MyProject \
+    --source-github myorg/myrepo \
+    --source-ref main \
+    --env DEV \
+    --env-config config/env/DEV.conf \
+    --name MyProject
+
+# Private repository
+export GITHUB_TOKEN=ghp_your_token
+python -m td_release_packager process \
+    --project MyProject \
+    --source-github myorg/myrepo \
+    --source-ref v1.4.2 \
+    --env PRD \
+    --env-config config/env/PRD.conf \
+    --name MyProject
+```
+
+SHIPS downloads the repository tarball via the GitHub REST API — no `git` required. The resolved commit SHA is stamped into `BUILD.json` automatically. For GitHub Enterprise Server, set `SHIPS_GITHUB_API_URL`.

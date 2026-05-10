@@ -819,8 +819,11 @@ python -m td_release_packager package \
 | `--format` | No | `zip` or `tar.gz` (default: `zip`) |
 | `--author` | No | Author metadata |
 | `--description` | No | Release description |
-| `--commit` | No | Git commit hash for traceability |
-| `--allow-dirty` | No | Build from a working tree with uncommitted changes. Stamps `source_dirty=true` in BUILD.json; Trust Report shows **READY-WITH-CAVEATS**. For development use only — production packages should always be built from a clean, committed state. |
+| `--commit` | No | Git commit hash for traceability. Set automatically when using `--source-github`. |
+| `--allow-dirty` | No | Build from a working tree with uncommitted changes. Stamps `source_dirty=true` in BUILD.json; Trust Report shows **READY-WITH-CAVEATS**. For development use only. |
+| `--source-github OWNER/REPO` | No | Fetch DDL source directly from a GitHub repository. Mutually exclusive with `--source`. |
+| `--source-ref REF` | No | Branch, tag, or commit SHA to fetch (default: `main`). Used with `--source-github`. |
+| `--github-token TOKEN` | No | GitHub PAT for private repositories. Falls back to `GITHUB_TOKEN` env var. Public repositories work without a token. |
 
 ---
 
@@ -853,21 +856,60 @@ python -m td_release_packager process \
 | `--pause` | No | Pause after each stage for interactive review |
 | `--author` | No | Package author metadata |
 | `--description` | No | Package description |
-| `--commit` | No | Source commit hash |
+| `--commit` | No | Source commit hash. Set automatically when using `--source-github`. |
+| `--source-github OWNER/REPO` | No | Fetch DDL source directly from a GitHub repository. Mutually exclusive with `--source`. |
+| `--source-ref REF` | No | Branch, tag, or commit SHA to fetch (default: `main`). Used with `--source-github`. |
+| `--github-token TOKEN` | No | GitHub PAT for private repositories. Falls back to `GITHUB_TOKEN` env var. |
 
 ---
 
 ### `ships scan`
 
-Scan payload files for token references and optionally validate against an environment config.
+Scan payload files for token references, validate against environment configs, and audit for orphan tokens.
 
 ```bash
+# Basic — list all tokens found in the payload
+python -m td_release_packager scan --source C:\Projects\OMR
+
+# Validate against a single env config
 python -m td_release_packager scan \
     --source C:\Projects\OMR \
     --env-config config/env/DEV.conf
+
+# Sweep all environments in one pass (recommended pre-promotion check)
+python -m td_release_packager scan \
+    --source C:\Projects\OMR \
+    --all-envs
+
+# CI gate: fail if any token is undefined OR orphaned in any environment
+python -m td_release_packager scan \
+    --source C:\Projects\OMR \
+    --all-envs \
+    --fail-on-orphan
+
+# Machine-readable output for agents and pipelines
+python -m td_release_packager scan \
+    --source C:\Projects\OMR \
+    --all-envs \
+    --format json
 ```
 
-Use this to confirm every `{{TOKEN}}` in the payload has a corresponding value in the config before packaging.
+| Flag | Required | Description |
+|---|---|---|
+| `--source` | Yes | Source project directory to scan |
+| `--env-config FILE` | No | Validate tokens against this env `.conf` file. Mutually exclusive with `--all-envs`. |
+| `--all-envs` | No | Discover every `*.conf` in `config/env/` and validate tokens against each. Shows per-environment status. Exits 1 if any env has undefined tokens. |
+| `--show-map` | No | Print the full token → file reverse index: for each token, list every payload file that references it. Useful for blast-radius analysis before renaming a token. |
+| `--format` | No | Output format: `text` (default, human-readable) or `json` (machine-readable, suitable for agent/CI consumption). |
+| `--fail-on-orphan` | No | Exit 1 when any token is defined in the env config but never referenced in the payload (orphan token). Use as a CI gate to keep config files clean. |
+
+**Recommended daily-driver pattern** — run this before every `ships package`:
+
+```bash
+ships scan --source C:\Projects\OMR --all-envs --fail-on-orphan
+```
+
+One command confirms every token resolves in every environment and no dead config entries have accumulated.
 
 ---
 
@@ -1116,7 +1158,7 @@ The token was not resolved. Check:
 2. You passed `--env-config config/env/DEV.conf` to the package command
 3. There is no whitespace inside the braces (`{{ MY_TOKEN }}` is invalid — must be `{{MY_TOKEN}}`)
 
-Run `ships scan --source . --env-config config/env/DEV.conf` to identify all undefined tokens before packaging.
+Run `ships scan --source . --all-envs` to identify all undefined tokens across every environment before packaging. Add `--fail-on-orphan` to also catch dead config entries.
 
 **Build counter keeps resetting to 0**
 
