@@ -411,8 +411,22 @@ def _build_package_impl(
 
     # -- Phase 8: Generate BUILD.json --
     from td_release_packager.discovery import resolve_harvest_extensions
+    from td_release_packager.orchestrator import ships_yaml as _sy
 
     resolved_extensions = resolve_harvest_extensions(config.source_dir)
+
+    # Read deployment.baseline_dir from ships.yaml if present
+    _baseline_dir = ""
+    _ships_yaml_path = os.path.join(config.source_dir, "ships.yaml")
+    if os.path.isfile(_ships_yaml_path):
+        try:
+            _yaml_data = _sy.load(_ships_yaml_path)
+            _baseline_dir = (
+                _yaml_data.get("deployment", {}).get("baseline_dir", "") or ""
+            )
+        except Exception:
+            pass
+
     manifest = BuildManifest(
         build_number=build_no,
         environment=config.environment,
@@ -429,6 +443,7 @@ def _build_package_impl(
         tokens_resolved={k: v for k, v in sorted(token_values.items())},
         warnings=warnings,
         discovery={"extensions": sorted(resolved_extensions)},
+        baseline_dir=_baseline_dir,
     )
 
     # -- Phase 8a: Compute and stamp Phase 1 Trust Report --

@@ -116,6 +116,68 @@ def _clean_db_error(raw: str) -> str:
 # ---------------------------------------------------------------
 
 
+def _load_baseline_dir(package_dir: str) -> str:
+    """Read ``baseline_dir`` from BUILD.json, or return empty string.
+
+    An empty return means drift detection was not configured in
+    ``ships.yaml`` at build time and is therefore disabled.
+
+    Args:
+        package_dir: Directory containing BUILD.json.
+
+    Returns:
+        Baseline directory path string, or ``""`` if absent.
+    """
+    build_json = os.path.join(package_dir, "BUILD.json")
+    if not os.path.isfile(build_json):
+        return ""
+    try:
+        with open(build_json, encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("baseline_dir", "") or ""
+    except Exception:  # noqa: BLE001
+        logger.debug("deployer: could not read baseline_dir from BUILD.json")
+    return ""
+
+
+def _run_show_text(
+    cursor,
+    database_name: str,
+    object_name: str,
+    object_type,
+) -> Optional[str]:
+    """Run the appropriate SHOW command and return the raw DDL text.
+
+    Used for both drift comparison (pre-deploy) and baseline capture
+    (post-deploy).  Returns ``None`` when no SHOW command is mapped for
+    the object type or when the SHOW fails or returns no rows.
+
+    Args:
+        cursor:        Active database cursor.
+        database_name: Database containing the object.
+        object_name:   Object name.
+        object_type:   ``ObjectType`` enum value.
+
+    Returns:
+        SHOW output as a single string, or ``None``.
+    """
+    show_cmd = SHOW_COMMAND_MAP.get(object_type)
+    if not show_cmd:
+        return None
+    qualified = f"{database_name}.{object_name}"
+    try:
+        cursor.execute(f"{show_cmd} {qualified}")
+        rows = cursor.fetchall()
+        if not rows:
+            return None
+        lines = [str(row[0]) for row in rows if row and row[0]]
+        text = "\n".join(lines)
+        return text if text.strip() else None
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("deployer: SHOW %s failed (non-fatal): %s", qualified, exc)
+        return None
+
+
 def _load_build_extensions(package_dir: str) -> Optional[list]:
     """Return the ``discovery.extensions`` list from BUILD.json, or ``None``.
 
@@ -161,6 +223,8 @@ def deploy_package(
     stop_on_failure: bool = True,
     dry_run: bool = False,
     skip_preflight: bool = False,
+    baseline_dir: Optional[str] = None,
+    on_drift: str = "abort",
 ) -> PackageDeployResult:
     """
     Deploy all DDL files in a directory idempotently.
@@ -169,6 +233,15 @@ def deploy_package(
     implementation.  Emits a ``ships.deploy`` OpenTelemetry span when
     ``OTEL_EXPORTER_OTLP_ENDPOINT`` is configured, and OpenLineage
     ``RunEvent`` messages when ``OPENLINEAGE_URL`` is configured.
+
+    Args:
+        baseline_dir: Shared filesystem path for schema drift baselines.
+                      When ``None``, reads from BUILD.json (stamped from
+                      ``ships.yaml``'s ``deployment.baseline_dir``).
+                      Empty string or unconfigured BUILD.json → drift
+                      detection disabled.
+        on_drift:     Action when drift is detected: ``abort`` (default),
+                      ``skip``, or ``continue``.
     """
     from ships_lineage import (
         complete_deploy_run,
@@ -176,6 +249,21 @@ def deploy_package(
         start_deploy_run,
     )
     from ships_tracing import stage_span
+
+    # Resolve baseline_dir: explicit arg > BUILD.json > disabled
+    _effective_baseline_dir = (
+        baseline_dir if baseline_dir is not None else _load_baseline_dir(package_dir)
+    )
+    if _effective_baseline_dir:
+        logger.info(
+            "Drift detection active — baseline dir: %s (on_drift=%s)",
+            _effective_baseline_dir,
+            on_drift,
+        )
+    else:
+        logger.debug(
+            "Drift detection disabled — set deployment.baseline_dir in ships.yaml to enable"
+        )
 
     _ol_run_id = start_deploy_run(package_dir, dry_run=dry_run)
 
@@ -201,6 +289,8 @@ def deploy_package(
                 stop_on_failure=stop_on_failure,
                 dry_run=dry_run,
                 skip_preflight=skip_preflight,
+                baseline_dir=_effective_baseline_dir,
+                on_drift=on_drift,
             )
         except Exception as exc:
             fail_deploy_run(
@@ -250,6 +340,8 @@ def _deploy_package_impl(
     stop_on_failure: bool = True,
     dry_run: bool = False,
     skip_preflight: bool = False,
+    baseline_dir: str = "",
+    on_drift: str = "abort",
 ) -> PackageDeployResult:
     """
     Deploy all DDL files in a directory idempotently.
@@ -514,6 +606,8 @@ def _deploy_package_impl(
             num_streams,
             connect_fn,
             stop_on_failure,
+            baseline_dir=baseline_dir,
+            on_drift=on_drift,
         )
     elif waves is not None:
         results, wave_summaries = _execute_waves_sequential(
@@ -523,6 +617,8 @@ def _deploy_package_impl(
             manifest,
             stop_on_failure,
             dry_run,
+            baseline_dir=baseline_dir,
+            on_drift=on_drift,
         )
     else:
         results = _execute_sequential(
@@ -531,6 +627,8 @@ def _deploy_package_impl(
             manifest,
             stop_on_failure,
             dry_run,
+            baseline_dir=baseline_dir,
+            on_drift=on_drift,
         )
         wave_summaries = []
 
@@ -576,7 +674,15 @@ def _deploy_package_impl(
 # ---------------------------------------------------------------
 
 
-def _execute_sequential(cursor, parsed_ddls, manifest, stop_on_failure, dry_run):
+def _execute_sequential(
+    cursor,
+    parsed_ddls,
+    manifest,
+    stop_on_failure,
+    dry_run,
+    baseline_dir="",
+    on_drift="abort",
+):
     """Execute objects sequentially (no waves)."""
     results = []
     for parsed in parsed_ddls:
@@ -587,7 +693,14 @@ def _execute_sequential(cursor, parsed_ddls, manifest, stop_on_failure, dry_run)
             DeployState.ROLLED_BACK,
         ):
             continue
-        result = _dispatch_deploy(cursor, parsed, manifest, dry_run)
+        result = _dispatch_deploy(
+            cursor,
+            parsed,
+            manifest,
+            dry_run,
+            baseline_dir=baseline_dir,
+            on_drift=on_drift,
+        )
         results.append(result)
         if result.state == DeployState.FAILED and stop_on_failure:
             manifest.set_package_status("FAILED")
@@ -596,7 +709,14 @@ def _execute_sequential(cursor, parsed_ddls, manifest, stop_on_failure, dry_run)
 
 
 def _execute_waves_sequential(
-    cursor, waves, parsed_by_path, manifest, stop_on_failure, dry_run
+    cursor,
+    waves,
+    parsed_by_path,
+    manifest,
+    stop_on_failure,
+    dry_run,
+    baseline_dir="",
+    on_drift="abort",
 ):
     """Execute waves sequentially (1 stream or dry-run), tracking wave numbers."""
     import time
@@ -642,7 +762,14 @@ def _execute_waves_sequential(
                 w_skipped += 1
                 continue
 
-            result = _dispatch_deploy(cursor, parsed, manifest, dry_run)
+            result = _dispatch_deploy(
+                cursor,
+                parsed,
+                manifest,
+                dry_run,
+                baseline_dir=baseline_dir,
+                on_drift=on_drift,
+            )
             result.wave_number = wave_num
             results.append(result)
 
@@ -683,7 +810,15 @@ def _execute_waves_sequential(
 
 
 def _execute_waves_parallel(
-    cursor, waves, parsed_by_path, manifest, num_streams, connect_fn, stop_on_failure
+    cursor,
+    waves,
+    parsed_by_path,
+    manifest,
+    num_streams,
+    connect_fn,
+    stop_on_failure,
+    baseline_dir="",
+    on_drift="abort",
 ):
     """
     Execute waves in parallel across multiple streams.
@@ -743,6 +878,8 @@ def _execute_waves_parallel(
                     parsed,
                     manifest,
                     False,
+                    baseline_dir=baseline_dir,
+                    on_drift=on_drift,
                 )
         else:
             result = _dispatch_deploy(
@@ -750,6 +887,8 @@ def _execute_waves_parallel(
                 parsed,
                 manifest,
                 False,
+                baseline_dir=baseline_dir,
+                on_drift=on_drift,
             )
 
         return {"file": file_path, "state": result.state.value, "result": result}
@@ -802,6 +941,8 @@ def resume_package(
     manifest_path: str,
     stop_on_failure: bool = True,
     dry_run: bool = False,
+    baseline_dir: str = "",
+    on_drift: str = "abort",
 ) -> PackageDeployResult:
     """
     Resume a previously failed or interrupted deployment.
@@ -887,7 +1028,14 @@ def resume_package(
             if parsed.object_type == ObjectType.TABLE:
                 _reconcile_table_state(cursor, qualified_name, record, manifest)
 
-        result = _dispatch_deploy(cursor, parsed, manifest, dry_run)
+        result = _dispatch_deploy(
+            cursor,
+            parsed,
+            manifest,
+            dry_run,
+            baseline_dir=baseline_dir,
+            on_drift=on_drift,
+        )
         results.append(result)
 
         if result.state == DeployState.FAILED and stop_on_failure:
@@ -1573,6 +1721,8 @@ def _dispatch_deploy(
     parsed: ParsedStatement,
     manifest: DeploymentManifest,
     dry_run: bool,
+    baseline_dir: str = "",
+    on_drift: str = "abort",
 ) -> ObjectDeployResult:
     """
     Dispatch deployment to the correct strategy and update manifest.
@@ -1581,11 +1731,24 @@ def _dispatch_deploy(
     not just object type. Before any destructive operation (REPLACE,
     DROP), the existing definition is captured via SHOW for rollback.
 
+    When ``baseline_dir`` is set, drift detection runs before deployment:
+    the current SHOW output is compared to the stored baseline from the
+    last SHIPS deploy.  On drift, behaviour is controlled by ``on_drift``:
+
+        ``abort``    — mark the object FAILED and stop (default)
+        ``skip``     — mark the object SKIPPED and continue
+        ``continue`` — log a warning and deploy anyway (overwrites change)
+
+    After a successful deploy, a new baseline is written for this object.
+
     Args:
-        cursor:    Active database cursor.
-        parsed:    Parsed DDL metadata.
-        manifest:  Deployment manifest for state persistence.
-        dry_run:   If True, simulate without executing.
+        cursor:       Active database cursor.
+        parsed:       Parsed DDL metadata.
+        manifest:     Deployment manifest for state persistence.
+        dry_run:      If True, simulate without executing.
+        baseline_dir: Path to the shared baseline directory.  Empty
+                      string disables drift detection.
+        on_drift:     Action on drift: ``abort`` | ``skip`` | ``continue``.
 
     Returns:
         ObjectDeployResult with outcome.
@@ -1599,6 +1762,79 @@ def _dispatch_deploy(
             parsed.strategy.value if parsed.strategy else "N/A",
             os.path.basename(parsed.file_path) if parsed.file_path else "inline",
         )
+
+        # -- Drift detection (pre-deploy) --
+        # Only runs when baseline_dir is configured and the object type
+        # supports SHOW (i.e. is in SHOW_COMMAND_MAP).  Skipped for
+        # DIRECT_EXECUTE objects (DATABASE, GRANT, DML) which have no
+        # meaningful SHOW output to compare.
+        _drift_result = None
+        if (
+            baseline_dir
+            and not dry_run
+            and parsed.strategy != DeployStrategy.DIRECT_EXECUTE
+            and parsed.object_type in SHOW_COMMAND_MAP
+        ):
+            from database_package_deployer.drift import check_drift
+
+            _current_show = _run_show_text(
+                cursor,
+                parsed.database_name,
+                parsed.object_name,
+                parsed.object_type,
+            )
+            if _current_show is not None:
+                _drift_result = check_drift(
+                    baseline_dir,
+                    parsed.database_name,
+                    parsed.object_name,
+                    _current_show,
+                )
+                if _drift_result.detected:
+                    _drift_msg = (
+                        f"Schema drift detected on "
+                        f"{parsed.database_name}.{parsed.object_name} — "
+                        f"object was changed out-of-band since last SHIPS deploy.\n"
+                        f"{_drift_result.diff_text}"
+                    )
+                    if on_drift == "abort":
+                        logger.error("  ⚠ DRIFT ABORT: %s", _drift_msg)
+                        _fail_result = ObjectDeployResult(
+                            database_name=parsed.database_name,
+                            object_name=parsed.object_name,
+                            object_type=parsed.object_type,
+                            state=DeployState.FAILED,
+                            error=_drift_msg,
+                            drift_detected=True,
+                            drift_diff=_drift_result.diff_text,
+                        )
+                        _fail_result.deploy_intent = parsed.deploy_intent
+                        manifest.update_state(
+                            parsed.qualified_name,
+                            DeployState.FAILED,
+                            error=_drift_msg,
+                        )
+                        return _fail_result
+                    elif on_drift == "skip":
+                        logger.warning("  ⚠ DRIFT SKIP: %s", _drift_msg)
+                        _skip_result = ObjectDeployResult(
+                            database_name=parsed.database_name,
+                            object_name=parsed.object_name,
+                            object_type=parsed.object_type,
+                            state=DeployState.SKIPPED,
+                            message=_drift_msg,
+                            drift_detected=True,
+                            drift_diff=_drift_result.diff_text,
+                        )
+                        _skip_result.deploy_intent = parsed.deploy_intent
+                        manifest.update_state(
+                            parsed.qualified_name,
+                            DeployState.SKIPPED,
+                            error=_drift_msg,
+                        )
+                        return _skip_result
+                    else:  # continue
+                        logger.warning("  ⚠ DRIFT CONTINUE: %s", _drift_msg)
 
         if parsed.strategy == DeployStrategy.IDEMPOTENT_DEPLOY:
             result = _deploy_table(cursor, parsed, dry_run)
@@ -1641,6 +1877,31 @@ def _dispatch_deploy(
                 result.message or "completed",
                 os.path.basename(parsed.file_path) if parsed.file_path else "",
             )
+            # -- Baseline capture (post-deploy) --
+            # Write/overwrite the baseline so the next run can detect drift
+            # against what SHIPS just deployed (rolling horizon: one file
+            # per object, overwritten on each successful deploy).
+            if baseline_dir and not dry_run and parsed.object_type in SHOW_COMMAND_MAP:
+                from database_package_deployer.drift import write_baseline
+
+                _post_show = _run_show_text(
+                    cursor,
+                    parsed.database_name,
+                    parsed.object_name,
+                    parsed.object_type,
+                )
+                if _post_show is not None:
+                    write_baseline(
+                        baseline_dir,
+                        parsed.database_name,
+                        parsed.object_name,
+                        _post_show,
+                    )
+
+            if _drift_result and _drift_result.detected:
+                result.drift_detected = True
+                result.drift_diff = _drift_result.diff_text
+
         elif result.state == DeployState.SKIPPED:
             logger.info(
                 "  ○ %s %s — %s [%s]",
