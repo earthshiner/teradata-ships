@@ -219,7 +219,7 @@ def main():
     elif args.command == "package":
         _cmd_build(args)
     elif args.command == "scan":
-        _cmd_scan(args)
+        sys.exit(_cmd_scan(args))
     elif args.command == "analyze":
         _cmd_analyze(args)
     elif args.command == "import-legacy":
@@ -2972,12 +2972,13 @@ def _cmd_scan(args):
     """
     Scan payload files for token references.
 
-    Pilot for build-order item 4 — refactored onto the orchestrator
-    foundation. ``_stage_recording`` decides whether to open a real
-    ``decisions.json`` (when running inside a SHIPS project) or a
-    no-op recorder (for ad-hoc scans against arbitrary directories).
-    The stdout output is identical in both cases.
+    Enhanced with --all-envs (sweep all env configs), --show-map
+    (reverse token-to-file index), --format json (machine-readable),
+    and --fail-on-orphan (CI gate for dead config entries).
     """
+    import glob as _glob
+    import json as _json
+
     from td_release_packager.orchestrator import issue_codes
 
     source_dir = args.source
@@ -2985,7 +2986,14 @@ def _cmd_scan(args):
         print(f"ERROR: Source directory not found: {source_dir}", file=sys.stderr)
         sys.exit(1)
 
-    # Only scan the payload — not config/, releases/, README, etc.
+    if getattr(args, "env_config", None) and getattr(args, "all_envs", False):
+        print(
+            "ERROR: --env-config and --all-envs are mutually exclusive.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # Resolve payload directory
     scan_dir = source_dir
     for candidate in ["payload/database", "payload"]:
         path = os.path.join(source_dir, candidate)
@@ -2993,88 +3001,193 @@ def _cmd_scan(args):
             scan_dir = path
             break
 
-    if scan_dir == source_dir:
-        print("  ⚠ No payload/ directory found — scanning entire project")
+    # Collect env config files
+    env_configs: list[str] = []
+    if getattr(args, "all_envs", False):
+        pattern = os.path.join(source_dir, "config", "env", "*.conf")
+        env_configs = sorted(_glob.glob(pattern))
+        if not env_configs:
+            print(
+                f"  ⚠ No *.conf files found in {os.path.join(source_dir, 'config', 'env')}"
+            )
+    elif getattr(args, "env_config", None):
+        env_configs = [args.env_config]
+
+    fmt = getattr(args, "format", "text")
+    show_map = getattr(args, "show_map", False)
+    fail_on_orphan = getattr(args, "fail_on_orphan", False)
 
     with _stage_recording(source_dir, "scan") as stage:
-        # Cascade for `scan` is trivial today — no ships.yaml,
-        # template, or env-properties contributions yet. Every
-        # setting comes from CLI (Layer 5). Recording the provenance
-        # here so future cascade integration just plugs in
-        # additional layers without changing downstream consumers.
         stage.set_config_resolved("source", source_dir, "layer-5", "cli")
         stage.set_config_resolved(
-            "env_config",
-            args.env_config or None,
-            "layer-5",
-            "cli",
+            "env_config", args.env_config or None, "layer-5", "cli"
+        )
+        stage.set_config_resolved(
+            "all_envs", getattr(args, "all_envs", False), "layer-5", "cli"
         )
 
         usage = scan_tokens_in_directory(scan_dir)
 
-        all_tokens = set()
+        all_tokens: set[str] = set()
         for tokens in usage.values():
             all_tokens.update(tokens)
 
-        stage.set_inputs(
-            scan_directory=scan_dir,
-            files_with_tokens=len(usage),
-        )
-        stage.set_outputs(
-            unique_tokens=len(all_tokens),
-            tokens=sorted(all_tokens),
-        )
+        # Build reverse map: token → sorted list of relative file paths
+        token_map: dict[str, list[str]] = {}
+        for token in sorted(all_tokens):
+            files = sorted(
+                os.path.relpath(f, scan_dir)
+                for f, toks in usage.items()
+                if token in toks
+            )
+            token_map[token] = files
 
-        print(f"\n{'=' * 64}")
-        print(f"  Token Scan: {scan_dir}")
-        print(f"{'=' * 64}")
-        print(f"  Files with tokens: {len(usage)}")
-        print(f"  Unique tokens:     {len(all_tokens)}")
+        # Per-env validation results
+        env_results: dict[str, dict] = {}
+        has_any_error = False
+        has_any_orphan = False
 
-        if all_tokens:
-            print("\n  Tokens found:")
-            for t in sorted(all_tokens):
-                files = [f for f, tokens in usage.items() if t in tokens]
-                print(f"    {{{{{t}}}}} — used in {len(files)} file(s)")
-
-        # Validate against properties if provided
-        if args.env_config:
+        for cfg_path in env_configs:
+            env_name = os.path.splitext(os.path.basename(cfg_path))[0]
             try:
-                values = read_env_config(args.env_config)
+                values = read_env_config(cfg_path)
                 errors, warnings = validate_tokens(values, usage)
-
+                orphan_count = len(warnings)
+                env_results[env_name] = {
+                    "config": cfg_path,
+                    "undefined": errors,
+                    "orphans": warnings,
+                    "status": "error" if errors else ("warning" if warnings else "ok"),
+                }
                 for e in errors:
                     stage.add_issue("error", issue_codes.TOKEN_UNDEFINED, e)
                 for w in warnings:
                     stage.add_issue("warning", issue_codes.TOKEN_UNUSED, w)
-
                 if errors:
-                    print("\n  Validation ERRORS:")
-                    for e in errors:
-                        print(f"    ✗ {e}")
-
-                if warnings:
-                    print("\n  Validation WARNINGS:")
-                    for w in warnings:
-                        print(f"    ⚠ {w}")
-
-                if not errors and not warnings:
-                    print(f"\n  ✓ All tokens validated against {args.env_config}")
-
-                # Stage status: error issues auto-upgrade to "error"
-                # via the recorder; warnings need an explicit set.
-                if warnings and not errors:
-                    stage.set_status("warning")
-
+                    has_any_error = True
+                if orphan_count:
+                    has_any_orphan = True
             except FileNotFoundError:
-                print(f"\n  ⚠ Config file not found: {args.env_config}")
+                env_results[env_name] = {
+                    "config": cfg_path,
+                    "undefined": [],
+                    "orphans": [],
+                    "status": "error",
+                    "error": "config file not found",
+                }
                 stage.add_issue(
                     "error",
                     issue_codes.PROPERTIES_NOT_FOUND,
-                    f"Config file not found: {args.env_config}",
+                    f"Config file not found: {cfg_path}",
                 )
+                has_any_error = True
 
-        print()
+        stage.set_inputs(scan_directory=scan_dir, files_with_tokens=len(usage))
+        stage.set_outputs(
+            unique_tokens=len(all_tokens),
+            tokens=sorted(all_tokens),
+            env_results={k: v["status"] for k, v in env_results.items()},
+        )
+
+        if has_any_error:
+            stage.set_status("error")
+        elif has_any_orphan:
+            stage.set_status("warning")
+
+        # ── Output ──────────────────────────────────────────────────
+        if fmt == "json":
+            out = {
+                "scan_dir": scan_dir,
+                "unique_tokens": len(all_tokens),
+                "files_with_tokens": len(usage),
+                "token_map": {
+                    t: {"count": len(fs), "files": fs} for t, fs in token_map.items()
+                },
+                "validation": env_results,
+            }
+            print(_json.dumps(out, indent=2))
+        else:
+            _scan_print_text(
+                scan_dir, all_tokens, token_map, env_results, show_map, env_configs
+            )
+
+    # Return exit code: 1 on errors; 1 on orphans when --fail-on-orphan.
+    # The CLI dispatcher calls sys.exit() with this value so that direct
+    # callers (tests, library code) are not interrupted by SystemExit.
+    if has_any_error or (fail_on_orphan and has_any_orphan):
+        return 1
+    return 0
+
+
+def _scan_print_text(
+    scan_dir: str,
+    all_tokens: set,
+    token_map: dict,
+    env_results: dict,
+    show_map: bool,
+    env_configs: list,
+) -> None:
+    """Print scan results in human-readable text format."""
+    W = 64
+    print(f"\n{'=' * W}")
+    print(f"  Token Scan")
+    print(f"  {scan_dir}")
+    print(f"{'=' * W}")
+    print(f"  Unique tokens      : {len(all_tokens)}")
+    print(f"  Files with tokens  : {sum(1 for fs in token_map.values() if fs)}")
+
+    if not all_tokens:
+        print("\n  No {{TOKEN}} references found.")
+
+    # Token inventory
+    elif show_map:
+        print("\n  Token → file map:")
+        for token, files in token_map.items():
+            print(f"\n    {{{{{token}}}}}  ({len(files)} reference(s))")
+            for f in files[:10]:
+                print(f"        {f}")
+            if len(files) > 10:
+                print(f"        … and {len(files) - 10} more")
+    else:
+        print("\n  Tokens found:")
+        for token, files in token_map.items():
+            print(f"    {{{{{token}}}}} — {len(files)} file(s)")
+
+    # Per-environment validation
+    if env_results:
+        print(f"\n  {'─' * (W - 2)}")
+        multi = len(env_results) > 1
+        for env_name, result in env_results.items():
+            label = f"[{env_name}]" if multi else ""
+            status = result.get("status", "?")
+            icon = {"ok": "✓", "warning": "⚠", "error": "✗"}.get(status, "?")
+
+            if result.get("error"):
+                print(f"\n  {icon} {label} {result['error']}")
+                continue
+
+            undef = result.get("undefined", [])
+            orphans = result.get("orphans", [])
+
+            if not undef and not orphans:
+                print(
+                    f"\n  {icon} {label} All tokens resolved — no undefined or orphan tokens"
+                )
+            else:
+                if undef:
+                    print(
+                        f"\n  {icon} {label} UNDEFINED tokens (referenced but not defined):"
+                    )
+                    for e in undef:
+                        print(f"      {e}")
+                if orphans:
+                    print(
+                        f"\n  ⚠ {label} ORPHAN tokens (defined but never referenced):"
+                    )
+                    for w in orphans:
+                        print(f"      {w}")
+
+    print()
 
 
 # ---------------------------------------------------------------
@@ -3522,11 +3635,45 @@ def _build_parser():
 
     # -- scan --
     sp = subs.add_parser(
-        "scan", help="Scan source for token references (part of Inspect)."
+        "scan",
+        help="Scan source for token references — validate, map, and audit tokens.",
     )
     sp.add_argument("--source", required=True, help="Source project directory to scan.")
     sp.add_argument(
-        "--env-config", help="Optional properties file to validate against."
+        "--env-config",
+        help="Validate all tokens against this env .conf file.  "
+        "Mutually exclusive with --all-envs.",
+    )
+    sp.add_argument(
+        "--all-envs",
+        action="store_true",
+        dest="all_envs",
+        default=False,
+        help="Validate against every *.conf file found in config/env/ "
+        "and report per-environment results in a single pass.  "
+        "Mutually exclusive with --env-config.",
+    )
+    sp.add_argument(
+        "--show-map",
+        action="store_true",
+        dest="show_map",
+        default=False,
+        help="Print the full token → file reverse index: for each token, "
+        "list every payload file that references it.",
+    )
+    sp.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format (default: text).  Use 'json' for agent or CI consumption.",
+    )
+    sp.add_argument(
+        "--fail-on-orphan",
+        action="store_true",
+        dest="fail_on_orphan",
+        default=False,
+        help="Exit 1 when any defined token is never referenced in the payload "
+        "(orphan token).  Useful as a CI gate to keep env configs clean.",
     )
 
     # -- analyze --
