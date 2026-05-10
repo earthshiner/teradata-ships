@@ -252,6 +252,22 @@ def validate(data: Dict[str, Any]) -> List[ValidationError]:
                                 )
                             )
 
+    # -- deployment block — optional; configures runtime deployment behaviour --
+    deployment_block = data.get("deployment")
+    if deployment_block is not None:
+        if not isinstance(deployment_block, dict):
+            errors.append(ValidationError("deployment", "must be a mapping"))
+        else:
+            baseline_dir = deployment_block.get("baseline_dir")
+            if baseline_dir is not None:
+                if not isinstance(baseline_dir, str) or not baseline_dir.strip():
+                    errors.append(
+                        ValidationError(
+                            "deployment.baseline_dir",
+                            "must be a non-empty string path (e.g. /shared/ships-baselines/OMR/)",
+                        )
+                    )
+
     # -- stages block — optional; each entry must be a known stage with
     #    valid strict/on_error values --
     stages_block = data.get("stages")
