@@ -254,6 +254,92 @@ python -m td_release_packager package \
 python -m td_release_packager verify --project /projects/OMR
 ```
 
+### Scenario 4 — Casual packaging: PoC or demo (no DBA, self-deploy)
+
+```python
+# Agent or developer wants to deploy a PoC without formal ceremony
+rc, out = ships_cli([
+    "process", "--project", "/tmp/poc",
+    "--source", "/poc/ddl/",
+    "--auto-tokenise",               # detect and apply tokens in one pass
+    "--env", "DEV",
+    "--env-config", "/poc/config/env/DEV.conf",
+    "--name", "poc_demo",
+])
+# The resulting package is fully auditable (build number, integrity, DBQL trail)
+# even though it was built casually — the quality is there whether you need it or not
+```
+
+### Scenario 5 — Feature rollback to a previous tag
+
+```python
+# A bad deployment went live; roll back to the last known-good tag
+ships_cli([
+    "rollback",
+    "--to-tag", "v1.2.3",
+    "--env", "PRD",
+    "--env-config", "config/env/PRD.conf",
+    "--name", "OMR",
+    "--project", "/projects/OMR",
+])
+# Then deploy the rollback package — on-drift defaults to 'continue'
+# (restoring a known-good state should overwrite out-of-band changes)
+```
+
+### Scenario 6 — Drift-aware deployment
+
+```python
+import os
+# Configure once per environment in ships.yaml / deploy.py invocation
+os.environ["BASELINE_DIR"] = "/shared/nfs/ships-baselines/OMR/PRD/"
+
+# The agent deploys; drift detection runs automatically
+# on_drift="abort" is the default — agent stops and reports any drift
+result = deploy_package(
+    cursor, package_dir,
+    baseline_dir="/shared/nfs/ships-baselines/OMR/PRD/",
+    on_drift="abort",       # agent blocks on drift, escalates to human
+)
+
+if any(r.drift_detected for r in result.results):
+    # Agent surfaces the diff for human review
+    for r in result.results:
+        if r.drift_detected:
+            print(f"Drift on {r.database_name}.{r.object_name}:\n{r.drift_diff}")
+```
+
+---
+
+## OpenTelemetry integration
+
+When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, every pipeline stage emits a span automatically. No code change required:
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://my-collector:4318
+export OTEL_SERVICE_NAME=ships-agent
+```
+
+The `ships.deploy` span carries: `ships.total`, `ships.completed`, `ships.failed`, `ships.success`. See [docs/OBSERVABILITY.md](./OBSERVABILITY.md) for the full span reference.
+
+---
+
+## OpenLineage integration
+
+When `OPENLINEAGE_URL` is set, `deploy_package` emits START/COMPLETE/FAIL events automatically. No code change required:
+
+```bash
+export OPENLINEAGE_URL=http://marquez:5000
+export OPENLINEAGE_NAMESPACE=teradata://td-prod.myorg.com:1025
+```
+
+For CI/air-gapped environments:
+
+```bash
+export OPENLINEAGE_URL=file:///var/log/ships/lineage.ndjson
+```
+
+Every successfully deployed object appears as an output dataset in the catalog. The `ShipsRunFacet` links the lineage event to the package build number and commit hash. See [docs/OBSERVABILITY.md](./OBSERVABILITY.md) for the full event schema.
+
 ---
 
 ## All exit codes
@@ -267,6 +353,7 @@ python -m td_release_packager verify --project /projects/OMR
 | `1` | `explain` | Last run had error status or file missing |
 | `1` | `deploy` | One or more objects failed |
 | `1` | `rollback` | One or more rollback operations failed |
+| `1` | `rollback --to-tag` | Tag not found, git unavailable, or build failed |
 
 ---
 
@@ -275,11 +362,13 @@ python -m td_release_packager verify --project /projects/OMR
 | Artefact | Location | What an agent reads |
 |---|---|---|
 | `decisions.json` | `<project>/decisions.json` | Stage outcomes, issue codes, config provenance, output counts |
-| `BUILD.json` | Inside the package `.zip` | Build number, environment, file list, token count, integrity hash, **trust report** |
+| `BUILD.json` | Inside the package `.zip` | Build number, environment, file list, token count, integrity hash, **trust report**, baseline\_dir, discovery extensions |
 | `_waves.txt` | `<project>/_waves.txt` | Topologically sorted deployment order |
 | `config/token_map.conf` | `<project>/config/token_map.conf` | Literal → `{{TOKEN}}` mapping |
 | `config/env/*.conf` | `<project>/config/env/` | Token → resolved value per environment |
-| Deploy manifest | `<package>/logs/.deploy_manifest_*.json` | Per-object deployment outcomes, wave timing |
+| Deploy manifest | `<package>/logs/.deploy_manifest_*.json` | Per-object deployment outcomes, wave timing, drift flags |
+| Drift baselines | `<baseline_dir>/<DB>.<OBJ>.baseline` | Last-deployed SHOW output per object — basis for drift detection |
+| Lineage NDJSON | `$OPENLINEAGE_URL` path (file transport) | OpenLineage RunEvents: START, COMPLETE, FAIL with output datasets |
 
 ---
 

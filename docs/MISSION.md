@@ -20,6 +20,21 @@ SHIPS does this by treating **metadata quality, object granularity, deterministi
 
 ---
 
+## The SHIPS Spectrum
+
+SHIPS is intentionally designed to serve users at every point on the deployment formality spectrum — from a developer deploying a personal proof-of-concept to an autonomous agent deploying to a regulated production environment. The workflow is the same at every point; only the ceremony level changes.
+
+| Mode | User | Ceremony | What they get |
+|---|---|---|---|
+| **Personal / PoC** | Developer | Zero — `ships process` and done | A build-numbered, rollback-capable, audit-trailed package without any packaging expertise |
+| **Team / Project** | Developer + DBA | Low — review token map, hand off package | Formal DBA handoff with trust report, pre-flight validation, and HTML deployment report |
+| **Enterprise** | Release manager + CI | Medium — governed pipeline | Schema drift detection, compliance audit trail, OpenLineage catalog integration |
+| **Agentic** | AI agent | None — fully autonomous | All of the above, consumed via MCP tools or deterministic CLI exit codes |
+
+A developer doing a Friday-afternoon PoC gets a SHA-256 tamper-proof package with a deployment audit trail in Teradata DBQL — whether they care about it or not. When that PoC becomes a production deployment, the artefact quality was already there. Nothing needs to be re-built.
+
+---
+
 ## What SHIPS Enables
 
 ### 1. Human-Managed Deployment Packaging
@@ -30,6 +45,24 @@ AI agents can independently analyse source assets, construct deployment packages
 
 ### 3. Git-Based Packaging
 Packages can be generated directly from source control: from an entire repository, a branch, one or more commits, a tagged release, or a detected changeset. This supports both traditional CI/CD and agent-driven release pipelines.
+
+### 3b. Frictionless PoC and Demo Packaging
+
+Developers building proofs-of-concept, demos, or personal projects can get a deployment-ready, auditable package with a single command and no packaging expertise:
+
+```bash
+python -m td_release_packager process \
+    --project my_poc \
+    --source my_sql/ \
+    --auto-tokenise \
+    --env DEV \
+    --env-config config/env/DEV.conf \
+    --name my_poc
+```
+
+`--auto-tokenise` detects and tokenises all hardcoded database names in one pass. No token map review, no manual file editing. The output is a self-contained `.zip` with an embedded deployment engine — the developer can hand it to a DBA or deploy it themselves. The enterprise-grade artefact quality (build number, integrity fingerprint, rollback capability, DBQL audit trail) is present whether the developer thinks about it or not.
+
+When the PoC graduates to a production project, no re-packaging is needed. The workflow is identical; only the governance around it changes.
 
 ### 4. Frictionless Developer Ingestion
 Developers drop Teradata assets into a directory. SHIPS does the rest: classifies object types, validates syntax, identifies dependencies, generates manifests, determines deployment ordering, and produces a deployment-ready package. No packaging expertise required.
@@ -64,10 +97,14 @@ SHIPS packages are explicitly designed for machine consumption. This includes:
 - **Deployment intent** — what the DDL verb means in execution terms
 - **Idempotency characteristics** — what happens on re-run
 - **Environment targeting** — token-resolved per environment
-- **Rollback metadata** — pre-deployment SHOW captures for recovery
-- **Validation status** — inspection results embedded in the package
+- **Rollback metadata** — pre-deployment SHOW captures for recovery; wave, full-build, and git-tag rollback paths
+- **Validation status** — inspection results and Trust Report embedded in the package
 - **Object lineage** — where each object came from, what it depends on
 - **Semantic object classification** — database, table, view, macro, procedure, etc.
+- **Schema drift signals** — baseline captures enable automatic out-of-band change detection between deployments
+- **OpenTelemetry spans** — per-stage tracing for operations dashboards
+- **OpenLineage events** — START/COMPLETE/FAIL events from deploy\_package with output datasets for data catalog integration
+- **decisions.json audit trail** — append-only record of every pipeline run; queryable by agents for outcome and issue codes
 
 ---
 
