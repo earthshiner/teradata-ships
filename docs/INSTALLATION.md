@@ -36,13 +36,38 @@ python -m venv .venv
 
 ### 3. Install Dependencies
 
-```bash
-# Runtime only
-pip install -r requirements.txt
+SHIPS uses `uv` for dependency management (recommended):
 
-# Runtime + testing
-pip install -r requirements-dev.txt
+```bash
+# Install uv if you don't have it
+pip install uv
+
+# Install all dependencies (runtime + dev)
+uv sync
 ```
+
+Or with plain pip:
+
+```bash
+pip install teradatasql pyyaml mcp
+```
+
+### 3a. Optional extras
+
+Install optional extras only when you need them:
+
+```bash
+# OpenTelemetry tracing — emit spans to Jaeger, Grafana Tempo, Datadog, etc.
+uv pip install -e ".[otel]"
+
+# OpenLineage client — richer transport options beyond stdlib HTTP/file
+uv pip install -e ".[lineage]"
+
+# Both
+uv pip install -e ".[otel,lineage]"
+```
+
+The core pipeline (Scaffold, Harvest, Inspect, Analyse, Package, Deploy) works without either extra. OTel and OpenLineage emit a no-op when their packages are not installed **or** when their environment variables are not set — no configuration required to keep them silent.
 
 ### 4. Verify the Installation
 
@@ -132,8 +157,8 @@ python deploy.py --host myserver --user dbc --logmech TD2
 ```bash
 cd teradata-deployment-agent
 git pull origin main
-pip install -r requirements.txt
-python -m pytest src/tests/ -v --tb=short
+uv sync
+uv run pytest src/tests/ -q
 ```
 
 Always run the test suite after upgrading to confirm compatibility.
