@@ -127,6 +127,25 @@ def test_zero_tokens_fail_hardcoded_procedure():
     assert issues[0].severity == "ERROR"
 
 
+def test_zero_tokens_fail_no_qualifier_at_all():
+    """Table with no database qualifier AND no tokens → ERROR.
+
+    Covers the case where a developer has written raw SQL without any
+    environment awareness at all — no hardcoded name, but also no token.
+    Both the db_qualifier rule (missing qualifier) and this rule (zero tokens)
+    fire on such a file.
+    """
+    content = (
+        "CREATE MULTISET TABLE Customer (\n"
+        "     customer_id  INTEGER     NOT NULL\n"
+        ") PRIMARY INDEX (customer_id);\n"
+    )
+    issues = _check_zero_tokens("ddl/Customer.tbl", content)
+    assert len(issues) == 1
+    assert issues[0].rule == "zero_tokens"
+    assert issues[0].severity == "ERROR"
+
+
 def test_zero_tokens_fail_message_contains_guidance():
     """ERROR message mentions auto-tokenise as the remediation path."""
     content = "REPLACE VIEW BadDb.v_X AS SELECT 1 AS x;\n"
