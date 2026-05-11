@@ -29,6 +29,11 @@ dashboard = [
     "fastapi>=0.115",
     "uvicorn>=0.32",
 ]
+# Install with: uv pip install -e ".[signing]"
+# Enables Ed25519 asymmetric package signing (Option C — ships keygen / --asymmetric-key).
+signing = [
+    "cryptography>=42.0",
+]
 
 [dependency-groups]
 dev = [

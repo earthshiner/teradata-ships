@@ -292,6 +292,14 @@ class BuildManifest:
     package_max_age_days: int = 30
     # 'warning' or 'error' — severity when the package exceeds max age.
     package_age_violation_level: str = "warning"
+    # Option C: whether the target environment requires an Ed25519 asymmetric
+    # signature sidecar.  Stamped from ships.yaml
+    # environments.<ENV>.require_asymmetric_signature at Package time.
+    require_asymmetric_signature: bool = False
+    # Option C: Ed25519 public key PEM string, committed to the project repo.
+    # Stamped from ships.yaml signing.public_key (if present) at Package time.
+    # Allows DBAs to verify without needing a separate --public-key flag.
+    ships_public_key: str = ""
 
 
 @dataclass

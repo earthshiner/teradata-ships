@@ -474,6 +474,12 @@ def _build_package_impl(
             "package_age_violation_level",
             default="warning",
         ),
+        # Option C: Ed25519 asymmetric signature enforcement.
+        require_asymmetric_signature=_read_bool_env_setting(
+            config.source_dir, config.environment, "require_asymmetric_signature"
+        ),
+        # Option C: public key PEM embedded in the package (from ships.yaml signing.public_key).
+        ships_public_key=_read_signing_public_key(config.source_dir),
     )
 
     # -- Phase 8a: Compute and stamp Phase 1 Trust Report --
@@ -2433,6 +2439,32 @@ def _read_int_env_setting(
         return int(val)
     except Exception:
         return default
+
+
+def _read_signing_public_key(source_dir: str) -> str:
+    """Read the Ed25519 public key PEM from ships.yaml signing.public_key.
+
+    Returns an empty string when ships.yaml is absent or the key is not
+    configured.  The returned value is stamped into BUILD.json so the
+    deployer can verify signatures without a separate --public-key argument.
+
+    Args:
+        source_dir: Project root directory containing ships.yaml.
+
+    Returns:
+        PEM string, or empty string if not configured.
+    """
+    ships_yaml_path = os.path.join(source_dir, "ships.yaml")
+    if not os.path.isfile(ships_yaml_path):
+        return ""
+    try:
+        from td_release_packager.orchestrator import ships_yaml as _sy
+
+        data = _sy.load(ships_yaml_path)
+        signing_cfg = data.get("signing", {})
+        return str(signing_cfg.get("public_key", "")).strip()
+    except Exception:
+        return ""
 
 
 def _generate_checksum(archive_path: str) -> str:

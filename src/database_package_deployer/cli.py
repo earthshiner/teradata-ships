@@ -109,6 +109,7 @@ def _cmd_deploy(args):
                 deployed_env=getattr(args, "env", "") or "",
                 approval_code=getattr(args, "approval_code", "") or "",
                 connection_params=_conn_params,
+                public_key_path=getattr(args, "public_key", "") or "",
             )
             otel_span.set_attribute("ships.deploy.completed", result.completed)
             otel_span.set_attribute("ships.deploy.failed", result.failed)
@@ -759,6 +760,17 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "4-eyes approval code produced by 'ships approve <package_zip>' "
             "(GAP-006). Required when the target environment has "
             "require_approvals: 2 in ships.yaml."
+        ),
+    )
+    dp.add_argument(
+        "--public-key",
+        dest="public_key",
+        default="",
+        metavar="KEY_FILE",
+        help=(
+            "Path to an Ed25519 public key PEM file for verifying the .sig "
+            "sidecar (Option C). Falls back to SHIPS_PUBLIC_KEY_PATH env var, "
+            "the key embedded in BUILD.json, and SHIPS_PUBLIC_KEY env var."
         ),
     )
     _add_conn_args(dp)
