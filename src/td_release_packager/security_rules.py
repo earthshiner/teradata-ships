@@ -204,3 +204,129 @@ def scan_dynamic_sql(
                 break
 
     return issues
+
+
+# ---------------------------------------------------------------
+# MISSING_SENSITIVITY_CLASS / INVALID_SENSITIVITY_CLASS — GAP-009
+# ---------------------------------------------------------------
+
+from typing import Optional  # noqa: E402 — kept at bottom for circular-import safety
+
+_VALID_SENSITIVITY_CLASSES = frozenset(
+    {"PUBLIC", "INTERNAL", "CONFIDENTIAL", "PII", "PCI", "PHI"}
+)
+
+# File extensions that represent DDL or view objects requiring classification.
+_CLASSIFY_EXTENSIONS = frozenset({".tbl", ".viw", ".sql"})
+
+
+def scan_sensitivity_class(
+    rel_path: str,
+    file_path: str,
+    require_sensitivity_class: bool = False,
+    violation_level: str = "warning",
+) -> List[ValidationIssue]:
+    """Check for missing or invalid sensitivity class companion files (GAP-009).
+
+    Each DDL/view file under ``ddl/`` or ``viw/`` may have a companion
+    ``.cls`` file containing a single sensitivity class token.  When
+    ``require_sensitivity_class`` is True, missing ``.cls`` files emit
+    a WARNING (or ERROR if ``violation_level='error'``).  An invalid
+    value in an existing ``.cls`` file always emits ERROR regardless
+    of ``require_sensitivity_class``.
+
+    Args:
+        rel_path:                  Relative path to the DDL/view file.
+        file_path:                 Absolute path to the DDL/view file.
+        require_sensitivity_class: Whether to enforce .cls presence.
+        violation_level:           'warning' (default) or 'error' for missing .cls.
+
+    Returns:
+        List of ValidationIssue.
+    """
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext not in _CLASSIFY_EXTENSIONS:
+        return []
+
+    if not _is_in_target_dirs(rel_path, frozenset({"ddl", "viw"})):
+        return []
+
+    cls_path = os.path.splitext(file_path)[0] + ".cls"
+
+    if not os.path.isfile(cls_path):
+        if not require_sensitivity_class:
+            return []
+        sev = "ERROR" if violation_level.lower() == "error" else "WARNING"
+        return [
+            ValidationIssue(
+                file=rel_path,
+                rule="sensitivity_class",
+                severity=sev,
+                message=(
+                    f"MISSING_SENSITIVITY_CLASS — no companion .cls file found for "
+                    f"'{os.path.basename(file_path)}'. Create a .cls file with one of: "
+                    f"{', '.join(sorted(_VALID_SENSITIVITY_CLASSES))}."
+                ),
+            )
+        ]
+
+    # .cls file exists — validate its content
+    try:
+        raw_class = open(cls_path, encoding="utf-8").read().strip().upper()
+    except (OSError, UnicodeDecodeError) as exc:
+        return [
+            ValidationIssue(
+                file=rel_path,
+                rule="sensitivity_class",
+                severity="ERROR",
+                message=f"INVALID_SENSITIVITY_CLASS — could not read .cls file: {exc}",
+            )
+        ]
+
+    if not raw_class:
+        return [
+            ValidationIssue(
+                file=rel_path,
+                rule="sensitivity_class",
+                severity="ERROR",
+                message=(
+                    "INVALID_SENSITIVITY_CLASS — .cls file is empty. "
+                    f"Use one of: {', '.join(sorted(_VALID_SENSITIVITY_CLASSES))}."
+                ),
+            )
+        ]
+
+    if raw_class not in _VALID_SENSITIVITY_CLASSES:
+        return [
+            ValidationIssue(
+                file=rel_path,
+                rule="sensitivity_class",
+                severity="ERROR",
+                message=(
+                    f"INVALID_SENSITIVITY_CLASS — '{raw_class}' is not a recognised "
+                    f"sensitivity class. Valid values: "
+                    f"{', '.join(sorted(_VALID_SENSITIVITY_CLASSES))}."
+                ),
+            )
+        ]
+
+    return []
+
+
+def read_sensitivity_class(file_path: str) -> Optional[str]:
+    """Read the sensitivity class for a file from its companion .cls file.
+
+    Args:
+        file_path: Absolute path to the DDL/view file.
+
+    Returns:
+        Upper-cased class string (e.g. 'PII'), or None if absent/unreadable.
+    """
+    cls_path = os.path.splitext(file_path)[0] + ".cls"
+    if not os.path.isfile(cls_path):
+        return None
+    try:
+        raw = open(cls_path, encoding="utf-8").read().strip().upper()
+        return raw if raw in _VALID_SENSITIVITY_CLASSES else None
+    except (OSError, UnicodeDecodeError):
+        return None
