@@ -1352,13 +1352,18 @@ def _check_hardcoded_names(rel_path: str, content: str) -> List[ValidationIssue]
 
 
 def _check_zero_tokens(rel_path: str, content: str) -> List[ValidationIssue]:
-    """Check that every deployable DDL/DML object uses at least one {{TOKEN}} reference.
+    """Check that every deployable DDL/DML object is usable by SHIPS for tokenisation.
 
-    A file with zero token references has hardcoded environment assumptions —
-    database names, usernames, or paths that cannot change across deployments.
-    Such files cannot be safely promoted from DEV to TST to PRD without manual
-    edits, which defeats the purpose of the SHIPS pipeline and introduces
-    deployment risk.
+    Three cases, in order of environment awareness:
+
+        1. {{TOKEN}} present  → PASS.  The file is already tokenised.
+        2. Hardcoded Database.Object name, no token  → PASS.  SHIPS can detect the
+           literal database name and auto-tokenise it via ``--auto-tokenise``.
+           The ``hardcoded_name`` WARNING surfaces this separately.
+        3. No database qualifier AND no token  → ERROR.  The developer has written
+           an unqualified object name (e.g. ``CREATE TABLE Customer (...)``).
+           SHIPS has nothing to tokenise because there is no database name to
+           replace.  The developer must add the database qualifier themselves.
 
     System-scope objects (Maps, Roles, Profiles, Authorisations, Foreign Servers)
     are excluded — they have no database qualifier by design and are identical
@@ -1369,23 +1374,16 @@ def _check_zero_tokens(rel_path: str, content: str) -> List[ValidationIssue]:
         content:  Comment-stripped file content.
 
     Returns:
-        One ValidationIssue (ERROR) when the file classifies as a DDL/DML object
-        but contains zero {{TOKEN}} references. Empty list when the file passes.
+        One ValidationIssue (ERROR) only for case 3 — no qualifier and no token.
+        Empty list for cases 1 and 2.
     """
-    # This rule validates SOURCE files — DDL as the developer wrote it,
-    # before Harvest resolves {{TOKEN}} placeholders.  Post-Harvest payload
-    # files legitimately contain literal database names (the resolved token
-    # values), so the rule MUST NOT fire on them.
-    #
-    # Detection heuristic: if "payload" appears as a directory component in
-    # the relative path, the file has already been through Harvest.  Skip it.
+    # Only applies to source files. Post-Harvest payload files legitimately
+    # contain resolved literal names — do not fire on them.
     _path_parts = set(re.split(r"[/\\]", rel_path))
     if "payload" in _path_parts:
         return []
 
-    # Determine whether the file contains a classifiable DDL/DML object.
-    # If it doesn't match any known pattern, skip it — companion files (.stt,
-    # .cls), binary files (.jar), and unknown content are not in scope.
+    # Must be a classifiable DDL/DML object type.
     obj_type = None
     for pattern, otype in _CLASSIFY_PATTERNS:
         if pattern.search(content):
@@ -1395,30 +1393,41 @@ def _check_zero_tokens(rel_path: str, content: str) -> List[ValidationIssue]:
     if obj_type is None:
         return []
 
-    # System-scope objects (maps, roles, profiles) are identical across
-    # environments and carry no database qualifier — tokens are not expected.
+    # System-scope objects carry no database qualifier — tokens not expected.
     if obj_type in _SYSTEM_SCOPE_TYPES:
         return []
 
-    # If the file references at least one {{TOKEN}}, it is environment-aware.
+    # Case 1: file already has {{TOKEN}} references — environment-aware.
     if _TOKEN_RE.search(content):
         return []
 
-    # Zero token references found in a deployable DDL/DML object.
+    # Case 2: file has a database-qualified name (Database.Object or
+    # {{TOKEN}}.Object).  The hardcoded literal gives SHIPS something to
+    # detect and replace via --auto-tokenise.  Pass here; the separate
+    # hardcoded_name WARNING will surface the literal for the developer.
+    name_match = _QUALIFIED_NAME_RE.search(content)
+    if name_match:
+        qualified = name_match.group(1).replace('"', "")
+        if "." in qualified:
+            return []
+
+    # Case 3: no token AND no database qualifier — SHIPS cannot auto-tokenise
+    # because there is no database name to work with.  The developer must add
+    # a database qualifier (e.g. {{MY_DB}}.ObjectName) before SHIPS can help.
     return [
         ValidationIssue(
             file=rel_path,
             rule="zero_tokens",
             severity="ERROR",
             message=(
-                "No {{TOKEN}} references found in this file. Every deployable "
-                "DDL and DML object must use {{TOKEN}} placeholders for database "
-                "names (e.g. {{MY_DATABASE}}.ObjectName) so the release package "
-                "resolves correctly for each target environment. Files without "
-                "tokens carry hardcoded environment assumptions and cannot be "
-                "safely promoted from DEV to TST to PRD without manual edits. "
-                "Add token placeholders manually or run "
-                "'ships harvest --auto-tokenise' to detect and apply them."
+                "No database qualifier found in this file. Every deployable DDL "
+                "and DML object must be fully qualified as Database.ObjectName "
+                "(or {{TOKEN}}.ObjectName). Without a database qualifier SHIPS "
+                "cannot tokenise the file and it cannot be safely deployed to "
+                "any environment. Add a database qualifier — use a {{TOKEN}} "
+                "placeholder if the target database varies per environment, or "
+                "a literal name that SHIPS can auto-tokenise via "
+                "'ships harvest --auto-tokenise'."
             ),
         )
     ]
