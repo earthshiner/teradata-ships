@@ -68,6 +68,8 @@ def main():
         _cmd_status(args)
     elif args.command == "approve":
         _cmd_approve(args)
+    elif args.command == "audit-grants":
+        _cmd_audit_grants(args)
     else:
         parser.print_help()
         sys.exit(1)
@@ -378,6 +380,37 @@ def _cmd_status(args):
 # ---------------------------------------------------------------
 # approve command (GAP-006)
 # ---------------------------------------------------------------
+
+
+def _cmd_audit_grants(args):
+    """Compare declared vs live grants and report drift."""
+    from database_package_deployer.grant_audit import audit_grants
+
+    cursor = _connect(args)
+    try:
+        report = audit_grants(cursor, args.package_dir)
+    finally:
+        cursor.close()
+        cursor.connection.close()
+
+    # JSON output to stdout
+    print(json.dumps(report, indent=2, default=list))
+
+    # Human-readable summary to stderr
+    drift = report["drift"]
+    matched = len(report["MATCHED"])
+    missing = len(report["MISSING"])
+    undeclared = len(report["UNDECLARED"])
+    print(
+        f"\nGrant audit: {matched} matched, {missing} missing, {undeclared} undeclared.",
+        file=sys.stderr,
+    )
+    if drift:
+        print("DRIFT DETECTED — review the report above.", file=sys.stderr)
+    else:
+        print("No drift detected.", file=sys.stderr)
+
+    sys.exit(1 if drift else 0)
 
 
 def _cmd_approve(args):
@@ -794,6 +827,20 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "manifest_path",
         help="Path to .deploy_manifest.json.",
     )
+
+    # -- audit-grants (GAP-014) --
+    ag = subs.add_parser(
+        "audit-grants",
+        help=(
+            "[GAP-014] Compare declared vs live grants and report drift. "
+            "Exit 0 = no drift, exit 1 = drift detected."
+        ),
+    )
+    ag.add_argument(
+        "package_dir",
+        help="Extracted package directory (contains payload/02_dcl/).",
+    )
+    _add_conn_args(ag)
 
     # -- approve (GAP-006) --
     ap = subs.add_parser(
