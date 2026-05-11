@@ -457,6 +457,10 @@ def _build_package_impl(
         require_approvals=_read_int_env_setting(
             config.source_dir, config.environment, "require_approvals", default=1
         ),
+        # GAP-015: TLS enforcement.
+        require_tls=_read_bool_env_setting(
+            config.source_dir, config.environment, "require_tls"
+        ),
         # GAP-012: package age TTL.
         package_built_at=timestamp.isoformat(),
         package_max_age_days=_read_int_env_setting(
@@ -779,6 +783,7 @@ def _split_into_paired_packages(
         require_change_ref=manifest.require_change_ref,
         require_signature=manifest.require_signature,
         require_approvals=manifest.require_approvals,
+        require_tls=manifest.require_tls,
         package_built_at=manifest.package_built_at,
         package_max_age_days=manifest.package_max_age_days,
         package_age_violation_level=manifest.package_age_violation_level,

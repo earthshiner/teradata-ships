@@ -25,6 +25,7 @@ reported but do not block execution.
 | `mpa_approval`        | ERROR (conditional)  | 4-eyes approval code verified when `require_approvals: 2` in ships.yaml. | GAP-006 |
 | `excess_privilege`    | WARNING              | Deploy user should not hold elevated rights (GD, SA, CA, AL, or DBC rights). | GAP-010 |
 | `package_age`         | WARNING (configurable) | Package exceeds `package_max_age_days` threshold stamped from ships.yaml. | GAP-012 |
+| `tls_connection`      | WARNING (configurable) | Teradata connection should use TLS/SSL; ERROR when `require_tls: true` in ships.yaml. | GAP-015 |
 
 ---
 

@@ -1468,3 +1468,88 @@ def check_package_age(package_dir: str) -> List[PreflightCheck]:
             severity=severity,
         )
     ]
+
+
+# ---------------------------------------------------------------
+# TLS / SSL connection check (GAP-015)
+# ---------------------------------------------------------------
+
+
+def check_tls_connection(
+    package_dir: str,
+    connection_params: Optional[dict] = None,
+) -> List[PreflightCheck]:
+    """Warn if the Teradata connection is not using TLS/SSL encryption (GAP-015).
+
+    Inspects *connection_params* for recognised encryption indicators
+    (``encryptdata``, ``sslmode``, ``ssl``).  When none are present or
+    the value is falsy, a WARNING is emitted.
+
+    When ``require_tls: true`` is set in BUILD.json (stamped from
+    ships.yaml), the check is promoted to ERROR.
+
+    Args:
+        package_dir:       Extracted package directory.
+        connection_params: Dict of teradatasql connection kwargs.  If
+                           absent or None, the check is skipped.
+
+    Returns:
+        List of PreflightCheck results (zero or one entry).
+    """
+    if not connection_params:
+        logger.debug("tls_connection: no connection params supplied — skipping.")
+        return []
+
+    # Read require_tls from BUILD.json
+    require_tls = False
+    build_json = os.path.join(package_dir, "BUILD.json")
+    if os.path.isfile(build_json):
+        try:
+            with open(build_json, encoding="utf-8") as fh:
+                manifest = json.load(fh)
+            require_tls = bool(manifest.get("require_tls", False))
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    # Detect encryption parameters
+    encrypted = any(
+        _is_truthy(connection_params.get(key))
+        for key in ("encryptdata", "sslmode", "ssl")
+    )
+
+    if encrypted:
+        logger.info("tls_connection: TLS/SSL encryption is enabled — OK.")
+        return [
+            PreflightCheck(
+                check_name="tls_connection",
+                passed=True,
+                database="(connection)",
+                message="tls_connection — Teradata connection is using TLS/SSL encryption.",
+                severity="INFO",
+            )
+        ]
+
+    severity = "ERROR" if require_tls else "WARNING"
+    logger.warning("tls_connection: connection is not using TLS/SSL encryption.")
+    return [
+        PreflightCheck(
+            check_name="tls_connection",
+            passed=(severity == "WARNING"),
+            database="(connection)",
+            message=(
+                "tls_connection — Teradata connection is not using TLS/SSL encryption. "
+                "Set encryptdata=true in the connection configuration."
+            ),
+            severity=severity,
+        )
+    ]
+
+
+def _is_truthy(value) -> bool:
+    """Return True for connection parameter values that indicate encryption is enabled."""
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    s = str(value).lower().strip()
+    return s in ("true", "1", "yes", "on", "require", "verify-ca", "verify-full")

@@ -79,6 +79,8 @@ def _cmd_deploy(args):
     """Execute the 'deploy' command with mandatory pre-flight."""
     from database_package_deployer.otel import deployer_span
 
+    # Build connection params before connecting so they can be passed to the TLS check.
+    _conn_params = _build_connection_params(args)
     cursor = _connect(args)
 
     # Parse file patterns from comma-separated string
@@ -106,6 +108,7 @@ def _cmd_deploy(args):
                 dry_run=args.dry_run,
                 deployed_env=getattr(args, "env", "") or "",
                 approval_code=getattr(args, "approval_code", "") or "",
+                connection_params=_conn_params,
             )
             otel_span.set_attribute("ships.deploy.completed", result.completed)
             otel_span.set_attribute("ships.deploy.failed", result.failed)
@@ -577,6 +580,36 @@ def _read_order_file(
 # ---------------------------------------------------------------
 
 
+def _build_connection_params(args) -> dict:
+    """Build the connection params dict from CLI args (GAP-015).
+
+    Returns the dict that would be passed to teradatasql.connect().
+    Used by the TLS check to inspect encryption settings before or
+    alongside the actual connection.
+    """
+    host = getattr(args, "host", None) or os.environ.get("TD_HOST", "")
+    user = getattr(args, "user", None) or os.environ.get("TD_USER", "")
+    password = getattr(args, "password", None) or os.environ.get("TD_PASSWORD", "")
+    logmech = getattr(args, "logmech", None) or os.environ.get("TD_LOGMECH", "")
+    encryptdata = getattr(args, "encryptdata", None) or os.environ.get("TD_ENCRYPTDATA", "")
+    sslmode = getattr(args, "sslmode", None) or os.environ.get("TD_SSLMODE", "")
+
+    params = {}
+    if host:
+        params["host"] = host
+    if user:
+        params["user"] = user
+    if password:
+        params["password"] = password
+    if logmech:
+        params["logmech"] = logmech
+    if encryptdata:
+        params["encryptdata"] = encryptdata
+    if sslmode:
+        params["sslmode"] = sslmode
+    return params
+
+
 def _connect(args):
     """Establish a Teradata database connection."""
     try:
@@ -875,6 +908,22 @@ def _add_conn_args(parser):
     parser.add_argument(
         "--logmech",
         help="Logon mechanism (or TD_LOGMECH).",
+    )
+    parser.add_argument(
+        "--encryptdata",
+        default="",
+        help=(
+            "Enable TLS encryption (e.g. 'true'). "
+            "Passed to teradatasql as encryptdata. (or TD_ENCRYPTDATA)."
+        ),
+    )
+    parser.add_argument(
+        "--sslmode",
+        default="",
+        help=(
+            "TLS SSL mode (e.g. 'require', 'verify-ca'). "
+            "Passed to teradatasql as sslmode. (or TD_SSLMODE)."
+        ),
     )
 
 

@@ -281,6 +281,9 @@ class BuildManifest:
     # 1 = self-certify (default, no approval code needed).
     # 2 = 4-eyes (a second operator must run 'ships approve').
     require_approvals: int = 1
+    # GAP-015: whether TLS/SSL is required for the connection.
+    # Stamped from ships.yaml environments.<ENV>.require_tls at Package time.
+    require_tls: bool = False
     # GAP-012: explicit build timestamp for TTL/staleness checks.
     # Set to the same value as timestamp at Package time.
     package_built_at: str = ""

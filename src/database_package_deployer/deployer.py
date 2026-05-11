@@ -62,6 +62,7 @@ from database_package_deployer.preflight import (
     check_package_age,
     check_package_hash,
     check_package_signature,
+    check_tls_connection,
     run_preflight,
 )
 from database_package_deployer.report import generate_report
@@ -236,6 +237,7 @@ def deploy_package(
     on_drift: str = "abort",
     deployed_env: str = "",
     approval_code: str = "",
+    connection_params: Optional[dict] = None,
 ) -> PackageDeployResult:
     """
     Deploy all DDL files in a directory idempotently.
@@ -305,6 +307,7 @@ def deploy_package(
                 on_drift=on_drift,
                 deployed_env=deployed_env,
                 approval_code=approval_code,
+                connection_params=connection_params,
             )
         except Exception as exc:
             fail_deploy_run(
@@ -386,6 +389,7 @@ def _deploy_package_impl(
     on_drift: str = "abort",
     deployed_env: str = "",
     approval_code: str = "",
+    connection_params: Optional[dict] = None,
 ) -> PackageDeployResult:
     """
     Deploy all DDL files in a directory idempotently.
@@ -509,6 +513,11 @@ def _deploy_package_impl(
 
     # GAP-012: warn or fail if the package exceeds its TTL.
     pkg_level_checks.extend(check_package_age(package_dir))
+
+    # GAP-015: warn if the connection is not using TLS/SSL.
+    pkg_level_checks.extend(
+        check_tls_connection(package_dir, connection_params)
+    )
 
     pkg_level_errors = [c for c in pkg_level_checks if not c.passed]
     if pkg_level_errors:
