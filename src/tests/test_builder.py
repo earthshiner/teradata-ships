@@ -17,7 +17,11 @@ from unittest.mock import patch
 
 import pytest
 
-from td_release_packager.builder import _check_working_tree, _generate_integrity_file, _resolve_filename
+from td_release_packager.builder import (
+    _check_working_tree,
+    _generate_integrity_file,
+    _resolve_filename,
+)
 
 
 # ---------------------------------------------------------------
@@ -69,7 +73,9 @@ class TestGenerateIntegrityFile:
             pkg_dir = self._make_package_dir(tmp)
             hash_before = _generate_integrity_file(pkg_dir)
 
-            lib_file = os.path.join(tmp, "lib", "database_package_deployer", "preflight.py")
+            lib_file = os.path.join(
+                tmp, "lib", "database_package_deployer", "preflight.py"
+            )
             with open(lib_file, "a", encoding="utf-8") as fh:
                 fh.write("# modified\n")
 
