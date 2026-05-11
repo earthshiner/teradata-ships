@@ -56,6 +56,7 @@ from database_package_deployer.models import (
     TABLE_KIND_MAP,
 )
 from database_package_deployer.preflight import (
+    check_asymmetric_signature,
     check_change_ref_present,
     check_env_lock,
     check_mpa_approval,
@@ -238,6 +239,7 @@ def deploy_package(
     deployed_env: str = "",
     approval_code: str = "",
     connection_params: Optional[dict] = None,
+    public_key_path: str = "",
 ) -> PackageDeployResult:
     """
     Deploy all DDL files in a directory idempotently.
@@ -308,6 +310,7 @@ def deploy_package(
                 deployed_env=deployed_env,
                 approval_code=approval_code,
                 connection_params=connection_params,
+                public_key_path=public_key_path,
             )
         except Exception as exc:
             fail_deploy_run(
@@ -390,6 +393,7 @@ def _deploy_package_impl(
     deployed_env: str = "",
     approval_code: str = "",
     connection_params: Optional[dict] = None,
+    public_key_path: str = "",
 ) -> PackageDeployResult:
     """
     Deploy all DDL files in a directory idempotently.
@@ -516,6 +520,9 @@ def _deploy_package_impl(
 
     # GAP-015: warn if the connection is not using TLS/SSL.
     pkg_level_checks.extend(check_tls_connection(package_dir, connection_params))
+
+    # Option C: verify Ed25519 asymmetric signature sidecar.
+    pkg_level_checks.extend(check_asymmetric_signature(package_dir, public_key_path))
 
     pkg_level_errors = [c for c in pkg_level_checks if not c.passed]
     if pkg_level_errors:

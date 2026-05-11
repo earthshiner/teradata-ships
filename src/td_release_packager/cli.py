@@ -244,6 +244,8 @@ def main():
         _cmd_decisions(args)
     elif args.command == "rollback":
         _cmd_rollback(args)
+    elif args.command == "keygen":
+        _cmd_keygen(args)
     else:
         parser.print_help()
         sys.exit(1)
@@ -2195,6 +2197,30 @@ def _run_build(args, stage, issue_codes) -> int:
     except Exception as _sign_exc:
         logger.warning("Package signing failed (non-fatal): %s", _sign_exc)
 
+    # -- Ed25519 asymmetric signing (Option C) --
+    # Coexists with HMAC signing; both sidecar files may be present.
+    _asym_key_path = getattr(args, "asymmetric_key", None)
+    try:
+        from database_package_deployer import asym_signing as _asym
+
+        _private_pem = _asym.resolve_private_key_pem(_asym_key_path)
+        if _private_pem:
+            sig_path = _asym.sign_zip(archive_path, _private_pem)
+            print(f"  Sig (Ed25519): {sig_path}")
+            if companion_pair is not None:
+                companion_sig = _asym.sign_zip(companion_pair[0], _private_pem)
+                print(f"  Sig (Ed25519): {companion_sig}")
+        else:
+            logger.debug(
+                "asym_signing: no private key available — skipping Ed25519 signing."
+            )
+    except ImportError:
+        logger.debug(
+            "asym_signing: cryptography not installed — Ed25519 signing skipped."
+        )
+    except Exception as _asym_exc:
+        logger.warning("Ed25519 signing failed (non-fatal): %s", _asym_exc)
+
     # -- Record outputs and issues --
     stage.set_outputs(
         archive_path=archive_path,
@@ -3515,6 +3541,57 @@ def _export_graph(result, args):
 # ---------------------------------------------------------------
 
 
+def _cmd_keygen(args):
+    """Generate an Ed25519 keypair for asymmetric package signing.
+
+    Writes two PEM files to *output_dir*:
+        ships_signing_private.pem  — keep secret; store in CI/CD secrets
+        ships_signing_public.pem   — commit to your project repository
+
+    Requires the ``cryptography`` package (pip install cryptography>=42.0).
+    """
+    try:
+        from database_package_deployer import asym_signing
+    except ImportError as exc:
+        print(f"ERROR: could not import asym_signing: {exc}", flush=True)
+        sys.exit(1)
+
+    try:
+        private_pem, public_pem = asym_signing.generate_keypair()
+    except ImportError as exc:
+        print(f"ERROR: {exc}", flush=True)
+        sys.exit(1)
+
+    output_dir = getattr(args, "output_dir", ".") or "."
+    os.makedirs(output_dir, exist_ok=True)
+
+    private_path = os.path.join(output_dir, "ships_signing_private.pem")
+    public_path = os.path.join(output_dir, "ships_signing_public.pem")
+
+    import pathlib
+
+    pathlib.Path(private_path).write_text(private_pem, encoding="utf-8")
+    pathlib.Path(public_path).write_text(public_pem, encoding="utf-8")
+
+    print()
+    print("Ed25519 keypair generated.")
+    print()
+    print(f"  Private key: {private_path}")
+    print("    ACTION REQUIRED — keep this file secret:")
+    print("      - Store it as a CI/CD secret (SHIPS_PRIVATE_KEY_PATH env var).")
+    print("      - Never commit it to source control.")
+    print("      - Never copy it to developer workstations.")
+    print()
+    print(f"  Public key:  {public_path}")
+    print("    Safe to share — commit this file to your project repository.")
+    print("    DBAs use it to verify package signatures without needing the private key.")
+    print()
+    print("  Usage:")
+    print("    ships package ... --asymmetric-key ships_signing_private.pem")
+    print("    ships deploy <pkg_dir> --public-key ships_signing_public.pem ...")
+    print()
+
+
 def _build_parser():
     """Build the argument parser."""
     parser = argparse.ArgumentParser(
@@ -3791,6 +3868,17 @@ def _build_parser():
             "Change management ticket reference (e.g. CHG0012345). "
             "Written to BUILD.json as change_ref. Required when the "
             "target environment has require_change_ref: true in ships.yaml."
+        ),
+    )
+    bp.add_argument(
+        "--asymmetric-key",
+        dest="asymmetric_key",
+        default=None,
+        metavar="KEY_FILE",
+        help=(
+            "Path to an Ed25519 private key PEM file. When supplied "
+            "(or SHIPS_PRIVATE_KEY_PATH is set), a .sig sidecar is written "
+            "alongside the archive. Requires the cryptography package."
         ),
     )
 
@@ -4349,6 +4437,22 @@ def _build_parser():
         action="store_true",
         dest="dry_run",
         help="Show what would be pruned without writing any changes.",
+    )
+
+    # -- keygen --
+    kg = subs.add_parser(
+        "keygen",
+        help="Generate an Ed25519 keypair for asymmetric package signing.",
+    )
+    kg.add_argument(
+        "--output-dir",
+        dest="output_dir",
+        default=".",
+        metavar="DIR",
+        help=(
+            "Directory to write ships_signing_private.pem and "
+            "ships_signing_public.pem (default: current directory)."
+        ),
     )
 
     return parser
