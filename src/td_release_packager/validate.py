@@ -69,6 +69,9 @@ DEFAULT_RULES: Dict[str, str] = {
     # sensitivity_class: check for .cls companion files. OFF by default;
     # activate with require_sensitivity_class=true in ships.yaml.
     "sensitivity_class": "OFF",
+    # Vault / secret ref rule (GAP-011).
+    # vault_ref: detect unresolved $env: or vault: prefixes in payload files.
+    "vault_ref": "ERROR",
     # Extension is ERROR, not WARNING. A staged file whose
     # extension disagrees with its content is the package and the
     # metadata lying to each other — the deployer and any
@@ -321,6 +324,11 @@ def generate_default_config() -> str:
         "# sensitivity_class: check for .cls companion files alongside DDL/view objects.",
         "# OFF by default — set to WARNING or ERROR to enforce.",
         f"sensitivity_class={DEFAULT_RULES['sensitivity_class']}",
+        "",
+        "# Vault / secret reference rule (GAP-011)",
+        "# vault_ref: detect unresolved $env: or vault: prefixes in payload files.",
+        "# Defaults to ERROR — these should never appear in deployed payload.",
+        f"vault_ref={DEFAULT_RULES['vault_ref']}",
         "",
         "# Cross-file structural rules",
         "# intra_package_dependency: object lives in a database/user that",
@@ -1945,11 +1953,13 @@ def _check_security(
         scan_dynamic_sql,
         scan_secret_patterns,
         scan_sensitivity_class,
+        scan_vault_refs,
     )
 
     issues: List[ValidationIssue] = []
     issues.extend(scan_secret_patterns(rel_path, content, file_path))
     issues.extend(scan_dynamic_sql(rel_path, content, file_path))
+    issues.extend(scan_vault_refs(rel_path, content, file_path))
 
     if rules_config is None:
         rules_config = {}

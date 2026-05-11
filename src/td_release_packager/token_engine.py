@@ -118,6 +118,114 @@ def _validate_property_values(
     return errors
 
 
+def _resolve_vault_value(raw_ref: str, token_name: str) -> str:
+    """Resolve a ``vault:path#key`` secret reference (GAP-011).
+
+    Uses the ``hvac`` package when available; falls back to direct HTTP
+    calls to the Vault KV v2 API via ``urllib.request``.
+
+    Args:
+        raw_ref:    The raw value string, e.g. ``vault:secret/data/ships/prd#password``.
+        token_name: Token name for error messages.
+
+    Returns:
+        Resolved secret value string.
+
+    Raises:
+        ValueError: When the secret cannot be resolved.
+    """
+    vault_addr = os.environ.get("VAULT_ADDR", "").strip()
+    vault_token = os.environ.get("VAULT_TOKEN", "").strip()
+
+    if not vault_addr:
+        raise ValueError(
+            f"token '{token_name}': vault reference requires VAULT_ADDR env var"
+        )
+    if not vault_token:
+        raise ValueError(
+            f"token '{token_name}': vault reference requires VAULT_TOKEN env var"
+        )
+
+    # Parse: vault:secret/data/ships/prd#field
+    ref = raw_ref[len("vault:"):]
+    if "#" not in ref:
+        raise ValueError(
+            f"token '{token_name}': vault reference must be 'vault:path#key', got '{raw_ref}'"
+        )
+    path, field = ref.rsplit("#", 1)
+
+    try:
+        import hvac
+
+        client = hvac.Client(url=vault_addr, token=vault_token)
+        secret = client.secrets.kv.v2.read_secret_version(path=path)
+        data = secret["data"]["data"]
+        if field not in data:
+            raise ValueError(
+                f"token '{token_name}': field '{field}' not found in vault path '{path}'"
+            )
+        return str(data[field])
+    except ImportError:
+        pass  # Fall back to urllib
+
+    import json
+    import urllib.request
+
+    # Vault KV v2: GET /v1/<path>
+    url = f"{vault_addr.rstrip('/')}/v1/{path}"
+    req = urllib.request.Request(
+        url,
+        headers={"X-Vault-Token": vault_token},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
+            body = json.loads(resp.read().decode("utf-8"))
+    except Exception as exc:
+        raise ValueError(
+            f"token '{token_name}': vault request failed for path '{path}': {exc}"
+        ) from exc
+
+    data = body.get("data", {}).get("data", {})
+    if field not in data:
+        raise ValueError(
+            f"token '{token_name}': field '{field}' not found in vault path '{path}'"
+        )
+    return str(data[field])
+
+
+def _resolve_secret_value(value: str, token_name: str) -> str:
+    """Resolve ``$env:`` and ``vault:`` prefixes in a token map value (GAP-011).
+
+    ``$env:VAR_NAME``  → ``os.environ['VAR_NAME']`` (fails if not set)
+    ``vault:path#key`` → Vault KV v2 secret field (fails if unreachable)
+    Plain values       → returned unchanged.
+
+    Args:
+        value:      Raw value from the token map .conf file.
+        token_name: Token name (used in error messages only).
+
+    Returns:
+        Resolved string value.
+
+    Raises:
+        ValueError: When a reference cannot be resolved.
+    """
+    if value.startswith("$env:"):
+        var_name = value[len("$env:"):]
+        resolved = os.environ.get(var_name)
+        if resolved is None:
+            raise ValueError(
+                f"token '{token_name}': env var '{var_name}' is not set"
+            )
+        logger.debug("token_engine: '%s' resolved from env var '%s'.", token_name, var_name)
+        return resolved
+
+    if value.startswith("vault:"):
+        return _resolve_vault_value(value, token_name)
+
+    return value
+
+
 def read_env_config(env_config_path: str) -> Dict[str, str]:
     """
     Read a .conf file into a token dictionary.
@@ -177,7 +285,7 @@ def read_env_config(env_config_path: str) -> Dict[str, str]:
                     name,
                 )
 
-            tokens[name] = value
+            tokens[name] = _resolve_secret_value(value, name)
 
     logger.info("Read %d tokens from %s", len(tokens), env_config_path)
 

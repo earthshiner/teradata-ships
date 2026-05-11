@@ -330,3 +330,50 @@ def read_sensitivity_class(file_path: str) -> Optional[str]:
         return raw if raw in _VALID_SENSITIVITY_CLASSES else None
     except (OSError, UnicodeDecodeError):
         return None
+
+
+# ---------------------------------------------------------------
+# VAULT_REF_UNRESOLVED — GAP-011
+# ---------------------------------------------------------------
+
+_UNRESOLVED_REF_RE = re.compile(r"\$env:[A-Za-z_]\w*|vault:[^\s]+")
+
+
+def scan_vault_refs(
+    rel_path: str,
+    content: str,
+    file_path: str,
+) -> List[ValidationIssue]:
+    """Detect unresolved $env: or vault: prefixes in a payload file (GAP-011).
+
+    After Harvest completes token substitution, no payload file should still
+    contain literal ``$env:`` or ``vault:`` strings.  If they are present,
+    it means the Harvest resolution was bypassed or the token map was hand-
+    edited after resolution.
+
+    Args:
+        rel_path:  Relative path to the payload file.
+        content:   File content (post-token-substitution).
+        file_path: Absolute path (not used; kept for API consistency).
+
+    Returns:
+        List of ValidationIssue — one per matching line.
+    """
+    issues: List[ValidationIssue] = []
+    for lineno, line in enumerate(content.splitlines(), start=1):
+        if _UNRESOLVED_REF_RE.search(line):
+            issues.append(
+                ValidationIssue(
+                    file=rel_path,
+                    rule="vault_ref",
+                    severity="ERROR",
+                    line=lineno,
+                    message=(
+                        f"VAULT_REF_UNRESOLVED — unresolved secret reference "
+                        f"($env: or vault:) found at line {lineno}. "
+                        f"This token should have been resolved during Harvest. "
+                        f"Check that the token map value was correctly set."
+                    ),
+                )
+            )
+    return issues
