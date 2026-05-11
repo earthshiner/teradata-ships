@@ -453,6 +453,10 @@ def _build_package_impl(
         require_signature=_read_bool_env_setting(
             config.source_dir, config.environment, "require_signature"
         ),
+        # GAP-006: 4-eyes approval requirement from ships.yaml.
+        require_approvals=_read_int_env_setting(
+            config.source_dir, config.environment, "require_approvals", default=1
+        ),
     )
 
     # -- Phase 8a: Compute and stamp Phase 1 Trust Report --
@@ -766,6 +770,7 @@ def _split_into_paired_packages(
         change_ref=manifest.change_ref,
         require_change_ref=manifest.require_change_ref,
         require_signature=manifest.require_signature,
+        require_approvals=manifest.require_approvals,
     )
 
     # 7. Re-write BUILD.json on both sides.
@@ -2362,6 +2367,29 @@ def _read_bool_env_setting(source_dir: str, environment: str, key: str) -> bool:
 def _read_require_change_ref(source_dir: str, environment: str) -> bool:
     """Read require_change_ref for *environment* from ships.yaml (GAP-004)."""
     return _read_bool_env_setting(source_dir, environment, "require_change_ref")
+
+
+def _read_int_env_setting(
+    source_dir: str, environment: str, key: str, default: int = 0
+) -> int:
+    """Read an integer per-environment key from ships.yaml.
+
+    Returns *default* when ships.yaml is absent, the environment block is
+    missing, or the key is not set.
+    """
+    ships_yaml_path = os.path.join(source_dir, "ships.yaml")
+    if not os.path.isfile(ships_yaml_path):
+        return default
+    try:
+        from td_release_packager.orchestrator import ships_yaml as _sy
+
+        data = _sy.load(ships_yaml_path)
+        envs = data.get("environments", {})
+        env_cfg = envs.get(environment, envs.get(environment.upper(), {}))
+        val = env_cfg.get(key, default)
+        return int(val)
+    except Exception:
+        return default
 
 
 def _generate_checksum(archive_path: str) -> str:

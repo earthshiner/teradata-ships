@@ -58,6 +58,7 @@ from database_package_deployer.models import (
 from database_package_deployer.preflight import (
     check_change_ref_present,
     check_env_lock,
+    check_mpa_approval,
     check_package_hash,
     check_package_signature,
     run_preflight,
@@ -233,6 +234,7 @@ def deploy_package(
     baseline_dir: Optional[str] = None,
     on_drift: str = "abort",
     deployed_env: str = "",
+    approval_code: str = "",
 ) -> PackageDeployResult:
     """
     Deploy all DDL files in a directory idempotently.
@@ -300,6 +302,7 @@ def deploy_package(
                 baseline_dir=_effective_baseline_dir,
                 on_drift=on_drift,
                 deployed_env=deployed_env,
+                approval_code=approval_code,
             )
         except Exception as exc:
             fail_deploy_run(
@@ -352,6 +355,7 @@ def _deploy_package_impl(
     baseline_dir: str = "",
     on_drift: str = "abort",
     deployed_env: str = "",
+    approval_code: str = "",
 ) -> PackageDeployResult:
     """
     Deploy all DDL files in a directory idempotently.
@@ -469,6 +473,9 @@ def _deploy_package_impl(
 
     # GAP-005: verify HMAC-SHA256 package signature sidecar.
     pkg_level_checks.extend(check_package_signature(package_dir))
+
+    # GAP-006: verify 4-eyes approval code when require_approvals >= 2.
+    pkg_level_checks.extend(check_mpa_approval(package_dir, approval_code))
 
     pkg_level_errors = [c for c in pkg_level_checks if not c.passed]
     if pkg_level_errors:

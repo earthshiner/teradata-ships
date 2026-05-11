@@ -277,6 +277,10 @@ class BuildManifest:
     # Stamped from ships.yaml environments.<ENV>.require_signature at
     # Package time.
     require_signature: bool = False
+    # GAP-006: minimum number of approvals required for Ship.
+    # 1 = self-certify (default, no approval code needed).
+    # 2 = 4-eyes (a second operator must run 'ships approve').
+    require_approvals: int = 1
 
 
 @dataclass

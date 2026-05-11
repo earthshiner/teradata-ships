@@ -1206,3 +1206,104 @@ def check_package_signature(package_dir: str) -> List[PreflightCheck]:
             severity="INFO",
         )
     ]
+
+
+# ---------------------------------------------------------------
+# Multi-person authorisation check (GAP-006)
+# ---------------------------------------------------------------
+
+
+def check_mpa_approval(package_dir: str, approval_code: str = "") -> List[PreflightCheck]:
+    """Verify a 4-eyes approval code when require_approvals >= 2 (GAP-006).
+
+    The check reads ``require_approvals`` from BUILD.json.  When it is 1
+    (or absent), the check passes with no findings.  When it is >= 2:
+
+    - No ``--approval-code`` supplied → ERROR.
+    - Code supplied but verification fails (wrong key or expired date) → ERROR.
+    - Code supplied and valid for today (UTC) → pass.
+
+    The approval code is ``HMAC-SHA256(key, sha256_of_zip + ':' + UTC_date)``.
+    Yesterday's code is explicitly rejected — the code expires at midnight UTC.
+
+    Args:
+        package_dir:   Path to the extracted package directory.
+        approval_code: Hex code produced by ``ships approve <package_zip>``.
+
+    Returns:
+        List of PreflightCheck results (zero or one entry).
+    """
+    build_json = os.path.join(package_dir, "BUILD.json")
+    if not os.path.isfile(build_json):
+        return []
+
+    try:
+        with open(build_json, encoding="utf-8") as fh:
+            manifest = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("mpa_approval: could not read BUILD.json: %s", exc)
+        return []
+
+    require_approvals = manifest.get("require_approvals", 1)
+    if require_approvals < 2:
+        logger.debug("mpa_approval: require_approvals=%d — skipping.", require_approvals)
+        return []
+
+    if not approval_code:
+        logger.error("mpa_approval: 4-eyes approval code required but not provided.")
+        return [
+            PreflightCheck(
+                check_name="mpa_approval",
+                passed=False,
+                database="(package)",
+                message=(
+                    "mpa_approval — this deployment requires a second authorisation. "
+                    "Ask a second authorised operator to run: "
+                    "  ships approve <package_zip>  "
+                    "then pass the printed code via --approval-code."
+                ),
+                severity="ERROR",
+            )
+        ]
+
+    # Locate the ZIP to verify the approval code against
+    package_filename = manifest.get("package_filename", "")
+    if not package_filename:
+        logger.warning("mpa_approval: package_filename absent from BUILD.json.")
+        return []
+
+    zip_path = Path(package_dir).parent / package_filename
+    if not zip_path.exists():
+        logger.warning(
+            "mpa_approval: archive '%s' not found — cannot verify approval code.", zip_path
+        )
+        return []
+
+    from database_package_deployer.mpa import verify_approval_code
+
+    if not verify_approval_code(str(zip_path), approval_code):
+        logger.error("mpa_approval: approval code invalid or expired.")
+        return [
+            PreflightCheck(
+                check_name="mpa_approval",
+                passed=False,
+                database="(package)",
+                message=(
+                    "mpa_approval — approval code is invalid or has expired "
+                    "(codes are valid for the UTC calendar day they were generated). "
+                    "Ask the approving operator to regenerate the code for today."
+                ),
+                severity="ERROR",
+            )
+        ]
+
+    logger.info("mpa_approval: 4-eyes approval code verified OK.")
+    return [
+        PreflightCheck(
+            check_name="mpa_approval",
+            passed=True,
+            database="(package)",
+            message="mpa_approval — 4-eyes approval code verified OK.",
+            severity="INFO",
+        )
+    ]

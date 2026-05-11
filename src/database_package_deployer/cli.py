@@ -66,6 +66,8 @@ def main():
         _cmd_rollback(args)
     elif args.command == "status":
         _cmd_status(args)
+    elif args.command == "approve":
+        _cmd_approve(args)
     else:
         parser.print_help()
         sys.exit(1)
@@ -101,6 +103,7 @@ def _cmd_deploy(args):
                 stop_on_failure=not args.continue_on_error,
                 dry_run=args.dry_run,
                 deployed_env=getattr(args, "env", "") or "",
+                approval_code=getattr(args, "approval_code", "") or "",
             )
             otel_span.set_attribute("ships.deploy.completed", result.completed)
             otel_span.set_attribute("ships.deploy.failed", result.failed)
@@ -370,6 +373,27 @@ def _cmd_status(args):
                 print(f"    BLOCKER: {blocker}")
 
     print()
+
+
+# ---------------------------------------------------------------
+# approve command (GAP-006)
+# ---------------------------------------------------------------
+
+
+def _cmd_approve(args):
+    """Generate a time-limited 4-eyes approval code for a package."""
+    from database_package_deployer.mpa import generate_approval_code
+
+    code = generate_approval_code(args.package_zip)
+    if code is None:
+        print(
+            "\nERROR: SHIPS_SIGNING_KEY is not set. "
+            "Set the environment variable to generate an approval code.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    print(code)
 
 
 # ---------------------------------------------------------------
@@ -658,6 +682,17 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "executes (env_lock check, GAP-002). Omit to skip this check."
         ),
     )
+    dp.add_argument(
+        "--approval-code",
+        dest="approval_code",
+        default="",
+        metavar="CODE",
+        help=(
+            "4-eyes approval code produced by 'ships approve <package_zip>' "
+            "(GAP-006). Required when the target environment has "
+            "require_approvals: 2 in ships.yaml."
+        ),
+    )
     _add_conn_args(dp)
 
     # -- analyze --
@@ -758,6 +793,19 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     st.add_argument(
         "manifest_path",
         help="Path to .deploy_manifest.json.",
+    )
+
+    # -- approve (GAP-006) --
+    ap = subs.add_parser(
+        "approve",
+        help=(
+            "[GAP-006] Generate a time-limited 4-eyes approval code for a package. "
+            "Requires SHIPS_SIGNING_KEY to be set."
+        ),
+    )
+    ap.add_argument(
+        "package_zip",
+        help="Path to the release ZIP archive to approve.",
     )
 
     return parser
