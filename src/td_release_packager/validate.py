@@ -72,6 +72,12 @@ DEFAULT_RULES: Dict[str, str] = {
     # Vault / secret ref rule (GAP-011).
     # vault_ref: detect unresolved $env: or vault: prefixes in payload files.
     "vault_ref": "ERROR",
+    # Environment token coverage rule.
+    # zero_tokens: every deployable DDL/DML object must reference at least one
+    # {{TOKEN}} placeholder so it resolves correctly per environment.
+    # Files with zero token references have hardcoded environment assumptions
+    # and cannot be safely promoted across DEV → TST → PRD.
+    "zero_tokens": "ERROR",
     # Extension is ERROR, not WARNING. A staged file whose
     # extension disagrees with its content is the package and the
     # metadata lying to each other — the deployer and any
@@ -329,6 +335,14 @@ def generate_default_config() -> str:
         "# vault_ref: detect unresolved $env: or vault: prefixes in payload files.",
         "# Defaults to ERROR — these should never appear in deployed payload.",
         f"vault_ref={DEFAULT_RULES['vault_ref']}",
+        "",
+        "# Environment token coverage rule",
+        "# zero_tokens: every deployable DDL/DML object must reference at least one",
+        "# {{TOKEN}} placeholder. Files with zero tokens have hardcoded environment",
+        "# assumptions and cannot be safely promoted across environments.",
+        "# Defaults to ERROR. Set to WARNING for gradual migration of legacy codebases,",
+        "# or OFF to disable while performing the initial tokenisation sweep.",
+        f"zero_tokens={DEFAULT_RULES['zero_tokens']}",
         "",
         "# Cross-file structural rules",
         "# intra_package_dependency: object lives in a database/user that",
@@ -908,6 +922,7 @@ def _validate_directory_impl(
         file_issues.extend(_check_extension(rel_path, clean, file_path))
         file_issues.extend(_check_type_suffixes(rel_path, clean))
         file_issues.extend(_check_hardcoded_names(rel_path, clean))
+        file_issues.extend(_check_zero_tokens(rel_path, clean))
         file_issues.extend(_check_keyword_case(rel_path, clean))
         file_issues.extend(
             _check_leading_commas(
@@ -1334,6 +1349,79 @@ def _check_hardcoded_names(rel_path: str, content: str) -> List[ValidationIssue]
                     )
                 ]
     return []
+
+
+def _check_zero_tokens(rel_path: str, content: str) -> List[ValidationIssue]:
+    """Check that every deployable DDL/DML object uses at least one {{TOKEN}} reference.
+
+    A file with zero token references has hardcoded environment assumptions —
+    database names, usernames, or paths that cannot change across deployments.
+    Such files cannot be safely promoted from DEV to TST to PRD without manual
+    edits, which defeats the purpose of the SHIPS pipeline and introduces
+    deployment risk.
+
+    System-scope objects (Maps, Roles, Profiles, Authorisations, Foreign Servers)
+    are excluded — they have no database qualifier by design and are identical
+    across all environments.
+
+    Args:
+        rel_path: Relative path of the file being checked.
+        content:  Comment-stripped file content.
+
+    Returns:
+        One ValidationIssue (ERROR) when the file classifies as a DDL/DML object
+        but contains zero {{TOKEN}} references. Empty list when the file passes.
+    """
+    # This rule validates SOURCE files — DDL as the developer wrote it,
+    # before Harvest resolves {{TOKEN}} placeholders.  Post-Harvest payload
+    # files legitimately contain literal database names (the resolved token
+    # values), so the rule MUST NOT fire on them.
+    #
+    # Detection heuristic: if "payload" appears as a directory component in
+    # the relative path, the file has already been through Harvest.  Skip it.
+    _path_parts = set(re.split(r"[/\\]", rel_path))
+    if "payload" in _path_parts:
+        return []
+
+    # Determine whether the file contains a classifiable DDL/DML object.
+    # If it doesn't match any known pattern, skip it — companion files (.stt,
+    # .cls), binary files (.jar), and unknown content are not in scope.
+    obj_type = None
+    for pattern, otype in _CLASSIFY_PATTERNS:
+        if pattern.search(content):
+            obj_type = otype
+            break
+
+    if obj_type is None:
+        return []
+
+    # System-scope objects (maps, roles, profiles) are identical across
+    # environments and carry no database qualifier — tokens are not expected.
+    if obj_type in _SYSTEM_SCOPE_TYPES:
+        return []
+
+    # If the file references at least one {{TOKEN}}, it is environment-aware.
+    if _TOKEN_RE.search(content):
+        return []
+
+    # Zero token references found in a deployable DDL/DML object.
+    return [
+        ValidationIssue(
+            file=rel_path,
+            rule="zero_tokens",
+            severity="ERROR",
+            message=(
+                "No {{TOKEN}} references found in this file. Every deployable "
+                "DDL and DML object must use {{TOKEN}} placeholders for database "
+                "names (e.g. {{MY_DATABASE}}.ObjectName) so the release package "
+                "resolves correctly for each target environment. Files without "
+                "tokens carry hardcoded environment assumptions and cannot be "
+                "safely promoted from DEV to TST to PRD without manual edits. "
+                "Add token placeholders manually or run "
+                "'ships harvest --auto-tokenise' to detect and apply them."
+            ),
+        )
+    ]
 
 
 def _check_keyword_case(rel_path: str, content: str) -> List[ValidationIssue]:
