@@ -50,10 +50,7 @@ def _abs(tmp_path: Path, subdir: str, filename: str, content: str) -> tuple:
 def test_secret_scan_pass_clean_procedure(tmp_path):
     """Clean stored procedure with no secrets → no findings."""
     content = (
-        "REPLACE PROCEDURE MyDb.MyProc()\n"
-        "BEGIN\n"
-        "  SELECT * FROM MyDb.MyTable;\n"
-        "END;\n"
+        "REPLACE PROCEDURE MyDb.MyProc()\nBEGIN\n  SELECT * FROM MyDb.MyTable;\nEND;\n"
     )
     rel, fp = _abs(tmp_path, "ddl", "MyProc.spl", content)
     issues = scan_secret_patterns(rel, content, fp)
@@ -152,14 +149,14 @@ def test_secret_scan_no_false_positive_column_name(tmp_path):
 def test_secret_scan_multiline_correct_line(tmp_path):
     """Pattern found in a multi-line body → line number is correct."""
     lines = [
-        "REPLACE PROCEDURE MyDb.Proc ()\n",   # 1
-        "BEGIN\n",                             # 2
-        "  DECLARE v_x INTEGER;\n",            # 3
-        "  SET v_x = 1;\n",                   # 4
-        "  SET v_x = 2;\n",                   # 5
-        "  SET v_x = 3;\n",                   # 6
-        "  SET v_pw = PWD='s3cret!';\n",       # 7  ← pattern here
-        "END;\n",                              # 8
+        "REPLACE PROCEDURE MyDb.Proc ()\n",  # 1
+        "BEGIN\n",  # 2
+        "  DECLARE v_x INTEGER;\n",  # 3
+        "  SET v_x = 1;\n",  # 4
+        "  SET v_x = 2;\n",  # 5
+        "  SET v_x = 3;\n",  # 6
+        "  SET v_pw = PWD='s3cret!';\n",  # 7  ← pattern here
+        "END;\n",  # 8
     ]
     content = "".join(lines)
     rel, fp = _abs(tmp_path, "ddl", "Proc.spl", content)

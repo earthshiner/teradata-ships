@@ -268,8 +268,8 @@ def emit_audit_event(
         elif scheme == "syslog":
             _sink_syslog(event, sink_uri)
         else:
-            logger.warning("audit: unknown sink scheme '%s' — only stderr used.", scheme)
+            logger.warning(
+                "audit: unknown sink scheme '%s' — only stderr used.", scheme
+            )
     except Exception as exc:
-        logger.warning(
-            "audit: sink '%s' failed (non-fatal): %s", sink_uri, exc
-        )
+        logger.warning("audit: sink '%s' failed (non-fatal): %s", sink_uri, exc)

@@ -36,14 +36,16 @@ def _pkg_dir(tmp_path: Path) -> str:
     pkg = tmp_path / "DEV_Pkg_BUILD_0001"
     pkg.mkdir()
     (pkg / "BUILD.json").write_text(
-        json.dumps({
-            "package_filename": "DEV_Pkg_BUILD_0001.zip",
-            "package_name": "Pkg",
-            "environment": "DEV",
-            "target_env": "DEV",
-            "change_ref": "CHG0012345",
-            "trust": {"label": "READY"},
-        }),
+        json.dumps(
+            {
+                "package_filename": "DEV_Pkg_BUILD_0001.zip",
+                "package_name": "Pkg",
+                "environment": "DEV",
+                "target_env": "DEV",
+                "change_ref": "CHG0012345",
+                "trust": {"label": "READY"},
+            }
+        ),
         encoding="utf-8",
     )
     return str(pkg)
@@ -65,9 +67,18 @@ def test_build_audit_event_minimum_fields(tmp_path):
         duration_seconds=12.3,
     )
     required = {
-        "event", "timestamp", "package_name", "package_hash",
-        "target_env", "change_ref", "operator", "hostname",
-        "trust_label", "outcome", "objects_deployed", "objects_failed",
+        "event",
+        "timestamp",
+        "package_name",
+        "package_hash",
+        "target_env",
+        "change_ref",
+        "operator",
+        "hostname",
+        "trust_label",
+        "outcome",
+        "objects_deployed",
+        "objects_failed",
         "duration_seconds",
     }
     assert required.issubset(event.keys())
@@ -201,7 +212,9 @@ def test_emit_audit_event_splunk_sink(tmp_path, monkeypatch, capsys):
         posted_headers.update(dict(req.headers))
         return _MockResp()
 
-    with mock.patch("database_package_deployer.audit.urlopen", _mock_urlopen, create=True):
+    with mock.patch(
+        "database_package_deployer.audit.urlopen", _mock_urlopen, create=True
+    ):
         emit_audit_event(
             package_dir=pkg,
             outcome="SUCCESS",

@@ -147,7 +147,7 @@ def _resolve_vault_value(raw_ref: str, token_name: str) -> str:
         )
 
     # Parse: vault:secret/data/ships/prd#field
-    ref = raw_ref[len("vault:"):]
+    ref = raw_ref[len("vault:") :]
     if "#" not in ref:
         raise ValueError(
             f"token '{token_name}': vault reference must be 'vault:path#key', got '{raw_ref}'"
@@ -211,13 +211,13 @@ def _resolve_secret_value(value: str, token_name: str) -> str:
         ValueError: When a reference cannot be resolved.
     """
     if value.startswith("$env:"):
-        var_name = value[len("$env:"):]
+        var_name = value[len("$env:") :]
         resolved = os.environ.get(var_name)
         if resolved is None:
-            raise ValueError(
-                f"token '{token_name}': env var '{var_name}' is not set"
-            )
-        logger.debug("token_engine: '%s' resolved from env var '%s'.", token_name, var_name)
+            raise ValueError(f"token '{token_name}': env var '{var_name}' is not set")
+        logger.debug(
+            "token_engine: '%s' resolved from env var '%s'.", token_name, var_name
+        )
         return resolved
 
     if value.startswith("vault:"):

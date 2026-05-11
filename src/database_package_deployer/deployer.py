@@ -515,9 +515,7 @@ def _deploy_package_impl(
     pkg_level_checks.extend(check_package_age(package_dir))
 
     # GAP-015: warn if the connection is not using TLS/SSL.
-    pkg_level_checks.extend(
-        check_tls_connection(package_dir, connection_params)
-    )
+    pkg_level_checks.extend(check_tls_connection(package_dir, connection_params))
 
     pkg_level_errors = [c for c in pkg_level_checks if not c.passed]
     if pkg_level_errors:

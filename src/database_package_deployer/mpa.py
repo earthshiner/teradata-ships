@@ -31,7 +31,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from database_package_deployer.signing import compute_hmac, resolve_signing_key, verify_hmac
+from database_package_deployer.signing import (
+    compute_hmac,
+    resolve_signing_key,
+    verify_hmac,
+)
 from database_package_deployer.preflight import _sha256_of_file
 
 logger = logging.getLogger(__name__)

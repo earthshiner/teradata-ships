@@ -106,4 +106,7 @@ def test_package_age_built_at_absent(tmp_path):
     results = check_package_age(str(tmp_path))
     assert len(results) == 1
     assert results[0].severity == "WARNING"
-    assert "absent" in results[0].message.lower() or "timestamp" in results[0].message.lower()
+    assert (
+        "absent" in results[0].message.lower()
+        or "timestamp" in results[0].message.lower()
+    )

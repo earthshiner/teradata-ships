@@ -591,7 +591,9 @@ def _build_connection_params(args) -> dict:
     user = getattr(args, "user", None) or os.environ.get("TD_USER", "")
     password = getattr(args, "password", None) or os.environ.get("TD_PASSWORD", "")
     logmech = getattr(args, "logmech", None) or os.environ.get("TD_LOGMECH", "")
-    encryptdata = getattr(args, "encryptdata", None) or os.environ.get("TD_ENCRYPTDATA", "")
+    encryptdata = getattr(args, "encryptdata", None) or os.environ.get(
+        "TD_ENCRYPTDATA", ""
+    )
     sslmode = getattr(args, "sslmode", None) or os.environ.get("TD_SSLMODE", "")
 
     params = {}

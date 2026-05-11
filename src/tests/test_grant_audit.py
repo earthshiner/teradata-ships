@@ -86,10 +86,12 @@ def test_audit_grants_undeclared(tmp_path):
     """Live state has grants not in DCL → UNDECLARED populated."""
     pkg = _make_grt(tmp_path, "GRANT SELECT ON MY_DB TO APP_USER;\n")
     # Live has extra grant not declared
-    cursor = _cursor_with_rows([
-        ("APP_USER", "MY_DB", "", "SELECT"),   # declared
-        ("DBA_USER", "MY_DB", "", "ALL"),       # undeclared
-    ])
+    cursor = _cursor_with_rows(
+        [
+            ("APP_USER", "MY_DB", "", "SELECT"),  # declared
+            ("DBA_USER", "MY_DB", "", "ALL"),  # undeclared
+        ]
+    )
     report = audit_grants(cursor, pkg)
     assert report["drift"]
     assert len(report["UNDECLARED"]) >= 1

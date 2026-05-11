@@ -448,7 +448,9 @@ def _build_package_impl(
         target_env=config.environment,
         # GAP-004: change management ticket reference and enforcement flag.
         change_ref=config.change_ref,
-        require_change_ref=_read_require_change_ref(config.source_dir, config.environment),
+        require_change_ref=_read_require_change_ref(
+            config.source_dir, config.environment
+        ),
         # GAP-005: signature enforcement flag from ships.yaml.
         require_signature=_read_bool_env_setting(
             config.source_dir, config.environment, "require_signature"
@@ -467,7 +469,10 @@ def _build_package_impl(
             config.source_dir, config.environment, "package_max_age_days", default=30
         ),
         package_age_violation_level=_read_str_env_setting(
-            config.source_dir, config.environment, "package_age_violation_level", default="warning"
+            config.source_dir,
+            config.environment,
+            "package_age_violation_level",
+            default="warning",
         ),
     )
 

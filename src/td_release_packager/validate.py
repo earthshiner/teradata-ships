@@ -1963,7 +1963,9 @@ def _check_security(
 
     if rules_config is None:
         rules_config = {}
-    sens_sev = rules_config.get("sensitivity_class", DEFAULT_RULES.get("sensitivity_class", "OFF"))
+    sens_sev = rules_config.get(
+        "sensitivity_class", DEFAULT_RULES.get("sensitivity_class", "OFF")
+    )
     if sens_sev != "OFF":
         violation_level = "error" if sens_sev == "ERROR" else "warning"
         issues.extend(

@@ -33,7 +33,9 @@ def _make_tbl(tmp_path: Path, filename: str = "D.MyTable.tbl") -> tuple:
     ddl_dir = tmp_path / "ddl"
     ddl_dir.mkdir(parents=True, exist_ok=True)
     fp = ddl_dir / filename
-    fp.write_text("CREATE MULTISET TABLE D.MyTable (id INT) PRIMARY INDEX(id);", encoding="utf-8")
+    fp.write_text(
+        "CREATE MULTISET TABLE D.MyTable (id INT) PRIMARY INDEX(id);", encoding="utf-8"
+    )
     rel = os.path.join("ddl", filename)
     return rel, str(fp)
 
@@ -71,7 +73,9 @@ def test_sensitivity_class_pass_required_present(tmp_path):
 def test_sensitivity_class_warn_missing(tmp_path):
     """require_sensitivity_class=true, no .cls → WARNING."""
     rel, fp = _make_tbl(tmp_path)
-    issues = scan_sensitivity_class(rel, fp, require_sensitivity_class=True, violation_level="warning")
+    issues = scan_sensitivity_class(
+        rel, fp, require_sensitivity_class=True, violation_level="warning"
+    )
     assert len(issues) == 1
     assert issues[0].severity == "WARNING"
     assert "MISSING_SENSITIVITY_CLASS" in issues[0].message
@@ -141,7 +145,9 @@ def test_validate_directory_sensitivity_class(tmp_path):
         encoding="utf-8",
     )
     # Enable sensitivity class enforcement at WARNING level
-    result = validate_directory(str(tmp_path), rules_config={"sensitivity_class": "WARNING"})
+    result = validate_directory(
+        str(tmp_path), rules_config={"sensitivity_class": "WARNING"}
+    )
     cls_issues = [i for i in result.issues if i.rule == "sensitivity_class"]
     assert len(cls_issues) >= 1
     assert all(i.severity == "WARNING" for i in cls_issues)

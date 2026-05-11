@@ -900,7 +900,9 @@ def check_package_hash(package_dir: str) -> List[PreflightCheck]:
 
     package_filename = manifest.get("package_filename", "")
     if not package_filename:
-        logger.debug("package_hash: package_filename absent from BUILD.json — skipping.")
+        logger.debug(
+            "package_hash: package_filename absent from BUILD.json — skipping."
+        )
         return []
 
     zip_path = Path(package_dir).parent / package_filename
@@ -970,9 +972,7 @@ def check_package_hash(package_dir: str) -> List[PreflightCheck]:
             )
         ]
 
-    logger.info(
-        "package_hash: '%s' verified OK (%s…)", zip_path.name, actual_hash[:12]
-    )
+    logger.info("package_hash: '%s' verified OK (%s…)", zip_path.name, actual_hash[:12])
     return [
         PreflightCheck(
             check_name="package_hash",
@@ -1205,7 +1205,9 @@ def check_package_signature(package_dir: str) -> List[PreflightCheck]:
 
     if not hmac_path.exists():
         if require_signature:
-            logger.error("package_signature: .hmac sidecar not found and signature is required.")
+            logger.error(
+                "package_signature: .hmac sidecar not found and signature is required."
+            )
             return [
                 PreflightCheck(
                     check_name="package_signature",
@@ -1291,7 +1293,9 @@ def check_package_signature(package_dir: str) -> List[PreflightCheck]:
 # ---------------------------------------------------------------
 
 
-def check_mpa_approval(package_dir: str, approval_code: str = "") -> List[PreflightCheck]:
+def check_mpa_approval(
+    package_dir: str, approval_code: str = ""
+) -> List[PreflightCheck]:
     """Verify a 4-eyes approval code when require_approvals >= 2 (GAP-006).
 
     The check reads ``require_approvals`` from BUILD.json.  When it is 1
@@ -1324,7 +1328,9 @@ def check_mpa_approval(package_dir: str, approval_code: str = "") -> List[Prefli
 
     require_approvals = manifest.get("require_approvals", 1)
     if require_approvals < 2:
-        logger.debug("mpa_approval: require_approvals=%d — skipping.", require_approvals)
+        logger.debug(
+            "mpa_approval: require_approvals=%d — skipping.", require_approvals
+        )
         return []
 
     if not approval_code:
@@ -1353,7 +1359,8 @@ def check_mpa_approval(package_dir: str, approval_code: str = "") -> List[Prefli
     zip_path = Path(package_dir).parent / package_filename
     if not zip_path.exists():
         logger.warning(
-            "mpa_approval: archive '%s' not found — cannot verify approval code.", zip_path
+            "mpa_approval: archive '%s' not found — cannot verify approval code.",
+            zip_path,
         )
         return []
 
@@ -1442,7 +1449,9 @@ def check_package_age(package_dir: str) -> List[PreflightCheck]:
         if built_at.tzinfo is None:
             built_at = built_at.replace(tzinfo=timezone.utc)
     except ValueError as exc:
-        logger.warning("package_age: could not parse build timestamp '%s': %s", built_at_str, exc)
+        logger.warning(
+            "package_age: could not parse build timestamp '%s': %s", built_at_str, exc
+        )
         return []
 
     age_days = (datetime.now(tz=timezone.utc) - built_at).days
