@@ -444,6 +444,36 @@ def _build_package_impl(
         warnings=warnings,
         discovery={"extensions": sorted(resolved_extensions)},
         baseline_dir=_baseline_dir,
+        # GAP-002: environment lock — deployer verifies this matches --env at Ship time.
+        target_env=config.environment,
+        # GAP-004: change management ticket reference and enforcement flag.
+        change_ref=config.change_ref,
+        require_change_ref=_read_require_change_ref(
+            config.source_dir, config.environment
+        ),
+        # GAP-005: signature enforcement flag from ships.yaml.
+        require_signature=_read_bool_env_setting(
+            config.source_dir, config.environment, "require_signature"
+        ),
+        # GAP-006: 4-eyes approval requirement from ships.yaml.
+        require_approvals=_read_int_env_setting(
+            config.source_dir, config.environment, "require_approvals", default=1
+        ),
+        # GAP-015: TLS enforcement.
+        require_tls=_read_bool_env_setting(
+            config.source_dir, config.environment, "require_tls"
+        ),
+        # GAP-012: package age TTL.
+        package_built_at=timestamp.isoformat(),
+        package_max_age_days=_read_int_env_setting(
+            config.source_dir, config.environment, "package_max_age_days", default=30
+        ),
+        package_age_violation_level=_read_str_env_setting(
+            config.source_dir,
+            config.environment,
+            "package_age_violation_level",
+            default="warning",
+        ),
     )
 
     # -- Phase 8a: Compute and stamp Phase 1 Trust Report --
@@ -753,6 +783,15 @@ def _split_into_paired_packages(
         role="prereqs",
         requires=[],
         discovery=dict(manifest.discovery),
+        target_env=manifest.target_env,
+        change_ref=manifest.change_ref,
+        require_change_ref=manifest.require_change_ref,
+        require_signature=manifest.require_signature,
+        require_approvals=manifest.require_approvals,
+        require_tls=manifest.require_tls,
+        package_built_at=manifest.package_built_at,
+        package_max_age_days=manifest.package_max_age_days,
+        package_age_violation_level=manifest.package_age_violation_level,
     )
 
     # 7. Re-write BUILD.json on both sides.
@@ -2310,6 +2349,90 @@ def _generate_integrity_file(pkg_dir: str) -> str:
         len(file_hashes),
     )
     return package_hash
+
+
+def _read_bool_env_setting(source_dir: str, environment: str, key: str) -> bool:
+    """Read a boolean per-environment key from ships.yaml.
+
+    Looks for::
+
+        environments:
+          <ENV>:
+            <key>: true
+
+    Returns False when ships.yaml is absent, the environment block is
+    missing, or the key is not set.
+
+    Args:
+        source_dir:  Project root directory containing ships.yaml.
+        environment: Target environment name (e.g. 'PRD').
+        key:         Setting name (e.g. 'require_change_ref').
+
+    Returns:
+        Boolean value of the setting, defaulting to False.
+    """
+    ships_yaml_path = os.path.join(source_dir, "ships.yaml")
+    if not os.path.isfile(ships_yaml_path):
+        return False
+    try:
+        from td_release_packager.orchestrator import ships_yaml as _sy
+
+        data = _sy.load(ships_yaml_path)
+        envs = data.get("environments", {})
+        env_cfg = envs.get(environment, envs.get(environment.upper(), {}))
+        return bool(env_cfg.get(key, False))
+    except Exception:
+        return False
+
+
+def _read_require_change_ref(source_dir: str, environment: str) -> bool:
+    """Read require_change_ref for *environment* from ships.yaml (GAP-004)."""
+    return _read_bool_env_setting(source_dir, environment, "require_change_ref")
+
+
+def _read_str_env_setting(
+    source_dir: str, environment: str, key: str, default: str = ""
+) -> str:
+    """Read a string per-environment key from ships.yaml.
+
+    Returns *default* when ships.yaml is absent, the environment block is
+    missing, or the key is not set.
+    """
+    ships_yaml_path = os.path.join(source_dir, "ships.yaml")
+    if not os.path.isfile(ships_yaml_path):
+        return default
+    try:
+        from td_release_packager.orchestrator import ships_yaml as _sy
+
+        data = _sy.load(ships_yaml_path)
+        envs = data.get("environments", {})
+        env_cfg = envs.get(environment, envs.get(environment.upper(), {}))
+        return str(env_cfg.get(key, default))
+    except Exception:
+        return default
+
+
+def _read_int_env_setting(
+    source_dir: str, environment: str, key: str, default: int = 0
+) -> int:
+    """Read an integer per-environment key from ships.yaml.
+
+    Returns *default* when ships.yaml is absent, the environment block is
+    missing, or the key is not set.
+    """
+    ships_yaml_path = os.path.join(source_dir, "ships.yaml")
+    if not os.path.isfile(ships_yaml_path):
+        return default
+    try:
+        from td_release_packager.orchestrator import ships_yaml as _sy
+
+        data = _sy.load(ships_yaml_path)
+        envs = data.get("environments", {})
+        env_cfg = envs.get(environment, envs.get(environment.upper(), {}))
+        val = env_cfg.get(key, default)
+        return int(val)
+    except Exception:
+        return default
 
 
 def _generate_checksum(archive_path: str) -> str:

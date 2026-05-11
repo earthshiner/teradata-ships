@@ -59,6 +59,19 @@ DEFAULT_RULES: Dict[str, str] = {
     "deploy_intent": "ERROR",
     "one_object": "WARNING",
     "eponymous": "WARNING",
+    # Security rules (GAP-003, GAP-008).
+    # secret_scan: scan DDL/DML bodies for embedded credentials. ERROR.
+    "secret_scan": "ERROR",
+    # dynamic_sql: detect EXECUTE IMMEDIATE / DBC.SYSEXECSQL in procedures.
+    # WARNING because dynamic SQL has legitimate uses.
+    "dynamic_sql": "WARNING",
+    # Data governance rules (GAP-009).
+    # sensitivity_class: check for .cls companion files. OFF by default;
+    # activate with require_sensitivity_class=true in ships.yaml.
+    "sensitivity_class": "OFF",
+    # Vault / secret ref rule (GAP-011).
+    # vault_ref: detect unresolved $env: or vault: prefixes in payload files.
+    "vault_ref": "ERROR",
     # Extension is ERROR, not WARNING. A staged file whose
     # extension disagrees with its content is the package and the
     # metadata lying to each other — the deployer and any
@@ -296,6 +309,26 @@ def generate_default_config() -> str:
         "# external service, etc.). System databases (DBC, SYSLIB,",
         "# TDStats, etc.) are auto-excluded.",
         f"review_unmapped_grants={DEFAULT_RULES['review_unmapped_grants']}",
+        "",
+        "",
+        "# Security rules (GAP-003, GAP-008)",
+        "# secret_scan: scan DDL/DML file bodies for embedded credentials.",
+        "# Reports SECRET_PATTERN_DETECTED. Defaults to ERROR.",
+        f"secret_scan={DEFAULT_RULES['secret_scan']}",
+        "# dynamic_sql: detect EXECUTE IMMEDIATE / DBC.SYSEXECSQL in procedures.",
+        "# Reports DYNAMIC_SQL_DETECTED. Defaults to WARNING (dynamic SQL has",
+        "# legitimate uses — promote to ERROR to enforce a blanket ban).",
+        f"dynamic_sql={DEFAULT_RULES['dynamic_sql']}",
+        "",
+        "# Data governance rules (GAP-009)",
+        "# sensitivity_class: check for .cls companion files alongside DDL/view objects.",
+        "# OFF by default — set to WARNING or ERROR to enforce.",
+        f"sensitivity_class={DEFAULT_RULES['sensitivity_class']}",
+        "",
+        "# Vault / secret reference rule (GAP-011)",
+        "# vault_ref: detect unresolved $env: or vault: prefixes in payload files.",
+        "# Defaults to ERROR — these should never appear in deployed payload.",
+        f"vault_ref={DEFAULT_RULES['vault_ref']}",
         "",
         "# Cross-file structural rules",
         "# intra_package_dependency: object lives in a database/user that",
@@ -865,6 +898,7 @@ def _validate_directory_impl(
         clean = _strip_sql_comments(content)
 
         # -- Run all checks, collect raw issues --
+        file_issues.extend(_check_security(rel_path, content, file_path, rules_config))
         file_issues.extend(_check_db_qualifier(rel_path, clean))
         file_issues.extend(_check_multiset(rel_path, clean))
         file_issues.extend(_check_deploy_intent(rel_path, clean, strict))
@@ -1886,6 +1920,63 @@ def _check_intra_package_dependency(
             ),
         )
     ]
+
+
+# ---------------------------------------------------------------
+# Security rules dispatcher (GAP-003, GAP-008)
+# ---------------------------------------------------------------
+
+
+def _check_security(
+    rel_path: str,
+    content: str,
+    file_path: str,
+    rules_config: Dict[str, str] = None,
+) -> List[ValidationIssue]:
+    """Dispatch security rule scans for a single file.
+
+    Calls scan_secret_patterns (GAP-003), scan_dynamic_sql (GAP-008), and
+    scan_sensitivity_class (GAP-009).  Uses the *raw* file content (not
+    comment-stripped) so that patterns inside SQL string literals are
+    still detected.
+
+    Args:
+        rel_path:     Path relative to the source directory.
+        content:      Raw (unstripped) file content.
+        file_path:    Absolute file path.
+        rules_config: Current rules dict (consulted for sensitivity_class).
+
+    Returns:
+        Combined list of ValidationIssue from all security scans.
+    """
+    from td_release_packager.security_rules import (
+        scan_dynamic_sql,
+        scan_secret_patterns,
+        scan_sensitivity_class,
+        scan_vault_refs,
+    )
+
+    issues: List[ValidationIssue] = []
+    issues.extend(scan_secret_patterns(rel_path, content, file_path))
+    issues.extend(scan_dynamic_sql(rel_path, content, file_path))
+    issues.extend(scan_vault_refs(rel_path, content, file_path))
+
+    if rules_config is None:
+        rules_config = {}
+    sens_sev = rules_config.get(
+        "sensitivity_class", DEFAULT_RULES.get("sensitivity_class", "OFF")
+    )
+    if sens_sev != "OFF":
+        violation_level = "error" if sens_sev == "ERROR" else "warning"
+        issues.extend(
+            scan_sensitivity_class(
+                rel_path=rel_path,
+                file_path=file_path,
+                require_sensitivity_class=True,
+                violation_level=violation_level,
+            )
+        )
+    return issues
 
 
 # ---------------------------------------------------------------

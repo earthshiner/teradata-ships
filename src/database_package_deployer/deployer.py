@@ -49,12 +49,22 @@ from database_package_deployer.models import (
     ObjectType,
     PackageDeployResult,
     ParsedStatement,
+    PreflightResult,
     DEPLOY_ORDER,
     SHOW_COMMAND_MAP,
     SYSTEM_EXISTENCE_QUERIES,
     TABLE_KIND_MAP,
 )
-from database_package_deployer.preflight import run_preflight
+from database_package_deployer.preflight import (
+    check_change_ref_present,
+    check_env_lock,
+    check_mpa_approval,
+    check_package_age,
+    check_package_hash,
+    check_package_signature,
+    check_tls_connection,
+    run_preflight,
+)
 from database_package_deployer.report import generate_report
 from database_package_deployer.schema_comparator import (
     compare_schemas,
@@ -225,6 +235,9 @@ def deploy_package(
     skip_preflight: bool = False,
     baseline_dir: Optional[str] = None,
     on_drift: str = "abort",
+    deployed_env: str = "",
+    approval_code: str = "",
+    connection_params: Optional[dict] = None,
 ) -> PackageDeployResult:
     """
     Deploy all DDL files in a directory idempotently.
@@ -266,6 +279,7 @@ def deploy_package(
         )
 
     _ol_run_id = start_deploy_run(package_dir, dry_run=dry_run)
+    _start_time = __import__("time").monotonic()
 
     wave_count = len(waves) if waves else 0
     with stage_span(
@@ -291,6 +305,9 @@ def deploy_package(
                 skip_preflight=skip_preflight,
                 baseline_dir=_effective_baseline_dir,
                 on_drift=on_drift,
+                deployed_env=deployed_env,
+                approval_code=approval_code,
+                connection_params=connection_params,
             )
         except Exception as exc:
             fail_deploy_run(
@@ -298,6 +315,19 @@ def deploy_package(
                 package_dir,
                 error=str(exc),
             )
+            _duration = __import__("time").monotonic() - _start_time
+            try:
+                from database_package_deployer.audit import emit_audit_event
+
+                emit_audit_event(
+                    package_dir=package_dir,
+                    outcome="FAILURE",
+                    objects_deployed=0,
+                    objects_failed=0,
+                    duration_seconds=_duration,
+                )
+            except Exception as _ae:
+                logger.warning("Audit emission failed (non-fatal): %s", _ae)
             raise
 
         _span.set_attribute("ships.total", result.total)
@@ -326,6 +356,21 @@ def deploy_package(
                 failed_objects=_failed,
             )
 
+        # GAP-007: emit audit event at Ship completion (success or failure).
+        _duration = __import__("time").monotonic() - _start_time
+        try:
+            from database_package_deployer.audit import emit_audit_event
+
+            emit_audit_event(
+                package_dir=package_dir,
+                outcome="SUCCESS" if result.success else "FAILURE",
+                objects_deployed=result.completed,
+                objects_failed=result.failed,
+                duration_seconds=_duration,
+            )
+        except Exception as _ae:
+            logger.warning("Audit emission failed (non-fatal): %s", _ae)
+
         return result
 
 
@@ -342,6 +387,9 @@ def _deploy_package_impl(
     skip_preflight: bool = False,
     baseline_dir: str = "",
     on_drift: str = "abort",
+    deployed_env: str = "",
+    approval_code: str = "",
+    connection_params: Optional[dict] = None,
 ) -> PackageDeployResult:
     """
     Deploy all DDL files in a directory idempotently.
@@ -443,6 +491,51 @@ def _deploy_package_impl(
         raise FileNotFoundError(f"No DDL files found in {package_dir}")
 
     logger.info("Discovered %d DDL files", len(ddl_files))
+
+    # -- Package-level security checks (GAP-001, GAP-002) --
+    # These run unconditionally — skip_preflight does not bypass them.
+    pkg_level_checks: List = []
+
+    # GAP-001: verify release ZIP against its SHA-256 sidecar.
+    pkg_level_checks.extend(check_package_hash(package_dir))
+
+    # GAP-002: verify package's target_env matches the operator's --env flag.
+    pkg_level_checks.extend(check_env_lock(package_dir, deployed_env))
+
+    # GAP-004: verify change ticket reference is present when required.
+    pkg_level_checks.extend(check_change_ref_present(package_dir))
+
+    # GAP-005: verify HMAC-SHA256 package signature sidecar.
+    pkg_level_checks.extend(check_package_signature(package_dir))
+
+    # GAP-006: verify 4-eyes approval code when require_approvals >= 2.
+    pkg_level_checks.extend(check_mpa_approval(package_dir, approval_code))
+
+    # GAP-012: warn or fail if the package exceeds its TTL.
+    pkg_level_checks.extend(check_package_age(package_dir))
+
+    # GAP-015: warn if the connection is not using TLS/SSL.
+    pkg_level_checks.extend(check_tls_connection(package_dir, connection_params))
+
+    pkg_level_errors = [c for c in pkg_level_checks if not c.passed]
+    if pkg_level_errors:
+        logger.error(
+            "Package-level security check FAILED: %s",
+            pkg_level_errors[0].message,
+        )
+        failed_preflight = PreflightResult(
+            passed=False,
+            checks=pkg_level_checks,
+            errors=len(pkg_level_errors),
+        )
+        return PackageDeployResult(
+            deployment_id="package_check_failed",
+            manifest_path="",
+            total=len(ddl_files),
+            failed=len(pkg_level_errors),
+            preflight_result=failed_preflight,
+            dry_run=dry_run,
+        )
 
     # -- Pre-flight validation (mandatory) --
     preflight_result = None
@@ -2365,6 +2458,7 @@ def _deploy_create_only(
 
     # -- Capture existing definition before DROP --
     rollback_file = None
+    snapshot_hash = None
     if exists:
         package_dir = (
             os.path.dirname(manifest.path)
@@ -2372,7 +2466,7 @@ def _deploy_create_only(
             else None
         )
         if package_dir:
-            rollback_file = _capture_existing_definition(
+            rollback_file, snapshot_hash = _capture_existing_definition(
                 cursor, db, obj, obj_type, package_dir
             )
         _drop_object(cursor, db, obj, obj_type, parsed.ddl_text)
@@ -2397,6 +2491,7 @@ def _deploy_create_only(
         state=DeployState.COMPLETED,
         prior_existed=exists,
         rollback_file=rollback_file,
+        snapshot_hash=snapshot_hash,
         message=msg,
     )
 
@@ -2454,6 +2549,7 @@ def _deploy_drop_and_create(
 
     # -- Capture existing definition before DROP --
     rollback_file = None
+    snapshot_hash = None
     if exists:
         package_dir = (
             os.path.dirname(manifest.path)
@@ -2461,7 +2557,7 @@ def _deploy_drop_and_create(
             else None
         )
         if package_dir:
-            rollback_file = _capture_existing_definition(
+            rollback_file, snapshot_hash = _capture_existing_definition(
                 cursor, db, obj, obj_type, package_dir
             )
         _drop_object(cursor, db, obj, obj_type, parsed.ddl_text)
@@ -2486,6 +2582,7 @@ def _deploy_drop_and_create(
         state=DeployState.COMPLETED,
         prior_existed=exists,
         rollback_file=rollback_file,
+        snapshot_hash=snapshot_hash,
         message=msg,
     )
 
@@ -2541,6 +2638,7 @@ def _deploy_replace_in_place(
 
     # -- Capture existing definition before REPLACE --
     rollback_file = None
+    snapshot_hash = None
     if exists:
         package_dir = (
             os.path.dirname(manifest.path)
@@ -2548,7 +2646,7 @@ def _deploy_replace_in_place(
             else None
         )
         if package_dir:
-            rollback_file = _capture_existing_definition(
+            rollback_file, snapshot_hash = _capture_existing_definition(
                 cursor, db, obj, obj_type, package_dir
             )
 
@@ -2566,6 +2664,7 @@ def _deploy_replace_in_place(
         state=DeployState.COMPLETED,
         prior_existed=exists,
         rollback_file=rollback_file,
+        snapshot_hash=snapshot_hash,
         message=msg,
     )
 
@@ -2758,9 +2857,41 @@ def _rollback_single(
                     parsed.ddl_text if parsed else None,
                 )
 
-            # Re-create from the saved rollback definition
+            # GAP-013: verify snapshot hash before restoring.
             with open(rollback_file, "r", encoding="utf-8") as f:
                 rollback_ddl = f.read()
+
+            recorded_hash = record.get("snapshot_hash") if record else None
+            if recorded_hash:
+                import hashlib as _hl2
+
+                actual_hash = _hl2.sha256(rollback_ddl.encode("utf-8")).hexdigest()
+                if actual_hash != recorded_hash:
+                    _integrity_msg = (
+                        f"rollback integrity failure for '{qualified_name}' — "
+                        f"snapshot hash mismatch (expected {recorded_hash[:12]}…, "
+                        f"got {actual_hash[:12]}…). Skipping restore for this object."
+                    )
+                    logger.error("  ✖ %s", _integrity_msg)
+                    manifest.update_state(
+                        qualified_name, DeployState.FAILED, error=_integrity_msg
+                    )
+                    return ObjectDeployResult(
+                        database_name=db,
+                        object_name=obj,
+                        object_type=obj_type,
+                        state=DeployState.FAILED,
+                        error=_integrity_msg,
+                        message=_integrity_msg,
+                    )
+            elif recorded_hash is None:
+                logger.warning(
+                    "package_age: snapshot_hash absent for '%s' — proceeding "
+                    "without integrity check (legacy manifest).",
+                    qualified_name,
+                )
+
+            # Re-create from the saved rollback definition
             _execute_ddl(cursor, rollback_ddl)
 
             manifest.update_state(qualified_name, DeployState.ROLLED_BACK)
@@ -2917,14 +3048,13 @@ def _capture_existing_definition(
     object_name: str,
     object_type: ObjectType,
     package_dir: str,
-) -> Optional[str]:
-    """
-    Capture an existing object's DDL via SHOW before replacement.
+) -> tuple:
+    """Capture an existing object's DDL via SHOW before replacement (GAP-013).
 
     Runs the appropriate SHOW command (SHOW VIEW, SHOW MACRO, etc.)
     and saves the output to a _rollback/ directory alongside the
-    manifest. This DDL can be re-executed to restore the previous
-    definition on rollback.
+    manifest.  Computes a SHA-256 digest of the saved content for
+    rollback integrity verification.
 
     Args:
         cursor:         Active database cursor.
@@ -2934,7 +3064,7 @@ def _capture_existing_definition(
         package_dir:    Directory for the _rollback/ output.
 
     Returns:
-        Path to the saved rollback file, or None if capture failed.
+        Tuple of (rollback_file_path_or_None, snapshot_hash_or_None).
     """
     show_cmd = SHOW_COMMAND_MAP.get(object_type)
     if not show_cmd:
@@ -2942,7 +3072,7 @@ def _capture_existing_definition(
             "No SHOW command mapped for %s — cannot capture rollback",
             object_type.value,
         )
-        return None
+        return (None, None)
 
     qualified = f"{database_name}.{object_name}"
 
@@ -2952,7 +3082,7 @@ def _capture_existing_definition(
 
         if not rows:
             logger.warning("SHOW %s returned no rows", qualified)
-            return None
+            return (None, None)
 
         # SHOW commands return the DDL as one or more rows of text
         ddl_lines = []
@@ -2963,7 +3093,7 @@ def _capture_existing_definition(
         ddl_text = "\n".join(ddl_lines)
 
         if not ddl_text.strip():
-            return None
+            return (None, None)
 
         # Save to _rollback/ directory
         rollback_dir = os.path.join(package_dir, "_rollback")
@@ -2990,12 +3120,18 @@ def _capture_existing_definition(
         with open(rollback_path, "w", encoding="utf-8") as f:
             f.write(ddl_text)
 
+        # GAP-013: compute snapshot hash for rollback integrity verification.
+        import hashlib as _hl
+
+        snap_hash = _hl.sha256(ddl_text.encode("utf-8")).hexdigest()
+
         logger.info(
-            "Captured rollback: %s → %s",
+            "Captured rollback: %s → %s (hash: %s…)",
             qualified,
             rollback_path,
+            snap_hash[:12],
         )
-        return rollback_path
+        return (rollback_path, snap_hash)
 
     except Exception as e:
         logger.warning(
@@ -3003,7 +3139,7 @@ def _capture_existing_definition(
             qualified,
             e,
         )
-        return None
+        return (None, None)
 
 
 # ---------------------------------------------------------------
