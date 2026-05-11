@@ -261,6 +261,11 @@ def run_preflight(
     jar_checks = _check_jar_alias_coverage(parsed_ddls)
     checks.extend(jar_checks)
 
+    # -- Phase 6: Excess privilege check (GAP-010) --
+    # Warn if the deploy account holds elevated rights beyond what is
+    # needed.  WARNING only — does not block deployment.
+    checks.extend(_check_excess_privilege(cursor))
+
     # -- Tally results --
     errors = sum(1 for c in checks if not c.passed and c.severity == "ERROR")
     warnings = sum(1 for c in checks if not c.passed and c.severity == "WARNING")
@@ -762,6 +767,78 @@ def _check_jar_alias_coverage(
             )
 
     return checks
+
+
+# ---------------------------------------------------------------
+# Excess privilege check (GAP-010)
+# ---------------------------------------------------------------
+
+
+def _check_excess_privilege(cursor) -> List[PreflightCheck]:
+    """Warn if the deploying user holds elevated rights beyond what is needed.
+
+    Queries ``DBC.UserRightsV`` for rights that the deploy account should
+    not hold: GRANT OPTION (GD), rights on DBC itself, SYSTEM_ADMIN (SA),
+    CREATE ACCESS MACRO (CA), or ALL rights on any database.
+
+    This is a WARNING-level check — it does not block deployment but flags
+    the excess for a security review.
+
+    Args:
+        cursor: Active Teradata database cursor.
+
+    Returns:
+        List of PreflightCheck results (zero or one entry).
+    """
+    _ELEVATED = frozenset({"GD", "SA", "CA", "AL"})
+
+    try:
+        cursor.execute(
+            "SELECT"
+            "     TRIM(AccessRight) AS AccessRight"
+            "    ,TRIM(DatabaseName) AS DatabaseName"
+            "    ,TRIM(TableName) AS TableName"
+            " FROM DBC.UserRightsV"
+            " WHERE UserName = USER"
+            "   AND ("
+            "        TRIM(AccessRight) IN ('GD', 'SA', 'CA', 'AL')"
+            "     OR TRIM(DatabaseName) = 'DBC'"
+            "   )"
+        )
+        rows = cursor.fetchall()
+    except Exception as exc:
+        logger.warning("excess_privilege: query failed (non-fatal): %s", exc)
+        return []
+
+    if not rows:
+        return [
+            PreflightCheck(
+                check_name="excess_privilege",
+                passed=True,
+                database="(system)",
+                message="excess_privilege — no elevated rights detected on deploy user.",
+                severity="INFO",
+            )
+        ]
+
+    findings = [f"{r[0]} ON {r[1]}" for r in rows]
+    logger.warning(
+        "excess_privilege: deploy user holds elevated rights: %s",
+        ", ".join(findings),
+    )
+    return [
+        PreflightCheck(
+            check_name="excess_privilege",
+            passed=True,  # WARNING — advisory only, does not block
+            database="(system)",
+            message=(
+                "excess_privilege — deploy user holds elevated rights: "
+                + ", ".join(findings)
+                + ". Review whether these rights are necessary for deployment."
+            ),
+            severity="WARNING",
+        )
+    ]
 
 
 # ---------------------------------------------------------------

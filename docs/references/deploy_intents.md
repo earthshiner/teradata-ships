@@ -23,6 +23,7 @@ reported but do not block execution.
 | `change_ref_present`  | ERROR (conditional)  | Change ticket reference required when `require_change_ref: true` in ships.yaml. | GAP-004 |
 | `package_signature`   | ERROR (conditional)  | HMAC-SHA256 signature verified when `.hmac` sidecar is present or `require_signature: true`. | GAP-005 |
 | `mpa_approval`        | ERROR (conditional)  | 4-eyes approval code verified when `require_approvals: 2` in ships.yaml. | GAP-006 |
+| `excess_privilege`    | WARNING              | Deploy user should not hold elevated rights (GD, SA, CA, AL, or DBC rights). | GAP-010 |
 
 ---
 
