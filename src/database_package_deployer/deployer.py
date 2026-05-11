@@ -2451,6 +2451,7 @@ def _deploy_create_only(
 
     # -- Capture existing definition before DROP --
     rollback_file = None
+    snapshot_hash = None
     if exists:
         package_dir = (
             os.path.dirname(manifest.path)
@@ -2458,7 +2459,7 @@ def _deploy_create_only(
             else None
         )
         if package_dir:
-            rollback_file = _capture_existing_definition(
+            rollback_file, snapshot_hash = _capture_existing_definition(
                 cursor, db, obj, obj_type, package_dir
             )
         _drop_object(cursor, db, obj, obj_type, parsed.ddl_text)
@@ -2483,6 +2484,7 @@ def _deploy_create_only(
         state=DeployState.COMPLETED,
         prior_existed=exists,
         rollback_file=rollback_file,
+        snapshot_hash=snapshot_hash,
         message=msg,
     )
 
@@ -2540,6 +2542,7 @@ def _deploy_drop_and_create(
 
     # -- Capture existing definition before DROP --
     rollback_file = None
+    snapshot_hash = None
     if exists:
         package_dir = (
             os.path.dirname(manifest.path)
@@ -2547,7 +2550,7 @@ def _deploy_drop_and_create(
             else None
         )
         if package_dir:
-            rollback_file = _capture_existing_definition(
+            rollback_file, snapshot_hash = _capture_existing_definition(
                 cursor, db, obj, obj_type, package_dir
             )
         _drop_object(cursor, db, obj, obj_type, parsed.ddl_text)
@@ -2572,6 +2575,7 @@ def _deploy_drop_and_create(
         state=DeployState.COMPLETED,
         prior_existed=exists,
         rollback_file=rollback_file,
+        snapshot_hash=snapshot_hash,
         message=msg,
     )
 
@@ -2627,6 +2631,7 @@ def _deploy_replace_in_place(
 
     # -- Capture existing definition before REPLACE --
     rollback_file = None
+    snapshot_hash = None
     if exists:
         package_dir = (
             os.path.dirname(manifest.path)
@@ -2634,7 +2639,7 @@ def _deploy_replace_in_place(
             else None
         )
         if package_dir:
-            rollback_file = _capture_existing_definition(
+            rollback_file, snapshot_hash = _capture_existing_definition(
                 cursor, db, obj, obj_type, package_dir
             )
 
@@ -2652,6 +2657,7 @@ def _deploy_replace_in_place(
         state=DeployState.COMPLETED,
         prior_existed=exists,
         rollback_file=rollback_file,
+        snapshot_hash=snapshot_hash,
         message=msg,
     )
 
@@ -2844,9 +2850,41 @@ def _rollback_single(
                     parsed.ddl_text if parsed else None,
                 )
 
-            # Re-create from the saved rollback definition
+            # GAP-013: verify snapshot hash before restoring.
             with open(rollback_file, "r", encoding="utf-8") as f:
                 rollback_ddl = f.read()
+
+            recorded_hash = record.get("snapshot_hash") if record else None
+            if recorded_hash:
+                import hashlib as _hl2
+
+                actual_hash = _hl2.sha256(rollback_ddl.encode("utf-8")).hexdigest()
+                if actual_hash != recorded_hash:
+                    _integrity_msg = (
+                        f"rollback integrity failure for '{qualified_name}' — "
+                        f"snapshot hash mismatch (expected {recorded_hash[:12]}…, "
+                        f"got {actual_hash[:12]}…). Skipping restore for this object."
+                    )
+                    logger.error("  ✖ %s", _integrity_msg)
+                    manifest.update_state(
+                        qualified_name, DeployState.FAILED, error=_integrity_msg
+                    )
+                    return ObjectDeployResult(
+                        database_name=db,
+                        object_name=obj,
+                        object_type=obj_type,
+                        state=DeployState.FAILED,
+                        error=_integrity_msg,
+                        message=_integrity_msg,
+                    )
+            elif recorded_hash is None:
+                logger.warning(
+                    "package_age: snapshot_hash absent for '%s' — proceeding "
+                    "without integrity check (legacy manifest).",
+                    qualified_name,
+                )
+
+            # Re-create from the saved rollback definition
             _execute_ddl(cursor, rollback_ddl)
 
             manifest.update_state(qualified_name, DeployState.ROLLED_BACK)
@@ -3003,14 +3041,13 @@ def _capture_existing_definition(
     object_name: str,
     object_type: ObjectType,
     package_dir: str,
-) -> Optional[str]:
-    """
-    Capture an existing object's DDL via SHOW before replacement.
+) -> tuple:
+    """Capture an existing object's DDL via SHOW before replacement (GAP-013).
 
     Runs the appropriate SHOW command (SHOW VIEW, SHOW MACRO, etc.)
     and saves the output to a _rollback/ directory alongside the
-    manifest. This DDL can be re-executed to restore the previous
-    definition on rollback.
+    manifest.  Computes a SHA-256 digest of the saved content for
+    rollback integrity verification.
 
     Args:
         cursor:         Active database cursor.
@@ -3020,7 +3057,7 @@ def _capture_existing_definition(
         package_dir:    Directory for the _rollback/ output.
 
     Returns:
-        Path to the saved rollback file, or None if capture failed.
+        Tuple of (rollback_file_path_or_None, snapshot_hash_or_None).
     """
     show_cmd = SHOW_COMMAND_MAP.get(object_type)
     if not show_cmd:
@@ -3028,7 +3065,7 @@ def _capture_existing_definition(
             "No SHOW command mapped for %s — cannot capture rollback",
             object_type.value,
         )
-        return None
+        return (None, None)
 
     qualified = f"{database_name}.{object_name}"
 
@@ -3038,7 +3075,7 @@ def _capture_existing_definition(
 
         if not rows:
             logger.warning("SHOW %s returned no rows", qualified)
-            return None
+            return (None, None)
 
         # SHOW commands return the DDL as one or more rows of text
         ddl_lines = []
@@ -3049,7 +3086,7 @@ def _capture_existing_definition(
         ddl_text = "\n".join(ddl_lines)
 
         if not ddl_text.strip():
-            return None
+            return (None, None)
 
         # Save to _rollback/ directory
         rollback_dir = os.path.join(package_dir, "_rollback")
@@ -3076,12 +3113,18 @@ def _capture_existing_definition(
         with open(rollback_path, "w", encoding="utf-8") as f:
             f.write(ddl_text)
 
+        # GAP-013: compute snapshot hash for rollback integrity verification.
+        import hashlib as _hl
+
+        snap_hash = _hl.sha256(ddl_text.encode("utf-8")).hexdigest()
+
         logger.info(
-            "Captured rollback: %s → %s",
+            "Captured rollback: %s → %s (hash: %s…)",
             qualified,
             rollback_path,
+            snap_hash[:12],
         )
-        return rollback_path
+        return (rollback_path, snap_hash)
 
     except Exception as e:
         logger.warning(
@@ -3089,7 +3132,7 @@ def _capture_existing_definition(
             qualified,
             e,
         )
-        return None
+        return (None, None)
 
 
 # ---------------------------------------------------------------

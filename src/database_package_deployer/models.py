@@ -456,6 +456,9 @@ class ObjectDeployResult:
     ddl_file: Optional[str] = None
     prior_existed: bool = False
     rollback_file: Optional[str] = None
+    # GAP-013: SHA-256 hex digest of the rollback snapshot content.
+    # Computed at capture time; verified before restore.
+    snapshot_hash: Optional[str] = None
     backup_table: Optional[str] = None
     rows_migrated: int = 0
     message: str = ""
