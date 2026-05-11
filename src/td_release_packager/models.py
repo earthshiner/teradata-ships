@@ -257,6 +257,11 @@ class BuildManifest:
     trust: Dict[str, object] = field(default_factory=dict)
     discovery: Dict[str, object] = field(default_factory=dict)
     baseline_dir: str = ""
+    # Security: explicit target environment lock (GAP-002).
+    # Set to the same value as ``environment`` at Package time so the
+    # deployer can verify the operator has not aimed this package at
+    # the wrong environment.
+    target_env: str = ""
 
 
 @dataclass

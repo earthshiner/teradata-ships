@@ -19,6 +19,7 @@ reported but do not block execution.
 | `perm_space`          | ERROR / WARNING      | Target databases must have sufficient free permanent space.                 | Core     |
 | `jar_alias_coverage`  | ERROR                | Every Java procedure's JAR alias must be installed by a script in the package. | Core  |
 | `package_hash`        | ERROR                | Release ZIP must match its SHA-256 sidecar before any DDL executes.         | GAP-001  |
+| `env_lock`            | ERROR                | Package's `target_env` must match the `--env` flag supplied to Ship.        | GAP-002  |
 
 ---
 

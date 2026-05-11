@@ -55,7 +55,7 @@ from database_package_deployer.models import (
     SYSTEM_EXISTENCE_QUERIES,
     TABLE_KIND_MAP,
 )
-from database_package_deployer.preflight import check_package_hash, run_preflight
+from database_package_deployer.preflight import check_env_lock, check_package_hash, run_preflight
 from database_package_deployer.report import generate_report
 from database_package_deployer.schema_comparator import (
     compare_schemas,
@@ -226,6 +226,7 @@ def deploy_package(
     skip_preflight: bool = False,
     baseline_dir: Optional[str] = None,
     on_drift: str = "abort",
+    deployed_env: str = "",
 ) -> PackageDeployResult:
     """
     Deploy all DDL files in a directory idempotently.
@@ -292,6 +293,7 @@ def deploy_package(
                 skip_preflight=skip_preflight,
                 baseline_dir=_effective_baseline_dir,
                 on_drift=on_drift,
+                deployed_env=deployed_env,
             )
         except Exception as exc:
             fail_deploy_run(
@@ -343,6 +345,7 @@ def _deploy_package_impl(
     skip_preflight: bool = False,
     baseline_dir: str = "",
     on_drift: str = "abort",
+    deployed_env: str = "",
 ) -> PackageDeployResult:
     """
     Deploy all DDL files in a directory idempotently.
@@ -445,26 +448,32 @@ def _deploy_package_impl(
 
     logger.info("Discovered %d DDL files", len(ddl_files))
 
-    # -- Package integrity check (GAP-001) --
-    # Verify the release ZIP against its SHA-256 sidecar before any DDL
-    # executes.  Runs unconditionally — skip_preflight does not bypass it.
-    pkg_hash_checks = check_package_hash(package_dir)
-    pkg_hash_errors = [c for c in pkg_hash_checks if not c.passed]
-    if pkg_hash_errors:
+    # -- Package-level security checks (GAP-001, GAP-002) --
+    # These run unconditionally — skip_preflight does not bypass them.
+    pkg_level_checks: List = []
+
+    # GAP-001: verify release ZIP against its SHA-256 sidecar.
+    pkg_level_checks.extend(check_package_hash(package_dir))
+
+    # GAP-002: verify package's target_env matches the operator's --env flag.
+    pkg_level_checks.extend(check_env_lock(package_dir, deployed_env))
+
+    pkg_level_errors = [c for c in pkg_level_checks if not c.passed]
+    if pkg_level_errors:
         logger.error(
-            "Package integrity check FAILED: %s",
-            pkg_hash_errors[0].message,
+            "Package-level security check FAILED: %s",
+            pkg_level_errors[0].message,
         )
         failed_preflight = PreflightResult(
             passed=False,
-            checks=pkg_hash_checks,
-            errors=len(pkg_hash_errors),
+            checks=pkg_level_checks,
+            errors=len(pkg_level_errors),
         )
         return PackageDeployResult(
-            deployment_id="package_hash_failed",
+            deployment_id="package_check_failed",
             manifest_path="",
             total=len(ddl_files),
-            failed=len(pkg_hash_errors),
+            failed=len(pkg_level_errors),
             preflight_result=failed_preflight,
             dry_run=dry_run,
         )

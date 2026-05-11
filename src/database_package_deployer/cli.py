@@ -100,6 +100,7 @@ def _cmd_deploy(args):
                 ordered_files=ordered_files,
                 stop_on_failure=not args.continue_on_error,
                 dry_run=args.dry_run,
+                deployed_env=getattr(args, "env", "") or "",
             )
             otel_span.set_attribute("ships.deploy.completed", result.completed)
             otel_span.set_attribute("ships.deploy.failed", result.failed)
@@ -646,6 +647,16 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--continue-on-error",
         action="store_true",
         help="Continue past failures.",
+    )
+    dp.add_argument(
+        "--env",
+        metavar="ENV",
+        default="",
+        help=(
+            "Target environment name (e.g. PRD, DEV). When supplied, the "
+            "package's target_env field is verified to match before any DDL "
+            "executes (env_lock check, GAP-002). Omit to skip this check."
+        ),
     )
     _add_conn_args(dp)
 

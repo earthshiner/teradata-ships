@@ -444,6 +444,8 @@ def _build_package_impl(
         warnings=warnings,
         discovery={"extensions": sorted(resolved_extensions)},
         baseline_dir=_baseline_dir,
+        # GAP-002: environment lock — deployer verifies this matches --env at Ship time.
+        target_env=config.environment,
     )
 
     # -- Phase 8a: Compute and stamp Phase 1 Trust Report --
@@ -753,6 +755,7 @@ def _split_into_paired_packages(
         role="prereqs",
         requires=[],
         discovery=dict(manifest.discovery),
+        target_env=manifest.target_env,
     )
 
     # 7. Re-write BUILD.json on both sides.

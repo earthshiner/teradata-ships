@@ -907,3 +907,97 @@ def check_package_hash(package_dir: str) -> List[PreflightCheck]:
             severity="INFO",
         )
     ]
+
+
+# ---------------------------------------------------------------
+# Environment lock check (GAP-002)
+# ---------------------------------------------------------------
+
+
+def check_env_lock(package_dir: str, deployed_env: str) -> List[PreflightCheck]:
+    """Verify the package's target environment matches the deployment target (GAP-002).
+
+    Reads ``target_env`` from BUILD.json and compares it to *deployed_env*
+    (the ``--env`` flag supplied to the Ship command).  A mismatch — or a
+    missing ``target_env`` field in older packages — is an ERROR that
+    prevents any DDL from executing.
+
+    The check is skipped silently when *deployed_env* is empty or ``None``,
+    allowing deployments that do not specify ``--env`` to proceed without
+    enforcement.
+
+    Args:
+        package_dir:  Path to the extracted package directory (contains BUILD.json).
+        deployed_env: Target environment supplied by the operator (e.g. ``'PRD'``).
+                      Pass an empty string or ``None`` to skip the check.
+
+    Returns:
+        List of PreflightCheck results (zero or one entry).
+    """
+    if not deployed_env:
+        logger.debug("env_lock: no --env supplied — skipping environment lock check.")
+        return []
+
+    build_json = os.path.join(package_dir, "BUILD.json")
+    if not os.path.isfile(build_json):
+        logger.debug("env_lock: BUILD.json not found in '%s' — skipping.", package_dir)
+        return []
+
+    try:
+        with open(build_json, encoding="utf-8") as fh:
+            manifest = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("env_lock: could not read BUILD.json: %s", exc)
+        return []
+
+    target_env = manifest.get("target_env", "")
+    if not target_env:
+        logger.error(
+            "env_lock: 'target_env' absent from BUILD.json — package must be rebuilt "
+            "with a version of SHIPS that stamps environment lock information."
+        )
+        return [
+            PreflightCheck(
+                check_name="env_lock",
+                passed=False,
+                database="(package)",
+                message=(
+                    "env_lock — 'target_env' is absent from BUILD.json. "
+                    "Rebuild this package with SHIPS v2+ to stamp the environment "
+                    "lock field, or remove --env from the Ship command to skip "
+                    "this check."
+                ),
+                severity="ERROR",
+            )
+        ]
+
+    if target_env.upper() != deployed_env.upper():
+        logger.error(
+            "env_lock: package built for '%s', attempted deployment to '%s'.",
+            target_env,
+            deployed_env,
+        )
+        return [
+            PreflightCheck(
+                check_name="env_lock",
+                passed=False,
+                database="(package)",
+                message=(
+                    f"env_lock — package built for '{target_env}', "
+                    f"cannot deploy to '{deployed_env}'. "
+                    f"Ensure you are using the correct package for this environment."
+                ),
+                severity="ERROR",
+            )
+        ]
+
+    logger.info("env_lock: environment '%s' verified OK.", target_env)
+    return [
+        PreflightCheck(
+            check_name="env_lock",
+            passed=True,
+            database="(package)",
+            message=f"env_lock — package environment '{target_env}' matches target '{deployed_env}'.",
+            severity="INFO",
+        )
+    ]
