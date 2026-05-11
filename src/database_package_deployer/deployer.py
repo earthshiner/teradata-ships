@@ -276,6 +276,7 @@ def deploy_package(
         )
 
     _ol_run_id = start_deploy_run(package_dir, dry_run=dry_run)
+    _start_time = __import__("time").monotonic()
 
     wave_count = len(waves) if waves else 0
     with stage_span(
@@ -310,6 +311,19 @@ def deploy_package(
                 package_dir,
                 error=str(exc),
             )
+            _duration = __import__("time").monotonic() - _start_time
+            try:
+                from database_package_deployer.audit import emit_audit_event
+
+                emit_audit_event(
+                    package_dir=package_dir,
+                    outcome="FAILURE",
+                    objects_deployed=0,
+                    objects_failed=0,
+                    duration_seconds=_duration,
+                )
+            except Exception as _ae:
+                logger.warning("Audit emission failed (non-fatal): %s", _ae)
             raise
 
         _span.set_attribute("ships.total", result.total)
@@ -337,6 +351,21 @@ def deploy_package(
                 completed_objects=_completed,
                 failed_objects=_failed,
             )
+
+        # GAP-007: emit audit event at Ship completion (success or failure).
+        _duration = __import__("time").monotonic() - _start_time
+        try:
+            from database_package_deployer.audit import emit_audit_event
+
+            emit_audit_event(
+                package_dir=package_dir,
+                outcome="SUCCESS" if result.success else "FAILURE",
+                objects_deployed=result.completed,
+                objects_failed=result.failed,
+                duration_seconds=_duration,
+            )
+        except Exception as _ae:
+            logger.warning("Audit emission failed (non-fatal): %s", _ae)
 
         return result
 
