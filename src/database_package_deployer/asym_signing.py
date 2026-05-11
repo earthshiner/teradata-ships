@@ -105,10 +105,14 @@ def generate_keypair() -> tuple:
         encryption_algorithm=NoEncryption(),
     ).decode("utf-8")
 
-    public_pem = private_key.public_key().public_bytes(
-        encoding=Encoding.PEM,
-        format=PublicFormat.SubjectPublicKeyInfo,
-    ).decode("utf-8")
+    public_pem = (
+        private_key.public_key()
+        .public_bytes(
+            encoding=Encoding.PEM,
+            format=PublicFormat.SubjectPublicKeyInfo,
+        )
+        .decode("utf-8")
+    )
 
     return (private_pem, public_pem)
 
@@ -154,9 +158,7 @@ def sign_zip(zip_path: str, private_key_pem: str) -> str:
 
     sig_path = zip_path + ".sig"
     Path(sig_path).write_text(sig_b64 + "\n", encoding="utf-8")
-    logger.info(
-        "asym_signing: signed '%s' → %s", os.path.basename(zip_path), sig_path
-    )
+    logger.info("asym_signing: signed '%s' → %s", os.path.basename(zip_path), sig_path)
     return sig_path
 
 

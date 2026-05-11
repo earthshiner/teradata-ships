@@ -3584,7 +3584,9 @@ def _cmd_keygen(args):
     print()
     print(f"  Public key:  {public_path}")
     print("    Safe to share — commit this file to your project repository.")
-    print("    DBAs use it to verify package signatures without needing the private key.")
+    print(
+        "    DBAs use it to verify package signatures without needing the private key."
+    )
     print()
     print("  Usage:")
     print("    ships package ... --asymmetric-key ships_signing_private.pem")

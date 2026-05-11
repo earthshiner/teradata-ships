@@ -100,9 +100,7 @@ def download_release_assets(
     else:
         api_url = f"{_GITHUB_API_BASE}/repos/{owner_repo}/releases/tags/{release_tag}"
 
-    logger.info(
-        "github_source: fetching release metadata from %s", api_url
-    )
+    logger.info("github_source: fetching release metadata from %s", api_url)
     release_json = _make_request(api_url, headers)
     release = json.loads(release_json)
 
@@ -117,9 +115,7 @@ def download_release_assets(
 
     # Download the primary ZIP asset
     zip_path = _download_asset(assets[asset_name], dest_dir, headers)
-    logger.info(
-        "github_source: downloaded '%s' → %s", asset_name, zip_path
-    )
+    logger.info("github_source: downloaded '%s' → %s", asset_name, zip_path)
 
     # Attempt to download sidecars — silently skip any that are absent
     for suffix in (".sha256", ".hmac", ".sig"):
@@ -195,9 +191,7 @@ def extract_zip_to_dir(zip_path: str, dest_dir: str) -> str:
     if len(top_level_dirs) == 1:
         pkg_dir = os.path.join(dest_dir, next(iter(top_level_dirs)))
         if os.path.isdir(pkg_dir):
-            logger.info(
-                "github_source: extracted package directory: %s", pkg_dir
-            )
+            logger.info("github_source: extracted package directory: %s", pkg_dir)
             return pkg_dir
 
     logger.info(
