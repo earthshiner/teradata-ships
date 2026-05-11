@@ -49,12 +49,13 @@ from database_package_deployer.models import (
     ObjectType,
     PackageDeployResult,
     ParsedStatement,
+    PreflightResult,
     DEPLOY_ORDER,
     SHOW_COMMAND_MAP,
     SYSTEM_EXISTENCE_QUERIES,
     TABLE_KIND_MAP,
 )
-from database_package_deployer.preflight import run_preflight
+from database_package_deployer.preflight import check_package_hash, run_preflight
 from database_package_deployer.report import generate_report
 from database_package_deployer.schema_comparator import (
     compare_schemas,
@@ -443,6 +444,30 @@ def _deploy_package_impl(
         raise FileNotFoundError(f"No DDL files found in {package_dir}")
 
     logger.info("Discovered %d DDL files", len(ddl_files))
+
+    # -- Package integrity check (GAP-001) --
+    # Verify the release ZIP against its SHA-256 sidecar before any DDL
+    # executes.  Runs unconditionally — skip_preflight does not bypass it.
+    pkg_hash_checks = check_package_hash(package_dir)
+    pkg_hash_errors = [c for c in pkg_hash_checks if not c.passed]
+    if pkg_hash_errors:
+        logger.error(
+            "Package integrity check FAILED: %s",
+            pkg_hash_errors[0].message,
+        )
+        failed_preflight = PreflightResult(
+            passed=False,
+            checks=pkg_hash_checks,
+            errors=len(pkg_hash_errors),
+        )
+        return PackageDeployResult(
+            deployment_id="package_hash_failed",
+            manifest_path="",
+            total=len(ddl_files),
+            failed=len(pkg_hash_errors),
+            preflight_result=failed_preflight,
+            dry_run=dry_run,
+        )
 
     # -- Pre-flight validation (mandatory) --
     preflight_result = None

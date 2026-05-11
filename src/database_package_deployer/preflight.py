@@ -30,9 +30,12 @@ Note on access rights:
     be detected, producing false negatives.
 """
 
+import hashlib
+import json
 import logging
 import os
 import re
+from pathlib import Path
 from typing import Dict, List, Set
 
 from database_package_deployer.statement_parser import parse_statement_file
@@ -759,3 +762,148 @@ def _check_jar_alias_coverage(
             )
 
     return checks
+
+
+# ---------------------------------------------------------------
+# Package-level integrity checks (GAP-001)
+# ---------------------------------------------------------------
+
+
+def _sha256_of_file(file_path: str) -> str:
+    """Compute the SHA-256 hex digest of a file.
+
+    Args:
+        file_path: Path to the file to hash.
+
+    Returns:
+        Lowercase hex digest string.
+    """
+    digest = hashlib.sha256()
+    with open(file_path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def check_package_hash(package_dir: str) -> List[PreflightCheck]:
+    """Verify the release ZIP against its SHA-256 sidecar (GAP-001).
+
+    Reads BUILD.json from *package_dir* to discover the ZIP filename,
+    then locates the archive and its ``.sha256`` sidecar in the parent
+    directory.  If the sidecar is absent or the computed hash does not
+    match the recorded value, an ERROR-level check is returned.
+
+    The check is silently skipped (no finding emitted) when the ZIP is
+    not present beside the extracted package directory — this happens
+    when a DBA extracts the archive and deletes the original ZIP before
+    running the deploy.  The sidecar-absent and hash-mismatch cases
+    always produce an ERROR.
+
+    Args:
+        package_dir: Path to the extracted package directory (which
+                     contains BUILD.json).
+
+    Returns:
+        List of PreflightCheck results (zero or one entry).
+    """
+    build_json = os.path.join(package_dir, "BUILD.json")
+    if not os.path.isfile(build_json):
+        logger.debug(
+            "package_hash: BUILD.json not found in '%s' — skipping check.", package_dir
+        )
+        return []
+
+    try:
+        with open(build_json, encoding="utf-8") as fh:
+            manifest = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("package_hash: could not read BUILD.json: %s", exc)
+        return []
+
+    package_filename = manifest.get("package_filename", "")
+    if not package_filename:
+        logger.debug("package_hash: package_filename absent from BUILD.json — skipping.")
+        return []
+
+    zip_path = Path(package_dir).parent / package_filename
+    if not zip_path.exists():
+        logger.debug(
+            "package_hash: archive '%s' not found beside package directory — skipping.",
+            zip_path,
+        )
+        return []
+
+    # Sidecar is the ZIP path with '.sha256' appended (not replacing the extension).
+    sidecar_path = zip_path.parent / (zip_path.name + ".sha256")
+    if not sidecar_path.exists():
+        logger.error("package_hash: SHA-256 sidecar not found: %s", sidecar_path)
+        return [
+            PreflightCheck(
+                check_name="package_hash",
+                passed=False,
+                database="(package)",
+                message=(
+                    f"package_hash — SHA-256 sidecar not found: {sidecar_path}. "
+                    f"Ensure the .sha256 file is transferred alongside the package archive."
+                ),
+                severity="ERROR",
+            )
+        ]
+
+    # Parse sidecar — handles single-column and two-column (sha256sum) formats.
+    try:
+        sidecar_text = sidecar_path.read_text(encoding="utf-8").strip()
+        expected_hash = sidecar_text.split()[0]
+    except (OSError, IndexError) as exc:
+        logger.error("package_hash: could not read sidecar '%s': %s", sidecar_path, exc)
+        return [
+            PreflightCheck(
+                check_name="package_hash",
+                passed=False,
+                database="(package)",
+                message=(
+                    f"package_hash — could not parse sidecar "
+                    f"'{sidecar_path.name}': {exc}"
+                ),
+                severity="ERROR",
+            )
+        ]
+
+    actual_hash = _sha256_of_file(str(zip_path))
+
+    if actual_hash != expected_hash:
+        logger.error(
+            "package_hash: hash mismatch for '%s' — expected %s…, got %s…",
+            zip_path.name,
+            expected_hash[:12],
+            actual_hash[:12],
+        )
+        return [
+            PreflightCheck(
+                check_name="package_hash",
+                passed=False,
+                database="(package)",
+                message=(
+                    f"package_hash — hash mismatch for '{zip_path.name}' "
+                    f"(expected {expected_hash[:12]}…, got {actual_hash[:12]}…). "
+                    f"The archive may have been corrupted or tampered with in transit."
+                ),
+                severity="ERROR",
+            )
+        ]
+
+    logger.info(
+        "package_hash: '%s' verified OK (%s…)", zip_path.name, actual_hash[:12]
+    )
+    return [
+        PreflightCheck(
+            check_name="package_hash",
+            passed=True,
+            database="(package)",
+            message=(
+                f"package_hash — '{zip_path.name}' SHA-256 verified OK "
+                f"({actual_hash[:12]}…)."
+            ),
+            severity="INFO",
+        )
+    ]
