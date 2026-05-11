@@ -35,8 +35,9 @@ import json
 import logging
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Dict, List, Optional, Set
 
 from database_package_deployer.statement_parser import parse_statement_file
 from database_package_deployer.models import (
@@ -1382,5 +1383,88 @@ def check_mpa_approval(package_dir: str, approval_code: str = "") -> List[Prefli
             database="(package)",
             message="mpa_approval — 4-eyes approval code verified OK.",
             severity="INFO",
+        )
+    ]
+
+
+# ---------------------------------------------------------------
+# Package age / TTL check (GAP-012)
+# ---------------------------------------------------------------
+
+
+def check_package_age(package_dir: str) -> List[PreflightCheck]:
+    """Check whether the release package has exceeded its TTL (GAP-012).
+
+    Reads ``package_built_at`` (falling back to ``timestamp``) and
+    ``package_max_age_days`` from BUILD.json.  When the package age
+    exceeds the threshold, emits a WARNING or ERROR depending on
+    ``package_age_violation_level``.
+
+    A threshold of 0 disables the check.
+
+    Args:
+        package_dir: Path to the extracted package directory.
+
+    Returns:
+        List of PreflightCheck results (zero or one entry).
+    """
+    build_json = os.path.join(package_dir, "BUILD.json")
+    if not os.path.isfile(build_json):
+        return []
+
+    try:
+        with open(build_json, encoding="utf-8") as fh:
+            manifest = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("package_age: could not read BUILD.json: %s", exc)
+        return []
+
+    max_age = manifest.get("package_max_age_days", 30)
+    if max_age == 0:
+        logger.debug("package_age: check disabled (package_max_age_days=0).")
+        return []
+
+    built_at_str = manifest.get("package_built_at") or manifest.get("timestamp", "")
+    if not built_at_str:
+        return [
+            PreflightCheck(
+                check_name="package_age",
+                passed=True,
+                database="(package)",
+                message="package_age — build timestamp absent from manifest.",
+                severity="WARNING",
+            )
+        ]
+
+    try:
+        # Parse ISO 8601 — accept both trailing Z and +00:00
+        built_at = datetime.fromisoformat(built_at_str.replace("Z", "+00:00"))
+        if built_at.tzinfo is None:
+            built_at = built_at.replace(tzinfo=timezone.utc)
+    except ValueError as exc:
+        logger.warning("package_age: could not parse build timestamp '%s': %s", built_at_str, exc)
+        return []
+
+    age_days = (datetime.now(tz=timezone.utc) - built_at).days
+    if age_days <= max_age:
+        return []
+
+    violation_level = manifest.get("package_age_violation_level", "warning").lower()
+    severity = "ERROR" if violation_level == "error" else "WARNING"
+
+    logger.warning(
+        "package_age: package is %d days old (threshold: %d days).", age_days, max_age
+    )
+    return [
+        PreflightCheck(
+            check_name="package_age",
+            passed=(severity == "WARNING"),
+            database="(package)",
+            message=(
+                f"package_age — package is {age_days} day(s) old "
+                f"(threshold: {max_age} day(s)). "
+                f"Consider rebuilding for a fresh deployment."
+            ),
+            severity=severity,
         )
     ]

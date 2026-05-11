@@ -281,6 +281,14 @@ class BuildManifest:
     # 1 = self-certify (default, no approval code needed).
     # 2 = 4-eyes (a second operator must run 'ships approve').
     require_approvals: int = 1
+    # GAP-012: explicit build timestamp for TTL/staleness checks.
+    # Set to the same value as timestamp at Package time.
+    package_built_at: str = ""
+    # Maximum age in days before the package_age check fires.
+    # 0 = disabled.  Default: 30.
+    package_max_age_days: int = 30
+    # 'warning' or 'error' — severity when the package exceeds max age.
+    package_age_violation_level: str = "warning"
 
 
 @dataclass

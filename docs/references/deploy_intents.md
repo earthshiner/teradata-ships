@@ -24,6 +24,7 @@ reported but do not block execution.
 | `package_signature`   | ERROR (conditional)  | HMAC-SHA256 signature verified when `.hmac` sidecar is present or `require_signature: true`. | GAP-005 |
 | `mpa_approval`        | ERROR (conditional)  | 4-eyes approval code verified when `require_approvals: 2` in ships.yaml. | GAP-006 |
 | `excess_privilege`    | WARNING              | Deploy user should not hold elevated rights (GD, SA, CA, AL, or DBC rights). | GAP-010 |
+| `package_age`         | WARNING (configurable) | Package exceeds `package_max_age_days` threshold stamped from ships.yaml. | GAP-012 |
 
 ---
 

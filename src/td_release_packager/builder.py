@@ -457,6 +457,14 @@ def _build_package_impl(
         require_approvals=_read_int_env_setting(
             config.source_dir, config.environment, "require_approvals", default=1
         ),
+        # GAP-012: package age TTL.
+        package_built_at=timestamp.isoformat(),
+        package_max_age_days=_read_int_env_setting(
+            config.source_dir, config.environment, "package_max_age_days", default=30
+        ),
+        package_age_violation_level=_read_str_env_setting(
+            config.source_dir, config.environment, "package_age_violation_level", default="warning"
+        ),
     )
 
     # -- Phase 8a: Compute and stamp Phase 1 Trust Report --
@@ -771,6 +779,9 @@ def _split_into_paired_packages(
         require_change_ref=manifest.require_change_ref,
         require_signature=manifest.require_signature,
         require_approvals=manifest.require_approvals,
+        package_built_at=manifest.package_built_at,
+        package_max_age_days=manifest.package_max_age_days,
+        package_age_violation_level=manifest.package_age_violation_level,
     )
 
     # 7. Re-write BUILD.json on both sides.
@@ -2367,6 +2378,28 @@ def _read_bool_env_setting(source_dir: str, environment: str, key: str) -> bool:
 def _read_require_change_ref(source_dir: str, environment: str) -> bool:
     """Read require_change_ref for *environment* from ships.yaml (GAP-004)."""
     return _read_bool_env_setting(source_dir, environment, "require_change_ref")
+
+
+def _read_str_env_setting(
+    source_dir: str, environment: str, key: str, default: str = ""
+) -> str:
+    """Read a string per-environment key from ships.yaml.
+
+    Returns *default* when ships.yaml is absent, the environment block is
+    missing, or the key is not set.
+    """
+    ships_yaml_path = os.path.join(source_dir, "ships.yaml")
+    if not os.path.isfile(ships_yaml_path):
+        return default
+    try:
+        from td_release_packager.orchestrator import ships_yaml as _sy
+
+        data = _sy.load(ships_yaml_path)
+        envs = data.get("environments", {})
+        env_cfg = envs.get(environment, envs.get(environment.upper(), {}))
+        return str(env_cfg.get(key, default))
+    except Exception:
+        return default
 
 
 def _read_int_env_setting(

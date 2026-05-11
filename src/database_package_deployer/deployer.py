@@ -59,6 +59,7 @@ from database_package_deployer.preflight import (
     check_change_ref_present,
     check_env_lock,
     check_mpa_approval,
+    check_package_age,
     check_package_hash,
     check_package_signature,
     run_preflight,
@@ -505,6 +506,9 @@ def _deploy_package_impl(
 
     # GAP-006: verify 4-eyes approval code when require_approvals >= 2.
     pkg_level_checks.extend(check_mpa_approval(package_dir, approval_code))
+
+    # GAP-012: warn or fail if the package exceeds its TTL.
+    pkg_level_checks.extend(check_package_age(package_dir))
 
     pkg_level_errors = [c for c in pkg_level_checks if not c.passed]
     if pkg_level_errors:
