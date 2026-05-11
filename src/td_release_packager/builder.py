@@ -474,6 +474,12 @@ def _build_package_impl(
             "package_age_violation_level",
             default="warning",
         ),
+        # Option C: Ed25519 asymmetric signature enforcement.
+        require_asymmetric_signature=_read_bool_env_setting(
+            config.source_dir, config.environment, "require_asymmetric_signature"
+        ),
+        # Option C: public key PEM embedded in the package (from ships.yaml signing.public_key).
+        ships_public_key=_read_signing_public_key(config.source_dir),
     )
 
     # -- Phase 8a: Compute and stamp Phase 1 Trust Report --
@@ -1883,9 +1889,12 @@ def main():
 def _verify_integrity(script_dir, logger, skip=False):
     """Verify the package has not been modified since packaging.
 
-    Recomputes SHA-256 over every file under payload/, derives the
-    combined package_hash, and compares against package_integrity.json.
+    Recomputes SHA-256 over every file under payload/ and lib/, derives
+    the combined package_hash, and compares against package_integrity.json.
     Aborts the process on any mismatch.
+
+    Including lib/ means an attacker who edits the embedded deployer code
+    (e.g. preflight.py) to bypass security checks will be detected here.
 
     Returns the package_hash string so callers can embed it in the
     query band.  Returns 'SKIPPED' when --skip-integrity-check is set.
@@ -1921,6 +1930,16 @@ def _verify_integrity(script_dir, logger, skip=False):
             rel = pathlib.Path(os.path.relpath(fpath, script_dir)).as_posix()
             with open(fpath, "rb") as fh:
                 computed_files[rel] = hashlib.sha256(fh.read()).hexdigest()
+
+    lib_dir = os.path.join(script_dir, "lib")
+    if os.path.isdir(lib_dir):
+        for root, dirs, files in os.walk(lib_dir):
+            dirs.sort()
+            for fname in sorted(files):
+                fpath = os.path.join(root, fname)
+                rel = pathlib.Path(os.path.relpath(fpath, script_dir)).as_posix()
+                with open(fpath, "rb") as fh:
+                    computed_files[rel] = hashlib.sha256(fh.read()).hexdigest()
 
     errors = []
     for path, expected in sorted(stored_files.items()):
@@ -2301,14 +2320,18 @@ def _archive_package(pkg_dir: str, archive_format: str) -> str:
 
 
 def _generate_integrity_file(pkg_dir: str) -> str:
-    """Compute a SHA-256 fingerprint over every payload file.
+    """Compute a SHA-256 fingerprint over every payload and lib/ file.
 
-    Walks ``payload/`` recursively (sorted), hashes each file, then
-    derives a single ``package_hash`` as SHA-256 of the sorted
+    Walks ``payload/`` and ``lib/`` recursively (sorted), hashes each file,
+    then derives a single ``package_hash`` as SHA-256 of the sorted
     ``"rel/path:filehash\\n"`` concatenation.  Writes the result to
     ``package_integrity.json`` in the package root so the embedded
     ``deploy.py`` can verify the package has not been tampered with
     before any database connection is opened.
+
+    Including ``lib/`` means that an attacker who edits the embedded
+    deployer code (e.g. ``lib/database_package_deployer/preflight.py``)
+    to bypass security checks will be detected before any DDL executes.
 
     Args:
         pkg_dir: Package root directory (not yet archived).
@@ -2319,6 +2342,7 @@ def _generate_integrity_file(pkg_dir: str) -> str:
     import pathlib
 
     payload_dir = os.path.join(pkg_dir, "payload")
+    lib_dir = os.path.join(pkg_dir, "lib")
     file_hashes: dict = {}
 
     for root, dirs, files in os.walk(payload_dir):
@@ -2328,6 +2352,15 @@ def _generate_integrity_file(pkg_dir: str) -> str:
             rel = pathlib.Path(os.path.relpath(fpath, pkg_dir)).as_posix()
             with open(fpath, "rb") as f:
                 file_hashes[rel] = hashlib.sha256(f.read()).hexdigest()
+
+    if os.path.isdir(lib_dir):
+        for root, dirs, files in os.walk(lib_dir):
+            dirs.sort()
+            for fname in sorted(files):
+                fpath = os.path.join(root, fname)
+                rel = pathlib.Path(os.path.relpath(fpath, pkg_dir)).as_posix()
+                with open(fpath, "rb") as f:
+                    file_hashes[rel] = hashlib.sha256(f.read()).hexdigest()
 
     combined = "".join(f"{k}:{v}\n" for k, v in sorted(file_hashes.items()))
     package_hash = hashlib.sha256(combined.encode()).hexdigest()
@@ -2433,6 +2466,32 @@ def _read_int_env_setting(
         return int(val)
     except Exception:
         return default
+
+
+def _read_signing_public_key(source_dir: str) -> str:
+    """Read the Ed25519 public key PEM from ships.yaml signing.public_key.
+
+    Returns an empty string when ships.yaml is absent or the key is not
+    configured.  The returned value is stamped into BUILD.json so the
+    deployer can verify signatures without a separate --public-key argument.
+
+    Args:
+        source_dir: Project root directory containing ships.yaml.
+
+    Returns:
+        PEM string, or empty string if not configured.
+    """
+    ships_yaml_path = os.path.join(source_dir, "ships.yaml")
+    if not os.path.isfile(ships_yaml_path):
+        return ""
+    try:
+        from td_release_packager.orchestrator import ships_yaml as _sy
+
+        data = _sy.load(ships_yaml_path)
+        signing_cfg = data.get("signing", {})
+        return str(signing_cfg.get("public_key", "")).strip()
+    except Exception:
+        return ""
 
 
 def _generate_checksum(archive_path: str) -> str:

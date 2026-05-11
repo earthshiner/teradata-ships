@@ -7,13 +7,83 @@ Covers:
     - Binary/non-DDL file preservation
     - Hidden/underscore file preservation
     - Dirty working tree gate (_check_working_tree)
+    - Integrity file generation covers payload/ and lib/ directories
 """
 
+import json
+import os
+import tempfile
 from unittest.mock import patch
 
 import pytest
 
-from td_release_packager.builder import _check_working_tree, _resolve_filename
+from td_release_packager.builder import (
+    _check_working_tree,
+    _generate_integrity_file,
+    _resolve_filename,
+)
+
+
+# ---------------------------------------------------------------
+# _generate_integrity_file — lib/ coverage
+# ---------------------------------------------------------------
+
+
+class TestGenerateIntegrityFile:
+    """Verify that _generate_integrity_file covers both payload/ and lib/."""
+
+    def _make_package_dir(self, tmp_dir: str) -> str:
+        """Create a minimal package directory structure."""
+        payload_dir = os.path.join(tmp_dir, "payload")
+        lib_dir = os.path.join(tmp_dir, "lib", "database_package_deployer")
+        os.makedirs(payload_dir, exist_ok=True)
+        os.makedirs(lib_dir, exist_ok=True)
+
+        payload_file = os.path.join(payload_dir, "create_table.tbl")
+        lib_file = os.path.join(lib_dir, "preflight.py")
+        with open(payload_file, "w", encoding="utf-8") as fh:
+            fh.write("CREATE TABLE Db.T1 (Id INT);\n")
+        with open(lib_file, "w", encoding="utf-8") as fh:
+            fh.write("# fake deployer module\n")
+
+        return tmp_dir
+
+    def test_lib_files_included_in_integrity_json(self):
+        """lib/ files appear in package_integrity.json file_hashes."""
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg_dir = self._make_package_dir(tmp)
+            _generate_integrity_file(pkg_dir)
+
+            integrity_path = os.path.join(pkg_dir, "package_integrity.json")
+            assert os.path.isfile(integrity_path)
+
+            with open(integrity_path, encoding="utf-8") as fh:
+                data = json.load(fh)
+
+            file_keys = data["files"]
+            payload_keys = [k for k in file_keys if k.startswith("payload/")]
+            lib_keys = [k for k in file_keys if k.startswith("lib/")]
+
+            assert len(payload_keys) >= 1, "payload/ files must be in integrity JSON"
+            assert len(lib_keys) >= 1, "lib/ files must be in integrity JSON"
+
+    def test_package_hash_changes_when_lib_modified(self):
+        """Modifying a lib/ file changes the package_hash."""
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg_dir = self._make_package_dir(tmp)
+            hash_before = _generate_integrity_file(pkg_dir)
+
+            lib_file = os.path.join(
+                tmp, "lib", "database_package_deployer", "preflight.py"
+            )
+            with open(lib_file, "a", encoding="utf-8") as fh:
+                fh.write("# modified\n")
+
+            hash_after = _generate_integrity_file(pkg_dir)
+
+            assert hash_before != hash_after, (
+                "package_hash must change when a lib/ file is modified"
+            )
 
 
 # ---------------------------------------------------------------

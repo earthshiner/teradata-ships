@@ -423,6 +423,126 @@ if any(r.drift_detected for r in result.results):
 
 ---
 
+## Deploying from GitHub Releases
+
+Once CI has published a package as a GitHub Release, an agent (or DBA) can deploy
+directly without downloading and transferring the ZIP file manually:
+
+```bash
+ships deploy \
+    --from-github org/repo \
+    --release-tag v1.2.3 \
+    --asset PRD_Pkg_BUILD_0001.zip \
+    --host myhost \
+    --user ships_dba
+```
+
+SHIPS downloads the ZIP and all available sidecar files (`.sha256`, `.hmac`, `.sig`)
+from the release using the GitHub API, verifies them, and proceeds with normal
+deployment.
+
+**Agent usage:**
+
+```python
+import subprocess
+
+result = subprocess.run([
+    "python", "-m", "td_release_packager", "deploy",
+    "--from-github", "myorg/myrepo",
+    "--release-tag", "v1.2.3",
+    "--asset", "PRD_Pkg_BUILD_0001.zip",
+    "--host", HOST,
+    "--user", USER,
+    "--password", os.environ["TD_PASS"],
+], capture_output=True, text=True)
+```
+
+Environment variables:
+- `GITHUB_TOKEN` — required for private repositories; public repositories work without it
+- `SHIPS_GITHUB_API_URL` — override for GitHub Enterprise Server
+
+An agent referencing release tags gains a clean chain of custody: the tag is immutable,
+the sidecar files are verified, and the package hash is stamped into DBQL via the query
+band.
+
+---
+
+## Asymmetric Signing in CI/CD Pipelines
+
+Ed25519 asymmetric signing is the recommended signing mode for production pipelines.
+The private key lives only in the CI/CD platform; agents and DBAs verify using the
+public key committed to the repository.
+
+**Generating a key pair (run once):**
+
+```bash
+ships keygen
+```
+
+**CI environment variable:**
+
+| Variable | Purpose |
+|---|---|
+| `SHIPS_PRIVATE_KEY_PATH` | Path to private key file (GitHub Actions: write to a temp file from a secret) |
+| `SHIPS_ASYMMETRIC_KEY` | Inline PEM string (GitLab CI masked variable, Vault injection) |
+
+**GitHub Actions example:**
+
+```yaml
+- name: Package with asymmetric signing
+  env:
+    SHIPS_ASYMMETRIC_KEY: ${{ secrets.SHIPS_ASYMMETRIC_KEY }}
+  run: |
+    uv run python -m td_release_packager package \
+      --source . \
+      --env PRD \
+      --env-config config/env/PRD.conf \
+      --name ${{ github.event.repository.name }} \
+      --asymmetric-key <(echo "$SHIPS_ASYMMETRIC_KEY") \
+      --change-ref ${{ vars.CHANGE_REF }}
+```
+
+The public key (`ships_signing_public.pem`) is committed to the repository and
+referenced in `ships.yaml`:
+
+```yaml
+signing:
+  public_key_file: ships_signing_public.pem
+```
+
+Deploy-time verification is automatic — any package not signed by the CI private key
+is rejected before a database connection is opened.
+
+---
+
+## Preflight Checks Reference
+
+The following preflight checks run before any database connection is opened. Agents
+can read their outcomes from the deploy manifest's `preflight.checks` array.
+
+| Check | GAP | Default severity | Trigger |
+|---|---|---|---|
+| `package_hash` | GAP-001 | ERROR | Archive `.sha256` sidecar mismatch |
+| `env_lock` | GAP-002 | ERROR | PRD package targeting a non-PRD environment |
+| `secret_scan` | GAP-003 | Configurable (default ERROR) | Embedded credentials in DDL bodies |
+| `change_ref_present` | GAP-004 | ERROR (when `require_change_ref: true`) | No `--change-ref` on PRD package |
+| `hmac_signature` | GAP-005 | ERROR (when key configured) | HMAC signature absent or invalid |
+| `mpa_approval` | GAP-006 | ERROR (when `require_approvals: 2`) | No 4-eyes approval code |
+| `audit_sink` | GAP-007 | WARNING | No `audit_sink` configured |
+| `dynamic_sql` | GAP-008 | Configurable (default WARNING) | `EXECUTE IMMEDIATE` in procedures |
+| `sensitivity_class` | GAP-009 | Configurable (default WARNING) | No `.cls` companion for PII/PCI objects |
+| `excess_privilege` | GAP-010 | WARNING | Deploy account has over-broad privileges |
+| `vault_ref` | GAP-011 | INFO | `$env:VAR` or `vault:path#key` references resolved |
+| `package_age` | GAP-012 | WARNING | Package older than `package_max_age_days` |
+| `rollback_integrity` | GAP-013 | ERROR | Rollback snapshot hash mismatch |
+| `grant_drift` | GAP-014 | WARNING | `ships audit-grants` detects undeclared or missing grants |
+| `tls_connection` | GAP-015 | WARNING (ERROR when `require_tls: true`) | Connection lacks TLS/SSL |
+| `asym_signature` | — | ERROR (when public key configured) | Ed25519 signature absent or invalid |
+
+Agents should gate on `severity == "ERROR" and passed == false` to block deployment.
+
+---
+
 ## OpenTelemetry integration
 
 When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, every pipeline stage emits a span automatically. No code change required:

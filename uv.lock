@@ -931,6 +931,9 @@ otel = [
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-sdk" },
 ]
+signing = [
+    { name = "cryptography" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -942,6 +945,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", marker = "extra == 'signing'", specifier = ">=42.0" },
     { name = "fastapi", marker = "extra == 'dashboard'", specifier = ">=0.115" },
     { name = "mcp", specifier = ">=1.27.1" },
     { name = "openlineage-python", marker = "extra == 'lineage'", specifier = ">=1.18.0" },
@@ -952,7 +956,7 @@ requires-dist = [
     { name = "teradatasql", specifier = ">=20.0.0.56" },
     { name = "uvicorn", marker = "extra == 'dashboard'", specifier = ">=0.32" },
 ]
-provides-extras = ["otel", "lineage", "dashboard"]
+provides-extras = ["otel", "lineage", "dashboard", "signing"]
 
 [package.metadata.requires-dev]
 dev = [

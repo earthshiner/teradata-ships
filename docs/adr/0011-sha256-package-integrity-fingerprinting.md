@@ -4,6 +4,26 @@
 
 Accepted | 2026-05-06
 
+## Updates
+
+**2026-05-11 — `lib/` coverage and Ed25519 asymmetric signing**
+
+The integrity check now covers `lib/` in addition to `payload/`. The fingerprint
+derivation walks both directories so that any modification to the embedded deployer
+code (e.g. editing `lib/database_package_deployer/` to bypass security checks)
+changes the package hash and blocks deployment.
+
+Ed25519 asymmetric signing has been implemented as a new `asym_signing.py` module.
+The "Asymmetric signing (RSA / ECDSA)" alternative considered in this ADR has been
+realised using Ed25519 (see `ships keygen`, `ships package --asymmetric-key`). The
+private key is held exclusively by the CI pipeline; the public key is committed to
+the project repository. This closes the adversarial threat model gap noted in the
+Consequences section — an attacker with write access to the extracted package can
+no longer forge a valid signature by recomputing `package_integrity.json`. The SHA-256
+hash layer is retained as a complementary, lower-overhead chain-of-custody check.
+
+GitHub issue #76 (asymmetric signing) is resolved.
+
 ## Context
 
 A SHIPS release package is built by a developer or CI pipeline, archived

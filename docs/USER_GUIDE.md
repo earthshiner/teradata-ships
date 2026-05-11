@@ -970,6 +970,65 @@ Prints a tailored recommendation and, with `--auto`, runs the first step automat
 
 ---
 
+### `ships keygen`
+
+Generate an Ed25519 key pair for asymmetric package signing.
+
+```bash
+python -m td_release_packager keygen
+python -m td_release_packager keygen --output-dir /etc/ships/keys
+```
+
+| Flag | Required | Description |
+|---|---|---|
+| `--output-dir` | No | Directory to write the key files (default: current directory) |
+
+Writes `ships_signing_private.pem` (keep secret) and `ships_signing_public.pem`
+(commit to repository). Run this once per project; rotate by running it again and
+updating the CI secret and committed public key.
+
+---
+
+### `ships approve`
+
+Generate a 4-eyes approval code for a package (second-operator sign-off).
+
+```bash
+ships approve /path/to/package.zip --signing-key /etc/ships/signing.key
+```
+
+The printed approval code is passed to the DBA who runs:
+
+```bash
+ships deploy /path/to/package/ --host myhost --user ships_dba --approval-code CODE
+```
+
+---
+
+### `ships audit-grants`
+
+Compare declared GRANT statements in a package against the live grant state in
+Teradata, and report drift.
+
+```bash
+ships audit-grants /path/to/package_dir \
+    --host myhost \
+    --user ships_dba
+```
+
+Output categories:
+
+| Category | Meaning |
+|---|---|
+| `MATCHED` | Grant declared in DCL and present in Teradata |
+| `MISSING` | Grant declared in DCL but not present in Teradata |
+| `UNDECLARED` | Grant present in Teradata but not in DCL |
+
+Exit 0 = no drift. Exit 1 = drift detected. Use this as a post-deployment gate
+or a standing compliance check.
+
+---
+
 ### `ships decisions prune`
 
 Remove old run entries from `decisions.json` to keep the audit file manageable over time.
@@ -1102,6 +1161,123 @@ This extends — not replaces — the built-in set. The resolved extension list 
 | `.db` | Create database |
 | `.usr` | Create user |
 | `.rol` | Create role |
+
+---
+
+## Security
+
+SHIPS has a layered security model that spans the packaging step (developer or CI), the
+handoff, and the deployment step (DBA). Developers interact with the signing and tagging
+features; DBAs interact with the verification and approval features.
+
+### Generating a key pair
+
+```bash
+ships keygen
+```
+
+Writes `ships_signing_private.pem` and `ships_signing_public.pem` in the current
+directory. Commit the public key to the repository; store the private key in your
+CI/CD platform's secrets manager.
+
+### Package signing
+
+Two modes are available, depending on your threat model:
+
+**HMAC (symmetric — shared team key)**
+
+```bash
+ships package \
+    --source /projects/OMR \
+    --env PRD \
+    --env-config config/env/PRD.conf \
+    --name OMR \
+    --signing-key /etc/ships/signing.key
+```
+
+The same key signs and verifies. Suitable when the signing team and the verifying DBA
+both have access to the shared secret. See `docs/security_prerequisites.md` for
+key storage requirements.
+
+**Ed25519 (asymmetric — CI-only private key)**
+
+```bash
+ships package \
+    --source /projects/OMR \
+    --env PRD \
+    --env-config config/env/PRD.conf \
+    --name OMR \
+    --asymmetric-key /run/secrets/ships_private.pem
+```
+
+Only the CI pipeline holds the private key. DBAs verify using the public key committed
+to the repository. This is the recommended mode for production pipelines — a DBA with
+full access to the extracted package cannot forge a valid signature.
+
+### Change ticket reference
+
+For environments that require a change ticket before production deployment:
+
+```bash
+ships package \
+    --source /projects/OMR \
+    --env PRD \
+    --env-config config/env/PRD.conf \
+    --name OMR \
+    --change-ref CHG0012345
+```
+
+Add `require_change_ref: true` under the environment block in `ships.yaml` to enforce
+this at the Ship preflight — the deploy will fail if the package has no change
+reference.
+
+### Sensitivity classification
+
+Add a `.cls` companion file alongside any DDL file to tag its sensitivity level:
+
+```
+payload/database/DDL/tables/{{STD_DATABASE}}.Customer.tbl
+payload/database/DDL/tables/{{STD_DATABASE}}.Customer.cls   ← companion
+```
+
+`.cls` file format:
+```
+PII
+```
+
+Configure how SHIPS responds in `config/inspect.conf`:
+```properties
+sensitivity_class=WARNING   # or ERROR to block packaging
+```
+
+### What the DBA sees
+
+The preflight checks visible to the DBA include package hash verification, HMAC/Ed25519
+signature verification, environment lock (prevents a PRD package deploying to DEV),
+change ticket presence check, excess privilege warning, TLS enforcement, and package
+age check. These run before any database connection is opened. See
+`docs/OPERATIONS_GUIDE.md` for the full preflight reference.
+
+---
+
+## Deploying directly from GitHub Releases
+
+Once CI publishes the package as a GitHub Release, DBAs deploy without file transfer:
+
+```bash
+ships deploy \
+    --from-github org/repo \
+    --release-tag v1.2.3 \
+    --asset PRD_Pkg_BUILD_0001.zip \
+    --host myhost \
+    --user ships_dba
+```
+
+SHIPS downloads the ZIP and all available sidecar files (`.sha256`, `.hmac`, `.sig`)
+from the release, verifies them, and proceeds with normal deployment. Set the
+`GITHUB_TOKEN` environment variable for private repositories.
+
+See `docs/OPERATIONS_GUIDE.md` for the full `--from-github` workflow.
 
 ---
 
