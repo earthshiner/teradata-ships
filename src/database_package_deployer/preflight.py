@@ -1072,3 +1072,137 @@ def check_change_ref_present(package_dir: str) -> List[PreflightCheck]:
             severity="INFO",
         )
     ]
+
+
+# ---------------------------------------------------------------
+# Package signature check (GAP-005)
+# ---------------------------------------------------------------
+
+
+def check_package_signature(package_dir: str) -> List[PreflightCheck]:
+    """Verify the HMAC-SHA256 package signature sidecar (GAP-005).
+
+    Locates the release ZIP via BUILD.json's ``package_filename``, then
+    looks for a ``.hmac`` sidecar file beside it.  The check is
+    conditional on three states:
+
+    - ``require_signature: true`` in BUILD.json AND no ``.hmac`` file →
+      ERROR.
+    - ``.hmac`` file present but ``SHIPS_SIGNING_KEY`` not set (no key
+      to verify) → ERROR.
+    - ``.hmac`` file present, key available, hash mismatch → ERROR.
+    - ``.hmac`` file present, key available, hash matches → pass (INFO).
+    - ``.hmac`` absent AND ``require_signature: false`` → silently pass
+      (no finding emitted).
+
+    Args:
+        package_dir: Path to the extracted package directory.
+
+    Returns:
+        List of PreflightCheck results (zero or one entry).
+    """
+    from database_package_deployer.signing import resolve_signing_key, verify_hmac
+
+    build_json = os.path.join(package_dir, "BUILD.json")
+    if not os.path.isfile(build_json):
+        return []
+
+    try:
+        with open(build_json, encoding="utf-8") as fh:
+            manifest = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("package_signature: could not read BUILD.json: %s", exc)
+        return []
+
+    package_filename = manifest.get("package_filename", "")
+    if not package_filename:
+        return []
+
+    require_signature = manifest.get("require_signature", False)
+    zip_path = Path(package_dir).parent / package_filename
+    if not zip_path.exists():
+        return []
+
+    hmac_path = zip_path.parent / (zip_path.name + ".hmac")
+
+    if not hmac_path.exists():
+        if require_signature:
+            logger.error("package_signature: .hmac sidecar not found and signature is required.")
+            return [
+                PreflightCheck(
+                    check_name="package_signature",
+                    passed=False,
+                    database="(package)",
+                    message=(
+                        f"package_signature — .hmac sidecar not found for "
+                        f"'{zip_path.name}' and require_signature=true. "
+                        f"Sign this package with --signing-key before deploying."
+                    ),
+                    severity="ERROR",
+                )
+            ]
+        # Not required and absent → silently pass
+        logger.debug("package_signature: no .hmac sidecar and not required — skipping.")
+        return []
+
+    # .hmac file exists — must verify
+    key = resolve_signing_key()
+    if key is None:
+        logger.error(
+            "package_signature: .hmac sidecar present but no signing key available."
+        )
+        return [
+            PreflightCheck(
+                check_name="package_signature",
+                passed=False,
+                database="(package)",
+                message=(
+                    "package_signature — cannot verify signature: "
+                    f"SHIPS_SIGNING_KEY is not set. Set the environment "
+                    f"variable or remove the .hmac sidecar if verification "
+                    f"is not required."
+                ),
+                severity="ERROR",
+            )
+        ]
+
+    try:
+        expected_hmac = hmac_path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        return [
+            PreflightCheck(
+                check_name="package_signature",
+                passed=False,
+                database="(package)",
+                message=f"package_signature — could not read .hmac sidecar: {exc}",
+                severity="ERROR",
+            )
+        ]
+
+    zip_hash = _sha256_of_file(str(zip_path))
+    if not verify_hmac(key, zip_hash, expected_hmac):
+        logger.error("package_signature: HMAC mismatch for '%s'.", zip_path.name)
+        return [
+            PreflightCheck(
+                check_name="package_signature",
+                passed=False,
+                database="(package)",
+                message=(
+                    f"package_signature — HMAC mismatch for '{zip_path.name}'. "
+                    f"The archive may have been tampered with, or the wrong "
+                    f"signing key is being used."
+                ),
+                severity="ERROR",
+            )
+        ]
+
+    logger.info("package_signature: '%s' HMAC verified OK.", zip_path.name)
+    return [
+        PreflightCheck(
+            check_name="package_signature",
+            passed=True,
+            database="(package)",
+            message=f"package_signature — '{zip_path.name}' HMAC signature verified OK.",
+            severity="INFO",
+        )
+    ]

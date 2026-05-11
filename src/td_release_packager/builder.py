@@ -449,6 +449,10 @@ def _build_package_impl(
         # GAP-004: change management ticket reference and enforcement flag.
         change_ref=config.change_ref,
         require_change_ref=_read_require_change_ref(config.source_dir, config.environment),
+        # GAP-005: signature enforcement flag from ships.yaml.
+        require_signature=_read_bool_env_setting(
+            config.source_dir, config.environment, "require_signature"
+        ),
     )
 
     # -- Phase 8a: Compute and stamp Phase 1 Trust Report --
@@ -761,6 +765,7 @@ def _split_into_paired_packages(
         target_env=manifest.target_env,
         change_ref=manifest.change_ref,
         require_change_ref=manifest.require_change_ref,
+        require_signature=manifest.require_signature,
     )
 
     # 7. Re-write BUILD.json on both sides.
@@ -2320,14 +2325,14 @@ def _generate_integrity_file(pkg_dir: str) -> str:
     return package_hash
 
 
-def _read_require_change_ref(source_dir: str, environment: str) -> bool:
-    """Read require_change_ref for *environment* from ships.yaml (GAP-004).
+def _read_bool_env_setting(source_dir: str, environment: str, key: str) -> bool:
+    """Read a boolean per-environment key from ships.yaml.
 
-    Returns True when ships.yaml declares::
+    Looks for::
 
         environments:
           <ENV>:
-            require_change_ref: true
+            <key>: true
 
     Returns False when ships.yaml is absent, the environment block is
     missing, or the key is not set.
@@ -2335,9 +2340,10 @@ def _read_require_change_ref(source_dir: str, environment: str) -> bool:
     Args:
         source_dir:  Project root directory containing ships.yaml.
         environment: Target environment name (e.g. 'PRD').
+        key:         Setting name (e.g. 'require_change_ref').
 
     Returns:
-        True if change_ref is required for this environment.
+        Boolean value of the setting, defaulting to False.
     """
     ships_yaml_path = os.path.join(source_dir, "ships.yaml")
     if not os.path.isfile(ships_yaml_path):
@@ -2348,9 +2354,14 @@ def _read_require_change_ref(source_dir: str, environment: str) -> bool:
         data = _sy.load(ships_yaml_path)
         envs = data.get("environments", {})
         env_cfg = envs.get(environment, envs.get(environment.upper(), {}))
-        return bool(env_cfg.get("require_change_ref", False))
+        return bool(env_cfg.get(key, False))
     except Exception:
         return False
+
+
+def _read_require_change_ref(source_dir: str, environment: str) -> bool:
+    """Read require_change_ref for *environment* from ships.yaml (GAP-004)."""
+    return _read_bool_env_setting(source_dir, environment, "require_change_ref")
 
 
 def _generate_checksum(archive_path: str) -> str:

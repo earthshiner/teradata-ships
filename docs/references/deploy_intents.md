@@ -21,6 +21,7 @@ reported but do not block execution.
 | `package_hash`        | ERROR                | Release ZIP must match its SHA-256 sidecar before any DDL executes.         | GAP-001  |
 | `env_lock`            | ERROR                | Package's `target_env` must match the `--env` flag supplied to Ship.        | GAP-002  |
 | `change_ref_present`  | ERROR (conditional)  | Change ticket reference required when `require_change_ref: true` in ships.yaml. | GAP-004 |
+| `package_signature`   | ERROR (conditional)  | HMAC-SHA256 signature verified when `.hmac` sidecar is present or `require_signature: true`. | GAP-005 |
 
 ---
 

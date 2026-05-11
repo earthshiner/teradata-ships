@@ -273,6 +273,10 @@ class BuildManifest:
     # Stamped from ships.yaml at Package time so the deployer can
     # enforce the policy without access to the project config.
     require_change_ref: bool = False
+    # GAP-005: whether the target environment requires a package signature.
+    # Stamped from ships.yaml environments.<ENV>.require_signature at
+    # Package time.
+    require_signature: bool = False
 
 
 @dataclass

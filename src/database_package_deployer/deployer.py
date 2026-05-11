@@ -59,6 +59,7 @@ from database_package_deployer.preflight import (
     check_change_ref_present,
     check_env_lock,
     check_package_hash,
+    check_package_signature,
     run_preflight,
 )
 from database_package_deployer.report import generate_report
@@ -465,6 +466,9 @@ def _deploy_package_impl(
 
     # GAP-004: verify change ticket reference is present when required.
     pkg_level_checks.extend(check_change_ref_present(package_dir))
+
+    # GAP-005: verify HMAC-SHA256 package signature sidecar.
+    pkg_level_checks.extend(check_package_signature(package_dir))
 
     pkg_level_errors = [c for c in pkg_level_checks if not c.passed]
     if pkg_level_errors:
