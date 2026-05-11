@@ -446,6 +446,9 @@ def _build_package_impl(
         baseline_dir=_baseline_dir,
         # GAP-002: environment lock — deployer verifies this matches --env at Ship time.
         target_env=config.environment,
+        # GAP-004: change management ticket reference and enforcement flag.
+        change_ref=config.change_ref,
+        require_change_ref=_read_require_change_ref(config.source_dir, config.environment),
     )
 
     # -- Phase 8a: Compute and stamp Phase 1 Trust Report --
@@ -756,6 +759,8 @@ def _split_into_paired_packages(
         requires=[],
         discovery=dict(manifest.discovery),
         target_env=manifest.target_env,
+        change_ref=manifest.change_ref,
+        require_change_ref=manifest.require_change_ref,
     )
 
     # 7. Re-write BUILD.json on both sides.
@@ -2313,6 +2318,39 @@ def _generate_integrity_file(pkg_dir: str) -> str:
         len(file_hashes),
     )
     return package_hash
+
+
+def _read_require_change_ref(source_dir: str, environment: str) -> bool:
+    """Read require_change_ref for *environment* from ships.yaml (GAP-004).
+
+    Returns True when ships.yaml declares::
+
+        environments:
+          <ENV>:
+            require_change_ref: true
+
+    Returns False when ships.yaml is absent, the environment block is
+    missing, or the key is not set.
+
+    Args:
+        source_dir:  Project root directory containing ships.yaml.
+        environment: Target environment name (e.g. 'PRD').
+
+    Returns:
+        True if change_ref is required for this environment.
+    """
+    ships_yaml_path = os.path.join(source_dir, "ships.yaml")
+    if not os.path.isfile(ships_yaml_path):
+        return False
+    try:
+        from td_release_packager.orchestrator import ships_yaml as _sy
+
+        data = _sy.load(ships_yaml_path)
+        envs = data.get("environments", {})
+        env_cfg = envs.get(environment, envs.get(environment.upper(), {}))
+        return bool(env_cfg.get("require_change_ref", False))
+    except Exception:
+        return False
 
 
 def _generate_checksum(archive_path: str) -> str:

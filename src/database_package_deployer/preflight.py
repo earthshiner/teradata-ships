@@ -1001,3 +1001,74 @@ def check_env_lock(package_dir: str, deployed_env: str) -> List[PreflightCheck]:
             severity="INFO",
         )
     ]
+
+
+# ---------------------------------------------------------------
+# Change reference check (GAP-004)
+# ---------------------------------------------------------------
+
+
+def check_change_ref_present(package_dir: str) -> List[PreflightCheck]:
+    """Verify a change ticket reference is present when required (GAP-004).
+
+    Reads ``require_change_ref`` and ``change_ref`` from BUILD.json.
+    When ``require_change_ref`` is True and ``change_ref`` is null or
+    absent, an ERROR is returned.
+
+    When ``require_change_ref`` is False or absent, the check passes
+    regardless of whether ``change_ref`` is set.
+
+    Args:
+        package_dir: Path to the extracted package directory.
+
+    Returns:
+        List of PreflightCheck results (zero or one entry).
+    """
+    build_json = os.path.join(package_dir, "BUILD.json")
+    if not os.path.isfile(build_json):
+        logger.debug("change_ref_present: BUILD.json not found — skipping.")
+        return []
+
+    try:
+        with open(build_json, encoding="utf-8") as fh:
+            manifest = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("change_ref_present: could not read BUILD.json: %s", exc)
+        return []
+
+    require = manifest.get("require_change_ref", False)
+    if not require:
+        logger.debug(
+            "change_ref_present: require_change_ref=false for this environment — skipping."
+        )
+        return []
+
+    change_ref = manifest.get("change_ref")
+    if not change_ref:
+        logger.error(
+            "change_ref_present: production deployment requires a change reference."
+        )
+        return [
+            PreflightCheck(
+                check_name="change_ref_present",
+                passed=False,
+                database="(package)",
+                message=(
+                    "change_ref_present — production deployment requires a change "
+                    "reference (--change-ref <ticket>). Build this package with "
+                    "--change-ref CHG0012345 and redeploy."
+                ),
+                severity="ERROR",
+            )
+        ]
+
+    logger.info("change_ref_present: change_ref '%s' present — OK.", change_ref)
+    return [
+        PreflightCheck(
+            check_name="change_ref_present",
+            passed=True,
+            database="(package)",
+            message=f"change_ref_present — change reference '{change_ref}' present.",
+            severity="INFO",
+        )
+    ]

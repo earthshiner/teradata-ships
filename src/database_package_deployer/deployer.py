@@ -55,7 +55,12 @@ from database_package_deployer.models import (
     SYSTEM_EXISTENCE_QUERIES,
     TABLE_KIND_MAP,
 )
-from database_package_deployer.preflight import check_env_lock, check_package_hash, run_preflight
+from database_package_deployer.preflight import (
+    check_change_ref_present,
+    check_env_lock,
+    check_package_hash,
+    run_preflight,
+)
 from database_package_deployer.report import generate_report
 from database_package_deployer.schema_comparator import (
     compare_schemas,
@@ -457,6 +462,9 @@ def _deploy_package_impl(
 
     # GAP-002: verify package's target_env matches the operator's --env flag.
     pkg_level_checks.extend(check_env_lock(package_dir, deployed_env))
+
+    # GAP-004: verify change ticket reference is present when required.
+    pkg_level_checks.extend(check_change_ref_present(package_dir))
 
     pkg_level_errors = [c for c in pkg_level_checks if not c.passed]
     if pkg_level_errors:

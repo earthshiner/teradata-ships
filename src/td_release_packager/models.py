@@ -174,6 +174,8 @@ class BuildConfig:
     description: str = ""
     source_commit: str = ""
     allow_dirty: bool = False
+    # GAP-004: optional change management ticket reference.
+    change_ref: Optional[str] = None
 
 
 @dataclass
@@ -262,6 +264,15 @@ class BuildManifest:
     # deployer can verify the operator has not aimed this package at
     # the wrong environment.
     target_env: str = ""
+    # GAP-004: change management ticket reference.
+    # Null when not supplied.  When the target environment has
+    # require_change_ref: true in ships.yaml, Ship will fail if this
+    # is absent or null.
+    change_ref: Optional[str] = None
+    # Whether the target environment requires a change reference.
+    # Stamped from ships.yaml at Package time so the deployer can
+    # enforce the policy without access to the project config.
+    require_change_ref: bool = False
 
 
 @dataclass

@@ -2174,6 +2174,7 @@ def _run_build(args, stage, issue_codes) -> int:
         description=args.description or "",
         source_commit=args.commit or "",
         allow_dirty=getattr(args, "allow_dirty", False),
+        change_ref=getattr(args, "change_ref", None),
     )
 
     (main_pair, companion_pair) = build_package(config)
@@ -3754,6 +3755,17 @@ def _build_parser():
         help="Build even if the working tree has uncommitted changes. "
         "Stamps source_dirty=true in BUILD.json so the Trust Report "
         "flags the package as READY-WITH-CAVEATS.",
+    )
+    bp.add_argument(
+        "--change-ref",
+        dest="change_ref",
+        default=None,
+        metavar="TICKET_ID",
+        help=(
+            "Change management ticket reference (e.g. CHG0012345). "
+            "Written to BUILD.json as change_ref. Required when the "
+            "target environment has require_change_ref: true in ships.yaml."
+        ),
     )
 
     # -- scan --
