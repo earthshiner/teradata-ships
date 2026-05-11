@@ -204,11 +204,44 @@ The deployer is designed for production reliability:
 | Foreign Server | `.fsvr` | System |
 | C Source (co-artefact) | `.c` / `.h` | — |
 
+## Security
+
+SHIPS includes a layered security model covering package integrity, signing, access
+controls, and audit logging:
+
+| Feature | Description | How to use |
+|---|---|---|
+| SHA-256 package integrity | Every file in `payload/` and `lib/` is hashed; deployment aborts if any file is modified post-build | Automatic |
+| HMAC signing | HMAC-SHA256 package signing with a shared team key | `ships package --signing-key key.txt` |
+| Ed25519 asymmetric signing | CI-only private key; public key committed to repo; DBAs cannot forge | `ships keygen`; `ships package --asymmetric-key private.pem` |
+| Secret scanning | Scans DDL/DML bodies for embedded credentials | `inspect.conf secret_scan=ERROR` |
+| Environment lock | Prevents deploying a PRD package to DEV (or vice versa) | Automatic (`--env PRD` on deploy) |
+| Change ticket reference | Requires a change ticket for production deployments | `ships package --change-ref CHG0012345` |
+| 4-eyes approval | Second operator approves before deployment | `ships approve <zip>` + `--approval-code CODE` on deploy |
+| Audit log | Structured JSON at end of every Ship | `ships.yaml audit_sink: file:///path/audit.jsonl` |
+| Dynamic SQL detection | Flags `EXECUTE IMMEDIATE` in procedures | `inspect.conf dynamic_sql=WARNING` |
+| Sensitivity classification | `.cls` companion files for PII/PCI tagging | `inspect.conf sensitivity_class=WARNING` |
+| Excess privilege check | Warns on over-privileged deploy accounts | Automatic in preflight |
+| Vault / env references | `$env:VAR` and `vault:path#key` in token maps | In `.conf` files |
+| Package TTL | Warns on stale packages | `ships.yaml package_max_age_days: 30` |
+| Rollback integrity | SHA-256 of every snapshot; verified before restore | Automatic |
+| Grant drift detection | Compares declared vs live grants | `ships audit-grants <package_dir>` |
+| TLS enforcement | Warns if connection lacks TLS/SSL | `--encryptdata true` on deploy |
+| Deploy from GitHub Release | Download and verify directly from a GitHub Release | `ships deploy --from-github org/repo --release-tag v1.0 --asset PKG.zip` |
+
+See [`docs/security_prerequisites.md`](docs/security_prerequisites.md) and
+[`docs/OPERATIONS_GUIDE.md`](docs/OPERATIONS_GUIDE.md) for the full reference.
+
+---
+
 ## Documentation
 
 - **[Installation Guide](docs/INSTALLATION.md)** — Prerequisites, setup, verification
 - **[User Guide](docs/USER_GUIDE.md)** — Complete workflow walkthrough
 - **[Agent Integration](docs/AGENT_INTEGRATION.md)** — Autonomous agent and MCP tool usage
+- **[Operations Guide](docs/OPERATIONS_GUIDE.md)** — DBA deployment reference, preflight checks, rollback
+- **[Security Prerequisites](docs/security_prerequisites.md)** — Network controls, signing, key management
+- **[FAQ](docs/FAQ.md)** — Answers to common questions by topic
 
 ## Testing
 
