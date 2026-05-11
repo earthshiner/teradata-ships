@@ -80,6 +80,35 @@ The deployment engine (`database_package_deployer`) is embedded in the package's
 
 ---
 
+## Preflight checks
+
+Every deployment runs a set of preflight checks before any database connection is
+opened. The following checks are performed automatically:
+
+| Check | Default severity | What triggers it |
+|---|---|---|
+| `package_hash` | ERROR | Archive `.sha256` sidecar mismatch |
+| `env_lock` | ERROR | PRD package targeting a non-PRD environment (or vice versa) |
+| `secret_scan` | ERROR (configurable) | Embedded credentials in DDL/DML bodies |
+| `change_ref_present` | ERROR (when `require_change_ref: true`) | No change ticket on a PRD package |
+| `hmac_signature` | ERROR (when key configured) | HMAC signature absent or invalid |
+| `asym_signature` | ERROR (when public key configured) | Ed25519 signature absent or invalid |
+| `mpa_approval` | ERROR (when `require_approvals: 2`) | No 4-eyes approval code |
+| `audit_sink` | WARNING | No `audit_sink` configured in `ships.yaml` |
+| `dynamic_sql` | WARNING (configurable) | `EXECUTE IMMEDIATE` in procedures |
+| `sensitivity_class` | WARNING (configurable) | No `.cls` companion for PII/PCI objects |
+| `excess_privilege` | WARNING | Deploy account has over-broad privileges |
+| `package_age` | WARNING | Package older than `package_max_age_days` |
+| `rollback_integrity` | ERROR | Rollback snapshot SHA-256 mismatch |
+| `grant_drift` | WARNING | Undeclared or missing grants detected |
+| `tls_connection` | WARNING (ERROR when `require_tls: true`) | Connection lacks TLS/SSL |
+
+Severity thresholds are configurable in `config/inspect.conf` (for package-build-time
+checks) and in `ships.yaml` (for deploy-time checks). ERROR-severity failures abort
+the deployment before any DDL is executed.
+
+---
+
 ## Before you deploy: the pre-deployment checklist
 
 Run through this before every live deployment. It takes two minutes and prevents most deployment failures.
@@ -507,6 +536,147 @@ Use `--on-drift skip` instead of `--on-drift continue`. SHIPS will roll back all
 ### Rollback and the build counter
 
 Rollback packages get a new build number (auto-incremented from the current `.build_counter`). The `source_commit` in `BUILD.json` records the tag's commit hash, so the audit trail clearly shows "build 0048 was a rollback to tag v1.2.3 / commit abc1234".
+
+---
+
+## 4-Eyes approval workflow
+
+When `require_approvals: 2` is set in `ships.yaml` for an environment, a second
+operator must approve the package before deployment.
+
+**Step 1 — First operator: generate the approval code**
+
+```bash
+ships approve /path/to/package.zip --signing-key /etc/ships/signing.key
+```
+
+The command prints an approval code. Communicate this to the deploying DBA through
+your change management system (not verbally or in plain email).
+
+**Step 2 — Second operator: deploy with the approval code**
+
+```bash
+python deploy.py \
+    --host myserver \
+    --user ships_dba \
+    --approval-code CODE_FROM_STEP_1
+```
+
+The preflight check verifies the code before opening a database connection. If the
+code is absent or invalid, the deployment is blocked.
+
+---
+
+## Grant drift check (`ships audit-grants`)
+
+Use `ships audit-grants` to compare the GRANT statements declared in a package's DCL
+files against the live grant state in Teradata. Run it after deployment as a
+compliance check, or before deployment to pre-validate.
+
+```bash
+ships audit-grants /path/to/package_dir \
+    --host myhost \
+    --user ships_dba
+```
+
+Output:
+
+```
+MATCHED      (12) — grants declared and confirmed live
+MISSING       (2) — in DCL but not in Teradata — run the missing GRANTs manually
+UNDECLARED    (1) — live in Teradata but not declared — investigate and remove or absorb
+```
+
+Exit 0 = no drift. Exit 1 = drift detected. Integrate this into the post-deployment
+runbook for production environments.
+
+---
+
+## Audit log
+
+Configure `ships.yaml` to write a structured JSON audit event at the end of every
+Ship:
+
+```yaml
+audit_sink: file:///var/log/ships/audit.jsonl
+```
+
+The audit log records the package name, build number, environment, operator, preflight
+outcomes, object counts, and package hash. One JSON object per line (NDJSON format).
+
+For syslog forwarding or SIEM integration, configure a remote sink:
+
+```yaml
+audit_sink: syslog://loghost:514
+```
+
+If no `audit_sink` is configured, a WARNING preflight check fires — deployments still
+proceed, but the audit trail gap is flagged.
+
+---
+
+## TLS enforcement
+
+All connections to Teradata should use TLS/SSL encryption. Pass the flag on the deploy
+command:
+
+```bash
+python deploy.py --host myserver --user ships_dba --encryptdata true
+```
+
+Or set `sslmode`:
+
+```bash
+python deploy.py --host myserver --user ships_dba --sslmode require
+```
+
+To enforce TLS for a specific environment and have the `tls_connection` preflight check
+block the deployment if it is absent, add this to `ships.yaml`:
+
+```yaml
+environments:
+  PRD:
+    require_tls: true
+```
+
+---
+
+## Deploying from GitHub Releases (`--from-github`)
+
+Once CI publishes the package as a GitHub Release, DBAs can deploy without a file
+transfer. SHIPS downloads the ZIP and all available sidecar files (`.sha256`, `.hmac`,
+`.sig`) from the release, verifies them, and proceeds with normal deployment.
+
+```bash
+python deploy.py \
+    --from-github org/repo \
+    --release-tag v1.2.3 \
+    --asset PRD_Pkg_BUILD_0001.zip \
+    --host myserver \
+    --user ships_dba
+```
+
+**Sidecar verification:** SHIPS automatically downloads and verifies any `.sha256`,
+`.hmac`, or `.sig` files published alongside the named asset. All verification steps
+run before a database connection is opened.
+
+**Private repositories:** set `GITHUB_TOKEN` in the environment:
+
+```bash
+export GITHUB_TOKEN=ghp_...
+python deploy.py --from-github org/repo ...
+```
+
+**GitHub Enterprise Server:**
+
+```bash
+export SHIPS_GITHUB_API_URL=https://github.mycompany.com/api/v3
+python deploy.py --from-github org/repo ...
+```
+
+This workflow eliminates the file-transfer step from the runbook and ensures the
+package deployed is byte-for-byte what CI published — no manual copying, no
+accidental version mismatch.
 
 ---
 
