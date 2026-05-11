@@ -13,6 +13,7 @@ Answers to the most common questions. Organised by topic — jump to the section
 - [Environment promotion](#environment-promotion)
 - [Schema drift detection](#schema-drift-detection)
 - [Audit trail and decisions.json](#audit-trail-and-decisionsjson)
+- [Security](#security)
 - [General](#general)
 
 ---
@@ -846,6 +847,82 @@ python -m td_release_packager process \
 SHIPS downloads the repository tarball via the GitHub REST API, extracts it to a temporary directory, runs the full pipeline, and then cleans up. The resolved commit SHA is automatically stamped into `BUILD.json` as `source_commit`. No `git` installation required.
 
 Authentication: `--github-token TOKEN` or `GITHUB_TOKEN` environment variable. Public repositories work without a token (subject to 60 req/hr rate limit). Private repositories require a PAT with `repo` scope.
+
+---
+
+## Security
+
+### How do I prevent someone from editing the embedded deployer code to bypass security checks?
+
+Two layers. First, `package_integrity.json` now covers both `payload/` and `lib/` — any
+edit to the deployer files changes the package hash and the deploy fails before any
+database connection is made. Second, use Ed25519 asymmetric signing
+(`ships package --asymmetric-key private.pem`): only the CI pipeline with the private
+key can produce a valid signature; DBAs verify with the public key and cannot forge it
+even with full access to the extracted package.
+
+---
+
+### What is the minimum key management infrastructure for asymmetric package signing?
+
+Very little. Run `ships keygen` once to generate an Ed25519 key pair. Store the private
+key in your CI/CD platform's secrets (GitHub Actions: `SHIPS_PRIVATE_KEY_PATH`). Commit
+`ships_signing_public.pem` to your project repository — it is a public key and safe to
+share. No certificate authority, HSM, or PKI required.
+
+---
+
+### Can the DBA deploy directly from GitHub without receiving the ZIP file?
+
+Yes. Once CI publishes the package as a GitHub Release, the DBA runs:
+
+```bash
+ships deploy \
+    --from-github org/repo \
+    --release-tag v1.2.3 \
+    --asset PRD_Pkg_BUILD_0001.zip \
+    --host myhost \
+    --user ships_dba
+```
+
+SHIPS downloads the ZIP and all available sidecar files (`.sha256`, `.hmac`, `.sig`)
+from the release, verifies them, and proceeds with normal deployment. The `GITHUB_TOKEN`
+environment variable is used for private repositories.
+
+---
+
+### What is the `ships audit-grants` command?
+
+It compares the GRANT statements declared in a package's DCL files against the current
+live grant state in Teradata, and reports:
+
+| Category | Meaning |
+|---|---|
+| `UNDECLARED` | Grant present in Teradata but not in DCL |
+| `MISSING` | Grant in DCL but not present in Teradata |
+| `MATCHED` | Grant declared in DCL and confirmed in Teradata |
+
+Exit 0 = no drift. Exit 1 = drift detected. Use it as a post-deployment gate or a
+standing compliance check.
+
+---
+
+### How do I add a change ticket reference to a package?
+
+Pass `--change-ref CHG0012345` when packaging:
+
+```bash
+ships package \
+    --source /projects/OMR \
+    --env PRD \
+    --env-config config/env/PRD.conf \
+    --name OMR \
+    --change-ref CHG0012345
+```
+
+For environments that require it, add `require_change_ref: true` under the environment
+block in `ships.yaml`. The Ship preflight will then fail if the package has no change
+reference.
 
 ---
 

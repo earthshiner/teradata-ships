@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import sys
+import tempfile
 
 from database_package_deployer.deployer import (
     deploy_package,
@@ -79,6 +80,22 @@ def _cmd_deploy(args):
     """Execute the 'deploy' command with mandatory pre-flight."""
     from database_package_deployer.otel import deployer_span
 
+    # -- Optional: download package from GitHub Release before connecting --
+    _gh_tmp_dir: str = ""
+    if getattr(args, "from_github", None):
+        _gh_tmp_dir = tempfile.mkdtemp(prefix="ships_deploy_")
+        try:
+            _gh_tmp_dir = _download_github_package(args, _gh_tmp_dir)
+        except Exception as exc:
+            print(f"\nERROR: GitHub download failed: {exc}", file=sys.stderr)
+            sys.exit(1)
+    elif not getattr(args, "package_dir", None):
+        print(
+            "ERROR: package_dir is required unless --from-github is supplied.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     # Build connection params before connecting so they can be passed to the TLS check.
     _conn_params = _build_connection_params(args)
     cursor = _connect(args)
@@ -109,6 +126,7 @@ def _cmd_deploy(args):
                 deployed_env=getattr(args, "env", "") or "",
                 approval_code=getattr(args, "approval_code", "") or "",
                 connection_params=_conn_params,
+                public_key_path=getattr(args, "public_key", "") or "",
             )
             otel_span.set_attribute("ships.deploy.completed", result.completed)
             otel_span.set_attribute("ships.deploy.failed", result.failed)
@@ -124,6 +142,78 @@ def _cmd_deploy(args):
     finally:
         cursor.close()
         cursor.connection.close()
+        if _gh_tmp_dir and os.path.isdir(_gh_tmp_dir):
+            import shutil
+
+            try:
+                shutil.rmtree(_gh_tmp_dir, ignore_errors=True)
+                logger.debug("github_source: cleaned up temp dir %s", _gh_tmp_dir)
+            except Exception as _clean_exc:
+                logger.warning(
+                    "github_source: could not clean up temp dir '%s': %s",
+                    _gh_tmp_dir,
+                    _clean_exc,
+                )
+
+
+def _download_github_package(args, tmp_dir: str) -> str:
+    """Download a SHIPS package from a GitHub Release into *tmp_dir*.
+
+    Validates that ``--release-tag`` and ``--asset`` are supplied, then
+    calls ``github_source.download_release_assets`` and
+    ``github_source.extract_zip_to_dir``.  Redirects ``args.package_dir``
+    to the extracted package directory.
+
+    Args:
+        args:    Parsed CLI arguments (must have from_github, release_tag, asset).
+        tmp_dir: Temporary directory for downloads.
+
+    Returns:
+        The *tmp_dir* root (the extracted package dir is set on args).
+
+    Raises:
+        SystemExit: When required flags are missing.
+        Exception:  Propagates download/extraction errors to the caller.
+    """
+    from database_package_deployer.github_source import (
+        download_release_assets,
+        extract_zip_to_dir,
+    )
+
+    release_tag = getattr(args, "release_tag", None)
+    asset_name = getattr(args, "asset", None)
+
+    if not release_tag:
+        print(
+            "ERROR: --release-tag is required when --from-github is supplied.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if not asset_name:
+        print(
+            "ERROR: --asset is required when --from-github is supplied.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    logger.info(
+        "Downloading '%s' from %s release %s ...",
+        asset_name,
+        args.from_github,
+        release_tag,
+    )
+    zip_path = download_release_assets(
+        owner_repo=args.from_github,
+        release_tag=release_tag,
+        asset_name=asset_name,
+        dest_dir=tmp_dir,
+    )
+
+    pkg_dir = extract_zip_to_dir(zip_path, tmp_dir)
+    args.package_dir = pkg_dir
+    logger.info("github_source: package directory set to '%s'", pkg_dir)
+    return tmp_dir
 
 
 # ---------------------------------------------------------------
@@ -715,7 +805,43 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     dp.add_argument(
         "package_dir",
-        help="Directory containing DDL files.",
+        nargs="?",
+        default=None,
+        help=(
+            "Directory containing DDL files. "
+            "Omit when using --from-github (the directory is resolved automatically)."
+        ),
+    )
+    dp.add_argument(
+        "--from-github",
+        dest="from_github",
+        default=None,
+        metavar="OWNER/REPO",
+        help=(
+            "Download the package from this GitHub repository before deploying. "
+            "Requires --release-tag and --asset. "
+            "Uses GITHUB_TOKEN for private repositories."
+        ),
+    )
+    dp.add_argument(
+        "--release-tag",
+        dest="release_tag",
+        default=None,
+        metavar="TAG",
+        help=(
+            "GitHub Release tag to download from (e.g. v1.2.3, or 'latest'). "
+            "Required with --from-github."
+        ),
+    )
+    dp.add_argument(
+        "--asset",
+        dest="asset",
+        default=None,
+        metavar="FILENAME",
+        help=(
+            "Name of the ZIP asset in the GitHub Release (e.g. my_package_PRD_0042.zip). "
+            "Required with --from-github."
+        ),
     )
     dp.add_argument(
         "--pattern",
@@ -759,6 +885,17 @@ def _build_arg_parser() -> argparse.ArgumentParser:
             "4-eyes approval code produced by 'ships approve <package_zip>' "
             "(GAP-006). Required when the target environment has "
             "require_approvals: 2 in ships.yaml."
+        ),
+    )
+    dp.add_argument(
+        "--public-key",
+        dest="public_key",
+        default="",
+        metavar="KEY_FILE",
+        help=(
+            "Path to an Ed25519 public key PEM file for verifying the .sig "
+            "sidecar (Option C). Falls back to SHIPS_PUBLIC_KEY_PATH env var, "
+            "the key embedded in BUILD.json, and SHIPS_PUBLIC_KEY env var."
         ),
     )
     _add_conn_args(dp)

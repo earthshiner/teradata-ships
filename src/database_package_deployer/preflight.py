@@ -1562,3 +1562,165 @@ def _is_truthy(value) -> bool:
         return value
     s = str(value).lower().strip()
     return s in ("true", "1", "yes", "on", "require", "verify-ca", "verify-full")
+
+
+# ---------------------------------------------------------------
+# Ed25519 asymmetric signature check (Option C)
+# ---------------------------------------------------------------
+
+
+def check_asymmetric_signature(
+    package_dir: str,
+    public_key_path: str = "",
+) -> List[PreflightCheck]:
+    """Verify the Ed25519 ``.sig`` sidecar alongside the package ZIP (Option C).
+
+    Resolution order for the public key:
+        1. *public_key_path* argument — path to a PEM file.
+        2. BUILD.json ``ships_public_key`` field — PEM string embedded at build time.
+        3. ``SHIPS_PUBLIC_KEY_PATH`` env var — path to a PEM file.
+        4. ``SHIPS_PUBLIC_KEY`` env var — raw PEM string.
+        5. None — returns an ERROR (no key to verify against).
+
+    Skips silently (returns ``[]``) when no ``.sig`` file exists AND
+    ``require_asymmetric_signature`` is False in BUILD.json.
+
+    Args:
+        package_dir:     Extracted package directory.
+        public_key_path: Optional path to an Ed25519 public key PEM file.
+
+    Returns:
+        List of PreflightCheck results (zero or one entry).
+    """
+    build_json = os.path.join(package_dir, "BUILD.json")
+    manifest: dict = {}
+    if os.path.isfile(build_json):
+        try:
+            with open(build_json, encoding="utf-8") as fh:
+                manifest = json.load(fh)
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    package_filename = manifest.get("package_filename", "")
+    require_asym = bool(manifest.get("require_asymmetric_signature", False))
+
+    # Locate the ZIP file
+    zip_path: Optional[str] = None
+    if package_filename:
+        candidate = os.path.join(package_dir, package_filename)
+        if os.path.isfile(candidate):
+            zip_path = candidate
+    if zip_path is None:
+        # Fall back to any ZIP in the package directory
+        for entry in os.listdir(package_dir):
+            if entry.lower().endswith(".zip"):
+                zip_path = os.path.join(package_dir, entry)
+                break
+
+    if zip_path is None:
+        if require_asym:
+            return [
+                PreflightCheck(
+                    check_name="asym_signature",
+                    passed=False,
+                    database="(package)",
+                    message=(
+                        "asym_signature — no ZIP archive found in package directory; "
+                        "cannot verify Ed25519 signature."
+                    ),
+                )
+            ]
+        return []
+
+    sig_path = zip_path + ".sig"
+    sig_exists = os.path.isfile(sig_path)
+
+    if not sig_exists and not require_asym:
+        logger.debug(
+            "asym_signature: no .sig sidecar and require_asymmetric_signature is False — skipping."
+        )
+        return []
+
+    if not sig_exists and require_asym:
+        return [
+            PreflightCheck(
+                check_name="asym_signature",
+                passed=False,
+                database="(package)",
+                message=(
+                    "asym_signature — Ed25519 .sig sidecar is absent but "
+                    "require_asymmetric_signature is true in BUILD.json. "
+                    "Rebuild the package with --asymmetric-key."
+                ),
+            )
+        ]
+
+    # .sig present — resolve public key
+    from database_package_deployer.asym_signing import (
+        resolve_public_key_pem,
+        verify_zip,
+    )
+
+    # Priority: arg → BUILD.json embedded key → env vars (handled by resolve_public_key_pem)
+    embedded_pem = manifest.get("ships_public_key", "").strip()
+    public_pem = resolve_public_key_pem(public_key_path or None)
+    if not public_pem and embedded_pem:
+        public_pem = embedded_pem
+
+    if not public_pem:
+        return [
+            PreflightCheck(
+                check_name="asym_signature",
+                passed=False,
+                database="(package)",
+                message=(
+                    "asym_signature — .sig sidecar found but no public key is available "
+                    "to verify it. Supply --public-key, set SHIPS_PUBLIC_KEY_PATH, "
+                    "or embed the key in ships.yaml signing.public_key."
+                ),
+            )
+        ]
+
+    # Verify — check for missing cryptography package
+    try:
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey  # noqa: F401
+    except ImportError:
+        return [
+            PreflightCheck(
+                check_name="asym_signature",
+                passed=False,
+                database="(package)",
+                message=(
+                    "asym_signature — the 'cryptography' package is required to verify "
+                    "Ed25519 signatures. Install it with: pip install cryptography>=42.0"
+                ),
+            )
+        ]
+
+    valid = verify_zip(zip_path, public_pem, sig_path)
+    if valid:
+        return [
+            PreflightCheck(
+                check_name="asym_signature",
+                passed=True,
+                database="(package)",
+                message=(
+                    f"asym_signature — Ed25519 signature valid for "
+                    f"'{os.path.basename(zip_path)}'."
+                ),
+                severity="INFO",
+            )
+        ]
+
+    return [
+        PreflightCheck(
+            check_name="asym_signature",
+            passed=False,
+            database="(package)",
+            message=(
+                f"asym_signature — Ed25519 signature INVALID for "
+                f"'{os.path.basename(zip_path)}'. "
+                "The archive may have been tampered with."
+            ),
+        )
+    ]

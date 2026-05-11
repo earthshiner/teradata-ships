@@ -72,6 +72,12 @@ DEFAULT_RULES: Dict[str, str] = {
     # Vault / secret ref rule (GAP-011).
     # vault_ref: detect unresolved $env: or vault: prefixes in payload files.
     "vault_ref": "ERROR",
+    # Environment token coverage rule.
+    # zero_tokens: every deployable DDL/DML object must reference at least one
+    # {{TOKEN}} placeholder so it resolves correctly per environment.
+    # Files with zero token references have hardcoded environment assumptions
+    # and cannot be safely promoted across DEV → TST → PRD.
+    "zero_tokens": "ERROR",
     # Extension is ERROR, not WARNING. A staged file whose
     # extension disagrees with its content is the package and the
     # metadata lying to each other — the deployer and any
@@ -329,6 +335,14 @@ def generate_default_config() -> str:
         "# vault_ref: detect unresolved $env: or vault: prefixes in payload files.",
         "# Defaults to ERROR — these should never appear in deployed payload.",
         f"vault_ref={DEFAULT_RULES['vault_ref']}",
+        "",
+        "# Environment token coverage rule",
+        "# zero_tokens: every deployable DDL/DML object must reference at least one",
+        "# {{TOKEN}} placeholder. Files with zero tokens have hardcoded environment",
+        "# assumptions and cannot be safely promoted across environments.",
+        "# Defaults to ERROR. Set to WARNING for gradual migration of legacy codebases,",
+        "# or OFF to disable while performing the initial tokenisation sweep.",
+        f"zero_tokens={DEFAULT_RULES['zero_tokens']}",
         "",
         "# Cross-file structural rules",
         "# intra_package_dependency: object lives in a database/user that",
@@ -908,6 +922,7 @@ def _validate_directory_impl(
         file_issues.extend(_check_extension(rel_path, clean, file_path))
         file_issues.extend(_check_type_suffixes(rel_path, clean))
         file_issues.extend(_check_hardcoded_names(rel_path, clean))
+        file_issues.extend(_check_zero_tokens(rel_path, clean))
         file_issues.extend(_check_keyword_case(rel_path, clean))
         file_issues.extend(
             _check_leading_commas(
@@ -1334,6 +1349,88 @@ def _check_hardcoded_names(rel_path: str, content: str) -> List[ValidationIssue]
                     )
                 ]
     return []
+
+
+def _check_zero_tokens(rel_path: str, content: str) -> List[ValidationIssue]:
+    """Check that every deployable DDL/DML object is usable by SHIPS for tokenisation.
+
+    Three cases, in order of environment awareness:
+
+        1. {{TOKEN}} present  → PASS.  The file is already tokenised.
+        2. Hardcoded Database.Object name, no token  → PASS.  SHIPS can detect the
+           literal database name and auto-tokenise it via ``--auto-tokenise``.
+           The ``hardcoded_name`` WARNING surfaces this separately.
+        3. No database qualifier AND no token  → ERROR.  The developer has written
+           an unqualified object name (e.g. ``CREATE TABLE Customer (...)``).
+           SHIPS has nothing to tokenise because there is no database name to
+           replace.  The developer must add the database qualifier themselves.
+
+    System-scope objects (Maps, Roles, Profiles, Authorisations, Foreign Servers)
+    are excluded — they have no database qualifier by design and are identical
+    across all environments.
+
+    Args:
+        rel_path: Relative path of the file being checked.
+        content:  Comment-stripped file content.
+
+    Returns:
+        One ValidationIssue (ERROR) only for case 3 — no qualifier and no token.
+        Empty list for cases 1 and 2.
+    """
+    # Only applies to source files. Post-Harvest payload files legitimately
+    # contain resolved literal names — do not fire on them.
+    _path_parts = set(re.split(r"[/\\]", rel_path))
+    if "payload" in _path_parts:
+        return []
+
+    # Must be a classifiable DDL/DML object type.
+    obj_type = None
+    for pattern, otype in _CLASSIFY_PATTERNS:
+        if pattern.search(content):
+            obj_type = otype
+            break
+
+    if obj_type is None:
+        return []
+
+    # System-scope objects carry no database qualifier — tokens not expected.
+    if obj_type in _SYSTEM_SCOPE_TYPES:
+        return []
+
+    # Case 1: file already has {{TOKEN}} references — environment-aware.
+    if _TOKEN_RE.search(content):
+        return []
+
+    # Case 2: file has a database-qualified name (Database.Object or
+    # {{TOKEN}}.Object).  The hardcoded literal gives SHIPS something to
+    # detect and replace via --auto-tokenise.  Pass here; the separate
+    # hardcoded_name WARNING will surface the literal for the developer.
+    name_match = _QUALIFIED_NAME_RE.search(content)
+    if name_match:
+        qualified = name_match.group(1).replace('"', "")
+        if "." in qualified:
+            return []
+
+    # Case 3: no token AND no database qualifier — SHIPS cannot auto-tokenise
+    # because there is no database name to work with.  The developer must add
+    # a database qualifier (e.g. {{MY_DB}}.ObjectName) before SHIPS can help.
+    return [
+        ValidationIssue(
+            file=rel_path,
+            rule="zero_tokens",
+            severity="ERROR",
+            message=(
+                "No database qualifier found in this file. Every deployable DDL "
+                "and DML object must be fully qualified as Database.ObjectName "
+                "(or {{TOKEN}}.ObjectName). Without a database qualifier SHIPS "
+                "cannot tokenise the file and it cannot be safely deployed to "
+                "any environment. Add a database qualifier — use a {{TOKEN}} "
+                "placeholder if the target database varies per environment, or "
+                "a literal name that SHIPS can auto-tokenise via "
+                "'ships harvest --auto-tokenise'."
+            ),
+        )
+    ]
 
 
 def _check_keyword_case(rel_path: str, content: str) -> List[ValidationIssue]:
