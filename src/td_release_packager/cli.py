@@ -2174,10 +2174,26 @@ def _run_build(args, stage, issue_codes) -> int:
         description=args.description or "",
         source_commit=args.commit or "",
         allow_dirty=getattr(args, "allow_dirty", False),
+        change_ref=getattr(args, "change_ref", None),
     )
 
     (main_pair, companion_pair) = build_package(config)
     archive_path, manifest = main_pair
+
+    # -- GAP-005: sign the package archive(s) if a key is available --
+    _signing_key_path = getattr(args, "signing_key", None)
+    try:
+        from database_package_deployer.signing import sign_package as _sign
+
+        hmac_path = _sign(archive_path, _signing_key_path)
+        if hmac_path:
+            print(f"  Signed:      {hmac_path}")
+        if companion_pair is not None:
+            companion_hmac = _sign(companion_pair[0], _signing_key_path)
+            if companion_hmac:
+                print(f"  Signed:      {companion_hmac}")
+    except Exception as _sign_exc:
+        logger.warning("Package signing failed (non-fatal): %s", _sign_exc)
 
     # -- Record outputs and issues --
     stage.set_outputs(
@@ -3754,6 +3770,28 @@ def _build_parser():
         help="Build even if the working tree has uncommitted changes. "
         "Stamps source_dirty=true in BUILD.json so the Trust Report "
         "flags the package as READY-WITH-CAVEATS.",
+    )
+    bp.add_argument(
+        "--signing-key",
+        dest="signing_key",
+        default=None,
+        metavar="KEY_FILE",
+        help=(
+            "Path to a file containing the HMAC-SHA256 signing key. "
+            "When supplied (or SHIPS_SIGNING_KEY env var is set), a "
+            ".hmac sidecar is written alongside the archive (GAP-005)."
+        ),
+    )
+    bp.add_argument(
+        "--change-ref",
+        dest="change_ref",
+        default=None,
+        metavar="TICKET_ID",
+        help=(
+            "Change management ticket reference (e.g. CHG0012345). "
+            "Written to BUILD.json as change_ref. Required when the "
+            "target environment has require_change_ref: true in ships.yaml."
+        ),
     )
 
     # -- scan --

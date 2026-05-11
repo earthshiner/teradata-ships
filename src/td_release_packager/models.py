@@ -174,6 +174,8 @@ class BuildConfig:
     description: str = ""
     source_commit: str = ""
     allow_dirty: bool = False
+    # GAP-004: optional change management ticket reference.
+    change_ref: Optional[str] = None
 
 
 @dataclass
@@ -257,6 +259,39 @@ class BuildManifest:
     trust: Dict[str, object] = field(default_factory=dict)
     discovery: Dict[str, object] = field(default_factory=dict)
     baseline_dir: str = ""
+    # Security: explicit target environment lock (GAP-002).
+    # Set to the same value as ``environment`` at Package time so the
+    # deployer can verify the operator has not aimed this package at
+    # the wrong environment.
+    target_env: str = ""
+    # GAP-004: change management ticket reference.
+    # Null when not supplied.  When the target environment has
+    # require_change_ref: true in ships.yaml, Ship will fail if this
+    # is absent or null.
+    change_ref: Optional[str] = None
+    # Whether the target environment requires a change reference.
+    # Stamped from ships.yaml at Package time so the deployer can
+    # enforce the policy without access to the project config.
+    require_change_ref: bool = False
+    # GAP-005: whether the target environment requires a package signature.
+    # Stamped from ships.yaml environments.<ENV>.require_signature at
+    # Package time.
+    require_signature: bool = False
+    # GAP-006: minimum number of approvals required for Ship.
+    # 1 = self-certify (default, no approval code needed).
+    # 2 = 4-eyes (a second operator must run 'ships approve').
+    require_approvals: int = 1
+    # GAP-015: whether TLS/SSL is required for the connection.
+    # Stamped from ships.yaml environments.<ENV>.require_tls at Package time.
+    require_tls: bool = False
+    # GAP-012: explicit build timestamp for TTL/staleness checks.
+    # Set to the same value as timestamp at Package time.
+    package_built_at: str = ""
+    # Maximum age in days before the package_age check fires.
+    # 0 = disabled.  Default: 30.
+    package_max_age_days: int = 30
+    # 'warning' or 'error' — severity when the package exceeds max age.
+    package_age_violation_level: str = "warning"
 
 
 @dataclass

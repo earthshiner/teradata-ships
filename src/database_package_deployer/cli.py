@@ -66,6 +66,10 @@ def main():
         _cmd_rollback(args)
     elif args.command == "status":
         _cmd_status(args)
+    elif args.command == "approve":
+        _cmd_approve(args)
+    elif args.command == "audit-grants":
+        _cmd_audit_grants(args)
     else:
         parser.print_help()
         sys.exit(1)
@@ -75,6 +79,8 @@ def _cmd_deploy(args):
     """Execute the 'deploy' command with mandatory pre-flight."""
     from database_package_deployer.otel import deployer_span
 
+    # Build connection params before connecting so they can be passed to the TLS check.
+    _conn_params = _build_connection_params(args)
     cursor = _connect(args)
 
     # Parse file patterns from comma-separated string
@@ -100,6 +106,9 @@ def _cmd_deploy(args):
                 ordered_files=ordered_files,
                 stop_on_failure=not args.continue_on_error,
                 dry_run=args.dry_run,
+                deployed_env=getattr(args, "env", "") or "",
+                approval_code=getattr(args, "approval_code", "") or "",
+                connection_params=_conn_params,
             )
             otel_span.set_attribute("ships.deploy.completed", result.completed)
             otel_span.set_attribute("ships.deploy.failed", result.failed)
@@ -372,6 +381,58 @@ def _cmd_status(args):
 
 
 # ---------------------------------------------------------------
+# approve command (GAP-006)
+# ---------------------------------------------------------------
+
+
+def _cmd_audit_grants(args):
+    """Compare declared vs live grants and report drift."""
+    from database_package_deployer.grant_audit import audit_grants
+
+    cursor = _connect(args)
+    try:
+        report = audit_grants(cursor, args.package_dir)
+    finally:
+        cursor.close()
+        cursor.connection.close()
+
+    # JSON output to stdout
+    print(json.dumps(report, indent=2, default=list))
+
+    # Human-readable summary to stderr
+    drift = report["drift"]
+    matched = len(report["MATCHED"])
+    missing = len(report["MISSING"])
+    undeclared = len(report["UNDECLARED"])
+    print(
+        f"\nGrant audit: {matched} matched, {missing} missing, {undeclared} undeclared.",
+        file=sys.stderr,
+    )
+    if drift:
+        print("DRIFT DETECTED — review the report above.", file=sys.stderr)
+    else:
+        print("No drift detected.", file=sys.stderr)
+
+    sys.exit(1 if drift else 0)
+
+
+def _cmd_approve(args):
+    """Generate a time-limited 4-eyes approval code for a package."""
+    from database_package_deployer.mpa import generate_approval_code
+
+    code = generate_approval_code(args.package_zip)
+    if code is None:
+        print(
+            "\nERROR: SHIPS_SIGNING_KEY is not set. "
+            "Set the environment variable to generate an approval code.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    print(code)
+
+
+# ---------------------------------------------------------------
 # Output formatting
 # ---------------------------------------------------------------
 
@@ -519,6 +580,38 @@ def _read_order_file(
 # ---------------------------------------------------------------
 
 
+def _build_connection_params(args) -> dict:
+    """Build the connection params dict from CLI args (GAP-015).
+
+    Returns the dict that would be passed to teradatasql.connect().
+    Used by the TLS check to inspect encryption settings before or
+    alongside the actual connection.
+    """
+    host = getattr(args, "host", None) or os.environ.get("TD_HOST", "")
+    user = getattr(args, "user", None) or os.environ.get("TD_USER", "")
+    password = getattr(args, "password", None) or os.environ.get("TD_PASSWORD", "")
+    logmech = getattr(args, "logmech", None) or os.environ.get("TD_LOGMECH", "")
+    encryptdata = getattr(args, "encryptdata", None) or os.environ.get(
+        "TD_ENCRYPTDATA", ""
+    )
+    sslmode = getattr(args, "sslmode", None) or os.environ.get("TD_SSLMODE", "")
+
+    params = {}
+    if host:
+        params["host"] = host
+    if user:
+        params["user"] = user
+    if password:
+        params["password"] = password
+    if logmech:
+        params["logmech"] = logmech
+    if encryptdata:
+        params["encryptdata"] = encryptdata
+    if sslmode:
+        params["sslmode"] = sslmode
+    return params
+
+
 def _connect(args):
     """Establish a Teradata database connection."""
     try:
@@ -647,6 +740,27 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Continue past failures.",
     )
+    dp.add_argument(
+        "--env",
+        metavar="ENV",
+        default="",
+        help=(
+            "Target environment name (e.g. PRD, DEV). When supplied, the "
+            "package's target_env field is verified to match before any DDL "
+            "executes (env_lock check, GAP-002). Omit to skip this check."
+        ),
+    )
+    dp.add_argument(
+        "--approval-code",
+        dest="approval_code",
+        default="",
+        metavar="CODE",
+        help=(
+            "4-eyes approval code produced by 'ships approve <package_zip>' "
+            "(GAP-006). Required when the target environment has "
+            "require_approvals: 2 in ships.yaml."
+        ),
+    )
     _add_conn_args(dp)
 
     # -- analyze --
@@ -749,6 +863,33 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Path to .deploy_manifest.json.",
     )
 
+    # -- audit-grants (GAP-014) --
+    ag = subs.add_parser(
+        "audit-grants",
+        help=(
+            "[GAP-014] Compare declared vs live grants and report drift. "
+            "Exit 0 = no drift, exit 1 = drift detected."
+        ),
+    )
+    ag.add_argument(
+        "package_dir",
+        help="Extracted package directory (contains payload/02_dcl/).",
+    )
+    _add_conn_args(ag)
+
+    # -- approve (GAP-006) --
+    ap = subs.add_parser(
+        "approve",
+        help=(
+            "[GAP-006] Generate a time-limited 4-eyes approval code for a package. "
+            "Requires SHIPS_SIGNING_KEY to be set."
+        ),
+    )
+    ap.add_argument(
+        "package_zip",
+        help="Path to the release ZIP archive to approve.",
+    )
+
     return parser
 
 
@@ -769,6 +910,22 @@ def _add_conn_args(parser):
     parser.add_argument(
         "--logmech",
         help="Logon mechanism (or TD_LOGMECH).",
+    )
+    parser.add_argument(
+        "--encryptdata",
+        default="",
+        help=(
+            "Enable TLS encryption (e.g. 'true'). "
+            "Passed to teradatasql as encryptdata. (or TD_ENCRYPTDATA)."
+        ),
+    )
+    parser.add_argument(
+        "--sslmode",
+        default="",
+        help=(
+            "TLS SSL mode (e.g. 'require', 'verify-ca'). "
+            "Passed to teradatasql as sslmode. (or TD_SSLMODE)."
+        ),
     )
 
 
