@@ -750,10 +750,10 @@ def _onboard_scan(source_dir: str) -> dict:
                 content = open(path, encoding="utf-8", errors="replace").read()
             except OSError:
                 continue
-            findings = find_legacy_placeholders(content)
+            findings = find_legacy_placeholders(content, path)
             if findings:
                 legacy_files.add(path)
-                legacy_count += sum(len(f.occurrences) for f in findings)
+                legacy_count += len(findings)
             if _SHIPS_TOKEN_RE.search(content):
                 token_files.add(path)
 
