@@ -375,6 +375,9 @@ class FakeFastMCP:
         self.settings = FakeSettings()
         self._token_verifier = None
         self._run = MagicMock()
+        # Stub so tests that inspect real FastMCP internals don't AttributeError
+        self._tool_manager = MagicMock()
+        self._tool_manager._tools = {}
 
     def tool(self):
         def decorator(fn):
@@ -413,12 +416,36 @@ def _install_fake_mcp_for_auth() -> FakeFastMCP:
 
 @pytest.fixture(autouse=True)
 def fresh_ships_mcp_for_auth():
-    """Reload ships_mcp with fresh fakes before each auth CLI test."""
-    sys.modules.pop("ships_mcp", None)
+    """Reload ships_mcp with fresh fakes before each auth CLI test.
+
+    Saves the pre-test state of every sys.modules entry we modify and
+    restores them on teardown so subsequent test files that use the real
+    mcp package are not contaminated by the fakes.
+    """
+    MCP_KEYS = [
+        "mcp", "mcp.server", "mcp.server.fastmcp",
+        "mcp.server.auth", "mcp.server.auth.settings",
+    ]
+
+    # Snapshot originals before touching anything (None = didn't exist)
+    originals = {k: sys.modules.get(k) for k in MCP_KEYS}
+    ships_mcp_original = sys.modules.pop("ships_mcp", None)
+
     _install_fake_mcp_for_auth()
+
     import ships_mcp  # noqa: F401
     yield
+
+    # Teardown: drop ships_mcp and restore every mcp.* entry
     sys.modules.pop("ships_mcp", None)
+    for key, original_value in originals.items():
+        if original_value is None:
+            sys.modules.pop(key, None)
+        else:
+            sys.modules[key] = original_value
+
+    if ships_mcp_original is not None:
+        sys.modules["ships_mcp"] = ships_mcp_original
 
 
 def _run_auth_main(argv):
