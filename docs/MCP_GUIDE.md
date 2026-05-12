@@ -24,23 +24,63 @@ uv sync   # installs mcp and all other dependencies
 
 ---
 
+## Transports
+
+SHIPS MCP supports three transports. Choose based on your deployment model.
+
+| Transport | MCP spec | Use when |
+|---|---|---|
+| `stdio` | 2024-11-05 | Client launches the server as a subprocess (Claude Desktop, Claude Code) |
+| `streamable-http` | 2025-03-26 | Enterprise: server runs as a standalone HTTP service; multiple clients connect over the network |
+| `sse` | 2024-11-05 | Legacy SSE clients not yet migrated to streamable-http |
+
+---
+
 ## Starting the server
 
-The MCP server communicates over stdio. You do not start it manually — the MCP client starts it as a subprocess based on your configuration.
-
-**Verify the server starts:**
+**stdio (default) — subprocess transport:**
 ```bash
-uv run python src/ships_mcp.py --help
-# or just:
 uv run python src/ships_mcp.py
-# → starts the server and waits for MCP protocol messages
+# starts the server and waits for MCP protocol messages on stdin/stdout
 ```
+
+**streamable-http — enterprise HTTP transport:**
+```bash
+# Bind to all interfaces, port 8000 (default endpoint: /mcp)
+uv run python src/ships_mcp.py --transport streamable-http --host 0.0.0.0 --port 8000
+
+# Stateless mode — new session per request, for serverless / load-balanced deployments
+uv run python src/ships_mcp.py --transport streamable-http --host 0.0.0.0 --port 8000 --stateless
+
+# Custom endpoint path
+uv run python src/ships_mcp.py --transport streamable-http --port 8000 --path /api/ships
+```
+
+**sse — legacy SSE transport:**
+```bash
+uv run python src/ships_mcp.py --transport sse --host 0.0.0.0 --port 8000
+```
+
+**All flags:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--transport` | `stdio` | Transport: `stdio`, `streamable-http`, or `sse` |
+| `--host` | `127.0.0.1` | Bind address (HTTP transports only) |
+| `--port` | `8000` | Listen port (HTTP transports only) |
+| `--path` | `/mcp` or `/sse` | Endpoint URL path (HTTP transports only) |
+| `--stateless` | off | New session per request — serverless/load-balanced deployments |
+| `--log-level` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` / `CRITICAL` |
+
+All HTTP settings may also be supplied via `FASTMCP_*` environment variables (`FASTMCP_HOST`, `FASTMCP_PORT`, `FASTMCP_LOG_LEVEL`, etc.). CLI flags take precedence.
+
+> **TLS note:** Terminate TLS at a reverse proxy (nginx, API Gateway, etc.) in front of the server. The MCP server speaks plain HTTP; TLS is the responsibility of the network layer.
 
 ---
 
 ## Configuration
 
-### Claude Code
+### Claude Code (stdio)
 
 Add to your project's `.claude/settings.json` or your user settings:
 
@@ -58,7 +98,7 @@ Add to your project's `.claude/settings.json` or your user settings:
 
 After saving, run `/mcp` in Claude Code to verify the server is connected and the tools appear.
 
-### Claude Desktop (macOS)
+### Claude Desktop (macOS) — stdio
 
 Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
@@ -74,7 +114,7 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-### Claude Desktop (Windows)
+### Claude Desktop (Windows) — stdio
 
 Edit `%APPDATA%\Claude\claude_desktop_config.json`:
 
@@ -90,12 +130,33 @@ Edit `%APPDATA%\Claude\claude_desktop_config.json`:
 }
 ```
 
-### Generic MCP client
+### Enterprise deployment — streamable-http
 
-Any client that supports the MCP stdio transport can connect:
+Run the server as a long-lived service (systemd, Docker, Kubernetes, etc.) and point clients at it over HTTP:
+
+```bash
+# Start the server (example: all interfaces, port 8000)
+uv run python src/ships_mcp.py --transport streamable-http --host 0.0.0.0 --port 8000
+```
+
+Client configuration (any MCP client that supports streamable-http):
+```json
+{
+  "mcpServers": {
+    "ships": {
+      "url": "http://ships-mcp.internal:8000/mcp",
+      "transport": "streamable-http"
+    }
+  }
+}
+```
+
+For load-balanced or serverless deployments, add `--stateless` so each request gets an independent session without server-side session state.
+
+### Generic stdio client
 
 ```python
-import subprocess, json
+import subprocess
 
 proc = subprocess.Popen(
     ["uv", "run", "python", "src/ships_mcp.py"],
@@ -105,6 +166,18 @@ proc = subprocess.Popen(
     stderr=subprocess.PIPE,
 )
 # Send MCP protocol messages via proc.stdin / proc.stdout
+```
+
+### Generic streamable-http client
+
+```python
+import httpx
+
+# POST to the /mcp endpoint with MCP protocol JSON bodies
+response = httpx.post(
+    "http://ships-mcp.internal:8000/mcp",
+    json={"jsonrpc": "2.0", "method": "tools/list", "id": 1},
+)
 ```
 
 ---
