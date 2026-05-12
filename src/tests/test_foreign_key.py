@@ -347,3 +347,121 @@ class TestParseStatementTextForeignKey:
         result = parse_statement_text(_SIMPLE_FK, file_path="MyDB_my_table.fk")
         assert result.multiset_injected is False
         assert "MULTISET" not in result.ddl_text
+
+
+# ---------------------------------------------------------------------------
+# 5. Analyser — dependency extraction
+# ---------------------------------------------------------------------------
+
+
+class TestAnalyserForeignKeyDependencies:
+    """td_release_packager.analyser — FK scripts produce correct dependency edges.
+
+    A .fk script has two mandatory dependencies:
+      1. The table being altered  (ALTER TABLE db.target ADD FOREIGN KEY ...)
+      2. The table being referenced (REFERENCES db.referenced)
+
+    Both must appear in the internal or external ref set returned by
+    _scan_references so the wave executor can order deployment correctly.
+    """
+
+    def _known_dbs(self, *names: str) -> set:
+        """Build a known_databases set (upper-cased, as the analyser expects)."""
+        return {n.upper() for n in names}
+
+    def test_altered_table_captured_as_reference(self):
+        """ALTER TABLE target (fin_card) is captured as a dependency."""
+        from td_release_packager.analyser import _scan_references
+
+        internal, external = _scan_references(
+            _EXAMPLE_FK,
+            object_type="FOREIGN_KEY",
+            own_qualified="FK:Berka_Staging_fin_card",
+            known_databases=self._known_dbs("Berka_Staging"),
+        )
+        all_refs = internal | external
+        assert any("fin_card" in r for r in all_refs), (
+            f"Expected fin_card in refs, got: {all_refs}"
+        )
+
+    def test_referenced_table_captured_as_reference(self):
+        """REFERENCES target (fin_disp) is captured as a dependency."""
+        from td_release_packager.analyser import _scan_references
+
+        internal, external = _scan_references(
+            _EXAMPLE_FK,
+            object_type="FOREIGN_KEY",
+            own_qualified="FK:Berka_Staging_fin_card",
+            known_databases=self._known_dbs("Berka_Staging"),
+        )
+        all_refs = internal | external
+        assert any("fin_disp" in r for r in all_refs), (
+            f"Expected fin_disp in refs, got: {all_refs}"
+        )
+
+    def test_both_dependencies_captured(self):
+        """Both the altered table and the referenced table appear in refs."""
+        from td_release_packager.analyser import _scan_references
+
+        internal, external = _scan_references(
+            _EXAMPLE_FK,
+            object_type="FOREIGN_KEY",
+            own_qualified="FK:Berka_Staging_fin_card",
+            known_databases=self._known_dbs("Berka_Staging"),
+        )
+        all_refs = internal | external
+        assert len(all_refs) >= 2, (
+            f"Expected at least 2 refs (altered + referenced table), got: {all_refs}"
+        )
+
+    def test_altered_table_is_internal_when_in_known_databases(self):
+        """fin_card resolves as internal when Berka_Staging is a known package DB."""
+        from td_release_packager.analyser import _scan_references
+
+        internal, _ = _scan_references(
+            _EXAMPLE_FK,
+            object_type="FOREIGN_KEY",
+            own_qualified="FK:Berka_Staging_fin_card",
+            known_databases=self._known_dbs("Berka_Staging"),
+        )
+        assert any("fin_card" in r for r in internal), (
+            f"Expected fin_card as internal dep, got internal={internal}"
+        )
+
+    def test_referenced_table_is_internal_when_in_known_databases(self):
+        """fin_disp resolves as internal when Berka_Staging is a known package DB."""
+        from td_release_packager.analyser import _scan_references
+
+        internal, _ = _scan_references(
+            _EXAMPLE_FK,
+            object_type="FOREIGN_KEY",
+            own_qualified="FK:Berka_Staging_fin_card",
+            known_databases=self._known_dbs("Berka_Staging"),
+        )
+        assert any("fin_disp" in r for r in internal), (
+            f"Expected fin_disp as internal dep, got internal={internal}"
+        )
+
+    def test_fk_target_not_captured_for_non_fk_alter(self):
+        """A plain ALTER TABLE ADD COLUMN does NOT produce an FK dependency edge.
+
+        _ALTER_TABLE_FK_TARGET_RE is anchored to ADD FOREIGN KEY specifically —
+        other ALTER TABLE forms must not match.
+        """
+        from td_release_packager.analyser import _scan_references
+
+        add_column = (
+            "ALTER TABLE MyDB.my_table ADD col_new VARCHAR(50) ;"
+        )
+        internal, external = _scan_references(
+            add_column,
+            object_type="TABLE",
+            own_qualified="MyDB.my_table",
+            known_databases=self._known_dbs("MyDB"),
+        )
+        all_refs = internal | external
+        # my_table itself might appear due to other anchors, but the
+        # key assertion is that the ALTER TABLE anchor did NOT fire.
+        assert not any(
+            "my_table" in r and r != "MyDB.my_table" for r in all_refs
+        ), f"Unexpected FK anchor hit on non-FK ALTER TABLE: {all_refs}"

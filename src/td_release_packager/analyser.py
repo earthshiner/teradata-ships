@@ -225,6 +225,16 @@ _QNAME = _IDENT + r"\." + _IDENT
 # Any name: qualified or unqualified (qualified tried first)
 _NAME = rf"(?:{_QNAME}|{_IDENT})"
 
+# Quoted-identifier-aware single part — handles both bare names and
+# double-quoted names (e.g. "Berka_Staging", fin_card).
+_IDENT_Q = r'(?:"[^"]+"|[A-Za-z_]\w*|\{\{[A-Za-z_]\w*\}\}\w*)'
+
+# Quoted-identifier-aware qualified name: db.obj (either part may be quoted)
+_QNAME_Q = _IDENT_Q + r"\." + _IDENT_Q
+
+# Quoted-identifier-aware _NAME (qualified tried first)
+_NAME_Q = rf"(?:{_QNAME_Q}|{_IDENT_Q})"
+
 # -- System databases (references to these are never dependencies)
 
 _SYSTEM_DATABASES = frozenset(
@@ -339,7 +349,31 @@ _TRIGGER_EVENT_ON_RE = re.compile(
 )
 
 # -- Foreign key REFERENCES ------------------------------------
-_FK_REFERENCES_RE = re.compile(rf"(?ix)\bREFERENCES\s+({_NAME})")
+
+# Foreign key REFERENCES clause — captures the referenced table name.
+# Uses _NAME_Q (quoted-identifier-aware) because Teradata FK scripts
+# commonly use double-quoted identifiers.
+# Skips the optional WITH NO CHECK OPTION clause that Teradata allows
+# between REFERENCES and the actual table name:
+#   REFERENCES WITH NO CHECK OPTION db.table
+#   REFERENCES db.table
+_FK_REFERENCES_RE = re.compile(
+    rf"(?ix)\bREFERENCES\s+(?:WITH\s+NO\s+CHECK\s+OPTION\s+)?({_NAME_Q})"
+)
+
+# -- ALTER TABLE target (FK alter scripts) ---------------------
+# Catches:  ALTER TABLE db.table ADD FOREIGN KEY ...
+# Captures the table being altered as a dependency so that both
+# the referencing table AND the referenced table are modelled as
+# edges in the dependency graph for .fk scripts.
+# Uses _NAME_Q (quoted-identifier-aware) because Teradata FK scripts
+# commonly use double-quoted identifiers (e.g. "Berka_Staging"."fin_card").
+# Scoped to ALTER TABLE ... ADD FOREIGN KEY specifically to avoid
+# false-positive dependencies from ALTER TABLE ADD COLUMN or
+# similar statements inside procedure bodies.
+_ALTER_TABLE_FK_TARGET_RE = re.compile(
+    rf"(?ix)\bALTER\s+TABLE\s+({_NAME_Q})\s+ADD\s+FOREIGN\s+KEY\b"
+)
 
 # -- COLLECT STATISTICS ON -------------------------------------
 # Catches:  COLLECT [SUMMARY] STATISTICS ... ON db.table
@@ -506,6 +540,12 @@ def _classify_ref(
         parts = ref.split(".", 1)
         db_part = parts[0].strip()
         obj_part = parts[1].strip()
+        # Strip double-quotes from quoted identifiers
+        # e.g. "Berka_Staging"."fin_card" → Berka_Staging, fin_card
+        if db_part.startswith('"') and db_part.endswith('"'):
+            db_part = db_part[1:-1]
+        if obj_part.startswith('"') and obj_part.endswith('"'):
+            obj_part = obj_part[1:-1]
     else:
         # Unqualified — no database prefix.
         # Cannot resolve to a dependency without a DATABASE
@@ -622,6 +662,11 @@ def _scan_references(
 
     # Foreign key REFERENCES
     for m in _FK_REFERENCES_RE.finditer(body):
+        raw_refs.append(m.group(1).strip())
+
+    # ALTER TABLE db.table ADD FOREIGN KEY — the altered table is also
+    # a dependency: it must exist before the constraint can be applied.
+    for m in _ALTER_TABLE_FK_TARGET_RE.finditer(body):
         raw_refs.append(m.group(1).strip())
 
     # COLLECT [SUMMARY] STATISTICS ... ON db.table
