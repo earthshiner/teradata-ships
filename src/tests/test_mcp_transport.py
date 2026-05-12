@@ -48,6 +48,9 @@ class FakeFastMCP:
     def __init__(self, *args, **kwargs):
         self.settings = FakeSettings()
         self._run = MagicMock()
+        # Stub so tests that inspect real FastMCP internals don't AttributeError
+        self._tool_manager = MagicMock()
+        self._tool_manager._tools = {}
 
     def tool(self):
         """No-op decorator so @mcp.tool() works at ships_mcp module level."""
@@ -87,16 +90,32 @@ def fresh_ships_mcp():
     """
     For each test: install a fresh FakeFastMCP, remove any cached ships_mcp,
     reimport it so the module-level mcp = FastMCP(...) gets our fake instance,
-    then tear down.
+    then tear down — restoring any mcp.* sys.modules entries to their
+    pre-test state so subsequent test files that use the real mcp package
+    are not contaminated by the fakes.
     """
-    # Remove any prior ships_mcp so module-level code re-runs on import
-    sys.modules.pop("ships_mcp", None)
+    MCP_KEYS = ["mcp", "mcp.server", "mcp.server.fastmcp"]
 
-    instance = _install_fake_mcp()
+    # Snapshot the originals before we touch anything (None = didn't exist)
+    originals = {k: sys.modules.get(k) for k in MCP_KEYS}
+    ships_mcp_original = sys.modules.pop("ships_mcp", None)
+
+    _install_fake_mcp()
 
     import ships_mcp  # noqa: F401
     yield
+
+    # Teardown: drop ships_mcp and restore every mcp.* entry
     sys.modules.pop("ships_mcp", None)
+    for key, original_value in originals.items():
+        if original_value is None:
+            sys.modules.pop(key, None)
+        else:
+            sys.modules[key] = original_value
+
+    # Restore ships_mcp if it existed before the test (unlikely but correct)
+    if ships_mcp_original is not None:
+        sys.modules["ships_mcp"] = ships_mcp_original
 
 
 def _run_main(argv: List[str]) -> None:

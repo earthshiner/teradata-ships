@@ -60,6 +60,23 @@ class ObjectType(Enum):
     # indexes so both the referencing and referenced tables exist.
     FOREIGN_KEY = "FOREIGN_KEY"
 
+    # Statistics collection scripts: COLLECT [SUMMARY] STATISTICS ... ON db.table
+    # or UPDATE STATISTICS (Teradata synonym). Carried under ``DDL/statistics/``
+    # and executed after tables AND indexes so the optimiser has accurate
+    # data (including indexed column statistics) before views compile.
+    STATISTICS = "STATISTICS"
+
+    # COMMENT ON TABLE/VIEW/COLUMN/MACRO/PROCEDURE/FUNCTION scripts.
+    # Carried under ``DDL/comments/`` and executed after all objects
+    # exist so every target of a COMMENT ON statement is present.
+    COMMENT = "COMMENT"
+
+    # C source and header files for C/C++ UDFs. These are compiled into
+    # a JAR before deployment — they are NOT executed directly against
+    # Teradata. Carried for traceability only.
+    C_SOURCE = "C_SOURCE"
+    C_HEADER = "C_HEADER"
+
     # -- System-scoped objects (no database qualifier, no tokens) --
     MAP = "MAP"
     ROLE = "ROLE"
@@ -152,10 +169,15 @@ STRATEGY_MAP = {
     ObjectType.JAR: DeployStrategy.DIRECT_EXECUTE,
     ObjectType.SCRIPT_TABLE_OPERATOR: DeployStrategy.REPLACE_IN_PLACE,
     ObjectType.DML: DeployStrategy.DIRECT_EXECUTE,
-    # FK alters are executed as-is — no idempotency guard needed
-    # because Teradata FK constraints use WITH NO CHECK OPTION
-    # and re-running is typically harmless in practice.
+    # FK alters are executed as-is.
     ObjectType.FOREIGN_KEY: DeployStrategy.DIRECT_EXECUTE,
+    # COLLECT / UPDATE STATISTICS execute as-is after tables exist.
+    ObjectType.STATISTICS: DeployStrategy.DIRECT_EXECUTE,
+    # COMMENT ON executes as-is after all objects exist.
+    ObjectType.COMMENT: DeployStrategy.DIRECT_EXECUTE,
+    # C source/header files are compiled into JARs — not executed against Teradata.
+    ObjectType.C_SOURCE: DeployStrategy.NOT_DEPLOYED,
+    ObjectType.C_HEADER: DeployStrategy.NOT_DEPLOYED,
     # System-scoped objects — skip silently if already present
     ObjectType.MAP: DeployStrategy.SKIP_IF_EXISTS,
     ObjectType.ROLE: DeployStrategy.SKIP_IF_EXISTS,
@@ -190,6 +212,11 @@ SCOPE_MAP = {
     ObjectType.SCRIPT_TABLE_OPERATOR: DeployScope.ENVIRONMENT,
     ObjectType.DML: DeployScope.ENVIRONMENT,
     ObjectType.FOREIGN_KEY: DeployScope.ENVIRONMENT,
+    ObjectType.STATISTICS: DeployScope.ENVIRONMENT,
+    ObjectType.COMMENT: DeployScope.ENVIRONMENT,
+    # C source/header files are system-level build artefacts, not environment-specific.
+    ObjectType.C_SOURCE: DeployScope.SYSTEM,
+    ObjectType.C_HEADER: DeployScope.SYSTEM,
 }
 
 # -- Deployment ordering: objects deployed in this sequence --
@@ -212,19 +239,29 @@ DEPLOY_ORDER = {
     ObjectType.JOIN_INDEX: 1,
     ObjectType.HASH_INDEX: 1,
     ObjectType.INDEX: 1,
-    # FK alters deploy after tables and indexes so both sides of the
-    # relationship are guaranteed to exist before the constraint is added.
+    # FK alters deploy after tables and indexes.
     ObjectType.FOREIGN_KEY: 1,
-    ObjectType.VIEW: 2,
-    ObjectType.MACRO: 3,
-    ObjectType.PROCEDURE: 3,
-    ObjectType.FUNCTION: 3,
-    ObjectType.JAR: 3,
-    ObjectType.SCRIPT_TABLE_OPERATOR: 4,
-    ObjectType.TRIGGER: 5,
+    # COLLECT STATISTICS runs after tables AND indexes (order 2 > 1) so
+    # the optimiser captures indexed column statistics, not just row-level.
+    # Must complete before views compile (view query plans use statistics).
+    ObjectType.STATISTICS: 2,
+    ObjectType.VIEW: 3,
+    ObjectType.MACRO: 4,
+    ObjectType.PROCEDURE: 4,
+    ObjectType.FUNCTION: 4,
+    ObjectType.JAR: 4,
+    ObjectType.SCRIPT_TABLE_OPERATOR: 5,
+    ObjectType.TRIGGER: 6,
+    # COMMENT ON runs after every object it might describe exists.
+    ObjectType.COMMENT: 7,
     # DML runs last so every target table, view, and trigger that
     # the data load depends on has already been deployed.
-    ObjectType.DML: 6,
+    ObjectType.DML: 8,
+    # C source/header files are not deployed — order is irrelevant but
+    # must be present for coverage enforcement. Use 98 so UNKNOWN (99)
+    # remains the definitive last entry.
+    ObjectType.C_SOURCE: 98,
+    ObjectType.C_HEADER: 98,
     ObjectType.UNKNOWN: 99,
 }
 

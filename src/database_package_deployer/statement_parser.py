@@ -255,6 +255,28 @@ _FOREIGN_KEY_RE = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
+# COLLECT [SUMMARY] STATISTICS ... ON db.table
+# UPDATE STATISTICS is a Teradata synonym — both refresh optimiser stats.
+# The ON clause may be preceded by COLUMN/INDEX qualifiers of arbitrary
+# length, so we use a non-greedy match to reach the target table name.
+_STATISTICS_RE = re.compile(
+    rf"""
+    (?:COLLECT\s+(?:SUMMARY\s+)?|UPDATE\s+)   # COLLECT [SUMMARY] or UPDATE
+    STATISTICS                                  # keyword
+    \b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+# COMMENT ON TABLE/VIEW/COLUMN/MACRO/PROCEDURE/FUNCTION db.obj IS '...'
+_COMMENT_ON_RE = re.compile(
+    r"""
+    \bCOMMENT\s+ON\s+
+    (?:TABLE|VIEW|COLUMN|MACRO|PROCEDURE|FUNCTION)\b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
 # -- Detect whether SET/MULTISET is already specified --
 _HAS_SET_MULTISET_RE = re.compile(
     r"""
@@ -366,8 +388,10 @@ def parse_statement_text(ddl_text: str, file_path: str = "<inline>") -> ParsedSt
             "FUNCTION, TRIGGER, or CREATE DATABASE, JOIN INDEX, INDEX, "
             "USER, ROLE, PROFILE, MAP, AUTHORIZATION, FOREIGN SERVER, "
             "GRANT, REVOKE, CALL SQLJ.INSTALL_JAR, "
-            "INSERT/UPDATE/DELETE/MERGE, or "
-            "ALTER TABLE ... ADD FOREIGN KEY."
+            "INSERT/UPDATE/DELETE/MERGE, "
+            "ALTER TABLE ... ADD FOREIGN KEY, "
+            "COLLECT/UPDATE STATISTICS, or "
+            "COMMENT ON TABLE/VIEW/COLUMN/MACRO/PROCEDURE/FUNCTION."
         )
 
     # -- Extract database and object name --
@@ -393,6 +417,15 @@ def parse_statement_text(ddl_text: str, file_path: str = "<inline>") -> ParsedSt
         # captured first target (a multi-target DML file would
         # otherwise collide with another file sharing that target).
         ObjectType.DML,
+        # STATISTICS — qualified name is filename-derived.
+        # The _STATISTICS_RE detects the statement type but does not
+        # extract the ON-clause table name; filename is the reliable key.
+        ObjectType.STATISTICS,
+        # COMMENT — COMMENT ON COLUMN has three-part names; use filename key.
+        ObjectType.COMMENT,
+        # C source/header files are not deployed — bypass the qualifier check.
+        ObjectType.C_SOURCE,
+        ObjectType.C_HEADER,
     }
 
     if db_name is None and object_type not in _SINGLE_NAME_TYPES:
@@ -482,6 +515,25 @@ def parse_statement_text(ddl_text: str, file_path: str = "<inline>") -> ParsedSt
         if db_name is None:
             db_name = ""
 
+    # STATISTICS: multiple .stt scripts may target the same table, so use
+    # a filename-derived manifest key to avoid collisions.
+    if object_type == ObjectType.STATISTICS and file_path:
+        basename = os.path.splitext(os.path.basename(file_path))[0]
+        qualified_name = f"STT:{basename}"
+        if not obj_name:
+            obj_name = basename
+        if db_name is None:
+            db_name = ""
+
+    # COMMENT: COMMENT ON COLUMN has three-part names; use filename key.
+    if object_type == ObjectType.COMMENT and file_path:
+        basename = os.path.splitext(os.path.basename(file_path))[0]
+        qualified_name = f"CMT:{basename}"
+        if not obj_name:
+            obj_name = basename
+        if db_name is None:
+            db_name = ""
+
     return ParsedStatement(
         file_path=file_path,
         ddl_text=ddl_text,
@@ -536,8 +588,18 @@ def _detect_deploy_intent(ddl_text: str, object_type: ObjectType) -> DeployInten
         # FK alter scripts execute as-is — ALTER TABLE ... ADD FOREIGN KEY
         # has no CREATE/REPLACE verb so no strategy inference is needed.
         ObjectType.FOREIGN_KEY,
+        # COLLECT / UPDATE STATISTICS execute as-is — no object to
+        # create or replace; the statement refreshes optimiser metadata.
+        ObjectType.STATISTICS,
+        # COMMENT ON executes as-is after all objects exist.
+        ObjectType.COMMENT,
     ):
         return DeployIntent.DIRECT_EXECUTE
+
+    # C source and header files are compiled into JARs — never executed
+    # directly against Teradata.
+    if object_type in (ObjectType.C_SOURCE, ObjectType.C_HEADER):
+        return DeployIntent.NOT_DEPLOYED
 
     # JIs, hash indexes, secondary indexes — always DROP_AND_CREATE
     # (Teradata has no REPLACE for these types)
@@ -622,6 +684,10 @@ def _detect_object_type(ddl_text: str) -> Tuple[ObjectType, str]:
         # FK alters before DML — ALTER TABLE ... ADD FOREIGN KEY must
         # not fall through to the generic DML patterns below.
         (_FOREIGN_KEY_RE, ObjectType.FOREIGN_KEY),
+        # COLLECT/UPDATE STATISTICS before DML for same reason.
+        (_STATISTICS_RE, ObjectType.STATISTICS),
+        # COMMENT ON before DML — must not be mis-classified as a DML statement.
+        (_COMMENT_ON_RE, ObjectType.COMMENT),
         # DML last — comes after every CREATE/REPLACE/GRANT/REVOKE
         # form so a procedure body containing INSERT/UPDATE never
         # classifies as DML. A pure DML script reaches this rung.

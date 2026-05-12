@@ -299,14 +299,18 @@ class TestTrustTab:
         trust = {
             "label": "READY",
             "signals": {
-                "inspect_lint": {"status": "pass", "detail": "No violations"},
-                "inspect_token_format": {"status": "fail", "detail": "Malformed token"},
+                # message is the canonical key (real trust signals)
+                "inspect_lint": {"status": "pass", "message": "No violations"},
+                "inspect_token_format": {"status": "fail", "message": "Malformed token"},
+                # detail is the legacy key — kept for backward compat
+                "inspect_grants": {"status": "warn", "detail": "Legacy detail key"},
             },
         }
         html = _trust_tab(trust)
         assert "inspect_lint" in html
         assert "inspect_token_format" in html
         assert "Malformed token" in html
+        assert "Legacy detail key" in html
 
     def test_empty_signals_no_crash(self):
         html = _trust_tab({"label": "READY", "signals": {}})

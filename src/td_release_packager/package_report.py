@@ -31,6 +31,8 @@ import logging
 import os
 from typing import Dict, List, Optional, Tuple
 
+from td_release_packager.trust import TRUST_PASS, TRUST_WARN
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -440,13 +442,36 @@ def _trust_tab(trust: dict) -> str:
     rows = ""
     for name, sig in signals.items():
         status = sig.get("status", "?") if isinstance(sig, dict) else str(sig)
-        detail = sig.get("detail", "") if isinstance(sig, dict) else ""
         icon = _trust_icon(status)
+
+        # Build detail cell — always show message; for non-pass signals
+        # also list any specific issues so the operator knows what to fix.
+        if isinstance(sig, dict):
+            # Trust signals serialize with 'message'; older packages may use 'detail'
+            message = sig.get("message") or sig.get("detail", "")
+            issues = sig.get("issues", [])
+            if status == TRUST_PASS:
+                detail = f"<span style='color:#555'>{message}</span>"
+            else:
+                # Non-pass: highlight the message and list each issue
+                colour = "#B45309" if status == TRUST_WARN else "#991B1B"
+                detail = f"<span style='color:{colour};font-weight:600'>{message}</span>"
+                if issues:
+                    issue_items = "".join(
+                        f"<li style='margin-top:4px'>{i}</li>" for i in issues
+                    )
+                    detail += (
+                        f"<ul style='margin:6px 0 0 0;padding-left:18px;"
+                        f"color:{colour};font-size:12px'>{issue_items}</ul>"
+                    )
+        else:
+            detail = ""
+
         rows += (
             f"<tr>"
             f"<td style='padding:10px 12px;font-family:monospace;font-size:13px'>{name}</td>"
             f"<td style='padding:10px 12px'>{icon} {status}</td>"
-            f"<td style='padding:10px 12px;color:#555;font-size:13px'>{detail}</td>"
+            f"<td style='padding:10px 12px;font-size:13px'>{detail}</td>"
             "</tr>"
         )
 

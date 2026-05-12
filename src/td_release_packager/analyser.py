@@ -963,6 +963,44 @@ def _analyse_project_impl(project_dir: str) -> AnalysisResult:
                 result.external_deps[qn] = set()
             result.external_deps[qn].update(ext_refs)
 
+    # -- Phase 3b: Post-process — statistics objects inherit index dependencies --
+    #
+    # COLLECT STATISTICS captures the ON-clause target table as a dependency
+    # edge (Phase 3 above, via _COLLECT_STATS_ON_RE).  That places statistics
+    # after the table but potentially in the same wave as indexes (both depend
+    # on the table but not on each other).
+    #
+    # The correct semantics: statistics must run after EVERY index that has
+    # been built on the target table, so the optimiser captures indexed-column
+    # statistics and not just row-level estimates.
+    #
+    # Implementation: for each STATISTICS object, find all indexes in the
+    # package that share a dependency on the same target table.  Add a
+    # dependency edge statistics → index so the topological sort places
+    # statistics strictly after all relevant indexes.
+    _INDEX_TYPES = {"JOIN_INDEX", "HASH_INDEX", "INDEX"}
+
+    # Build a lookup: table qualified-name → set of index qualified-names
+    _table_to_indexes: dict[str, set[str]] = {}
+    for qn, obj in result.objects.items():
+        if obj.object_type in _INDEX_TYPES:
+            for dep in result.dependencies.get(qn, set()):
+                _table_to_indexes.setdefault(dep, set()).add(qn)
+
+    # For each STATISTICS object, add edges to the indexes on its target table
+    for qn, obj in result.objects.items():
+        if obj.object_type == "STATISTICS":
+            for dep_table in list(result.dependencies.get(qn, set())):
+                for index_qn in _table_to_indexes.get(dep_table, set()):
+                    if index_qn != qn:
+                        result.dependencies[qn].add(index_qn)
+                        logger.debug(
+                            "analyser: %s → %s (statistics after index on %s)",
+                            qn,
+                            index_qn,
+                            dep_table,
+                        )
+
     # -- Phase 4: Detect cycles --
     result.cycles = _detect_cycles(result.dependencies)
 
