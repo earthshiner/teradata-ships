@@ -182,6 +182,65 @@ response = httpx.post(
 
 ---
 
+## Authentication
+
+JWT/Bearer token authentication is supported for HTTP transports (`streamable-http` and `sse`). SHIPS acts as an **OAuth 2.0 Resource Server** — it validates tokens issued by your identity provider using asymmetric key verification via JWKS. SHIPS does not issue tokens.
+
+### Enabling authentication
+
+```bash
+python -m ships_mcp \
+    --transport streamable-http \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --auth-jwks-uri https://login.microsoftonline.com/{tenant}/discovery/v2.0/keys \
+    --auth-issuer  https://login.microsoftonline.com/{tenant}/v2.0 \
+    --auth-audience api://ships-mcp \
+    --auth-required-scopes ships.read,ships.deploy \
+    --auth-resource-url http://ships-mcp.internal:8000
+```
+
+Once enabled, every request to the MCP endpoint must include an `Authorization: Bearer <jwt>` header. Requests without a valid token receive HTTP 401; requests with a token lacking the required scopes receive HTTP 403.
+
+### Auth flags
+
+| Flag | Required | Description |
+|---|---|---|
+| `--auth-jwks-uri` | Yes (to enable auth) | JWKS endpoint for JWT signature verification |
+| `--auth-issuer` | Recommended | Expected `iss` claim value |
+| `--auth-audience` | Recommended | Expected `aud` claim value |
+| `--auth-required-scopes` | No | Comma-separated scopes every caller must hold |
+| `--auth-resource-url` | Yes (when `--auth-jwks-uri` set) | This server's public URL — used in `WWW-Authenticate` headers |
+
+### Identity provider JWKS URIs
+
+| Provider | JWKS URI |
+|---|---|
+| Azure AD / Entra ID | `https://login.microsoftonline.com/{tenant}/discovery/v2.0/keys` |
+| Okta | `https://{domain}/oauth2/default/v1/keys` |
+| AWS Cognito | `https://cognito-idp.{region}.amazonaws.com/{pool_id}/.well-known/jwks.json` |
+| Keycloak | `https://{host}/realms/{realm}/protocol/openid-connect/certs` |
+| Auth0 | `https://{domain}/.well-known/jwks.json` |
+
+### JWT claim mapping
+
+| JWT claim | Mapped to |
+|---|---|
+| `azp` (preferred) / `client_id` / `sub` | `AccessToken.client_id` |
+| `scope` (space-separated string) | `AccessToken.scopes` |
+| `scp` (list — Azure AD style) | `AccessToken.scopes` |
+| `exp` | `AccessToken.expires_at` |
+
+### Key rotation
+
+SHIPS caches JWKS for 1 hour. On a cache miss (unknown `kid`), the cache is refreshed immediately before failing the request. This handles seamless key rotation by the identity provider without a server restart.
+
+### Dependencies
+
+Authentication requires `PyJWT[crypto]` and `httpx`, both declared in `requirements.txt` and installed by `uv sync`. Neither is required for stdio or unauthenticated HTTP deployments.
+
+---
+
 ## Tool reference
 
 ### Pipeline tools (offline — no database connection needed)

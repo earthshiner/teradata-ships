@@ -1164,6 +1164,69 @@ def main() -> None:
         help="Log level for the MCP server (default: INFO).",
     )
 
+    # -- Auth flags (HTTP transports only) ----------------------------------
+    auth_group = parser.add_argument_group(
+        "authentication",
+        "JWT/Bearer token authentication. Requires --transport streamable-http or sse. "
+        "SHIPS acts as an OAuth 2.0 Resource Server — it validates tokens issued by "
+        "your identity provider (Azure AD, Okta, AWS Cognito, Keycloak, etc.).",
+    )
+    auth_group.add_argument(
+        "--auth-jwks-uri",
+        metavar="URL",
+        default=None,
+        help=(
+            "JWKS endpoint URL for JWT signature verification. "
+            "Examples: "
+            "Azure AD: https://login.microsoftonline.com/{tenant}/discovery/v2.0/keys  "
+            "Okta: https://{domain}/oauth2/default/v1/keys  "
+            "AWS Cognito: https://cognito-idp.{region}.amazonaws.com/{pool}/.well-known/jwks.json  "
+            "Enabling this flag activates Bearer token enforcement on all HTTP endpoints."
+        ),
+    )
+    auth_group.add_argument(
+        "--auth-issuer",
+        metavar="URL",
+        default=None,
+        help=(
+            "Expected JWT issuer (iss claim). Must match the token exactly. "
+            "Examples: "
+            "Azure AD: https://login.microsoftonline.com/{tenant}/v2.0  "
+            "Okta: https://{domain}/oauth2/default"
+        ),
+    )
+    auth_group.add_argument(
+        "--auth-audience",
+        metavar="VALUE",
+        default=None,
+        help=(
+            "Expected JWT audience (aud claim). "
+            "Typically the Application ID URI or client_id of this service. "
+            "Example: api://ships-mcp"
+        ),
+    )
+    auth_group.add_argument(
+        "--auth-required-scopes",
+        metavar="SCOPES",
+        default=None,
+        help=(
+            "Comma-separated list of OAuth scopes that every caller must hold. "
+            "Requests with tokens missing any required scope receive HTTP 403. "
+            "Example: ships.deploy,ships.read"
+        ),
+    )
+    auth_group.add_argument(
+        "--auth-resource-url",
+        metavar="URL",
+        default=None,
+        help=(
+            "Public base URL of this MCP server. Required when --auth-jwks-uri is set. "
+            "Used in WWW-Authenticate response headers per RFC 9728 "
+            "(OAuth 2.0 Protected Resource Metadata). "
+            "Example: http://ships-mcp.internal:8000"
+        ),
+    )
+
     args = parser.parse_args()
 
     # -- Validate: HTTP-only flags must not be used with stdio ----------
@@ -1172,6 +1235,22 @@ def main() -> None:
         parser.error(
             "--host, --port, --path, and --stateless are only valid with "
             "--transport streamable-http or --transport sse."
+        )
+
+    # -- Validate: auth flags require HTTP transport --------------------
+    auth_flags_set = any([
+        args.auth_jwks_uri, args.auth_issuer, args.auth_audience,
+        args.auth_required_scopes, args.auth_resource_url,
+    ])
+    if auth_flags_set and args.transport == "stdio":
+        parser.error(
+            "--auth-* flags are only valid with "
+            "--transport streamable-http or --transport sse."
+        )
+    if args.auth_jwks_uri and not args.auth_resource_url:
+        parser.error(
+            "--auth-resource-url is required when --auth-jwks-uri is set. "
+            "It identifies this MCP server in WWW-Authenticate headers."
         )
 
     # -- Apply settings to the FastMCP instance -------------------------
@@ -1193,6 +1272,49 @@ def main() -> None:
             mcp.settings.streamable_http_path = args.http_path
         elif args.transport == "sse":
             mcp.settings.sse_path = args.http_path
+
+    # -- Configure JWT/Bearer authentication ---------------------------
+    # Auth is applied to HTTP transports only; wired by setting
+    # mcp._token_verifier and mcp.settings.auth before mcp.run().
+    # FastMCP builds the ASGI app (and wires auth middleware) lazily
+    # inside run(), so both attributes must be set beforehand.
+    if args.auth_jwks_uri:
+        from ships_mcp_auth import JWTTokenVerifier
+
+        mcp._token_verifier = JWTTokenVerifier(
+            jwks_uri=args.auth_jwks_uri,
+            issuer=args.auth_issuer or None,
+            audience=args.auth_audience or None,
+        )
+
+        try:
+            from mcp.server.auth.settings import AuthSettings
+            from pydantic import AnyHttpUrl
+
+            required_scopes = (
+                [s.strip() for s in args.auth_required_scopes.split(",") if s.strip()]
+                if args.auth_required_scopes
+                else None
+            )
+
+            mcp.settings.auth = AuthSettings(
+                issuer_url=AnyHttpUrl(args.auth_issuer or args.auth_resource_url),
+                resource_server_url=AnyHttpUrl(args.auth_resource_url),
+                required_scopes=required_scopes,
+            )
+        except ImportError:  # pragma: no cover
+            # mcp package not available — auth settings not applied,
+            # but JWTTokenVerifier is still set and will be called
+            pass
+
+        logger.info(
+            "JWT authentication enabled — jwks_uri=%s  issuer=%s  audience=%s  "
+            "required_scopes=%s",
+            args.auth_jwks_uri,
+            args.auth_issuer or "(not validated)",
+            args.auth_audience or "(not validated)",
+            args.auth_required_scopes or "(none)",
+        )
 
     # -- Emit startup banner for HTTP transports ------------------------
     if args.transport in ("streamable-http", "sse"):
