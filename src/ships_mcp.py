@@ -5,10 +5,13 @@ Exposes all SHIPS pipeline stages as MCP tools so any MCP-compatible
 client (Claude Code, Claude Desktop, Cursor, custom agents) can drive
 the full deployment workflow without subprocess invocation.
 
-Run as an MCP server (stdio transport):
+Transport options
+-----------------
+stdio (default) — subprocess transport for local clients:
+
     python -m ships_mcp
 
-Or register in a Claude Desktop / Claude Code MCP config:
+    Register in Claude Desktop / Claude Code:
     {
         "mcpServers": {
             "ships": {
@@ -19,11 +22,34 @@ Or register in a Claude Desktop / Claude Code MCP config:
         }
     }
 
-Design principles:
+streamable-http — enterprise HTTP transport (MCP 2025-03-26 spec).
+Runs as a standalone service; clients connect over HTTP/HTTPS:
+
+    python -m ships_mcp --transport streamable-http --host 0.0.0.0 --port 8000
+
+    # Stateless mode for serverless / load-balanced deployments:
+    python -m ships_mcp --transport streamable-http --host 0.0.0.0 --port 8000 --stateless
+
+    # Custom endpoint path:
+    python -m ships_mcp --transport streamable-http --port 8000 --path /api/mcp
+
+sse — legacy SSE transport (MCP 2024-11-05 spec) for clients that have
+not yet migrated to streamable-http:
+
+    python -m ships_mcp --transport sse --host 0.0.0.0 --port 8000
+
+Environment variables
+---------------------
+All HTTP settings may also be supplied via FASTMCP_* environment
+variables (FASTMCP_HOST, FASTMCP_PORT, FASTMCP_LOG_LEVEL, etc.).
+CLI flags take precedence over environment variables.
+
+Design principles
+-----------------
   - Stateless per invocation: each tool call is independent.
   - Durable state lives on the filesystem (decisions.json, releases/).
-  - Tools that do not need a database connection work fully offline.
-  - Tools that need a connection accept host/user/password inline.
+  - Pipeline tools (scaffold through package) work fully offline.
+  - Deployment tools (deploy, explain, rollback) require a live connection.
   - All tools return JSON-serialisable dicts. On failure: {"error": ...}.
 """
 
@@ -1048,5 +1074,267 @@ def _key_outputs(stage: dict) -> dict:
 # ---------------------------------------------------------------
 
 
+def main() -> None:
+    """Parse CLI arguments and start the SHIPS MCP server.
+
+    Supports three transports:
+
+    stdio (default) — classic subprocess transport for Claude Desktop,
+    Claude Code, and any MCP client that launches the server as a child
+    process.  No network port is opened.
+
+        python -m ships_mcp
+
+    streamable-http — HTTP/1.1 transport with chunked responses defined
+    in the MCP 2025-03-26 specification.  Required for enterprise
+    deployments where the server runs as a standalone service and clients
+    connect over the network rather than via subprocess.
+
+        python -m ships_mcp --transport streamable-http --host 0.0.0.0 --port 8000
+
+    sse (legacy) — Server-Sent Events transport from the MCP 2024-11-05
+    specification.  Supported for backward compatibility with clients that
+    have not yet migrated to streamable-http.
+
+        python -m ships_mcp --transport sse --host 0.0.0.0 --port 8000
+
+    For streamable-http and sse, all settings may also be supplied via
+    environment variables prefixed with FASTMCP_ (e.g. FASTMCP_HOST,
+    FASTMCP_PORT, FASTMCP_LOG_LEVEL).  CLI flags take precedence.
+
+    Enterprise TLS note: terminate TLS at a reverse proxy (nginx, API
+    Gateway, etc.) in front of the server.  The MCP server itself speaks
+    plain HTTP; TLS is the responsibility of the network layer.
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="ships_mcp",
+        description="SHIPS MCP Server — Teradata deployment pipeline over MCP.",
+    )
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "sse", "streamable-http"],
+        default="stdio",
+        help=(
+            "MCP transport to use. "
+            "'stdio' (default) for subprocess clients (Claude Desktop, Claude Code). "
+            "'streamable-http' for enterprise HTTP deployments (MCP 2025-03-26). "
+            "'sse' for legacy SSE clients (MCP 2024-11-05)."
+        ),
+    )
+    parser.add_argument(
+        "--host",
+        default=None,
+        help=(
+            "Host address to bind for HTTP transports (default: 127.0.0.1). "
+            "Use 0.0.0.0 to accept connections from all interfaces — "
+            "only do this behind a network-layer access control."
+        ),
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="Port to listen on for HTTP transports (default: 8000).",
+    )
+    parser.add_argument(
+        "--path",
+        default=None,
+        dest="http_path",
+        help=(
+            "URL path for the MCP endpoint "
+            "(default: /mcp for streamable-http, /sse for sse)."
+        ),
+    )
+    parser.add_argument(
+        "--stateless",
+        action="store_true",
+        default=False,
+        help=(
+            "Enable stateless HTTP mode: create a new transport session per request. "
+            "Suitable for serverless / load-balanced deployments. "
+            "Only applies to streamable-http transport."
+        ),
+    )
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default=None,
+        help="Log level for the MCP server (default: INFO).",
+    )
+
+    # -- Auth flags (HTTP transports only) ----------------------------------
+    auth_group = parser.add_argument_group(
+        "authentication",
+        "JWT/Bearer token authentication. Requires --transport streamable-http or sse. "
+        "SHIPS acts as an OAuth 2.0 Resource Server — it validates tokens issued by "
+        "your identity provider (Azure AD, Okta, AWS Cognito, Keycloak, etc.).",
+    )
+    auth_group.add_argument(
+        "--auth-jwks-uri",
+        metavar="URL",
+        default=None,
+        help=(
+            "JWKS endpoint URL for JWT signature verification. "
+            "Examples: "
+            "Azure AD: https://login.microsoftonline.com/{tenant}/discovery/v2.0/keys  "
+            "Okta: https://{domain}/oauth2/default/v1/keys  "
+            "AWS Cognito: https://cognito-idp.{region}.amazonaws.com/{pool}/.well-known/jwks.json  "
+            "Enabling this flag activates Bearer token enforcement on all HTTP endpoints."
+        ),
+    )
+    auth_group.add_argument(
+        "--auth-issuer",
+        metavar="URL",
+        default=None,
+        help=(
+            "Expected JWT issuer (iss claim). Must match the token exactly. "
+            "Examples: "
+            "Azure AD: https://login.microsoftonline.com/{tenant}/v2.0  "
+            "Okta: https://{domain}/oauth2/default"
+        ),
+    )
+    auth_group.add_argument(
+        "--auth-audience",
+        metavar="VALUE",
+        default=None,
+        help=(
+            "Expected JWT audience (aud claim). "
+            "Typically the Application ID URI or client_id of this service. "
+            "Example: api://ships-mcp"
+        ),
+    )
+    auth_group.add_argument(
+        "--auth-required-scopes",
+        metavar="SCOPES",
+        default=None,
+        help=(
+            "Comma-separated list of OAuth scopes that every caller must hold. "
+            "Requests with tokens missing any required scope receive HTTP 403. "
+            "Example: ships.deploy,ships.read"
+        ),
+    )
+    auth_group.add_argument(
+        "--auth-resource-url",
+        metavar="URL",
+        default=None,
+        help=(
+            "Public base URL of this MCP server. Required when --auth-jwks-uri is set. "
+            "Used in WWW-Authenticate response headers per RFC 9728 "
+            "(OAuth 2.0 Protected Resource Metadata). "
+            "Example: http://ships-mcp.internal:8000"
+        ),
+    )
+
+    args = parser.parse_args()
+
+    # -- Validate: HTTP-only flags must not be used with stdio ----------
+    http_flags_set = any([args.host, args.port, args.http_path, args.stateless])
+    if args.transport == "stdio" and http_flags_set:
+        parser.error(
+            "--host, --port, --path, and --stateless are only valid with "
+            "--transport streamable-http or --transport sse."
+        )
+
+    # -- Validate: auth flags require HTTP transport --------------------
+    auth_flags_set = any([
+        args.auth_jwks_uri, args.auth_issuer, args.auth_audience,
+        args.auth_required_scopes, args.auth_resource_url,
+    ])
+    if auth_flags_set and args.transport == "stdio":
+        parser.error(
+            "--auth-* flags are only valid with "
+            "--transport streamable-http or --transport sse."
+        )
+    if args.auth_jwks_uri and not args.auth_resource_url:
+        parser.error(
+            "--auth-resource-url is required when --auth-jwks-uri is set. "
+            "It identifies this MCP server in WWW-Authenticate headers."
+        )
+
+    # -- Apply settings to the FastMCP instance -------------------------
+    # mcp.settings is a mutable Pydantic model; update it before run().
+    # CLI flags override defaults; FASTMCP_* env vars are already folded
+    # in by pydantic-settings at Settings construction time.
+    if args.host is not None:
+        mcp.settings.host = args.host
+    if args.port is not None:
+        mcp.settings.port = args.port
+    if args.log_level is not None:
+        mcp.settings.log_level = args.log_level
+    if args.stateless:
+        mcp.settings.stateless_http = True
+
+    # Apply custom path for the chosen transport
+    if args.http_path is not None:
+        if args.transport == "streamable-http":
+            mcp.settings.streamable_http_path = args.http_path
+        elif args.transport == "sse":
+            mcp.settings.sse_path = args.http_path
+
+    # -- Configure JWT/Bearer authentication ---------------------------
+    # Auth is applied to HTTP transports only; wired by setting
+    # mcp._token_verifier and mcp.settings.auth before mcp.run().
+    # FastMCP builds the ASGI app (and wires auth middleware) lazily
+    # inside run(), so both attributes must be set beforehand.
+    if args.auth_jwks_uri:
+        from ships_mcp_auth import JWTTokenVerifier
+
+        mcp._token_verifier = JWTTokenVerifier(
+            jwks_uri=args.auth_jwks_uri,
+            issuer=args.auth_issuer or None,
+            audience=args.auth_audience or None,
+        )
+
+        try:
+            from mcp.server.auth.settings import AuthSettings
+            from pydantic import AnyHttpUrl
+
+            required_scopes = (
+                [s.strip() for s in args.auth_required_scopes.split(",") if s.strip()]
+                if args.auth_required_scopes
+                else None
+            )
+
+            mcp.settings.auth = AuthSettings(
+                issuer_url=AnyHttpUrl(args.auth_issuer or args.auth_resource_url),
+                resource_server_url=AnyHttpUrl(args.auth_resource_url),
+                required_scopes=required_scopes,
+            )
+        except ImportError:  # pragma: no cover
+            # mcp package not available — auth settings not applied,
+            # but JWTTokenVerifier is still set and will be called
+            pass
+
+        logger.info(
+            "JWT authentication enabled — jwks_uri=%s  issuer=%s  audience=%s  "
+            "required_scopes=%s",
+            args.auth_jwks_uri,
+            args.auth_issuer or "(not validated)",
+            args.auth_audience or "(not validated)",
+            args.auth_required_scopes or "(none)",
+        )
+
+    # -- Emit startup banner for HTTP transports ------------------------
+    if args.transport in ("streamable-http", "sse"):
+        host = mcp.settings.host
+        port = mcp.settings.port
+        if args.transport == "streamable-http":
+            path = mcp.settings.streamable_http_path
+        else:
+            path = mcp.settings.sse_path
+        logger.info(
+            "SHIPS MCP server starting — transport=%s  endpoint=http://%s:%d%s%s",
+            args.transport,
+            host,
+            port,
+            path,
+            "  [stateless]" if args.stateless else "",
+        )
+
+    mcp.run(transport=args.transport)
+
+
 if __name__ == "__main__":
-    mcp.run()
+    main()
