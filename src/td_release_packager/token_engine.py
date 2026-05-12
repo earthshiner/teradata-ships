@@ -628,6 +628,7 @@ def format_malformed_tokens_report(
 def validate_tokens(
     token_values: Dict[str, str],
     token_usage: Dict[str, Set[str]],
+    config_file: str = "",
 ) -> Tuple[List[str], List[str]]:
     """
     Validate that all referenced tokens are defined, and flag unused ones.
@@ -635,6 +636,8 @@ def validate_tokens(
     Args:
         token_values: Dictionary of defined token_name → value.
         token_usage:  Dictionary of file_path → set of token names used.
+        config_file:  Path to the env config file (included in messages
+                      so the operator knows exactly which file to edit).
 
     Returns:
         Tuple of (errors, warnings).
@@ -650,8 +653,9 @@ def validate_tokens(
 
     # Tokens used but not defined — build error
     undefined = all_referenced - defined
+    _cfg = f" in {config_file}" if config_file else ""
     errors = [
-        f"Token '{{{{{t}}}}}' is referenced but not defined in properties."
+        f"Token '{{{{{t}}}}}' is referenced but not defined in the env config{_cfg}."
         for t in sorted(undefined)
     ]
 
@@ -662,11 +666,11 @@ def validate_tokens(
             errors.append(f"  → used in: {fpath}")
 
     # Tokens defined but never used — warning
-    # Exclude reserved metadata properties (not deployment tokens)
+    # Exclude reserved metadata keys (not deployment tokens)
     _RESERVED_PROPERTIES = {"SHIPS_ENV", "SHIPS_PROJECT", "ENV_PREFIX"}
     unused = defined - all_referenced - _RESERVED_PROPERTIES
     warnings = [
-        f"Token '{{{{{t}}}}}' is defined in properties but never referenced."
+        f"Token '{{{{{t}}}}}' is defined in the env config{_cfg} but never referenced in any payload file."
         for t in sorted(unused)
     ]
 

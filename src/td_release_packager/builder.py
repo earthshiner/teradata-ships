@@ -306,7 +306,9 @@ def _build_package_impl(
         )
 
     # -- Phase 3: Validate tokens --
-    errors, warnings = validate_tokens(token_values, token_usage)
+    errors, warnings = validate_tokens(
+        token_values, token_usage, config_file=config.env_config_file
+    )
 
     if errors or warnings:
         # -- Build structured report from raw data --
@@ -351,15 +353,15 @@ def _build_package_impl(
 
         if unreferenced:
             print()
-            print("  WARNINGS — tokens defined in properties but never")
-            print("  referenced (informational — safe to ignore):")
+            print("  WARNINGS — tokens defined in the env config but never")
+            print("  referenced in any payload file (informational — safe to ignore):")
             print()
             # Compact display — wrap token names
             token_list = ", ".join(f"{{{{{t}}}}}" for t in unreferenced)
             print(f"    {token_list}")
             print()
             print("  Tip: if these have been replaced by _T/_V variants,")
-            print("  remove the old flat tokens from your properties file.")
+            print(f"  remove the old flat tokens from: {config.env_config_file}")
 
         print()
         print(f"{'=' * 64}")
@@ -373,7 +375,7 @@ def _build_package_impl(
             raise ValueError(
                 f"Token validation failed: {len(undefined)} undefined "
                 f"token(s). All referenced tokens must be defined in "
-                f"the properties file."
+                f"the env config: {config.env_config_file}"
             )
 
     # -- Phase 4: Create package structure --
