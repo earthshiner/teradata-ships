@@ -244,6 +244,17 @@ _DML_RE = re.compile(
     re.IGNORECASE | re.VERBOSE,
 )
 
+# ALTER TABLE db.tbl ADD FOREIGN KEY (col) REFERENCES ...
+# Captures the qualified table name being altered as group 1.
+_FOREIGN_KEY_RE = re.compile(
+    r"""
+    ALTER\s+TABLE\s+
+    """ + _QNAME + r"""
+    \s+ADD\s+FOREIGN\s+KEY\b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
 # -- Detect whether SET/MULTISET is already specified --
 _HAS_SET_MULTISET_RE = re.compile(
     r"""
@@ -354,8 +365,9 @@ def parse_statement_text(ddl_text: str, file_path: str = "<inline>") -> ParsedSt
             "Expected CREATE/REPLACE TABLE, VIEW, MACRO, PROCEDURE, "
             "FUNCTION, TRIGGER, or CREATE DATABASE, JOIN INDEX, INDEX, "
             "USER, ROLE, PROFILE, MAP, AUTHORIZATION, FOREIGN SERVER, "
-            "GRANT, REVOKE, CALL SQLJ.INSTALL_JAR, or "
-            "INSERT/UPDATE/DELETE/MERGE."
+            "GRANT, REVOKE, CALL SQLJ.INSTALL_JAR, "
+            "INSERT/UPDATE/DELETE/MERGE, or "
+            "ALTER TABLE ... ADD FOREIGN KEY."
         )
 
     # -- Extract database and object name --
@@ -458,6 +470,18 @@ def parse_statement_text(ddl_text: str, file_path: str = "<inline>") -> ParsedSt
         if db_name is None:
             db_name = ""
 
+    # FOREIGN_KEY: a table may have multiple .fk scripts, so derive a
+    # unique manifest key from the filename rather than the altered table
+    # name.  The database and table captured from ALTER TABLE are kept for
+    # reporting so the operator can see which table is being constrained.
+    if object_type == ObjectType.FOREIGN_KEY and file_path:
+        basename = os.path.splitext(os.path.basename(file_path))[0]
+        qualified_name = f"FK:{basename}"
+        if not obj_name:
+            obj_name = basename
+        if db_name is None:
+            db_name = ""
+
     return ParsedStatement(
         file_path=file_path,
         ddl_text=ddl_text,
@@ -509,6 +533,9 @@ def _detect_deploy_intent(ddl_text: str, object_type: ObjectType) -> DeployInten
         # DML scripts (INSERT/UPDATE/DELETE/MERGE) execute as-is.
         # _execute_ddl already handles multi-statement bodies.
         ObjectType.DML,
+        # FK alter scripts execute as-is — ALTER TABLE ... ADD FOREIGN KEY
+        # has no CREATE/REPLACE verb so no strategy inference is needed.
+        ObjectType.FOREIGN_KEY,
     ):
         return DeployIntent.DIRECT_EXECUTE
 
@@ -592,6 +619,9 @@ def _detect_object_type(ddl_text: str) -> Tuple[ObjectType, str]:
         (_JAR_INSTALL_RE, ObjectType.JAR),
         (_GRANT_RE, ObjectType.GRANT),
         (_REVOKE_RE, ObjectType.REVOKE),
+        # FK alters before DML — ALTER TABLE ... ADD FOREIGN KEY must
+        # not fall through to the generic DML patterns below.
+        (_FOREIGN_KEY_RE, ObjectType.FOREIGN_KEY),
         # DML last — comes after every CREATE/REPLACE/GRANT/REVOKE
         # form so a procedure body containing INSERT/UPDATE never
         # classifies as DML. A pure DML script reaches this rung.

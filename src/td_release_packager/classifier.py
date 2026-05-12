@@ -84,6 +84,7 @@ BASE_TYPES: Set[str] = {
     "C_SOURCE",
     "C_HEADER",
     "DML",
+    "FOREIGN_KEY",
 }
 
 
@@ -137,6 +138,7 @@ TYPE_TO_EXTENSION: Dict[str, str] = {
     "C_SOURCE": ".c",
     "C_HEADER": ".h",
     "DML": ".dml",
+    "FOREIGN_KEY": ".fk",
 }
 
 
@@ -171,6 +173,7 @@ TYPE_TO_SUBDIR: Dict[str, str] = {
     "C_SOURCE": "DDL/functions",
     "C_HEADER": "DDL/functions",
     "DML": "DML",
+    "FOREIGN_KEY": "DDL/alters",
 }
 
 
@@ -207,6 +210,8 @@ EXTENSION_TO_EXPECTED: Dict[str, Optional[Set[str]]] = {
     ".fsvr": {"FOREIGN_SERVER"},
     # DML scripts — INSERT/UPDATE/DELETE/MERGE.
     ".dml": {"DML"},
+    # Foreign key ALTER scripts — ALTER TABLE ... ADD FOREIGN KEY.
+    ".fk": {"FOREIGN_KEY"},
     # Generic — any type acceptable
     ".sql": None,
     ".ddl": None,
@@ -318,6 +323,17 @@ _CLASSIFY_PATTERNS: List[Tuple[re.Pattern, str]] = [
     # mis-classifying because the GRANT verb wouldn't be at line-start.
     (re.compile(r"^\s*GRANT\b", _STMT_FLAGS), "GRANT"),
     (re.compile(r"^\s*REVOKE\b", _STMT_FLAGS), "REVOKE"),
+    # Foreign key constraint — ALTER TABLE ... ADD FOREIGN KEY.
+    # Must appear before the generic DML patterns below so that an
+    # ALTER TABLE ADD FOREIGN KEY script is not mis-classified as DML
+    # if it happens to contain an embedded UPDATE or INSERT keyword.
+    (
+        re.compile(
+            r"^\s*ALTER\s+TABLE\b.*?\bADD\s+FOREIGN\s+KEY\b",
+            re.IGNORECASE | re.MULTILINE | re.DOTALL,
+        ),
+        "FOREIGN_KEY",
+    ),
     # DML — comes LAST so any DDL with embedded DML (e.g. a procedure
     # body containing INSERT/UPDATE) classifies as the DDL type via
     # an earlier pattern. A pure DML script (registration data, seed

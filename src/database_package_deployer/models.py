@@ -55,6 +55,11 @@ class ObjectType(Enum):
     # after all DDL so the target tables exist before data is loaded.
     DML = "DML"
 
+    # Foreign key constraint scripts: ALTER TABLE ... ADD FOREIGN KEY.
+    # Carried under ``DDL/alters/`` and executed after all tables and
+    # indexes so both the referencing and referenced tables exist.
+    FOREIGN_KEY = "FOREIGN_KEY"
+
     # -- System-scoped objects (no database qualifier, no tokens) --
     MAP = "MAP"
     ROLE = "ROLE"
@@ -147,6 +152,10 @@ STRATEGY_MAP = {
     ObjectType.JAR: DeployStrategy.DIRECT_EXECUTE,
     ObjectType.SCRIPT_TABLE_OPERATOR: DeployStrategy.REPLACE_IN_PLACE,
     ObjectType.DML: DeployStrategy.DIRECT_EXECUTE,
+    # FK alters are executed as-is — no idempotency guard needed
+    # because Teradata FK constraints use WITH NO CHECK OPTION
+    # and re-running is typically harmless in practice.
+    ObjectType.FOREIGN_KEY: DeployStrategy.DIRECT_EXECUTE,
     # System-scoped objects — skip silently if already present
     ObjectType.MAP: DeployStrategy.SKIP_IF_EXISTS,
     ObjectType.ROLE: DeployStrategy.SKIP_IF_EXISTS,
@@ -180,6 +189,7 @@ SCOPE_MAP = {
     ObjectType.JAR: DeployScope.ENVIRONMENT,
     ObjectType.SCRIPT_TABLE_OPERATOR: DeployScope.ENVIRONMENT,
     ObjectType.DML: DeployScope.ENVIRONMENT,
+    ObjectType.FOREIGN_KEY: DeployScope.ENVIRONMENT,
 }
 
 # -- Deployment ordering: objects deployed in this sequence --
@@ -202,6 +212,9 @@ DEPLOY_ORDER = {
     ObjectType.JOIN_INDEX: 1,
     ObjectType.HASH_INDEX: 1,
     ObjectType.INDEX: 1,
+    # FK alters deploy after tables and indexes so both sides of the
+    # relationship are guaranteed to exist before the constraint is added.
+    ObjectType.FOREIGN_KEY: 1,
     ObjectType.VIEW: 2,
     ObjectType.MACRO: 3,
     ObjectType.PROCEDURE: 3,

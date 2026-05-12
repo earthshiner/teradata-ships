@@ -63,6 +63,7 @@ _EXT_TYPE: Dict[str, str] = {
     ".btq": "BTQ",
     ".cmt": "COMMENT",
     ".stt": "STATISTICS",
+    ".fk": "FOREIGN KEY",
 }
 
 # Type → badge colour (bg, text)
