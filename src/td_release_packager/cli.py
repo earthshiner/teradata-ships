@@ -2969,7 +2969,8 @@ def _cmd_verify(args):
     archive_path = out.get("archive_path", "")
     archive_exists = bool(archive_path) and os.path.exists(archive_path)
 
-    warnings = [i for i in issues if i.get("severity") in ("warning", "error")]
+    errors = [i for i in issues if i.get("severity") == "error"]
+    warnings = [i for i in issues if i.get("severity") == "warning"]
 
     # ---- Checklist -----------------------------------------------
     print(f"\n{'=' * 64}")
@@ -2993,15 +2994,26 @@ def _cmd_verify(args):
         print(f"    ✗ Archive NOT found: {archive_path}")
         checks.append(False)
 
-    # 2. No errors / warnings in package stage
-    if not warnings:
+    # 2. Package stage issues — errors block deployment; warnings are informational
+    if not errors and not warnings:
         print(f"    ✓ No package issues recorded")
         checks.append(True)
     else:
+        # Errors are blocking — show with ✗ and fail the check
+        for i in errors:
+            print(f"    ✗ {i.get('code', '?')}: {i.get('message', '')}")
+        if errors:
+            checks.append(False)
+
+        # Warnings are informational — show with ⚠ but do not block deployment
         for i in warnings:
-            sev_icon = "✗" if i.get("severity") == "error" else "⚠"
-            print(f"    {sev_icon} {i.get('code', '?')}: {i.get('message', '')}")
-        checks.append(False)
+            print(f"    ⚠ {i.get('code', '?')}: {i.get('message', '')}")
+        if warnings and not errors:
+            print(
+                f"    ↳ {len(warnings)} warning(s) above are informational "
+                f"and do not block deployment."
+            )
+            checks.append(True)
 
     # 3. Package stage status
     pkg_status = pkg_stage.get("status", "unknown")
