@@ -184,6 +184,20 @@ def _format_grant_recap(grant_result, max_items: int = 10) -> str:
 
 def main():
     """CLI entry point."""
+    try:
+        _main()
+    except KeyboardInterrupt:
+        print(
+            "\n\n  SHIPS interrupted — pipeline cancelled by user.\n"
+            "  Any stages that completed before the interrupt were recorded\n"
+            "  in decisions.json and can be reviewed with 'ships explain'.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+def _main():
+    """Inner entry point — separated so KeyboardInterrupt wraps everything cleanly."""
     # Force UTF-8 on stdout/stderr regardless of platform locale.
     # On Windows the default codepage is cp1252, which cannot
     # represent the Unicode glyphs we use for status output (✓, ✗,
@@ -220,7 +234,7 @@ def main():
         _cmd_build(args)
     elif args.command == "scan":
         sys.exit(_cmd_scan(args))
-    elif args.command == "analyze":
+    elif args.command in ("analyze", "analyse"):
         _cmd_analyze(args)
     elif args.command == "import-legacy":
         _cmd_import_legacy(args)
@@ -3210,7 +3224,7 @@ def _cmd_scan(args):
             env_name = os.path.splitext(os.path.basename(cfg_path))[0]
             try:
                 values = read_env_config(cfg_path)
-                errors, warnings = validate_tokens(values, usage)
+                errors, warnings = validate_tokens(values, usage, config_file=cfg_path)
                 orphan_count = len(warnings)
                 env_results[env_name] = {
                     "config": cfg_path,
@@ -3930,6 +3944,7 @@ def _build_parser():
     # -- analyze --
     az = subs.add_parser(
         "analyze",
+        aliases=["analyse"],
         help="Analyse DDL dependencies, generate waves, and export dependency graph.",
     )
     az.add_argument("--source", required=True, help="Project directory to analyse.")
