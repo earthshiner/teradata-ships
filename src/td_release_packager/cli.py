@@ -750,7 +750,7 @@ def _onboard_scan(source_dir: str) -> dict:
                 content = open(path, encoding="utf-8", errors="replace").read()
             except OSError:
                 continue
-            findings = find_legacy_placeholders(content)
+            findings = find_legacy_placeholders(content, path)
             if findings:
                 legacy_files.add(path)
                 legacy_count += sum(len(f.occurrences) for f in findings)
