@@ -82,13 +82,13 @@ class TestModelsStatistics:
         """STATISTICS deploys after TABLE (must have data to collect stats on)."""
         assert DEPLOY_ORDER[ObjectType.STATISTICS] > DEPLOY_ORDER[ObjectType.TABLE]
 
+    def test_statistics_deploy_order_after_index(self):
+        """STATISTICS deploys after indexes — captures indexed column statistics."""
+        assert DEPLOY_ORDER[ObjectType.STATISTICS] > DEPLOY_ORDER[ObjectType.INDEX]
+
     def test_statistics_deploy_order_before_view(self):
         """STATISTICS deploys before VIEW (optimiser stats before view compilation)."""
         assert DEPLOY_ORDER[ObjectType.STATISTICS] < DEPLOY_ORDER[ObjectType.VIEW]
-
-    def test_statistics_deploy_order_same_as_index(self):
-        """STATISTICS shares deploy order 1 with indexes."""
-        assert DEPLOY_ORDER[ObjectType.STATISTICS] == DEPLOY_ORDER[ObjectType.INDEX]
 
 
 # ---------------------------------------------------------------------------
