@@ -859,13 +859,27 @@ def _create_package_structure(pkg_dir: str):
     """
     Create the package directory skeleton.
 
+    Directories created:
+      lib/               — embedded database_package_deployer library
+      payload/00_system  — system-scope objects (Maps, Roles, etc.)
+      payload/01_pre_requisites — CREATE DATABASE / CREATE USER
+      payload/02_dcl     — Grants and Revokes
+      payload/03_ddl     — Tables, Views, Procedures, Macros, etc.
+      payload/04_dml     — INSERT / UPDATE / DELETE / MERGE scripts
+
+    Note: config/ and logs/ are NOT created inside the package.
+      - config/ belongs to the SHIPS project, not the release artefact.
+        Token values are already resolved into the payload; there is
+        nothing environment-specific left to configure at deploy time.
+      - logs/ is written by the deployer at runtime to the operator's
+        own working directory, not inside the (potentially read-only)
+        extracted package.
+
     Args:
         pkg_dir: Root of the package being built.
     """
     dirs = [
-        "config",
         "lib",
-        "logs",
         "payload/00_system",
         "payload/01_pre_requisites",
         "payload/02_dcl",
