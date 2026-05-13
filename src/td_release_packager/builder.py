@@ -54,6 +54,7 @@ from database_package_deployer.provenance import (
     Stage,
     Status,
 )
+from td_release_packager.context_artifacts import write_context_artifacts
 
 logger = logging.getLogger(__name__)
 
@@ -497,10 +498,16 @@ def _build_package_impl(
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest.__dict__, f, indent=2, ensure_ascii=False)
 
+    # -- Phase 8b: Write agent-facing context artefacts --
+    # These files are a compact handoff contract for humans, CI/CD,
+    # MCP tools, and autonomous agents.  They reference BUILD.json and
+    # _provenance.json rather than duplicating detailed evidence.
+    write_context_artifacts(pkg_dir, manifest, config)
+
     # Print trust banner to CLI
     print(format_trust_banner(trust_report))
 
-    # -- Phase 8b: Write provenance document (v2) --
+    # -- Phase 8c: Write provenance document (v2) --
     # Records the full filename-transformation chain (source →
     # eponymous → token-resolved → package) for every payload file.
     # The HTML report uses this to render a drill-down that shows
@@ -810,6 +817,7 @@ def _split_into_paired_packages(
         manifest_path = os.path.join(target_pkg_dir, "BUILD.json")
         with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(target_manifest.__dict__, f, indent=2, ensure_ascii=False)
+        write_context_artifacts(target_pkg_dir, target_manifest)
 
     # 8. Integrity fingerprints, then archive both. Prereqs first so
     #    the on-disk creation order matches the deploy order.
