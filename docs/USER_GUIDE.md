@@ -108,6 +108,7 @@ The DBA does not get your SQL files. They get a **package** — a `.zip` that co
 - A deployment manifest listing every object, its type, and its deployment strategy
 - A SHA-256 fingerprint that proves the package was not tampered with
 - A `deploy.py` script — the DBA runs `python deploy.py --host myserver --user dbc`
+- Three agent-facing context artefacts (`ships.context.json`, `ships.manifest.json`, `ships.handoff.json`) for autonomous agent and CI/CD handoff
 
 You never touch the deployment. You produce the package; the DBA runs it.
 
@@ -649,6 +650,8 @@ Press Enter or `y` to continue, `n` to abort, `q` to quit cleanly. Suppressed au
 ## Package Trust Report
 
 Every package built with `ships package` or `ships process` (with packaging enabled) carries a **Trust Report** in `BUILD.json`. It tells you — and any agent or CI pipeline — whether the package is safe to promote.
+
+The trust label is also surfaced in the agent-facing context artefacts (`ships.context.json`, `ships.manifest.json`, `ships.handoff.json`) that are written alongside `BUILD.json` into every package. Agents read the context artefacts first; the full trust detail is in `BUILD.json`.
 
 ### Labels
 

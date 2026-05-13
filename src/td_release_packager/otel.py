@@ -17,7 +17,7 @@ Standard env vars (https://opentelemetry.io/docs/languages/sdk-configuration/):
 
 Install OTel support:
     uv sync --extra otel
-    # or: pip install "teradata-deployment-agent[otel]"
+    # or: pip install "teradata-ships[otel]"
 
 Example: send traces to a local Jaeger instance
     export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317

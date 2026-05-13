@@ -25,7 +25,7 @@ Options:
 Design
 ------
 The dashboard is read-mostly: it reads artefacts SHIPS already produces
-(decisions.json, BUILD.json inside archives, deployment manifests) and
+(decisions.json, ships.build.json inside archives, deployment manifests) and
 owns no persistent data beyond the approval sidecar files it writes.
 
 Approval sidecar files sit alongside the package archive:
@@ -110,15 +110,15 @@ class PackageInfo:
 
 
 def read_build_json_from_zip(archive_path: str) -> Optional[dict]:
-    """Extract and parse BUILD.json from inside a package archive."""
+    """Extract and parse ships.build.json from inside a package archive."""
     try:
         with zipfile.ZipFile(archive_path) as zf:
             for name in zf.namelist():
-                if name.endswith("BUILD.json"):
+                if name.endswith("ships.build.json"):
                     return json.loads(zf.read(name).decode("utf-8"))
     except Exception as exc:  # noqa: BLE001
         logger.debug(
-            "dashboard: could not read BUILD.json from %s: %s", archive_path, exc
+            "dashboard: could not read ships.build.json from %s: %s", archive_path, exc
         )
     return None
 

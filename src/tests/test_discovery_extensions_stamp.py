@@ -2,17 +2,17 @@
 test_discovery_extensions_stamp.py — Tests for issue #50.
 
 Verifies that the resolved discovery extension set is stamped into
-BUILD.json at build time, and that the embedded deployer reads it
+ships.build.json at build time, and that the embedded deployer reads it
 back at startup instead of using a hard-coded list.
 
 Covers:
-    - _load_build_extensions: absent BUILD.json → None
+    - _load_build_extensions: absent ships.build.json → None
     - _load_build_extensions: missing discovery block → None
     - _load_build_extensions: non-list extensions → None
     - _load_build_extensions: malformed JSON → None
     - _load_build_extensions: valid extensions → list returned
-    - build_package: BUILD.json contains discovery.extensions (defaults)
-    - build_package: custom ships.yaml extensions appear in BUILD.json
+    - build_package: ships.build.json contains discovery.extensions (defaults)
+    - build_package: custom ships.yaml extensions appear in ships.build.json
     - auto-split: both archives preserve discovery.extensions
 """
 
@@ -48,12 +48,12 @@ def _properties_for(env: str, tmp_path: Path) -> Path:
 
 
 def _read_zip_build_json(archive_path: str) -> dict:
-    """Extract and parse the BUILD.json from an archive."""
+    """Extract and parse the ships.build.json from an archive."""
     with zipfile.ZipFile(archive_path) as zf:
         for name in zf.namelist():
-            if name.endswith("BUILD.json"):
+            if name.endswith("ships.build.json"):
                 return json.loads(zf.read(name).decode("utf-8"))
-    raise FileNotFoundError(f"No BUILD.json found in {archive_path}")
+    raise FileNotFoundError(f"No ships.build.json found in {archive_path}")
 
 
 # ---------------------------------------------------------------
@@ -62,44 +62,44 @@ def _read_zip_build_json(archive_path: str) -> dict:
 
 
 class TestLoadBuildExtensions:
-    """Unit tests for the BUILD.json extension reader in the deployer."""
+    """Unit tests for the ships.build.json extension reader in the deployer."""
 
     def test_returns_none_when_no_build_json(self, tmp_path):
         result = _load_build_extensions(str(tmp_path))
         assert result is None
 
     def test_returns_none_when_discovery_block_absent(self, tmp_path):
-        (tmp_path / "BUILD.json").write_text(
+        (tmp_path / "ships.build.json").write_text(
             json.dumps({"build_number": "0001"}), encoding="utf-8"
         )
         assert _load_build_extensions(str(tmp_path)) is None
 
     def test_returns_none_when_extensions_not_a_list(self, tmp_path):
-        (tmp_path / "BUILD.json").write_text(
+        (tmp_path / "ships.build.json").write_text(
             json.dumps({"discovery": {"extensions": ".sql"}}), encoding="utf-8"
         )
         assert _load_build_extensions(str(tmp_path)) is None
 
     def test_returns_none_when_extensions_contains_non_string(self, tmp_path):
-        (tmp_path / "BUILD.json").write_text(
+        (tmp_path / "ships.build.json").write_text(
             json.dumps({"discovery": {"extensions": [".sql", 42]}}), encoding="utf-8"
         )
         assert _load_build_extensions(str(tmp_path)) is None
 
     def test_returns_none_on_malformed_json(self, tmp_path):
-        (tmp_path / "BUILD.json").write_text("{not valid json}", encoding="utf-8")
+        (tmp_path / "ships.build.json").write_text("{not valid json}", encoding="utf-8")
         assert _load_build_extensions(str(tmp_path)) is None
 
     def test_returns_extension_list_when_valid(self, tmp_path):
         exts = [".bteq", ".sql", ".tbl"]
-        (tmp_path / "BUILD.json").write_text(
+        (tmp_path / "ships.build.json").write_text(
             json.dumps({"discovery": {"extensions": exts}}), encoding="utf-8"
         )
         result = _load_build_extensions(str(tmp_path))
         assert result == exts
 
     def test_returns_empty_list_when_extensions_empty(self, tmp_path):
-        (tmp_path / "BUILD.json").write_text(
+        (tmp_path / "ships.build.json").write_text(
             json.dumps({"discovery": {"extensions": []}}), encoding="utf-8"
         )
         result = _load_build_extensions(str(tmp_path))
@@ -107,12 +107,12 @@ class TestLoadBuildExtensions:
 
 
 # ---------------------------------------------------------------
-# build_package — BUILD.json discovery.extensions stamping
+# build_package — ships.build.json discovery.extensions stamping
 # ---------------------------------------------------------------
 
 
 class TestBuildJsonDiscoveryStamp:
-    """build_package stamps discovery.extensions into BUILD.json."""
+    """build_package stamps discovery.extensions into ships.build.json."""
 
     def _minimal_config(self, tmp_project: Path, tmp_path: Path) -> BuildConfig:
         _write(
@@ -163,7 +163,7 @@ class TestBuildJsonDiscoveryStamp:
     def test_custom_ships_yaml_extension_appears_in_build_json(
         self, tmp_project, tmp_path
     ):
-        """A project-level extension added via ships.yaml is stamped into BUILD.json."""
+        """A project-level extension added via ships.yaml is stamped into ships.build.json."""
         _write(
             tmp_project / "payload" / "database" / "DDL" / "tables" / "MyDB.T.tbl",
             "CREATE MULTISET TABLE MyDB.T (Id INTEGER) PRIMARY INDEX (Id);\n",

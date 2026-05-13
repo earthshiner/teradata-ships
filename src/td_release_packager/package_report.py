@@ -100,9 +100,9 @@ _SKIP_NAMES = frozenset(
         "_order.txt",
         ".gitkeep",
         ".gitignore",
-        "package_integrity.json",
-        "_provenance.json",
-        "BUILD.json",
+        "ships.integrity.json",
+        "ships.provenance.json",
+        "ships.build.json",
     }
 )
 _SKIP_EXTS = frozenset({".json", ".py", ".sh", ".bat", ".txt", ".html", ".jar"})
@@ -586,7 +586,7 @@ def generate_package_report(pkg_dir: str, manifest_dict: dict) -> str:
     Args:
         pkg_dir:       The package directory (not yet archived).
         manifest_dict: The ``BuildManifest.__dict__`` already written to
-                       BUILD.json.
+                       ships.build.json.
 
     Returns:
         Absolute path to the written report file.

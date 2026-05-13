@@ -20,7 +20,7 @@ Workflow
 
 The build counter in the project directory is incremented so the
 rollback package gets a unique, sequential build number.  The
-``source_commit`` field in ``BUILD.json`` records the tag's commit hash,
+``source_commit`` field in ``ships.build.json`` records the tag's commit hash,
 making the rollback traceable in the audit trail.
 
 Deployment
@@ -185,7 +185,7 @@ def build_rollback_package(
         package_name:   Package name for the archive filename.
         output_dir:     Directory where the archive will be written.
         archive_format: ``zip`` or ``tar.gz`` (default: ``zip``).
-        author:         Optional author metadata for BUILD.json.
+        author:         Optional author metadata for ships.build.json.
         description:    Optional description; defaults to
                         ``Rollback to <tag>`` when empty.
 
@@ -198,7 +198,7 @@ def build_rollback_package(
                     build fails.
         FileNotFoundError: When ``.build_counter`` is absent.
     """
-    # 1. Verify the tag and get its commit hash for BUILD.json traceability.
+    # 1. Verify the tag and get its commit hash for ships.build.json traceability.
     commit_hash = verify_git_tag(project_dir, tag)
 
     # 2. Increment the build counter in the live project so the rollback

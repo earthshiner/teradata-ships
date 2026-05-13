@@ -132,7 +132,7 @@ def generate_report(
 
 def _load_provenance(pkg_dir: str) -> Tuple[Optional[ProvenanceDocument], str]:
     """
-    Load the v2 ProvenanceDocument from _provenance.json if it exists.
+    Load the v2 ProvenanceDocument from ships.provenance.json if it exists.
 
     The provenance document records the full filename-transformation
     chain (source → eponymous → token-resolved → package) for every
@@ -141,7 +141,7 @@ def _load_provenance(pkg_dir: str) -> Tuple[Optional[ProvenanceDocument], str]:
     build pipeline each path was rewritten.
 
     The deployer commonly writes its outputs (manifest, report) into
-    a ``logs/`` subdirectory whilst ``_provenance.json`` lives at the
+    a ``logs/`` subdirectory whilst ``ships.provenance.json`` lives at the
     package root, so this function walks UP from ``pkg_dir`` looking
     for the file. Stops at filesystem root or after 5 levels — a
     reasonable bound that avoids unbounded scans on deep mounts.
@@ -164,7 +164,7 @@ def _load_provenance(pkg_dir: str) -> Tuple[Optional[ProvenanceDocument], str]:
     """
     candidate = os.path.abspath(pkg_dir)
     for _ in range(6):  # current dir + up to 5 ancestors
-        provenance_path = os.path.join(candidate, "_provenance.json")
+        provenance_path = os.path.join(candidate, "ships.provenance.json")
         if os.path.exists(provenance_path):
             try:
                 return ProvenanceDocument.load(provenance_path), ""
@@ -178,14 +178,14 @@ def _load_provenance(pkg_dir: str) -> Tuple[Optional[ProvenanceDocument], str]:
                     msg,
                 )
                 return None, (
-                    f"_provenance.json at {provenance_path} could not "
+                    f"ships.provenance.json at {provenance_path} could not "
                     f"be loaded — drill-downs disabled. Reason: {msg}"
                 )
             except Exception as e:
                 msg = str(e)
                 logger.warning("Could not parse %s: %s", provenance_path, msg)
                 return None, (
-                    f"_provenance.json at {provenance_path} could not "
+                    f"ships.provenance.json at {provenance_path} could not "
                     f"be parsed — drill-downs disabled. Reason: {msg}"
                 )
 
@@ -196,7 +196,7 @@ def _load_provenance(pkg_dir: str) -> Tuple[Optional[ProvenanceDocument], str]:
 
     # Not found in pkg_dir or any of its ancestors
     return None, (
-        "_provenance.json not present in this package directory tree. "
+        "ships.provenance.json not present in this package directory tree. "
         "Drill-downs and source-edit hints are disabled. To enable: "
         "rebuild the package with the current version of the builder, "
         "and verify the report is being written within the package "

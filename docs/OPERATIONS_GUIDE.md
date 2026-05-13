@@ -13,6 +13,9 @@ As the operator, you receive a self-contained package `.zip` from the developmen
 OMR_DEV_BUILD_0005_20260509.zip
     deploy.py                   ← The only script you run
     BUILD.json                  ← Build manifest (provenance, file list, integrity hash)
+    ships.context.json          ← Durable workflow context for agents, CI/CD, and MCP tools
+    ships.manifest.json         ← Compact agent-safe package inventory and dependency contract
+    ships.handoff.json          ← Next-actor instructions (human, CI/CD job, or deployment agent)
     package_integrity.json      ← SHA-256 file hashes for tamper detection
     _waves.txt                  ← Deployment wave ordering
     lib/

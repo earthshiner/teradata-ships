@@ -21,7 +21,7 @@ to fix.
 | inspect_token_format | decisions.json inspect stage | Any INSPECT_TOKEN_MALFORMED error   |
 | inspect_lint         | decisions.json inspect stage | Any INSPECT_LINT_VIOLATION error    |
 | inspect_grants       | decisions.json inspect stage | Any INSPECT_GRANT_VIOLATION error   |
-| provenance_complete  | _provenance.json existence   | File absent from payload |
+| provenance_complete  | ships.provenance.json existence   | File absent from payload |
 
 **Label derivation**
 
@@ -199,7 +199,7 @@ def _inspect_signal(
         return TrustSignal(
             status=TRUST_FAIL,
             message=f"{fail_message_prefix}: {len(errors)} error(s)",
-            issues=messages[:10],  # cap to keep BUILD.json small
+            issues=messages[:10],  # cap to keep ships.build.json small
         )
     if warnings:
         messages = [i.get("message", "") for i in warnings]
@@ -213,7 +213,7 @@ def _inspect_signal(
 
 def _provenance_signal(source_dir: str) -> TrustSignal:
     """
-    Check whether ``_provenance.json`` exists in the payload tree.
+    Check whether ``ships.provenance.json`` exists in the payload tree.
 
     The provenance file records the full source → payload file
     transformation chain and enables the deployer to link each
@@ -221,27 +221,27 @@ def _provenance_signal(source_dir: str) -> TrustSignal:
     it, the deploy report's drill-down and edit-source hints are
     disabled.
     """
-    # Walk the payload tree looking for _provenance.json
+    # Walk the payload tree looking for ships.provenance.json
     payload_dir = os.path.join(source_dir, "payload")
     if os.path.isdir(payload_dir):
         for root, _dirs, files in os.walk(payload_dir):
-            if "_provenance.json" in files:
+            if "ships.provenance.json" in files:
                 return TrustSignal(
                     status=TRUST_PASS,
-                    message="_provenance.json present — deploy report drill-downs enabled",
+                    message="ships.provenance.json present — deploy report drill-downs enabled",
                 )
 
     # Also check directly in source_dir
-    if os.path.exists(os.path.join(source_dir, "_provenance.json")):
+    if os.path.exists(os.path.join(source_dir, "ships.provenance.json")):
         return TrustSignal(
             status=TRUST_PASS,
-            message="_provenance.json present — deploy report drill-downs enabled",
+            message="ships.provenance.json present — deploy report drill-downs enabled",
         )
 
     return TrustSignal(
         status=TRUST_WARN,
         message=(
-            "_provenance.json not found — deploy report drill-downs will be "
+            "ships.provenance.json not found — deploy report drill-downs will be "
             "disabled. Rebuild the package with the current SHIPS version to "
             "generate provenance."
         ),
@@ -252,16 +252,16 @@ def _build_reproducible_signal(pkg_dir: str) -> TrustSignal:
     """
     Trust signal: was the package built from a clean working tree?
 
-    Reads ``source_dirty`` from BUILD.json in ``pkg_dir``.
+    Reads ``source_dirty`` from ships.build.json in ``pkg_dir``.
     - ``source_dirty: true``  → WARN (built with --allow-dirty)
     - ``source_dirty: false`` or absent → PASS
-    - BUILD.json not found    → UNKNOWN
+    - ships.build.json not found    → UNKNOWN
     """
-    build_json = os.path.join(pkg_dir, "BUILD.json")
+    build_json = os.path.join(pkg_dir, "ships.build.json")
     if not os.path.exists(build_json):
         return TrustSignal(
             status=TRUST_PASS,
-            message="BUILD.json absent — no evidence of dirty-tree build",
+            message="ships.build.json absent — no evidence of dirty-tree build",
         )
     try:
         with open(build_json, encoding="utf-8") as f:
@@ -269,7 +269,7 @@ def _build_reproducible_signal(pkg_dir: str) -> TrustSignal:
     except Exception:
         return TrustSignal(
             status=TRUST_PASS,
-            message="BUILD.json unreadable — assuming clean build",
+            message="ships.build.json unreadable — assuming clean build",
         )
 
     if manifest.get("source_dirty", False):
