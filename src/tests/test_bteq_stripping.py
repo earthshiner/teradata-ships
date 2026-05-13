@@ -188,7 +188,7 @@ class TestIngestBteqStripping:
             encoding="utf-8",
         )
 
-        result = ingest_directory(str(source), str(project), detect_tokens=False)
+        ingest_directory(str(source), str(project), detect_tokens=False)
 
         usr_files = list(
             (project / "payload" / "database" / "pre-requisites" / "users").glob(

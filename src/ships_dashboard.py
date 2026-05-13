@@ -25,7 +25,7 @@ Options:
 Design
 ------
 The dashboard is read-mostly: it reads artefacts SHIPS already produces
-(decisions.json, ships.build.json inside archives, deployment manifests) and
+(ships.decisions.json, ships.build.json inside archives, deployment manifests) and
 owns no persistent data beyond the approval sidecar files it writes.
 
 Approval sidecar files sit alongside the package archive:
@@ -44,7 +44,6 @@ import logging
 import os
 import zipfile
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -261,7 +260,7 @@ def _approval_badge(pkg: PackageInfo) -> str:
     if pkg.approved:
         return '<span style="color:#198754;font-weight:600">✓ Approved</span>'
     if pkg.rejected:
-        return f'<span style="color:#DC3545;font-weight:600">✗ Rejected</span>'
+        return '<span style="color:#DC3545;font-weight:600">✗ Rejected</span>'
     return '<span style="color:#FFC107;font-weight:600">● Awaiting</span>'
 
 
@@ -370,7 +369,7 @@ function filterStatus(val){{
 # ---------------------------------------------------------------------------
 
 try:
-    from fastapi import FastAPI, Form, Request
+    from fastapi import FastAPI, Form
     from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
     _FASTAPI_AVAILABLE = True
@@ -526,12 +525,12 @@ def create_app(project_dirs: List[str]) -> "FastAPI":
         report_link = ""
         if pkg.has_report:
             report_link = (
-                f'<div style="margin-top:16px">'
-                f"<strong>Interactive Package Report</strong><br>"
-                f'<span style="font-size:13px;color:#555">Extract the archive and open '
-                f"<code>package_report.html</code> in a browser for the full object "
-                f"inventory, wave plan, and deploy commands.</span>"
-                f"</div>"
+                '<div style="margin-top:16px">'
+                "<strong>Interactive Package Report</strong><br>"
+                '<span style="font-size:13px;color:#555">Extract the archive and open '
+                "<code>package_report.html</code> in a browser for the full object "
+                "inventory, wave plan, and deploy commands.</span>"
+                "</div>"
             )
 
         compliance_tab = f"""
@@ -777,7 +776,7 @@ def main():
         raise SystemExit(1)
 
     app = create_app(project_dirs)
-    print(f"\n  SHIPS Deployment Dashboard")
+    print("\n  SHIPS Deployment Dashboard")
     print(f"  Scanning: {', '.join(project_dirs)}")
     print(f"  Open:     http://{args.host}:{args.port}\n")
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")

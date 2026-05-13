@@ -227,7 +227,7 @@ class TestHarvestBinariesEndToEnd:
         source_script = scripts_dir / "install.ddl"
         source_script.write_text("placeholder", encoding="utf-8")
 
-        jar = _write_bin(tmp_path / "JAVA" / "JAR" / "ExecLargeSqlJ.jar", b"jar-bytes")
+        _write_bin(tmp_path / "JAVA" / "JAR" / "ExecLargeSqlJ.jar", b"jar-bytes")
 
         content = (
             "CALL SQLJ.INSTALL_JAR("
@@ -261,8 +261,8 @@ class TestHarvestBinariesEndToEnd:
         source_fnc = fnc_dir / "foo.fnc"
         source_fnc.write_text("placeholder", encoding="utf-8")
 
-        c_src = _write_bin(tmp_path / "C" / "foo.c", b"c-source")
-        h_src = _write_bin(tmp_path / "C" / "foo.h", b"c-header")
+        _write_bin(tmp_path / "C" / "foo.c", b"c-source")
+        _write_bin(tmp_path / "C" / "foo.h", b"c-header")
 
         content = (
             "CREATE FUNCTION x.foo (a INT) RETURNS INT\n"

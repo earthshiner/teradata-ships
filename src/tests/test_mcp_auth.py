@@ -288,8 +288,6 @@ class TestJWTTokenVerifier:
 
         refresh_called = []
 
-        original_fetch = verifier._jwks_cache._fetch
-
         async def mock_fetch():
             refresh_called.append(True)
             # Don't actually add the new key — simulates unknown kid post-refresh

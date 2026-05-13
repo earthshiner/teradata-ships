@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from td_release_packager.view_layer_generator import (
     TableSpec,

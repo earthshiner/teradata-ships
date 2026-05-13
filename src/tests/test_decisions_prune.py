@@ -1,5 +1,5 @@
 """
-test_decisions_prune.py — Tests for decisions.json pruning.
+test_decisions_prune.py — Tests for ships.decisions.json pruning.
 
 Covers:
     - keep_runs: retains N most recent, removes older
@@ -64,7 +64,7 @@ def _days_ago(n: int) -> str:
 
 class TestPruneByRunCount:
     def test_keeps_n_most_recent(self, tmp_path):
-        f = tmp_path / "decisions.json"
+        f = tmp_path / "ships.decisions.json"
         runs = [_make_run(f"r{i}", _days_ago(10 - i)) for i in range(5)]
         _write_decisions(f, runs)
 
@@ -76,7 +76,7 @@ class TestPruneByRunCount:
         assert len(_read_runs(f)) == 3
 
     def test_oldest_two_are_removed(self, tmp_path):
-        f = tmp_path / "decisions.json"
+        f = tmp_path / "ships.decisions.json"
         runs = [_make_run(f"r{i}", _days_ago(10 - i)) for i in range(5)]
         _write_decisions(f, runs)
 
@@ -86,7 +86,7 @@ class TestPruneByRunCount:
         assert remaining_ids == {"r2", "r3", "r4"}
 
     def test_keep_runs_zero_removes_all(self, tmp_path):
-        f = tmp_path / "decisions.json"
+        f = tmp_path / "ships.decisions.json"
         runs = [_make_run(f"r{i}", _days_ago(i)) for i in range(3)]
         _write_decisions(f, runs)
 
@@ -96,7 +96,7 @@ class TestPruneByRunCount:
         assert _read_runs(f) == []
 
     def test_keep_more_than_exist_keeps_all(self, tmp_path):
-        f = tmp_path / "decisions.json"
+        f = tmp_path / "ships.decisions.json"
         runs = [_make_run(f"r{i}", _days_ago(i)) for i in range(3)]
         _write_decisions(f, runs)
 
@@ -106,7 +106,7 @@ class TestPruneByRunCount:
         assert len(_read_runs(f)) == 3
 
     def test_empty_file_no_error(self, tmp_path):
-        f = tmp_path / "decisions.json"
+        f = tmp_path / "ships.decisions.json"
         _write_decisions(f, [])
 
         result = prune_decisions(str(f), keep_runs=10)
@@ -122,7 +122,7 @@ class TestPruneByRunCount:
 
 class TestPruneByAge:
     def test_removes_runs_older_than_cutoff(self, tmp_path):
-        f = tmp_path / "decisions.json"
+        f = tmp_path / "ships.decisions.json"
         runs = [
             _make_run("recent", _days_ago(1)),
             _make_run("borderline", _days_ago(29)),
@@ -138,7 +138,7 @@ class TestPruneByAge:
         assert "recent" in remaining
 
     def test_keep_days_zero_removes_all(self, tmp_path):
-        f = tmp_path / "decisions.json"
+        f = tmp_path / "ships.decisions.json"
         runs = [_make_run(f"r{i}", _days_ago(i + 1)) for i in range(3)]
         _write_decisions(f, runs)
 
@@ -154,7 +154,7 @@ class TestPruneByAge:
 
 class TestDryRun:
     def test_dry_run_does_not_write(self, tmp_path):
-        f = tmp_path / "decisions.json"
+        f = tmp_path / "ships.decisions.json"
         runs = [_make_run(f"r{i}", _days_ago(i)) for i in range(5)]
         _write_decisions(f, runs)
         original_content = f.read_text(encoding="utf-8")
@@ -166,7 +166,7 @@ class TestDryRun:
         assert f.read_text(encoding="utf-8") == original_content
 
     def test_dry_run_returns_correct_ids(self, tmp_path):
-        f = tmp_path / "decisions.json"
+        f = tmp_path / "ships.decisions.json"
         runs = [_make_run(f"r{i}", _days_ago(5 - i)) for i in range(5)]
         _write_decisions(f, runs)
 
@@ -182,19 +182,19 @@ class TestDryRun:
 
 class TestPruneValidation:
     def test_neither_criterion_raises(self, tmp_path):
-        f = tmp_path / "decisions.json"
+        f = tmp_path / "ships.decisions.json"
         _write_decisions(f, [])
         with pytest.raises(ValueError, match="exactly one"):
             prune_decisions(str(f))
 
     def test_both_criteria_raises(self, tmp_path):
-        f = tmp_path / "decisions.json"
+        f = tmp_path / "ships.decisions.json"
         _write_decisions(f, [])
         with pytest.raises(ValueError, match="exactly one"):
             prune_decisions(str(f), keep_runs=5, keep_days=30)
 
     def test_negative_keep_runs_raises(self, tmp_path):
-        f = tmp_path / "decisions.json"
+        f = tmp_path / "ships.decisions.json"
         _write_decisions(f, [])
         with pytest.raises(ValueError, match="keep_runs"):
             prune_decisions(str(f), keep_runs=-1)
@@ -204,7 +204,7 @@ class TestPruneValidation:
             prune_decisions(str(tmp_path / "nonexistent.json"), keep_runs=5)
 
     def test_result_fields_populated(self, tmp_path):
-        f = tmp_path / "decisions.json"
+        f = tmp_path / "ships.decisions.json"
         runs = [_make_run(f"r{i}", _days_ago(i)) for i in range(4)]
         _write_decisions(f, runs)
 

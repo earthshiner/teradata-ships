@@ -8,7 +8,7 @@ stage depends on:
                   generate-on-first-run helper for ships.yaml.
     cascade     — five-layer configuration resolver (CLI > env-properties
                   > project ships.yaml > platform template > defaults).
-    decisions   — append-only writer for decisions.json, the audit
+    decisions   — append-only writer for ships.decisions.json, the audit
                   trail every stage records its run into.
 
 These are foundation only — they do not modify existing stages and

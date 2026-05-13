@@ -14,12 +14,10 @@ Covers:
 
 from __future__ import annotations
 
-import json
 import os
 import zipfile
 from pathlib import Path
 
-import pytest
 
 from td_release_packager.package_report import (
     _objects_tab,

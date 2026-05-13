@@ -24,8 +24,6 @@ Usage:
     ships deploy /extracted/PRD_MyPkg_BUILD_0001/ --approval-code <code>
 """
 
-import hashlib
-import hmac as _hmac
 import logging
 from datetime import datetime, timezone
 from pathlib import Path

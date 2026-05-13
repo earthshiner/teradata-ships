@@ -19,11 +19,9 @@ Covers:
 from __future__ import annotations
 
 import json
-import os
 import zipfile
 from pathlib import Path
 
-import pytest
 
 from database_package_deployer.deployer import _load_build_extensions
 from td_release_packager.builder import build_package

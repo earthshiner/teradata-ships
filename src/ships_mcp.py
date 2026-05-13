@@ -47,7 +47,7 @@ CLI flags take precedence over environment variables.
 Design principles
 -----------------
   - Stateless per invocation: each tool call is independent.
-  - Durable state lives on the filesystem (decisions.json, releases/).
+  - Durable state lives on the filesystem (ships.decisions.json, releases/).
   - Pipeline tools (scaffold through package) work fully offline.
   - Deployment tools (deploy, explain, rollback) require a live connection.
   - All tools return JSON-serialisable dicts. On failure: {"error": ...}.
@@ -58,8 +58,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import sys
-from pathlib import Path
 from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
@@ -439,8 +437,12 @@ def ships_package(
             else "UNKNOWN",
             "warnings": manifest.warnings,
         }
+        result.update(_ships_context_response(main_arc))
         if companion:
             result["companion_archive"] = companion[0]
+            result["companion_context_entrypoint"] = _archive_member_ref(
+                companion[0], "ships.index.json"
+            )
         return result
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -580,7 +582,6 @@ def ships_deploy(
     try:
         import teradatasql
         from database_package_deployer.deployer import deploy_package
-        from database_package_deployer.wave_parser import parse_waves_file
 
         cursor = teradatasql.connect(
             host=host,
@@ -606,6 +607,7 @@ def ships_deploy(
             )
             d = _package_result_to_dict(result)
             d["success"] = result.success
+            d.update(_ships_context_response(package_dir, extracted_dir=package_dir))
             return d
         finally:
             cursor.close()
@@ -742,23 +744,23 @@ def ships_rollback(
 
 @mcp.tool()
 def ships_decisions(project: str, run_id: Optional[str] = None) -> dict:
-    """Read the decisions.json audit trail for a SHIPS project.
+    """Read the ships.decisions.json audit trail for a SHIPS project.
 
     Returns the last pipeline run (or a specific run by ID). Shows
     stage statuses, config provenance, outputs, and issues for each stage.
 
     Args:
-        project: SHIPS project directory containing decisions.json.
+        project: SHIPS project directory containing ships.decisions.json.
         run_id: Specific run ID to return. Omit for the last run.
 
     Returns:
-        The run record from decisions.json, or {"runs_count": N} if
+        The run record from ships.decisions.json, or {"runs_count": N} if
         no specific run is requested and the file has multiple runs.
     """
     try:
-        decisions_path = os.path.join(project, "decisions.json")
+        decisions_path = os.path.join(project, "ships.decisions.json")
         if not os.path.exists(decisions_path):
-            return {"success": False, "error": "decisions.json not found in project"}
+            return {"success": False, "error": "ships.decisions.json not found in project"}
 
         with open(decisions_path, encoding="utf-8") as f:
             data = json.load(f)
@@ -793,12 +795,12 @@ def ships_verify(project: str) -> dict:
         {"ready": bool, "trust_label": str, "checks": [...], "archive_path": str}
     """
     try:
-        decisions_path = os.path.join(project, "decisions.json")
+        decisions_path = os.path.join(project, "ships.decisions.json")
         if not os.path.exists(decisions_path):
             return {
                 "success": False,
                 "ready": False,
-                "error": "decisions.json not found — run the pipeline first",
+                "error": "ships.decisions.json not found — run the pipeline first",
             }
 
         with open(decisions_path, encoding="utf-8") as f:
@@ -847,7 +849,7 @@ def ships_verify(project: str) -> dict:
             if build_json:
                 trust_label = build_json.get("trust", {}).get("label", "UNKNOWN")
 
-        return {
+        response = {
             "success": True,
             "ready": ready,
             "trust_label": trust_label,
@@ -855,6 +857,9 @@ def ships_verify(project: str) -> dict:
             "checks": checks,
             "run_id": pkg_run.get("run_id") if pkg_run else None,
         }
+        if archive_exists:
+            response.update(_ships_context_response(archive))
+        return response
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -865,7 +870,7 @@ def ships_explain_run(
     run_id: Optional[str] = None,
     command_filter: Optional[str] = None,
 ) -> dict:
-    """Read and explain a prior pipeline run from decisions.json.
+    """Read and explain a prior pipeline run from ships.decisions.json.
 
     Formats the run record as a structured summary: stage statuses,
     key outputs, and the full issues list. Use before promoting a
@@ -882,9 +887,9 @@ def ships_explain_run(
          "duration_ms": int, "stages": [...], "issues_summary": {...}}
     """
     try:
-        decisions_path = os.path.join(project, "decisions.json")
+        decisions_path = os.path.join(project, "ships.decisions.json")
         if not os.path.exists(decisions_path):
-            return {"success": False, "error": "decisions.json not found"}
+            return {"success": False, "error": "ships.decisions.json not found"}
 
         with open(decisions_path, encoding="utf-8") as f:
             data = json.load(f)
@@ -1027,6 +1032,61 @@ def _package_result_to_dict(result) -> dict:
             for r in result.results
         ]
     return d
+
+
+def _archive_member_ref(archive_path: str, filename: str) -> Optional[str]:
+    """Return a stable archive member reference when *filename* exists."""
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(archive_path) as zf:
+            for name in zf.namelist():
+                if name.endswith(filename):
+                    return f"{archive_path}::{name}"
+    except Exception:
+        return None
+    return None
+
+
+def _ships_context_response(package_ref: str, extracted_dir: Optional[str] = None) -> dict:
+    """Return the standard SHIPS context handoff fields for tool responses."""
+    if extracted_dir:
+        entrypoint = os.path.join(extracted_dir, "ships.index.json")
+        reads = [
+            os.path.join(extracted_dir, name)
+            for name in (
+                "ships.index.json",
+                "ships.handoff.json",
+                "ships.context.json",
+                "ships.build.json",
+                "ships.manifest.json",
+                "ships.integrity.json",
+                "ships.provenance.json",
+                "ships.decisions.json",
+            )
+        ]
+    else:
+        entrypoint = _archive_member_ref(package_ref, "ships.index.json")
+        reads = [
+            _archive_member_ref(package_ref, name)
+            for name in (
+                "ships.index.json",
+                "ships.handoff.json",
+                "ships.context.json",
+                "ships.build.json",
+                "ships.manifest.json",
+                "ships.integrity.json",
+                "ships.provenance.json",
+                "ships.decisions.json",
+            )
+        ]
+        reads = [r for r in reads if r]
+    return {
+        "package_type": "teradata-ships",
+        "context_entrypoint": entrypoint,
+        "required_next_reads": reads,
+        "agent_instruction": "Read ships.index.json first, then follow its recommended_read_order before deploying, approving, modifying, or summarising this package.",
+    }
 
 
 def _find_build_json(archive_path: str) -> Optional[dict]:

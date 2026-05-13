@@ -14,7 +14,7 @@ Covers:
     - ships_generate: returns generation counts
     - ships_package: builds archive, trust label in output
     - ships_process: orchestrates all stages
-    - ships_decisions: reads decisions.json
+    - ships_decisions: reads ships.decisions.json
     - ships_verify: package readiness check
     - ships_explain_run: formats prior run for review
     - ships_rollback: dry-run works without connection
@@ -24,11 +24,8 @@ Covers:
 from __future__ import annotations
 
 import json
-import os
-import zipfile
 from pathlib import Path
 
-import pytest
 
 
 # ---------------------------------------------------------------
@@ -57,7 +54,7 @@ def _seed_table(project: Path) -> None:
 
 
 def _seed_decisions(project: Path, runs: list) -> None:
-    (project / "decisions.json").write_text(
+    (project / "ships.decisions.json").write_text(
         json.dumps({"schema_version": 1, "runs": runs}), encoding="utf-8"
     )
 

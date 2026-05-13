@@ -260,7 +260,7 @@ _FOREIGN_KEY_RE = re.compile(
 # The ON clause may be preceded by COLUMN/INDEX qualifiers of arbitrary
 # length, so we use a non-greedy match to reach the target table name.
 _STATISTICS_RE = re.compile(
-    rf"""
+    r"""
     (?:COLLECT\s+(?:SUMMARY\s+)?|UPDATE\s+)   # COLLECT [SUMMARY] or UPDATE
     STATISTICS                                  # keyword
     \b

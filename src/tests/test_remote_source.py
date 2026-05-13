@@ -17,21 +17,18 @@ Covers:
 
 from __future__ import annotations
 
-import gzip
 import io
 import json
 import os
 import tarfile
 import urllib.error
 from argparse import Namespace
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from td_release_packager.remote_source import (
     _extract_strip_root,
-    _get,
     fetch_github_source,
     resolve_ref,
 )

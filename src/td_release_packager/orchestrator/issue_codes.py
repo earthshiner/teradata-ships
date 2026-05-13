@@ -1,7 +1,7 @@
 """
 issue_codes.py — Central registry for ``StageRecorder.add_issue`` codes.
 
-Every issue recorded into ``decisions.json`` carries a short stable
+Every issue recorded into ``ships.decisions.json`` carries a short stable
 identifier (``code``) so downstream tools (``explain``, CI dashboards,
 auditors) can group and trend issues without parsing free-text
 ``message`` fields. This module is the single source of truth for the

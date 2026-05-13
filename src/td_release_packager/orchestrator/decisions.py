@@ -1,7 +1,7 @@
 """
-decisions.py — Append-only writer for ``decisions.json``.
+decisions.py — Append-only writer for ``ships.decisions.json``.
 
-``decisions.json`` is the single source of truth for what SHIPS did
+``ships.decisions.json`` is the single source of truth for what SHIPS did
 to a project: every stage of every run records its inputs, outputs,
 resolved configuration, decisions, and issues into one file at the
 project root. ``td_release_packager explain`` reads it. CI uses it
@@ -13,7 +13,7 @@ concern (build-order item 6).
 Public API
 ----------
     DecisionsManifest(path, project_meta=None)
-        Load an existing decisions.json or create a new one in
+        Load an existing ships.decisions.json or create a new one in
         memory. Calling .save() persists.
 
     manifest.run(command, run_id=None) → context manager
@@ -107,7 +107,7 @@ ISSUE_SEVERITIES = ("info", "warning", "error")
 #: Run-level final status vocabulary.
 FINAL_STATUSES = ("success", "warning", "partial", "failed")
 
-DECISIONS_FILENAME = "decisions.json"
+DECISIONS_FILENAME = "ships.decisions.json"
 
 
 # ---------------------------------------------------------------
@@ -116,7 +116,7 @@ DECISIONS_FILENAME = "decisions.json"
 
 
 class DecisionsError(Exception):
-    """Base class for decisions.json errors."""
+    """Base class for ships.decisions.json errors."""
 
 
 class DecisionsSchemaError(DecisionsError):
@@ -157,11 +157,11 @@ class DecisionsManifest:
         project_meta: Optional[Dict[str, Any]] = None,
     ):
         """
-        Load or initialise a decisions.json.
+        Load or initialise a ships.decisions.json.
 
         Args:
             path:         Filesystem path to the manifest. Typically
-                          ``<project-root>/decisions.json``.
+                          ``<project-root>/ships.decisions.json``.
             project_meta: Used only when creating a fresh manifest;
                           ignored when loading an existing one. Should
                           contain at least ``name``; ``version`` and
@@ -240,11 +240,11 @@ class DecisionsManifest:
                 data = json.load(f)
         except json.JSONDecodeError as e:
             raise DecisionsCorruptError(
-                f"decisions.json is not valid JSON ({path}): {e}"
+                f"ships.decisions.json is not valid JSON ({path}): {e}"
             ) from e
         except OSError as e:
             raise DecisionsCorruptError(
-                f"decisions.json unreadable ({path}): {e}"
+                f"ships.decisions.json unreadable ({path}): {e}"
             ) from e
 
         version = data.get("schema_version")
@@ -252,7 +252,7 @@ class DecisionsManifest:
             raise DecisionsSchemaError(f"missing or invalid schema_version in {path}")
         if version > SCHEMA_VERSION:
             raise DecisionsSchemaError(
-                f"decisions.json at {path} has schema_version={version} "
+                f"ships.decisions.json at {path} has schema_version={version} "
                 f"but this build only understands up to v{SCHEMA_VERSION}. "
                 f"Upgrade the tool or use an older manifest."
             )
@@ -462,7 +462,7 @@ class StageRecorder:
         Record one resolved configuration setting and its provenance.
 
         Args:
-            name:        Setting name as recorded in decisions.json
+            name:        Setting name as recorded in ships.decisions.json
                          (typically the dotted path or its leaf).
             value:       Effective value used for this run.
             source:      The cascade layer that supplied it
@@ -542,7 +542,7 @@ def prune_decisions(
     dry_run: bool = False,
 ) -> PruneResult:
     """
-    Prune old run entries from a ``decisions.json`` file.
+    Prune old run entries from a ``ships.decisions.json`` file.
 
     Exactly one of ``keep_runs`` or ``keep_days`` must be provided.
     The most recent runs (by ``started_at``) are kept; older ones are
@@ -550,7 +550,7 @@ def prune_decisions(
     returned ``PruneResult`` describes what *would* be removed.
 
     Args:
-        path:       Path to the ``decisions.json`` file.
+        path:       Path to the ``ships.decisions.json`` file.
         keep_runs:  Retain the N most recent runs. Older runs are pruned.
         keep_days:  Retain runs started within the last N calendar days.
         dry_run:    If True, compute but do not apply the prune.
@@ -573,7 +573,7 @@ def prune_decisions(
         raise ValueError("keep_days must be >= 0.")
 
     if not os.path.exists(path):
-        raise FileNotFoundError(f"decisions.json not found: {path}")
+        raise FileNotFoundError(f"ships.decisions.json not found: {path}")
 
     data = DecisionsManifest._load_and_migrate(path)
     runs: List[Dict[str, Any]] = data.get("runs", [])

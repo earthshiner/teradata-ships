@@ -1737,7 +1737,7 @@ class TestKindAwareTokenSubstitution:
             "REPLACE VIEW Dom_V.v_loans AS SELECT 1 AS x;",
             encoding="utf-8",
         )
-        result = ingest_directory(
+        ingest_directory(
             str(src),
             str(tmp_project),
             detect_tokens=False,
@@ -1766,7 +1766,7 @@ class TestKindAwareTokenSubstitution:
             "REPLACE VIEW Dom.v_loans AS SELECT 1 AS x;",
             encoding="utf-8",
         )
-        result = ingest_directory(
+        ingest_directory(
             str(src),
             str(tmp_project),
             detect_tokens=False,

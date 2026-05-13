@@ -12,13 +12,9 @@ Covers:
 from __future__ import annotations
 
 import json
-import os
-import sys
-from io import StringIO
 from pathlib import Path
 from unittest import mock
 
-import pytest
 
 from database_package_deployer.audit import (
     build_audit_event,
@@ -155,7 +151,7 @@ def test_file_sink_appends(tmp_path, monkeypatch, capsys):
     emit_audit_event(pkg, "SUCCESS", 5, 0, 3.0, sink_uri=sink)
     emit_audit_event(pkg, "FAILURE", 0, 2, 1.5, sink_uri=sink)
 
-    lines = [l for l in audit_file.read_text(encoding="utf-8").splitlines() if l]
+    lines = [line for line in audit_file.read_text(encoding="utf-8").splitlines() if line]
     assert len(lines) == 2
     assert json.loads(lines[1])["outcome"] == "FAILURE"
 

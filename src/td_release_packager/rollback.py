@@ -46,7 +46,6 @@ import os
 import subprocess
 import tarfile
 import tempfile
-from typing import Optional
 
 from td_release_packager.builder import BuildConfig, build_package
 
