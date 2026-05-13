@@ -13,7 +13,7 @@ Build process:
     4. Create package directory structure.
     5. Copy and resolve payload files (substitute tokens).
     6. Embed the deployment engine (database_package_deployer library).
-    7. Generate BUILD.json manifest.
+    7. Generate ships.build.json manifest.
     8. Generate deploy.py (DBA entry point).
     9. Generate README.txt (DBA instructions).
    10. Archive as .zip or .tar.gz.
@@ -213,13 +213,13 @@ def _check_working_tree(source_dir: str, allow_dirty: bool) -> bool:
             f"Working tree has uncommitted changes — package not built.\n"
             f"{summary}\n\n"
             f"Commit or stash your changes, or pass --allow-dirty to override.\n"
-            f"Note: --allow-dirty stamps source_dirty=true in BUILD.json so the\n"
+            f"Note: --allow-dirty stamps source_dirty=true in ships.build.json so the\n"
             f"Trust Report will flag this package as READY-WITH-CAVEATS."
         )
 
     logger.warning(
         "Building from dirty working tree (--allow-dirty). "
-        "source_dirty=true will be stamped in BUILD.json.\n%s",
+        "source_dirty=true will be stamped in ships.build.json.\n%s",
         summary,
     )
     return True
@@ -412,7 +412,7 @@ def _build_package_impl(
     # -- Phase 7: Embed deployment engine --
     _embed_deployer(pkg_dir)
 
-    # -- Phase 8: Generate BUILD.json --
+    # -- Phase 8: Generate ships.build.json --
     from td_release_packager.discovery import resolve_harvest_extensions
     from td_release_packager.orchestrator import ships_yaml as _sy
 
@@ -494,27 +494,27 @@ def _build_package_impl(
     trust_report = compute_trust_report(config.source_dir, pkg_dir)
     manifest.trust = trust_report.to_dict()
 
-    manifest_path = os.path.join(pkg_dir, "BUILD.json")
+    manifest_path = os.path.join(pkg_dir, "ships.build.json")
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest.__dict__, f, indent=2, ensure_ascii=False)
 
     # -- Phase 8b: Write agent-facing context artefacts --
     # These files are a compact handoff contract for humans, CI/CD,
-    # MCP tools, and autonomous agents.  They reference BUILD.json and
-    # _provenance.json rather than duplicating detailed evidence.
+    # MCP tools, and autonomous agents.  They reference ships.build.json and
+    # ships.provenance.json rather than duplicating detailed evidence.
     write_context_artifacts(pkg_dir, manifest, config)
 
     # Print trust banner to CLI
     print(format_trust_banner(trust_report))
 
-    # -- Phase 8c: Write provenance document (v2) --
+    # -- Phase 8b: Write provenance document (v2) --
     # Records the full filename-transformation chain (source →
     # eponymous → token-resolved → package) for every payload file.
     # The HTML report uses this to render a drill-down that shows
     # the DBA exactly where in the pipeline each filename was
     # rewritten — critical for diagnosing mapping bugs that only
     # surface at deploy time.
-    provenance_path = os.path.join(pkg_dir, "_provenance.json")
+    provenance_path = os.path.join(pkg_dir, "ships.provenance.json")
     provenance_doc.write(provenance_path)
     logger.info(
         "Provenance document (v%d): %d entries → %s",
@@ -652,7 +652,7 @@ def _compute_phase_inventory(pkg_dir: str) -> Dict[str, int]:
     The pre-split inventory captured by ``_copy_payload`` covers the
     whole payload, but each half of an auto-split pair only ships a
     subset of phases. Walk the post-split tree and recount so the
-    BUILD.json in each archive reports exactly what that archive
+    ships.build.json in each archive reports exactly what that archive
     contains.
     """
     inventory: Dict[str, int] = {}
@@ -707,7 +707,7 @@ def _split_into_paired_packages(
     zip keeps ``01_pre_requisites`` and empties every other phase;
     the main zip does the inverse.
 
-    Both BUILD.json manifests are rewritten to:
+    Both ships.build.json manifests are rewritten to:
       - share the same ``release_group`` (= the main archive basename)
       - declare their ``role`` ("prereqs" or "main")
       - have the main zip's ``requires`` list name the prereqs zip,
@@ -761,7 +761,7 @@ def _split_into_paired_packages(
     for phase in _MAIN_PHASES:
         _empty_phase_subtree(prereqs_pkg_dir, phase)
 
-    # 4. Recompute inventories for each half so BUILD.json reflects
+    # 4. Recompute inventories for each half so ships.build.json reflects
     #    what the archive actually ships, not the pre-split union.
     main_inventory = _compute_phase_inventory(pkg_dir)
     prereqs_inventory = _compute_phase_inventory(prereqs_pkg_dir)
@@ -809,12 +809,12 @@ def _split_into_paired_packages(
         package_age_violation_level=manifest.package_age_violation_level,
     )
 
-    # 7. Re-write BUILD.json on both sides.
+    # 7. Re-write ships.build.json on both sides.
     for target_pkg_dir, target_manifest in (
         (pkg_dir, manifest),
         (prereqs_pkg_dir, prereqs_manifest),
     ):
-        manifest_path = os.path.join(target_pkg_dir, "BUILD.json")
+        manifest_path = os.path.join(target_pkg_dir, "ships.build.json")
         with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(target_manifest.__dict__, f, indent=2, ensure_ascii=False)
         write_context_artifacts(target_pkg_dir, target_manifest)
@@ -983,7 +983,7 @@ def _copy_payload(
                 total_subs += subs
 
                 # Start a provenance chain for this file. Each stage
-                # is recorded as it runs so the v2 _provenance.json
+                # is recorded as it runs so the v2 ships.provenance.json
                 # contains a full audit trail of how the source
                 # filename became the package path.
                 src_rel_path = rel_path.replace("\\", "/")
@@ -1537,7 +1537,7 @@ def _generate_deploy_script(pkg_dir: str, manifest: BuildManifest):
     Generate deploy.py — the DBA's single entry point.
 
     This script bootstraps the embedded database_package_deployer, reads the
-    BUILD.json for context, and orchestrates the deployment with
+    ships.build.json for context, and orchestrates the deployment with
     query banding and logging.
 
     Args:
@@ -1629,7 +1629,7 @@ def main():
     # label and per-signal status before any database connection is
     # opened.  A BLOCKED label means the package should not be
     # deployed without investigating and resolving the blocking signals.
-    _build_json = os.path.join(SCRIPT_DIR, "BUILD.json")
+    _build_json = os.path.join(SCRIPT_DIR, "ships.build.json")
     if os.path.exists(_build_json):
         with open(_build_json, encoding="utf-8") as _f:
             _bdata = json.load(_f)
@@ -1682,7 +1682,7 @@ def main():
 
     # -- Deploy chaining: deploy companion prereqs package first (if any) --
     #
-    # When this package's BUILD.json has a non-empty ``requires`` list, a
+    # When this package's ships.build.json has a non-empty ``requires`` list, a
     # companion prereqs package was auto-generated alongside it (Phase 2 of
     # the intra-package dependency trilogy).  The prereqs package contains
     # CREATE DATABASE / CREATE USER statements that must be deployed before
@@ -1696,7 +1696,7 @@ def main():
     #     This ensures parent databases physically exist when EXPLAIN
     #     validates the main package's DDL (fixes issue #53 Option 2).
     #
-    build_json_path = os.path.join(SCRIPT_DIR, "BUILD.json")
+    build_json_path = os.path.join(SCRIPT_DIR, "ships.build.json")
     requires = []
     if os.path.exists(build_json_path):
         with open(build_json_path, encoding="utf-8") as _f:
@@ -1914,7 +1914,7 @@ def _verify_integrity(script_dir, logger, skip=False):
     """Verify the package has not been modified since packaging.
 
     Recomputes SHA-256 over every file under payload/ and lib/, derives
-    the combined package_hash, and compares against package_integrity.json.
+    the combined package_hash, and compares against ships.integrity.json.
     Aborts the process on any mismatch.
 
     Including lib/ means an attacker who edits the embedded deployer code
@@ -1927,7 +1927,7 @@ def _verify_integrity(script_dir, logger, skip=False):
     Returns the package_hash string so callers can embed it in the
     query band.  Returns 'SKIPPED' when --skip-integrity-check is set.
     """
-    integrity_file = os.path.join(script_dir, "package_integrity.json")
+    integrity_file = os.path.join(script_dir, "ships.integrity.json")
 
     if skip:
         logger.warning("Integrity check SKIPPED (--skip-integrity-check).")
@@ -1935,7 +1935,7 @@ def _verify_integrity(script_dir, logger, skip=False):
 
     if not os.path.exists(integrity_file):
         logger.error(
-            "INTEGRITY CHECK FAILED: package_integrity.json not found — "
+            "INTEGRITY CHECK FAILED: ships.integrity.json not found — "
             "package may be incomplete or corrupted. "
             "Use --skip-integrity-check to override (development only)."
         )
@@ -2360,7 +2360,7 @@ def _generate_integrity_file(pkg_dir: str) -> str:
     Walks ``payload/`` and ``lib/`` recursively (sorted), hashes each file,
     then derives a single ``package_hash`` as SHA-256 of the sorted
     ``"rel/path:filehash\\n"`` concatenation.  Writes the result to
-    ``package_integrity.json`` in the package root so the embedded
+    ``ships.integrity.json`` in the package root so the embedded
     ``deploy.py`` can verify the package has not been tampered with
     before any database connection is opened.
 
@@ -2422,7 +2422,7 @@ def _generate_integrity_file(pkg_dir: str) -> str:
         "files": file_hashes,
     }
 
-    out_path = os.path.join(pkg_dir, "package_integrity.json")
+    out_path = os.path.join(pkg_dir, "ships.integrity.json")
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(integrity, f, indent=2, ensure_ascii=False)
 
@@ -2522,7 +2522,7 @@ def _read_signing_public_key(source_dir: str) -> str:
     """Read the Ed25519 public key PEM from ships.yaml signing.public_key.
 
     Returns an empty string when ships.yaml is absent or the key is not
-    configured.  The returned value is stamped into BUILD.json so the
+    configured.  The returned value is stamped into ships.build.json so the
     deployer can verify signatures without a separate --public-key argument.
 
     Args:

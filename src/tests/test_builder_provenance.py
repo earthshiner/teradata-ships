@@ -320,7 +320,7 @@ class TestProvenanceJSONOutput:
 
         _, _, _, _, doc = _copy_payload(src, pkg, token_values)
 
-        json_path = str(tmp_path / "_provenance.json")
+        json_path = str(tmp_path / "ships.provenance.json")
         doc.write(json_path)
 
         from database_package_deployer.provenance import ProvenanceDocument

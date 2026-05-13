@@ -6,7 +6,7 @@ HTTP routes are thin wrappers around these functions; testing the
 data layer is sufficient for correctness coverage.
 
 Covers:
-    - read_build_json_from_zip: valid archive, missing BUILD.json, bad archive
+    - read_build_json_from_zip: valid archive, missing ships.build.json, bad archive
     - archive_has_report: with and without package_report.html
     - check_approval: no sidecar, approved, rejected with reason
     - write_approval: approve writes .approved; reject writes .rejected;
@@ -79,9 +79,9 @@ def _build_json(pkg_name="OMR", build_no="0042", env="PRD", label="READY") -> di
 
 
 def _make_package_zip(tmp_path: Path, filename: str, **build_overrides) -> str:
-    """Write a realistic package archive with BUILD.json (and optional report)."""
+    """Write a realistic package archive with ships.build.json (and optional report)."""
     bd = _build_json(**build_overrides)
-    members = {f"{filename.split('.')[0]}/BUILD.json": json.dumps(bd)}
+    members = {f"{filename.split('.')[0]}/ships.build.json": json.dumps(bd)}
     if build_overrides.get("with_report"):
         members[f"{filename.split('.')[0]}/package_report.html"] = "<html></html>"
     return _make_zip(tmp_path, filename, members)
@@ -94,7 +94,7 @@ def _make_project(tmp_path: Path, archives: list[tuple[str, dict]]) -> Path:
     releases.mkdir(parents=True)
     for filename, build_kwargs in archives:
         bd = _build_json(**build_kwargs)
-        members = {f"{filename.split('.')[0]}/BUILD.json": json.dumps(bd)}
+        members = {f"{filename.split('.')[0]}/ships.build.json": json.dumps(bd)}
         archive_path = str(releases / filename)
         with zipfile.ZipFile(archive_path, "w") as zf:
             for name, content in members.items():
@@ -110,7 +110,7 @@ def _make_project(tmp_path: Path, archives: list[tuple[str, dict]]) -> Path:
 class TestReadBuildJsonFromZip:
     def test_reads_build_json(self, tmp_path):
         bd = _build_json()
-        archive = _make_zip(tmp_path, "pkg.zip", {"pkg/BUILD.json": json.dumps(bd)})
+        archive = _make_zip(tmp_path, "pkg.zip", {"pkg/ships.build.json": json.dumps(bd)})
         result = read_build_json_from_zip(archive)
         assert result is not None
         assert result["package_name"] == "OMR"
@@ -139,12 +139,12 @@ class TestArchiveHasReport:
         archive = _make_zip(
             tmp_path,
             "pkg.zip",
-            {"pkg/package_report.html": "<html></html>", "pkg/BUILD.json": "{}"},
+            {"pkg/package_report.html": "<html></html>", "pkg/ships.build.json": "{}"},
         )
         assert archive_has_report(archive) is True
 
     def test_returns_false_when_no_report(self, tmp_path):
-        archive = _make_zip(tmp_path, "pkg.zip", {"pkg/BUILD.json": "{}"})
+        archive = _make_zip(tmp_path, "pkg.zip", {"pkg/ships.build.json": "{}"})
         assert archive_has_report(archive) is False
 
     def test_returns_false_for_nonexistent_file(self, tmp_path):

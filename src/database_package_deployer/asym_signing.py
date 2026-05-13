@@ -44,7 +44,7 @@ _ENV_PUBLIC_KEY = "SHIPS_PUBLIC_KEY"
 _IMPORT_ERROR_MSG = (
     "The 'cryptography' package is required for Ed25519 signing.\n"
     "Install it with:  pip install cryptography>=42.0\n"
-    "Or, if using uv:  uv pip install 'teradata-deployment-agent[signing]'"
+    "Or, if using uv:  uv pip install 'teradata-ships[signing]'"
 )
 
 

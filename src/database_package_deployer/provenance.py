@@ -258,7 +258,7 @@ class ProvenanceChain:
 class ProvenanceDocument:
     """
     The full v2 provenance document — top-level container written
-    to ``_provenance.json`` at the package root.
+    to ``ships.provenance.json`` at the package root.
 
     Attributes:
         version:      Schema version. Always SCHEMA_VERSION on write;

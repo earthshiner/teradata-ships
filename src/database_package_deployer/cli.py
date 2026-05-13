@@ -895,7 +895,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help=(
             "Path to an Ed25519 public key PEM file for verifying the .sig "
             "sidecar (Option C). Falls back to SHIPS_PUBLIC_KEY_PATH env var, "
-            "the key embedded in BUILD.json, and SHIPS_PUBLIC_KEY env var."
+            "the key embedded in ships.build.json, and SHIPS_PUBLIC_KEY env var."
         ),
     )
     _add_conn_args(dp)

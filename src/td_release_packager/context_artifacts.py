@@ -1,7 +1,7 @@
 """
 context_artifacts.py — Agent-facing SHIPS context artefacts.
 
-The package builder already emits BUILD.json, _provenance.json, reports,
+The package builder already emits ships.build.json, ships.provenance.json, reports,
 and deployment scripts.  Those files are excellent for machines and DBAs,
 but autonomous agents also need a compact, stable context contract that
 explains what the package is, where it sits in the workflow, what evidence
@@ -44,7 +44,7 @@ def write_context_artifacts(
 
     Args:
         pkg_dir: Package directory that will later be archived.
-        manifest: BUILD.json manifest object for this package.
+        manifest: ships.build.json manifest object for this package.
         config: Optional build configuration. Present on the normal build
             path; omitted when regenerating context for an auto-split sibling.
 
@@ -142,12 +142,12 @@ def _governance(manifest: Dict[str, Any]) -> Dict[str, Any]:
 def _evidence_files() -> Dict[str, str]:
     """Canonical evidence files expected within a SHIPS package."""
     return {
-        "build_manifest": "BUILD.json",
+        "build_manifest": "ships.build.json",
         "context": CONTEXT_FILENAME,
         "agent_manifest": MANIFEST_FILENAME,
         "handoff": HANDOFF_FILENAME,
-        "provenance": "_provenance.json",
-        "integrity": "_integrity.json",
+        "provenance": "ships.provenance.json",
+        "integrity": "ships.integrity.json",
         "package_report": "package_report.html",
         "readme": "README.txt",
     }
@@ -157,16 +157,16 @@ def _safe_token_summary(manifest: Dict[str, Any]) -> Dict[str, Any]:
     """
     Summarise token usage without duplicating resolved values.
 
-    BUILD.json already contains the full token map.  Agent context should be
+    ships.build.json already contains the full token map.  Agent context should be
     small and should avoid re-spreading environment-specific values unless an
-    actor deliberately opens BUILD.json.
+    actor deliberately opens ships.build.json.
     """
     tokens = manifest.get("tokens_resolved") or {}
     return {
         "token_count": len(tokens),
         "token_names": sorted(tokens.keys()),
         "values_redacted": True,
-        "full_values_reference": "BUILD.json#/tokens_resolved",
+        "full_values_reference": "ships.build.json#/tokens_resolved",
     }
 
 
@@ -205,9 +205,9 @@ def _build_context_document(
         "constraints": [
             "Preserve Teradata SQL syntax and deployment order.",
             "Do not change business logic during package handoff or deployment.",
-            "Use BUILD.json as the authoritative technical build manifest.",
+            "Use ships.build.json as the authoritative technical build manifest.",
             "Use ships.manifest.json for compact agent-safe inventory and policy context.",
-            "Use _provenance.json for file-level source-to-package traceability.",
+            "Use ships.provenance.json for file-level source-to-package traceability.",
             "Do not rely on conversational memory between agents; carry this package context forward.",
         ],
         "governance": _governance(manifest),
@@ -272,7 +272,7 @@ def _build_handoff_document(
     """Build ships.handoff.json."""
     governance = _governance(manifest)
     required_actions = [
-        "Review BUILD.json, ships.manifest.json, and package_report.html.",
+        "Review ships.build.json, ships.manifest.json, and package_report.html.",
         "Verify package integrity before deployment.",
         "Confirm target environment matches the package target_env.",
         "Deploy required companion packages first if dependency_contract.requires is not empty.",

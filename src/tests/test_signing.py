@@ -42,7 +42,7 @@ _KEY = b"test-key-do-not-use"
 def _make_zip(tmp_path: Path, zip_name: str = "PRD_Pkg_BUILD_0001.zip") -> Path:
     zip_path = tmp_path / zip_name
     with zipfile.ZipFile(zip_path, "w") as zf:
-        zf.writestr("BUILD.json", json.dumps({"package_filename": zip_name}))
+        zf.writestr("ships.build.json", json.dumps({"package_filename": zip_name}))
     return zip_path
 
 
@@ -56,7 +56,7 @@ def _sha256(path: Path) -> str:
 
 def _write_build_json(pkg_dir: Path, zip_name: str, **extra) -> None:
     manifest = {"package_filename": zip_name, **extra}
-    (pkg_dir / "BUILD.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (pkg_dir / "ships.build.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
 def _make_hmac_sidecar(zip_path: Path, key: bytes) -> Path:

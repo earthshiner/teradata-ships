@@ -56,10 +56,10 @@ Run facet
 ---------
 A custom ``ShipsRunFacet`` is attached to every event and carries:
 
-    build_number    From BUILD.json (empty string if not present)
-    environment     From BUILD.json
-    package_name    From BUILD.json
-    package_filename From BUILD.json
+    build_number    From ships.build.json (empty string if not present)
+    environment     From ships.build.json
+    package_name    From ships.build.json
+    package_filename From ships.build.json
     dry_run         True when the deploy ran in dry-run mode
 
 OpenLineage spec
@@ -93,12 +93,12 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-_PRODUCER = "https://github.com/earthshiner/teradata-deployment-agent"
+_PRODUCER = "https://github.com/earthshiner/teradata-ships"
 
 _OL_SCHEMA_URL = "https://openlineage.io/spec/2-0-2/OpenLineage.json#/$defs/RunEvent"
 
 _SHIPS_RUN_FACET_SCHEMA = (
-    "https://github.com/earthshiner/teradata-deployment-agent"
+    "https://github.com/earthshiner/teradata-ships"
     "/blob/main/docs/openlineage/ShipsRunFacet.json"
 )
 
@@ -140,16 +140,16 @@ def _now() -> str:
 
 
 # ---------------------------------------------------------------------------
-# BUILD.json reader
+# ships.build.json reader
 # ---------------------------------------------------------------------------
 
 
 def _read_build_meta(package_dir: str) -> dict:
-    """Read deployment metadata from BUILD.json in ``package_dir``.
+    """Read deployment metadata from ships.build.json in ``package_dir``.
 
     Returns a dict with keys ``build_number``, ``environment``,
     ``package_name``, ``package_filename``.  Missing or unreadable
-    BUILD.json → all values are empty strings.
+    ships.build.json → all values are empty strings.
     """
     defaults = {
         "build_number": "",
@@ -157,7 +157,7 @@ def _read_build_meta(package_dir: str) -> dict:
         "package_name": "",
         "package_filename": "",
     }
-    build_json = os.path.join(package_dir, "BUILD.json")
+    build_json = os.path.join(package_dir, "ships.build.json")
     if not os.path.isfile(build_json):
         return defaults
     try:
@@ -167,7 +167,7 @@ def _read_build_meta(package_dir: str) -> dict:
             if isinstance(data.get(key), str):
                 defaults[key] = data[key]
     except Exception:  # noqa: BLE001
-        logger.debug("ships_lineage: could not read BUILD.json at %s", package_dir)
+        logger.debug("ships_lineage: could not read ships.build.json at %s", package_dir)
     return defaults
 
 
@@ -332,7 +332,7 @@ def start_deploy_run(
     ``fail_deploy_run`` to close the run.
 
     Args:
-        package_dir: Package directory containing BUILD.json.
+        package_dir: Package directory containing ships.build.json.
         dry_run:     Whether this is a dry-run deployment.
         db_host:     Database host string used to derive the dataset
                      namespace.  Falls back to ``OPENLINEAGE_NAMESPACE``
@@ -373,7 +373,7 @@ def complete_deploy_run(
 
     Args:
         run_id:             Run ID returned by ``start_deploy_run``.
-        package_dir:        Package directory containing BUILD.json.
+        package_dir:        Package directory containing ships.build.json.
         completed_objects:  List of ``(database_name, object_name)``
                             tuples for objects that reached COMPLETED
                             state.
@@ -412,7 +412,7 @@ def fail_deploy_run(
 
     Args:
         run_id:             Run ID returned by ``start_deploy_run``.
-        package_dir:        Package directory containing BUILD.json.
+        package_dir:        Package directory containing ships.build.json.
         db_host:            Database host string (namespace hint).
         error:              Top-level error message (used when the
                             deployer raised an unexpected exception).

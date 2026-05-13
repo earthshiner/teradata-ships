@@ -5,9 +5,9 @@ Covers:
     - Signal computation from decisions.json (inspect stages)
     - Provenance signal from filesystem state
     - Label derivation (READY / READY-WITH-CAVEATS / BLOCKED)
-    - to_dict serialisation matches BUILD.json schema
+    - to_dict serialisation matches ships.build.json schema
     - Banner formatting
-    - Integration: build_package stamps trust block in BUILD.json
+    - Integration: build_package stamps trust block in ships.build.json
 """
 
 from __future__ import annotations
@@ -127,12 +127,12 @@ class TestProvenanceSignal:
     def test_pass_when_provenance_in_payload(self, tmp_path):
         payload = tmp_path / "payload" / "database"
         payload.mkdir(parents=True)
-        (payload / "_provenance.json").write_text("{}", encoding="utf-8")
+        (payload / "ships.provenance.json").write_text("{}", encoding="utf-8")
         sig = _provenance_signal(str(tmp_path))
         assert sig.status == TRUST_PASS
 
     def test_pass_when_provenance_in_source_root(self, tmp_path):
-        (tmp_path / "_provenance.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "ships.provenance.json").write_text("{}", encoding="utf-8")
         sig = _provenance_signal(str(tmp_path))
         assert sig.status == TRUST_PASS
 
@@ -203,7 +203,7 @@ class TestComputeTrustReport:
                 }
             ],
         )
-        (tmp_path / "_provenance.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "ships.provenance.json").write_text("{}", encoding="utf-8")
         report = compute_trust_report(str(tmp_path), str(tmp_path))
         assert report.label == LABEL_READY
 
@@ -255,7 +255,7 @@ class TestComputeTrustReport:
                 }
             ],
         )
-        (tmp_path / "_provenance.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "ships.provenance.json").write_text("{}", encoding="utf-8")
         report = compute_trust_report(str(tmp_path), str(tmp_path))
         assert report.label == LABEL_CAVEATS
         assert report.signals["inspect_lint"].status == TRUST_WARN
@@ -297,7 +297,7 @@ class TestComputeTrustReport:
                 },
             ],
         )
-        (tmp_path / "_provenance.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "ships.provenance.json").write_text("{}", encoding="utf-8")
         report = compute_trust_report(str(tmp_path), str(tmp_path))
         # Second run (clean) should win
         assert report.signals["inspect_token_format"].status == TRUST_PASS
@@ -341,7 +341,7 @@ class TestFormatTrustBanner:
 
 
 # ---------------------------------------------------------------
-# Integration: build_package stamps trust in BUILD.json
+# Integration: build_package stamps trust in ships.build.json
 # ---------------------------------------------------------------
 
 
@@ -387,10 +387,10 @@ class TestBuildPackageStampsTrust:
         (main_arc, manifest), _companion = build_package(cfg)
 
         with zipfile.ZipFile(main_arc) as zf:
-            build_json_name = next(n for n in zf.namelist() if n.endswith("BUILD.json"))
+            build_json_name = next(n for n in zf.namelist() if n.endswith("ships.build.json"))
             build_data = json.loads(zf.read(build_json_name))
 
-        assert "trust" in build_data, "BUILD.json must contain a trust block"
+        assert "trust" in build_data, "ships.build.json must contain a trust block"
         trust = build_data["trust"]
         assert "label" in trust
         assert trust["label"] in (LABEL_READY, LABEL_CAVEATS, LABEL_BLOCKED)
@@ -427,7 +427,7 @@ class TestBuildPackageStampsTrust:
             json.dumps(decisions), encoding="utf-8"
         )
         # Seed provenance
-        (tmp_project / "_provenance.json").write_text("{}", encoding="utf-8")
+        (tmp_project / "ships.provenance.json").write_text("{}", encoding="utf-8")
 
         props = tmp_path / "DEV.conf"
         props.write_text("SHIPS_ENV=DEV\n", encoding="utf-8")
@@ -443,7 +443,7 @@ class TestBuildPackageStampsTrust:
         (main_arc, _), _companion = build_package(cfg)
 
         with zipfile.ZipFile(main_arc) as zf:
-            build_json_name = next(n for n in zf.namelist() if n.endswith("BUILD.json"))
+            build_json_name = next(n for n in zf.namelist() if n.endswith("ships.build.json"))
             build_data = json.loads(zf.read(build_json_name))
 
         assert build_data["trust"]["label"] == LABEL_READY
@@ -463,28 +463,28 @@ class TestBuildReproducibleSignal:
         assert sig.status == TRUST_PASS
 
     def test_pass_when_source_dirty_false(self, tmp_path):
-        (tmp_path / "BUILD.json").write_text(
+        (tmp_path / "ships.build.json").write_text(
             '{"source_dirty": false}', encoding="utf-8"
         )
         sig = _build_reproducible_signal(str(tmp_path))
         assert sig.status == TRUST_PASS
 
     def test_pass_when_source_dirty_absent(self, tmp_path):
-        (tmp_path / "BUILD.json").write_text(
+        (tmp_path / "ships.build.json").write_text(
             '{"build_number": "0001"}', encoding="utf-8"
         )
         sig = _build_reproducible_signal(str(tmp_path))
         assert sig.status == TRUST_PASS
 
     def test_warn_when_source_dirty_true(self, tmp_path):
-        (tmp_path / "BUILD.json").write_text('{"source_dirty": true}', encoding="utf-8")
+        (tmp_path / "ships.build.json").write_text('{"source_dirty": true}', encoding="utf-8")
         sig = _build_reproducible_signal(str(tmp_path))
         assert sig.status == TRUST_WARN
         assert "dirty" in sig.message.lower()
 
     def test_dirty_build_triggers_caveats_label(self, tmp_path):
-        (tmp_path / "BUILD.json").write_text('{"source_dirty": true}', encoding="utf-8")
-        (tmp_path / "_provenance.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "ships.build.json").write_text('{"source_dirty": true}', encoding="utf-8")
+        (tmp_path / "ships.provenance.json").write_text("{}", encoding="utf-8")
         report = compute_trust_report(str(tmp_path), str(tmp_path))
         assert report.label == LABEL_CAVEATS
         assert report.signals["build_reproducible"].status == TRUST_WARN

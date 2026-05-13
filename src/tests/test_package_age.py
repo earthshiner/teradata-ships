@@ -31,7 +31,7 @@ def _iso(dt: datetime) -> str:
 
 def _write_build_json(pkg_dir: Path, **extra) -> None:
     manifest = {"package_filename": "PRD_Pkg_BUILD_0001.zip", **extra}
-    (pkg_dir / "BUILD.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (pkg_dir / "ships.build.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
 _NOW = datetime.now(tz=timezone.utc)

@@ -31,7 +31,7 @@ def _write_build_json(pkg_dir: Path, **extra) -> None:
         "package_name": "Pkg",
         **extra,
     }
-    (pkg_dir / "BUILD.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (pkg_dir / "ships.build.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
 # ---------------------------------------------------------------

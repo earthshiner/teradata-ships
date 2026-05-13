@@ -43,4 +43,4 @@ def test_write_context_artifacts_emits_three_agent_files(tmp_path):
     assert agent_manifest["tokens"]["values_redacted"] is True
     assert agent_manifest["tokens"]["token_names"] == ["CORE_T", "CORE_V"]
     assert handoff["preconditions"]["tls_required"] is True
-    assert "BUILD.json" in handoff["references"].values()
+    assert "ships.build.json" in handoff["references"].values()

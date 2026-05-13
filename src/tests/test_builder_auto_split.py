@@ -12,7 +12,7 @@ Covers:
     - Filename convention (``_prereqs_BUILD_`` infix on the prereqs zip)
     - Per-archive phase_inventory recount post-split
     - Both archives contain full infrastructure (config/, lib/,
-      deploy.py, BUILD.json, etc.)
+      deploy.py, ships.build.json, etc.)
     - Direct unit tests for the helpers (_phase_has_files,
       _is_auto_split_needed, _compute_phase_inventory)
 """
@@ -60,7 +60,7 @@ def _properties_for(env: str, tmp_path: Path, **extra) -> Path:
 
 def _zip_contains(archive_path: str, member: str) -> bool:
     """True when ``member`` (anywhere in the zip) ends with the given
-    suffix. Used to assert presence of files like ``BUILD.json`` or
+    suffix. Used to assert presence of files like ``ships.build.json`` or
     ``deploy.py`` regardless of the top-level archive directory."""
     with zipfile.ZipFile(archive_path) as zf:
         for name in zf.namelist():
@@ -373,13 +373,13 @@ class TestBuildPackageAutoSplit:
         assert any("MyDB.Customer.tbl" in name for name in main_files)
 
     def test_both_archives_have_full_infrastructure(self, split_config):
-        """Each archive must be independently deployable: BUILD.json,
+        """Each archive must be independently deployable: ships.build.json,
         deploy.py, README, embedded deployer all present in both."""
         ((main_archive, _), (prereqs_archive, _)) = build_package(split_config)
 
         for archive in (main_archive, prereqs_archive):
-            assert _zip_contains(archive, "BUILD.json"), (
-                f"BUILD.json missing from {archive}"
+            assert _zip_contains(archive, "ships.build.json"), (
+                f"ships.build.json missing from {archive}"
             )
             assert _zip_contains(archive, "deploy.py"), (
                 f"deploy.py missing from {archive}"
@@ -389,15 +389,15 @@ class TestBuildPackageAutoSplit:
             )
 
     def test_build_json_round_trip(self, split_config):
-        """The on-disk BUILD.json in each zip parses and carries the
+        """The on-disk ships.build.json in each zip parses and carries the
         expected role / release_group / requires fields — proves the
         manifest changes survive the JSON round-trip."""
         ((main_archive, main_manifest), (prereqs_archive, prereqs_manifest)) = (
             build_package(split_config)
         )
 
-        main_json = json.loads(_read_zip_member(main_archive, "BUILD.json"))
-        prereqs_json = json.loads(_read_zip_member(prereqs_archive, "BUILD.json"))
+        main_json = json.loads(_read_zip_member(main_archive, "ships.build.json"))
+        prereqs_json = json.loads(_read_zip_member(prereqs_archive, "ships.build.json"))
 
         assert main_json["role"] == "main"
         assert main_json["release_group"] == main_manifest.release_group
@@ -417,13 +417,13 @@ class TestBuildPackageAutoSplit:
 
 
 class TestDeployChaining:
-    """Phase 3 — deploy chaining via BUILD.json requires field.
+    """Phase 3 — deploy chaining via ships.build.json requires field.
 
     Verifies that:
     - A split package's main deploy.py contains the chaining code that
-      reads BUILD.json, locates the companion prereqs directory, and
+      reads ships.build.json, locates the companion prereqs directory, and
       deploys it before the main package.
-    - The BUILD.json requires field is populated on the main archive and
+    - The ships.build.json requires field is populated on the main archive and
       empty on the prereqs archive.
     - The generated deploy.py explicitly references 'requires' and
       'deploy_package' so agents can rely on the chaining behaviour.
@@ -453,13 +453,13 @@ class TestDeployChaining:
         return main_arc, prereqs_arc
 
     def test_main_deploy_py_contains_chaining_code(self, tmp_path, tmp_project):
-        """The main deploy.py must contain chaining logic that reads BUILD.json
+        """The main deploy.py must contain chaining logic that reads ships.build.json
         and deploys the companion prereqs before the main package."""
         main_arc, _ = self._make_split_package(tmp_path, tmp_project)
         deploy_py = _read_zip_member(main_arc, "deploy.py")
 
         # Core chaining keywords must all be present
-        assert "requires" in deploy_py, "deploy.py must read 'requires' from BUILD.json"
+        assert "requires" in deploy_py, "deploy.py must read 'requires' from ships.build.json"
         assert "prereqs" in deploy_py.lower(), (
             "deploy.py must reference companion prereqs"
         )
@@ -469,22 +469,22 @@ class TestDeployChaining:
         assert "Deploy chaining" in deploy_py, "deploy.py must banner the chaining step"
 
     def test_main_build_json_requires_populated(self, tmp_path, tmp_project):
-        """Main BUILD.json must have a non-empty requires list."""
+        """Main ships.build.json must have a non-empty requires list."""
         main_arc, _ = self._make_split_package(tmp_path, tmp_project)
-        build = json.loads(_read_zip_member(main_arc, "BUILD.json"))
+        build = json.loads(_read_zip_member(main_arc, "ships.build.json"))
 
         assert build.get("role") == "main"
-        assert build.get("requires"), "main BUILD.json must have non-empty requires"
+        assert build.get("requires"), "main ships.build.json must have non-empty requires"
         assert build["requires"][0].endswith(".zip")
 
     def test_prereqs_build_json_requires_empty(self, tmp_path, tmp_project):
-        """Prereqs BUILD.json must have an empty requires list."""
+        """Prereqs ships.build.json must have an empty requires list."""
         _, prereqs_arc = self._make_split_package(tmp_path, tmp_project)
-        build = json.loads(_read_zip_member(prereqs_arc, "BUILD.json"))
+        build = json.loads(_read_zip_member(prereqs_arc, "ships.build.json"))
 
         assert build.get("role") == "prereqs"
         assert build.get("requires") == [], (
-            "prereqs BUILD.json must have empty requires"
+            "prereqs ships.build.json must have empty requires"
         )
 
     def test_chaining_skipped_message_in_dry_run_path(self, tmp_path, tmp_project):
