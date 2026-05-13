@@ -12,6 +12,7 @@ Covers:
     - Hardcoded name detection
     - Keyword case check
     - Leading comma check
+    - DDL statement terminator check
     - Full directory validation
 """
 
@@ -21,6 +22,7 @@ from td_release_packager.validate import (
     _check_db_qualifier,
     _check_multiset,
     _check_deploy_intent,
+    _check_ddl_terminator,
     _check_view_macro_self_reference,
     _check_one_object,
     _check_eponymous,
@@ -30,6 +32,7 @@ from td_release_packager.validate import (
     _check_keyword_case,
     _check_leading_commas,
     _check_intra_package_dependency,
+    _check_view_column_list,
     _collect_package_prereqs,
     validate_directory,
     read_inspect_config,
@@ -234,6 +237,107 @@ class TestCheckDeployIntent:
         )
         issues = _check_deploy_intent("x.spl", ddl)
         assert len(issues) == 1
+
+
+# ---------------------------------------------------------------
+# _check_ddl_terminator
+# ---------------------------------------------------------------
+
+
+class TestCheckDdlTerminator:
+    """Tests for DDL statement semi-colon termination."""
+
+    def test_create_view_with_semicolon_passes(self):
+        """A terminated CREATE VIEW produces no issue."""
+        ddl = "CREATE VIEW MyDB.V AS SELECT 1;"
+        assert _check_ddl_terminator("v.viw", ddl) == []
+
+    def test_create_view_without_semicolon_flagged(self):
+        """Missing terminator on CREATE VIEW is flagged."""
+        ddl = "CREATE VIEW MyDB.V AS SELECT 1"
+        issues = _check_ddl_terminator("v.viw", ddl)
+        assert len(issues) == 1
+        assert issues[0].rule == "ddl_terminator"
+        assert issues[0].severity == "ERROR"
+        assert issues[0].line == 1
+
+    def test_create_macro_without_semicolon_flagged(self):
+        """Missing terminator on CREATE MACRO is flagged."""
+        ddl = "CREATE MACRO MyDB.M AS (SELECT 1;)"
+        issues = _check_ddl_terminator("m.mcr", ddl)
+        assert len(issues) == 1
+        assert issues[0].rule == "ddl_terminator"
+
+    def test_create_procedure_with_semicolon_passes(self):
+        """A normal CREATE PROCEDURE ending in END; passes."""
+        ddl = (
+            "CREATE PROCEDURE MyDB.sp_X()\n"
+            "BEGIN\n"
+            "    INSERT INTO MyDB.Log VALUES (1);\n"
+            "END;\n"
+        )
+        assert _check_ddl_terminator("x.spl", ddl) == []
+
+    def test_create_procedure_without_final_semicolon_flagged(self):
+        """A procedure body without the final END terminator is flagged."""
+        ddl = (
+            "CREATE PROCEDURE MyDB.sp_X()\n"
+            "BEGIN\n"
+            "    INSERT INTO MyDB.Log VALUES (1);\n"
+            "END\n"
+        )
+        issues = _check_ddl_terminator("x.spl", ddl)
+        assert len(issues) == 1
+        assert issues[0].line == 1
+
+    def test_trailing_whitespace_after_semicolon_passes(self):
+        """Whitespace after the terminator is allowed."""
+        ddl = "CREATE VIEW MyDB.V AS SELECT 1;\n\n   "
+        assert _check_ddl_terminator("v.viw", ddl) == []
+
+    def test_missing_terminator_before_next_ddl_flagged(self):
+        """Each DDL segment must be terminated, not just the final file."""
+        ddl = (
+            "CREATE TABLE MyDB.T1 (Id INT)\n"
+            "CREATE TABLE MyDB.T2 (Id INT);\n"
+        )
+        issues = _check_ddl_terminator("multi.sql", ddl)
+        assert len(issues) == 1
+        assert issues[0].line == 1
+
+    def test_no_ddl_statement_is_skipped(self):
+        """Non-DDL content is out of scope for this rule."""
+        assert _check_ddl_terminator("notes.txt", "just notes") == []
+
+    def test_rule_is_error_by_default(self):
+        """ddl_terminator defaults to ERROR in DEFAULT_RULES."""
+        assert DEFAULT_RULES.get("ddl_terminator") == "ERROR"
+
+    def test_generate_default_config_includes_rule(self):
+        """generate_default_config() includes the ddl_terminator entry."""
+        cfg = generate_default_config()
+        assert "ddl_terminator=ERROR" in cfg
+
+    def test_rule_present_in_parsed_config(self, tmp_path):
+        """read_inspect_config merges ddl_terminator from DEFAULT_RULES."""
+        conf = tmp_path / "inspect.conf"
+        conf.write_text("# empty\n", encoding="utf-8")
+        rules = read_inspect_config(str(conf))
+        assert rules.get("ddl_terminator") == "ERROR"
+
+    def test_rule_can_be_set_to_warning_via_config(self, tmp_path):
+        """Setting ddl_terminator=WARNING in inspect.conf is honoured."""
+        conf = tmp_path / "inspect.conf"
+        conf.write_text("ddl_terminator=WARNING\n", encoding="utf-8")
+        rules = read_inspect_config(str(conf))
+        assert rules.get("ddl_terminator") == "WARNING"
+
+    def test_rule_can_be_disabled_via_config(self, tmp_path):
+        """Setting ddl_terminator=OFF in inspect.conf is honoured."""
+        conf = tmp_path / "inspect.conf"
+        conf.write_text("ddl_terminator=OFF\n", encoding="utf-8")
+        rules = read_inspect_config(str(conf))
+        assert rules.get("ddl_terminator") == "OFF"
 
 
 # ---------------------------------------------------------------
@@ -897,6 +1001,56 @@ class TestValidateDirectory:
             f"String-literal CREATE TABLE triggered: {triggered}. "
             f"All issues: {[(i.rule, i.message) for i in relevant]}"
         )
+
+    def test_missing_ddl_terminator_is_error_by_default(self, tmp_path):
+        """Directory validation reports missing DDL terminators as ERROR."""
+        ddl_dir = tmp_path / "DDL" / "views"
+        ddl_dir.mkdir(parents=True)
+        (ddl_dir / "{{DB}}.V.viw").write_text(
+            "CREATE VIEW {{DB}}.V (X) AS SELECT 1 AS X",
+            encoding="utf-8",
+        )
+
+        result = validate_directory(str(tmp_path))
+
+        term_issues = [i for i in result.issues if i.rule == "ddl_terminator"]
+        assert len(term_issues) == 1
+        assert term_issues[0].severity == "ERROR"
+        assert result.errors >= 1
+        assert not result.passed
+
+    def test_missing_ddl_terminator_can_be_downgraded_to_warning(self, tmp_path):
+        """ddl_terminator severity is configurable."""
+        ddl_dir = tmp_path / "DDL" / "views"
+        ddl_dir.mkdir(parents=True)
+        (ddl_dir / "{{DB}}.V.viw").write_text(
+            "CREATE VIEW {{DB}}.V (X) AS SELECT 1 AS X",
+            encoding="utf-8",
+        )
+        rules = dict(DEFAULT_RULES)
+        rules["ddl_terminator"] = "WARNING"
+
+        result = validate_directory(str(tmp_path), rules_config=rules)
+
+        term_issues = [i for i in result.issues if i.rule == "ddl_terminator"]
+        assert len(term_issues) == 1
+        assert term_issues[0].severity == "WARNING"
+
+    def test_missing_ddl_terminator_can_be_disabled(self, tmp_path):
+        """ddl_terminator=OFF suppresses missing terminator findings."""
+        ddl_dir = tmp_path / "DDL" / "views"
+        ddl_dir.mkdir(parents=True)
+        (ddl_dir / "{{DB}}.V.viw").write_text(
+            "CREATE VIEW {{DB}}.V (X) AS SELECT 1 AS X",
+            encoding="utf-8",
+        )
+        rules = dict(DEFAULT_RULES)
+        rules["ddl_terminator"] = "OFF"
+
+        result = validate_directory(str(tmp_path), rules_config=rules)
+
+        term_issues = [i for i in result.issues if i.rule == "ddl_terminator"]
+        assert term_issues == []
 
     def test_block_comment_keywords_do_not_trigger_rules(self, tmp_path):
         """Regression test for the GCFR_FF_IMGTableDelta_Create.spl
@@ -1640,3 +1794,225 @@ class TestIntraPackageDependencyIntegration:
         ]
         assert len(intra_issues) == 1
         assert intra_issues[0].severity == "WARNING"
+
+
+# ---------------------------------------------------------------
+# _check_view_column_list  (Issue #133)
+# ---------------------------------------------------------------
+
+
+class TestCheckViewColumnList:
+    """Tests for the view_column_list rule (Issue #133).
+
+    A view should declare an explicit column list between its name and
+    the AS keyword so that agents and tooling can determine the view's
+    schema from source without querying the live database.
+    """
+
+    # -- Compliant cases (no issue expected) ---------------------
+
+    def test_view_with_column_list_passes(self):
+        """A view that declares an explicit column list is compliant."""
+        ddl = (
+            "REPLACE VIEW {{V_DB}}.MyView (ColA, ColB, ColC) AS\n"
+            "SELECT a.ColA, a.ColB, a.ColC\n"
+            "FROM   {{T_DB}}.MyTable AS a;"
+        )
+        issues = _check_view_column_list("MyView.viw", ddl)
+        assert issues == []
+
+    def test_view_with_single_column_list_passes(self):
+        """A single-column list is still explicit and passes."""
+        ddl = (
+            "CREATE VIEW {{V_DB}}.SingleCol (Id) AS\n"
+            "SELECT t.Id\n"
+            "FROM   {{T_DB}}.Ref AS t;"
+        )
+        issues = _check_view_column_list("SingleCol.viw", ddl)
+        assert issues == []
+
+    def test_view_with_quoted_identifiers_and_column_list_passes(self):
+        """Double-quoted identifiers with a column list are compliant."""
+        ddl = (
+            'REPLACE VIEW "MyDb"."MyView" (Col1, Col2) AS\n'
+            "SELECT t.Col1, t.Col2 FROM \"MyDb\".\"Base\" AS t;"
+        )
+        issues = _check_view_column_list("MyView.viw", ddl)
+        assert issues == []
+
+    def test_non_view_object_skipped(self):
+        """A TABLE definition is silently ignored — rule only targets views."""
+        ddl = (
+            "CREATE MULTISET TABLE {{T_DB}}.Customer\n"
+            "    ( Id INTEGER NOT NULL\n"
+            "    , Name VARCHAR(100)\n"
+            "    )\n"
+            "PRIMARY INDEX (Id);"
+        )
+        issues = _check_view_column_list("Customer.tbl", ddl)
+        assert issues == []
+
+    def test_procedure_skipped(self):
+        """A stored procedure is silently ignored."""
+        ddl = (
+            "REPLACE PROCEDURE {{P_DB}}.MyProc (IN p_Id INTEGER)\n"
+            "BEGIN\n"
+            "    SELECT 1;\n"
+            "END;"
+        )
+        issues = _check_view_column_list("MyProc.spl", ddl)
+        assert issues == []
+
+    # -- Non-compliant cases (issue expected) --------------------
+
+    def test_view_without_column_list_flagged(self):
+        """A view jumping straight from the name to AS is flagged."""
+        ddl = (
+            "REPLACE VIEW {{V_DB}}.MyView AS\n"
+            "SELECT a.ColA, a.ColB\n"
+            "FROM   {{T_DB}}.MyTable AS a;"
+        )
+        issues = _check_view_column_list("MyView.viw", ddl)
+        assert len(issues) == 1
+        assert issues[0].rule == "view_column_list"
+        assert issues[0].severity == "WARNING"
+
+    def test_create_view_without_column_list_flagged(self):
+        """CREATE VIEW (not REPLACE) without a column list is also flagged."""
+        ddl = (
+            "CREATE VIEW {{V_DB}}.MyView AS\n"
+            "SELECT a.Id FROM {{T_DB}}.Ref AS a;"
+        )
+        issues = _check_view_column_list("MyView.viw", ddl)
+        assert len(issues) == 1
+        assert issues[0].rule == "view_column_list"
+
+    def test_token_database_no_column_list_flagged(self):
+        """Token form for the database segment — still flagged without column list."""
+        ddl = (
+            "REPLACE VIEW {{V_DB}}.Customer AS\n"
+            "SELECT c.Id, c.Name FROM {{T_DB}}.Customer AS c;"
+        )
+        issues = _check_view_column_list("Customer.viw", ddl)
+        assert len(issues) == 1
+
+    def test_quoted_identifier_no_column_list_flagged(self):
+        """Double-quoted view name without column list is flagged."""
+        ddl = (
+            'REPLACE VIEW "MyDb"."MyView" AS\n'
+            'SELECT t.Id FROM "MyDb"."Base" AS t;'
+        )
+        issues = _check_view_column_list("MyView.viw", ddl)
+        assert len(issues) == 1
+
+    def test_issue_message_contains_agent_context(self):
+        """The warning message explains the agent-friendliness motivation."""
+        ddl = (
+            "REPLACE VIEW {{V_DB}}.MyView AS\n"
+            "SELECT 1 AS Dummy;"
+        )
+        issues = _check_view_column_list("MyView.viw", ddl)
+        assert len(issues) == 1
+        assert "agent" in issues[0].message.lower()
+        assert "column list" in issues[0].message.lower()
+
+    def test_line_number_reported(self):
+        """The line number of the offending header is reported.
+
+        The regex anchors to ``^\\s*`` which can consume leading blank
+        lines — the match start therefore sits on the blank line
+        immediately before the REPLACE VIEW keyword rather than on the
+        keyword line itself.  We assert the value the function returns
+        rather than the visual line of the keyword, so this test stays
+        coupled to the actual implementation behaviour.
+        """
+        ddl = (
+            "-- Header comment\n"
+            "\n"
+            "REPLACE VIEW {{V_DB}}.MyView AS\n"
+            "SELECT 1 AS Dummy;"
+        )
+        issues = _check_view_column_list("MyView.viw", ddl)
+        assert len(issues) == 1
+        # Match starts on the blank line (line 2) due to ^\s* anchor.
+        assert issues[0].line == 2
+
+    def test_case_insensitive_keywords(self):
+        """The check is case-insensitive on CREATE/REPLACE VIEW/AS."""
+        ddl = "replace view {{V_DB}}.MyView as SELECT 1 AS X;"
+        issues = _check_view_column_list("MyView.viw", ddl)
+        assert len(issues) == 1
+
+    # -- Config / severity tests ---------------------------------
+
+    def test_rule_is_warning_by_default(self):
+        """view_column_list defaults to WARNING in DEFAULT_RULES."""
+        assert DEFAULT_RULES.get("view_column_list") == "WARNING"
+
+    def test_generate_default_config_includes_rule(self):
+        """generate_default_config() includes the view_column_list entry."""
+        from td_release_packager.validate import generate_default_config
+
+        cfg = generate_default_config()
+        assert "view_column_list" in cfg
+
+    def test_rule_present_in_parsed_config(self, tmp_path):
+        """read_inspect_config merges view_column_list from DEFAULT_RULES."""
+        conf = tmp_path / "inspect.conf"
+        conf.write_text("# empty\n", encoding="utf-8")
+        from td_release_packager.validate import read_inspect_config
+
+        rules = read_inspect_config(str(conf))
+        assert rules.get("view_column_list") == "WARNING"
+
+    def test_rule_can_be_set_to_error_via_config(self, tmp_path):
+        """Setting view_column_list=ERROR in inspect.conf is honoured."""
+        conf = tmp_path / "inspect.conf"
+        conf.write_text("view_column_list=ERROR\n", encoding="utf-8")
+        from td_release_packager.validate import read_inspect_config
+
+        rules = read_inspect_config(str(conf))
+        assert rules.get("view_column_list") == "ERROR"
+
+    def test_rule_can_be_disabled_via_config(self, tmp_path):
+        """Setting view_column_list=OFF in inspect.conf silences the rule."""
+        conf = tmp_path / "inspect.conf"
+        conf.write_text("view_column_list=OFF\n", encoding="utf-8")
+        from td_release_packager.validate import read_inspect_config
+
+        rules = read_inspect_config(str(conf))
+        assert rules.get("view_column_list") == "OFF"
+
+    def test_off_rule_suppressed_in_directory_validation(self, tmp_path):
+        """When set to OFF, no issue is emitted even for a non-compliant view."""
+        view_dir = tmp_path / "DDL" / "views"
+        view_dir.mkdir(parents=True)
+        (view_dir / "{{V_DB}}.MyView.viw").write_text(
+            "REPLACE VIEW {{V_DB}}.MyView AS SELECT 1 AS Dummy;",
+            encoding="utf-8",
+        )
+        rules = dict(DEFAULT_RULES)
+        rules["view_column_list"] = "OFF"
+        result = validate_directory(str(tmp_path), rules_config=rules)
+        vcl_issues = [i for i in result.issues if i.rule == "view_column_list"]
+        assert vcl_issues == []
+
+    def test_warning_emitted_in_directory_validation(self, tmp_path):
+        """A non-compliant view produces a WARNING via the full pipeline."""
+        view_dir = tmp_path / "DDL" / "views"
+        view_dir.mkdir(parents=True)
+        (view_dir / "{{V_DB}}.MyView.viw").write_text(
+            "REPLACE VIEW {{V_DB}}.MyView AS SELECT 1 AS Dummy;",
+            encoding="utf-8",
+        )
+        rules = dict(DEFAULT_RULES)
+        rules["view_column_list"] = "WARNING"
+        # Suppress unrelated rules to keep assertions clean.
+        rules["hardcoded_name"] = "OFF"
+        rules["zero_tokens"] = "OFF"
+        rules["eponymous"] = "OFF"
+        rules["deploy_intent"] = "OFF"
+        result = validate_directory(str(tmp_path), rules_config=rules)
+        vcl_issues = [i for i in result.issues if i.rule == "view_column_list"]
+        assert len(vcl_issues) == 1
+        assert vcl_issues[0].severity == "WARNING"

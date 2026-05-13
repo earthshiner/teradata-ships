@@ -15,6 +15,8 @@ engineering discipline rules:
     9. CREATE required (REPLACE prohibited — deployer owns idempotency)
    10. Correct file extension per object type
    11. Object placement (views must not reference tables databases directly)
+   12. View column list (views should declare an explicit column list before AS)
+   13. DDL statement terminator (DDL must end with a semi-colon)
 
 Each rule's severity is configurable via inspect.conf:
     ERROR   — must fix before deployment
@@ -106,6 +108,20 @@ DEFAULT_RULES: Dict[str, str] = {
     # splits — set it to ERROR or WARNING in inspect.conf to
     # surface the structural pattern at lint time.
     "intra_package_dependency": "OFF",
+    # view_column_list: views should declare an explicit column list
+    # between the view name and the AS keyword, e.g.
+    #   CREATE VIEW db.MyView (ColA, ColB) AS SELECT ...
+    # Omitting the column list makes the view's contract implicit —
+    # agents and tooling must introspect the live database to discover
+    # column names rather than reading them from source. WARNING by
+    # default; promote to ERROR in agent-heavy environments.
+    "view_column_list": "WARNING",
+    # ddl_terminator: every deployable DDL statement must terminate
+    # with a semi-colon. Missing terminators make package parsing,
+    # deployment scripting, and downstream agent hand-off ambiguous.
+    # Defaults to ERROR because a package should not proceed when the
+    # statement boundary is unclear.
+    "ddl_terminator": "ERROR",
 }
 
 # -- Valid severity values --
@@ -357,6 +373,23 @@ def generate_default_config() -> str:
         "# ERROR if you want lint-time visibility (e.g. policy-driven",
         "# manual splits, or CI gates that pre-date the auto-split).",
         f"intra_package_dependency={DEFAULT_RULES['intra_package_dependency']}",
+        "",
+        "# Agent-friendliness rules",
+        "# view_column_list: views should declare an explicit column list between",
+        "# the view name and the AS keyword, e.g.",
+        "#   CREATE VIEW db.MyView (ColA, ColB) AS SELECT ...",
+        "# Omitting the list makes the view's schema contract implicit — agents",
+        "# and tooling must introspect the live database to discover column names",
+        "# rather than reading them from source. WARNING by default; promote to",
+        "# ERROR in agent-heavy environments. Set to OFF to disable entirely.",
+        f"view_column_list={DEFAULT_RULES['view_column_list']}",
+        "",
+        "# Statement boundary rules",
+        "# ddl_terminator: every deployable DDL statement must terminate with",
+        "# a semi-colon (;). Missing terminators make package parsing,",
+        "# deployment scripting, and downstream agent hand-off ambiguous.",
+        "# Defaults to ERROR. Set to WARNING for gradual adoption or OFF to disable.",
+        f"ddl_terminator={DEFAULT_RULES['ddl_terminator']}",
     ]
     return "\n".join(lines) + "\n"
 
@@ -513,6 +546,47 @@ _VIEW_MACRO_DEF_NAME_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
+# -- View-without-column-list detection (Issue #133) --
+#
+# Matches a CREATE/REPLACE VIEW header that jumps straight to AS without
+# declaring a column list in parentheses first.  The pattern intentionally
+# ends at AS so that a view WITH a column list (the correct form) does not
+# match at all:
+#
+#   No column list (fires):
+#     CREATE VIEW db.MyView AS SELECT ...
+#     REPLACE VIEW "db"."MyView" AS SELECT ...
+#     CREATE VIEW {{V_DB}}.MyView   AS SELECT ...      ← token form
+#
+#   With column list (does NOT fire):
+#     CREATE VIEW db.MyView (ColA, ColB) AS SELECT ...
+#
+# Identifier forms recognised in the view name:
+#   bare ident    [A-Za-z_]\w*
+#   double-quoted \"[^\"]+\"
+#   token         \{\{[A-Za-z_][A-Za-z0-9_-]*\}\}
+#
+# The three forms are combined into _VCL_IDENT_FRAG and used for both
+# the database segment and the object segment.  A dot with optional
+# surrounding whitespace separates the two segments.
+#
+# The negative look-ahead ``(?!\s*\()`` rejects headers that are
+# immediately followed by an opening parenthesis — those carry an
+# explicit column list and are therefore compliant.
+_VCL_IDENT_FRAG = (
+    r'(?:\{\{[A-Za-z_][A-Za-z0-9_-]*\}\}'  # {{TOKEN}}
+    r'|"[^"]+"'                             # "Quoted Identifier"
+    r'|[A-Za-z_]\w*)'                       # bare_identifier
+)
+_VIEW_NO_COLUMN_LIST_RE = re.compile(
+    r"^\s*\b(?:CREATE|REPLACE)\b\s+\bVIEW\b\s+"
+    + _VCL_IDENT_FRAG               # database / schema part
+    + r"\s*\.\s*"                   # dot separator
+    + _VCL_IDENT_FRAG               # object name part
+    + r"\s*(?!\s*\()\s*\bAS\b",     # AS with NO preceding '(' → no column list
+    re.IGNORECASE | re.MULTILINE,
+)
+
 # -- SET/MULTISET detection --
 # Anchored to start-of-statement: a procedure body that mentions
 # ``SET`` (Teradata's variable assignment keyword) followed by an
@@ -605,6 +679,17 @@ _INTRA_QUALIFIED_NAME_RE = re.compile(
 # statement (the CREATE PROCEDURE).
 _STATEMENT_START_RE = re.compile(
     r"^\s*(?:CREATE|REPLACE|DROP|GRANT|REVOKE|ALTER)\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# -- DDL statement terminator detection --
+#
+# This rule is intentionally scoped to DDL verbs rather than DML.  It
+# validates statement boundaries for deployable object definitions and
+# structural changes while avoiding false positives on ordinary DML that
+# may legitimately appear inside stored procedure / trigger bodies.
+_DDL_TERMINATOR_START_RE = re.compile(
+    r"^\s*(?:CREATE|REPLACE|DROP|ALTER)\b",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -916,6 +1001,7 @@ def _validate_directory_impl(
         file_issues.extend(_check_db_qualifier(rel_path, clean))
         file_issues.extend(_check_multiset(rel_path, clean))
         file_issues.extend(_check_deploy_intent(rel_path, clean, strict))
+        file_issues.extend(_check_ddl_terminator(rel_path, clean))
         file_issues.extend(_check_view_macro_self_reference(rel_path, clean))
         file_issues.extend(_check_one_object(rel_path, clean))
         file_issues.extend(_check_eponymous(rel_path, clean, file_path))
@@ -943,6 +1029,7 @@ def _validate_directory_impl(
         file_issues.extend(
             _check_intra_package_dependency(rel_path, clean, file_path, package_prereqs)
         )
+        file_issues.extend(_check_view_column_list(rel_path, clean))
 
         # -- Apply rule config: remap severity or drop OFF rules --
         # INFO issues are informational and not configurable —
@@ -1088,6 +1175,56 @@ def _check_deploy_intent(
             )
         ]
     return []
+
+
+def _check_ddl_terminator(rel_path: str, content: str) -> List[ValidationIssue]:
+    """Check that each DDL statement terminates with a semi-colon.
+
+    The inspector packages DDL as discrete, agent-readable artefacts.
+    A missing statement terminator makes the statement boundary implicit,
+    which is fragile for deployment scripting and downstream automation.
+
+    The caller passes comment/string-literal-stripped SQL, so trailing
+    comments after a valid semi-colon are ignored and text such as
+    ``'CREATE VIEW ...'`` inside dynamic SQL strings does not produce a
+    false DDL match.
+
+    Args:
+        rel_path: Relative path of the file being checked.
+        content:  Comment/string-literal-stripped SQL content.
+
+    Returns:
+        One ValidationIssue per DDL statement segment that does not end
+        with ``;``; otherwise an empty list.
+    """
+    matches = list(_DDL_TERMINATOR_START_RE.finditer(content))
+    if not matches:
+        return []
+
+    issues: List[ValidationIssue] = []
+    for idx, match in enumerate(matches):
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(content)
+        statement_text = content[match.start() : end].rstrip()
+        if not statement_text or statement_text.endswith(";"):
+            continue
+
+        line_num = content[: match.start()].count("\n") + 1
+        verb = match.group(0).strip().split()[0].upper()
+        issues.append(
+            ValidationIssue(
+                file=rel_path,
+                rule="ddl_terminator",
+                severity="ERROR",
+                line=line_num,
+                message=(
+                    f"{verb} DDL statement does not terminate with a semi-colon (;). "
+                    "Add an explicit terminator so deployment scripts and "
+                    "downstream agents can determine the statement boundary reliably."
+                ),
+            )
+        )
+
+    return issues
 
 
 # NOTE: An older comment-only ``_strip_sql_comments`` used to live
@@ -1925,6 +2062,83 @@ def _check_unmapped_grants(
         )
 
     return issues
+
+
+# ---------------------------------------------------------------
+# View column list rule (Issue #133)
+# ---------------------------------------------------------------
+
+
+def _check_view_column_list(rel_path: str, content: str) -> List[ValidationIssue]:
+    """Check that CREATE/REPLACE VIEW declares an explicit column list.
+
+    An explicit column list between the view name and the AS keyword
+    makes the view's schema contract self-describing at the source
+    level.  Without it, agents and tooling must connect to the live
+    database and execute ``HELP VIEW`` or query ``DBC.ColumnsV`` to
+    discover column names.  That makes the solution less agent-friendly
+    and breaks any workflow that reasons about view shape from source
+    alone.
+
+    Compliant form:
+        CREATE VIEW {{V_DB}}.MyView (ColA, ColB, ColC) AS
+        SELECT a.ColA, a.ColB, a.ColC
+        FROM   {{T_DB}}.MyTable AS a;
+
+    Non-compliant (fires this rule):
+        CREATE VIEW {{V_DB}}.MyView AS
+        SELECT a.ColA, a.ColB, a.ColC
+        FROM   {{T_DB}}.MyTable AS a;
+
+    Only ``.viw`` files and content whose first DDL verb is CREATE or
+    REPLACE VIEW are in scope — other object types are silently skipped.
+    Comments are already stripped by the caller before this function
+    is invoked.
+
+    Args:
+        rel_path: Relative path of the file being checked.
+        content:  Comment-stripped SQL content.
+
+    Returns:
+        A single ValidationIssue (WARNING by default) when the view
+        header omits the column list; an empty list when the header
+        is compliant or the file is not a view.
+    """
+    # Only applies to view DDL.  Check the first matching pattern so we
+    # don't waste cycles on tables, procedures, etc.
+    is_view = False
+    for pattern, obj_type in _CLASSIFY_PATTERNS:
+        if pattern.search(content):
+            if obj_type == "VIEW":
+                is_view = True
+            break  # first match wins; any non-VIEW type exits early
+
+    if not is_view:
+        return []
+
+    match = _VIEW_NO_COLUMN_LIST_RE.search(content)
+    if match is None:
+        # Column list present (or unqualified name — db_qualifier catches that).
+        return []
+
+    line_num = content[: match.start()].count("\n") + 1
+    return [
+        ValidationIssue(
+            file=rel_path,
+            rule="view_column_list",
+            severity="WARNING",
+            line=line_num,
+            message=(
+                "VIEW is defined without an explicit column list before AS. "
+                "Add a column list — e.g. CREATE VIEW db.MyView (Col1, Col2) AS — "
+                "so the view's schema contract is self-describing from source. "
+                "Without it, agents and tooling must query the live database "
+                "(HELP VIEW / DBC.ColumnsV) to discover column names, which "
+                "makes the solution less agent-friendly and breaks source-only "
+                "analysis workflows."
+            ),
+        )
+    ]
 
 
 # ---------------------------------------------------------------
