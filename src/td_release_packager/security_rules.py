@@ -14,7 +14,7 @@ each function returns a list of ValidationIssue objects (empty on pass).
 
 Files are scanned LINE BY LINE so that accurate 1-based line numbers can be
 reported.  Matched text is NEVER included in the issue message to prevent
-secrets from leaking into inspect reports, CI logs, and decisions.json.
+secrets from leaking into inspect reports, CI logs, and ships.decisions.json.
 """
 
 import os
@@ -98,7 +98,7 @@ def scan_secret_patterns(
 
     Matched text is deliberately excluded from the report — only the
     pattern description is emitted.  This prevents secrets from leaking
-    into inspect reports, CI pipelines, and ``decisions.json``.
+    into inspect reports, CI pipelines, and ``ships.decisions.json``.
 
     Args:
         rel_path:  Path relative to the source directory (used for scope

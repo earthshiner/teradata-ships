@@ -190,7 +190,7 @@ def main():
         print(
             "\n\n  SHIPS interrupted — pipeline cancelled by user.\n"
             "  Any stages that completed before the interrupt were recorded\n"
-            "  in decisions.json and can be reviewed with 'ships explain'.",
+            "  in ships.decisions.json and can be reviewed with 'ships explain'.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -269,10 +269,10 @@ def _main():
 # Orchestrator integration helpers
 # ---------------------------------------------------------------
 #
-# Build-order item 4: every stage opens a ``decisions.json`` and
+# Build-order item 4: every stage opens a ``ships.decisions.json`` and
 # records its run. Two concerns colliding here:
 #
-#   1. We don't want a decisions.json appearing in random
+#   1. We don't want a ships.decisions.json appearing in random
 #      directories where the user is doing a one-off scan against
 #      a non-project tree (litter on disc, surprise artefact).
 #
@@ -294,7 +294,7 @@ def _looks_like_ships_project(path: str) -> bool:
       - ``ships.yaml``  (orchestrator config — definitive marker)
       - ``payload/``    (the canonical scaffolded payload tree)
 
-    Used to decide whether a stage should write decisions.json.
+    Used to decide whether a stage should write ships.decisions.json.
     For ad-hoc invocations against a non-project directory we
     yield a no-op recorder so the file doesn't appear.
     """
@@ -313,7 +313,7 @@ class _NullStageRecorder:
 
     Used by ``_stage_recording`` when the target directory isn't a
     SHIPS project. Lets the same stage code run end-to-end without
-    branching on whether decisions.json is being written.
+    branching on whether ships.decisions.json is being written.
     """
 
     def set_status(self, status: str) -> None:
@@ -353,7 +353,7 @@ def _stage_recording(project_dir: str, stage_name: str):
     at ``project_dir``.
 
     If ``project_dir`` looks like a SHIPS project, opens
-    ``<project_dir>/decisions.json`` and yields a real
+    ``<project_dir>/ships.decisions.json`` and yields a real
     ``StageRecorder``. Otherwise yields a ``_NullStageRecorder`` so
     ad-hoc one-off invocations don't litter the filesystem.
 
@@ -446,7 +446,7 @@ class _NullRunRecorder:
     Drop-in for ``RunRecorder`` for non-project ``process`` runs.
 
     Yields ``_NullStageRecorder`` instances so the caller never needs
-    to branch on whether decisions.json is being written.
+    to branch on whether ships.decisions.json is being written.
     """
 
     from contextlib import contextmanager as _cm
@@ -469,7 +469,7 @@ def _process_recording(project_dir: str):
     """
     Context manager for the ``process`` meta-verb.
 
-    Opens a single run in ``decisions.json`` and yields the
+    Opens a single run in ``ships.decisions.json`` and yields the
     ``RunRecorder`` so the caller can open individual stages within
     it.  One run with multiple stages gives a clean end-to-end audit
     trail across the whole pipeline — distinct from the per-stage
@@ -815,14 +815,14 @@ def _cmd_onboard(args):
         print(f"ERROR: source directory not found: {source}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"\n  SHIPS Onboarding Wizard")
+    print("\n  SHIPS Onboarding Wizard")
     print(f"  {'=' * 56}")
     print(f"  Scanning: {source}")
 
     scan = _onboard_scan(source)
     state = _onboard_classify(scan, source)
 
-    print(f"\n  Source summary")
+    print("\n  Source summary")
     print(f"    SQL/DDL files found : {scan['sql_files']}")
     print(
         f"    Legacy markers ($VAR, &&VAR&&) : {scan['legacy_count']} in {scan['legacy_files']} file(s)"
@@ -847,10 +847,10 @@ def _print_onboard_recommendation(state: str, source: str, env: str, scan: dict)
         print(f"    {module} import-legacy \\")
         print(f"      --scan-source {source} \\")
         print(f"      --env {env} \\")
-        print(f"      --output-dir ./config\n")
+        print("      --output-dir ./config\n")
         print("  Step 2 — fill in token values in config/env/DEV.conf, then apply:")
         print(f"    {module} migrate-source \\")
-        print(f"      --sed config/legacy_migration.sed \\")
+        print("      --sed config/legacy_migration.sed \\")
         print(f"      --source {source}\n")
         print("  Step 3 — harvest the migrated source into a SHIPS project:")
         print(f"    {module} harvest --source {source} --project <project_dir>")
@@ -860,7 +860,7 @@ def _print_onboard_recommendation(state: str, source: str, env: str, scan: dict)
         print("  Recommended path: bootstrap-env-config → fill values → harvest\n")
         print("  Step 1 — generate a config scaffold from existing tokens:")
         print(f"    {module} bootstrap-env-config \\")
-        print(f"      --source <project_dir> \\")
+        print("      --source <project_dir> \\")
         print(f"      --env {env}\n")
         print("  Step 2 — fill in token values in config/env/DEV.conf")
         print("  Step 3 — harvest:")
@@ -1135,7 +1135,7 @@ def _cmd_scaffold(args):
 
     # Run scaffold first — the project directory must exist before
     # _stage_recording can detect it as a SHIPS project and open
-    # decisions.json. Errors are fatal so they exit before recording starts.
+    # ships.decisions.json. Errors are fatal so they exit before recording starts.
     try:
         project_dir = scaffold_project(
             project_name=args.name,
@@ -1664,7 +1664,7 @@ def _cmd_validate(args):
 
     Refactored onto the orchestrator (build-order item 4b): wraps the
     existing logic in ``_stage_recording`` so projects with a SHIPS
-    layout grow a ``decisions.json`` entry per inspect run while ad-
+    layout grow a ``ships.decisions.json`` entry per inspect run while ad-
     hoc invocations against arbitrary directories see identical
     stdout and zero filesystem litter.
 
@@ -1851,7 +1851,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
                         sev = "ℹ"
                     print(f"      {sev} [{issue.rule}] {issue.message}")
 
-            # Record one decisions.json issue per lint finding. The
+            # Record one ships.decisions.json issue per lint finding. The
             # rule name is carried in the message so explain can
             # group by rule even though the issue code is coarse.
             for issue in lint_result.issues:
@@ -1996,7 +1996,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
         print(f"{'=' * 64}\n")
 
         # ==============================================================
-        # decisions.json — record grants, inputs, outputs, status
+        # ships.decisions.json — record grants, inputs, outputs, status
         # ==============================================================
         # Done after the human-facing report so an interruption mid-
         # report still leaves the printed output intact. The recorder
@@ -2041,7 +2041,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
 
         # The recorder auto-rolls up "error" issues into the run's
         # final_status. Warnings need an explicit set_status to
-        # surface in decisions.json — otherwise a clean run that
+        # surface in ships.decisions.json — otherwise a clean run that
         # only emitted warnings would still report status="success".
         if not overall_ok:
             stage.set_status("error")
@@ -2304,7 +2304,7 @@ def _cmd_process(args):
     Item 5 of the orchestrator build order. Runs:
       harvest → generate → inspect → analyse → [package]
 
-    All stages write into a single ``process`` run in ``decisions.json``
+    All stages write into a single ``process`` run in ``ships.decisions.json``
     so the audit trail is one coherent record rather than five separate
     run entries.
 
@@ -2477,7 +2477,7 @@ def _cmd_process_impl(args):
     print(f"\n{'=' * 64}")
     if failed_stages:
         print(f"  Process completed with errors in: {', '.join(failed_stages)}")
-        print("  Review decisions.json for full detail.")
+        print("  Review ships.decisions.json for full detail.")
         print(f"{'=' * 64}\n")
         sys.exit(1)
     else:
@@ -2568,7 +2568,7 @@ def _maybe_pause(stage_name: str, stage_status: str, args) -> None:
 
 
 # ---------------------------------------------------------------
-# explain — human-readable read-only view of decisions.json
+# explain — human-readable read-only view of ships.decisions.json
 # ---------------------------------------------------------------
 
 #: Status badge colouring for terminal output.
@@ -2602,7 +2602,7 @@ def _cmd_rollback(args):
 
     pkg_name = getattr(args, "name", None) or os.path.basename(project)
 
-    print(f"\n  SHIPS Rollback")
+    print("\n  SHIPS Rollback")
     print(f"  {'=' * 56}")
     print(f"  Tag:         {tag}")
     print(f"  Environment: {env}")
@@ -2628,7 +2628,7 @@ def _cmd_rollback(args):
 
     archive_path, manifest = main_pair
 
-    print(f"  ✓ Rollback package built")
+    print("  ✓ Rollback package built")
     print(f"    Archive:      {os.path.basename(archive_path)}")
     print(f"    Build:        {manifest.build_number}")
     print(f"    Commit:       {manifest.source_commit[:12]}")
@@ -2637,34 +2637,34 @@ def _cmd_rollback(args):
         print(f"    Companion:    {os.path.basename(companion_archive)}")
 
     print()
-    print(f"  Next steps")
+    print("  Next steps")
     print(f"  {'─' * 54}")
     if companion_pair:
         companion_archive, _ = companion_pair
-        print(f"  1. Extract and deploy the prereqs archive first:")
+        print("  1. Extract and deploy the prereqs archive first:")
         print(
             f"       python deploy.py --host <host> --user <user> --on-drift {on_drift}"
         )
         print(f"     (inside: {os.path.basename(companion_archive)})")
         print()
-        print(f"  2. Then deploy the main archive:")
+        print("  2. Then deploy the main archive:")
     else:
-        print(f"  1. Extract the rollback package:")
+        print("  1. Extract the rollback package:")
         print(f"       unzip {os.path.basename(archive_path)}")
         print()
-        print(f"  2. Verify integrity:")
-        print(f"       python deploy.py integrity-check")
+        print("  2. Verify integrity:")
+        print("       python deploy.py integrity-check")
         print()
-        print(f"  3. Dry run (recommended):")
-        print(f"       python deploy.py --dry-run --host <host> --user <user>")
+        print("  3. Dry run (recommended):")
+        print("       python deploy.py --dry-run --host <host> --user <user>")
         print()
-        print(f"  4. Deploy:")
+        print("  4. Deploy:")
     print(f"       python deploy.py --host <host> --user <user> --on-drift {on_drift}")
     print()
     if on_drift == "continue":
-        print(f"  ⚠  --on-drift continue is set: any schema changes made after")
-        print(f"     the broken deploy will be overwritten by this rollback.")
-        print(f"     Use --on-drift skip to preserve a specific hotfix.")
+        print("  ⚠  --on-drift continue is set: any schema changes made after")
+        print("     the broken deploy will be overwritten by this rollback.")
+        print("     Use --on-drift skip to preserve a specific hotfix.")
     print(f"  {'=' * 56}")
 
 
@@ -2682,14 +2682,14 @@ def _cmd_decisions(args):
 
 
 def _cmd_decisions_prune(args):
-    """Prune old run entries from decisions.json."""
+    """Prune old run entries from ships.decisions.json."""
     from td_release_packager.orchestrator.decisions import prune_decisions
 
     project = args.project
-    decisions_path = os.path.join(project, "decisions.json")
+    decisions_path = os.path.join(project, "ships.decisions.json")
 
     if not os.path.isfile(decisions_path):
-        print(f"ERROR: decisions.json not found in {project}", file=sys.stderr)
+        print(f"ERROR: ships.decisions.json not found in {project}", file=sys.stderr)
         sys.exit(1)
 
     keep_runs = getattr(args, "keep_runs", None)
@@ -2702,7 +2702,7 @@ def _cmd_decisions_prune(args):
         decisions_path, keep_runs=keep_runs, keep_days=keep_days, dry_run=True
     )
 
-    print(f"\n  decisions.json prune preview")
+    print("\n  ships.decisions.json prune preview")
     print(f"  {'=' * 44}")
     print(f"  Total runs  : {preview.total_runs}")
     print(f"  To keep     : {preview.kept_runs}")
@@ -2746,7 +2746,7 @@ def _cmd_explain(args):
     """
     Item 6a — explain: human-readable report of a prior process run.
 
-    Reads decisions.json without modifying it.  Finds the most recent
+    Reads ships.decisions.json without modifying it.  Finds the most recent
     run (or the run specified by ``--run-id``) and prints a concise
     report showing: run metadata, per-stage status + key outputs, and
     a full issues table.  Designed as a pre-promotion checklist — the
@@ -2762,7 +2762,7 @@ def _cmd_explain(args):
     manifest_path = os.path.join(project_dir, DECISIONS_FILENAME)
     if not os.path.exists(manifest_path):
         print(
-            f"ERROR: No decisions.json found in {project_dir}.\n"
+            f"ERROR: No ships.decisions.json found in {project_dir}.\n"
             "  Run the pipeline first:  ships process --project <dir>",
             file=sys.stderr,
         )
@@ -2803,7 +2803,7 @@ def _cmd_explain(args):
 
 
 def _print_explain_report(run: dict, project_dir: str) -> None:
-    """Render one run from decisions.json as a human-readable report."""
+    """Render one run from ships.decisions.json as a human-readable report."""
     final = run.get("final_status", "unknown")
     icon = _STATUS_ICONS.get(final, "?")
     duration_ms = run.get("duration_ms", 0)
@@ -2912,15 +2912,15 @@ def _wrap(text: str, width: int, indent: str) -> list:
 
 
 # ---------------------------------------------------------------
-# verify — pre-deploy sanity check against decisions.json
+# verify — pre-deploy sanity check against ships.decisions.json
 # ---------------------------------------------------------------
 
 
 def _cmd_verify(args):
     """
-    Item 6b — verify: pre-deploy sanity check from decisions.json.
+    Item 6b — verify: pre-deploy sanity check from ships.decisions.json.
 
-    Reads decisions.json and finds the most recent package stage.
+    Reads ships.decisions.json and finds the most recent package stage.
     Checks: the archive file still exists on disk, no PACKAGE_WARNING
     issues were recorded, and the build looks complete.  Intended as
     the final gate before an operator runs ``deploy``.
@@ -2935,7 +2935,7 @@ def _cmd_verify(args):
     manifest_path = os.path.join(project_dir, DECISIONS_FILENAME)
     if not os.path.exists(manifest_path):
         print(
-            f"ERROR: No decisions.json found in {project_dir}.",
+            f"ERROR: No ships.decisions.json found in {project_dir}.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -2957,7 +2957,7 @@ def _cmd_verify(args):
 
     if pkg_stage is None:
         print(
-            "  No package stage found in decisions.json.\n"
+            "  No package stage found in ships.decisions.json.\n"
             "  Run the pipeline with packaging enabled:\n"
             "    ships process ... --env DEV --env-config ... --name ...",
             file=sys.stderr,
@@ -2983,12 +2983,12 @@ def _cmd_verify(args):
     print(f"  Files:       {out.get('file_count', '—')}")
     print(f"  Tokens:      {out.get('token_count', '—')} substitutions")
 
-    print(f"\n  Checklist:")
+    print("\n  Checklist:")
     checks = []
 
     # 1. Archive exists
     if archive_exists:
-        print(f"    ✓ Archive exists on disk")
+        print("    ✓ Archive exists on disk")
         checks.append(True)
     else:
         print(f"    ✗ Archive NOT found: {archive_path}")
@@ -2996,7 +2996,7 @@ def _cmd_verify(args):
 
     # 2. Package stage issues — errors block deployment; warnings are informational
     if not errors and not warnings:
-        print(f"    ✓ No package issues recorded")
+        print("    ✓ No package issues recorded")
         checks.append(True)
     else:
         # Errors are blocking — show with ✗ and fail the check
@@ -3018,7 +3018,7 @@ def _cmd_verify(args):
     # 3. Package stage status
     pkg_status = pkg_stage.get("status", "unknown")
     if pkg_status == "success":
-        print(f"    ✓ Package stage status: success")
+        print("    ✓ Package stage status: success")
         checks.append(True)
     else:
         print(f"    ✗ Package stage status: {pkg_status}")
@@ -3029,7 +3029,7 @@ def _cmd_verify(args):
         companion = out.get("companion_archive_path", "")
         companion_exists = bool(companion) and os.path.exists(companion)
         if companion_exists:
-            print(f"    ✓ Companion (prereqs) archive exists")
+            print("    ✓ Companion (prereqs) archive exists")
         else:
             print(f"    ✗ Companion archive NOT found: {companion}")
             checks.append(False)
@@ -3050,7 +3050,7 @@ def _cmd_generate(args):
 
     Orchestrator wrapper for ``td_release_packager.view_layer_generator``.
     Wired onto ``_stage_recording`` so every run is captured in
-    ``decisions.json``.
+    ``ships.decisions.json``.
     """
     from td_release_packager.orchestrator import issue_codes as _ic
 
@@ -3315,7 +3315,7 @@ def _scan_print_text(
     """Print scan results in human-readable text format."""
     W = 64
     print(f"\n{'=' * W}")
-    print(f"  Token Scan")
+    print("  Token Scan")
     print(f"  {scan_dir}")
     print(f"{'=' * W}")
     print(f"  Unique tokens      : {len(all_tokens)}")
@@ -4163,7 +4163,7 @@ def _build_parser():
         "inspect → analyse → [package].",
         description="Orchestrate the complete SHIPS pipeline in a single "
         "command, recording all stage decisions into one run entry in "
-        "decisions.json.\n\n"
+        "ships.decisions.json.\n\n"
         "Developer mode (default): continues past warnings; hard errors "
         "are reported but do not abort.\n"
         "Platform mode (--strict): any stage error immediately aborts "
@@ -4275,14 +4275,14 @@ def _build_parser():
     ex = subs.add_parser(
         "explain",
         help="[E] Explain — human-readable report of a prior pipeline run.",
-        description="Read decisions.json and render a concise report of the "
+        description="Read ships.decisions.json and render a concise report of the "
         "most recent (or specified) run: stage statuses, key outputs, "
         "and full issues table. Use before promoting to the next environment.",
     )
     ex.add_argument(
         "--project",
         required=True,
-        help="SHIPS project directory containing decisions.json.",
+        help="SHIPS project directory containing ships.decisions.json.",
     )
     ex.add_argument(
         "--run-id",
@@ -4302,14 +4302,14 @@ def _build_parser():
     vr = subs.add_parser(
         "verify",
         help="[V] Verify — pre-deploy package readiness check.",
-        description="Read decisions.json, locate the most recent package stage, "
+        description="Read ships.decisions.json, locate the most recent package stage, "
         "and confirm the archive exists on disk and the build was clean. "
         "Exit code 0 = READY, 1 = NOT READY.",
     )
     vr.add_argument(
         "--project",
         required=True,
-        help="SHIPS project directory containing decisions.json.",
+        help="SHIPS project directory containing ships.decisions.json.",
     )
     vr.add_argument(
         "--run-id",
@@ -4424,14 +4424,14 @@ def _build_parser():
 
     dc = subs.add_parser(
         "decisions",
-        help="Manage the decisions.json audit trail.",
-        description="Sub-commands for inspecting and maintaining decisions.json.",
+        help="Manage the ships.decisions.json audit trail.",
+        description="Sub-commands for inspecting and maintaining ships.decisions.json.",
     )
     dc_subs = dc.add_subparsers(dest="decisions_subcommand")
 
     dp = dc_subs.add_parser(
         "prune",
-        help="Remove old run entries from decisions.json.",
+        help="Remove old run entries from ships.decisions.json.",
         description="Prune stale run entries, keeping the most recent N runs or "
         "runs from the last N days. Always shows a preview before writing. "
         "Use --yes to skip the confirmation prompt (for CI/scripts).",
@@ -4439,7 +4439,7 @@ def _build_parser():
     dp.add_argument(
         "--project",
         required=True,
-        help="SHIPS project directory containing decisions.json.",
+        help="SHIPS project directory containing ships.decisions.json.",
     )
     dp_mode = dp.add_mutually_exclusive_group(required=True)
     dp_mode.add_argument(

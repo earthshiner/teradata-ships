@@ -19,10 +19,7 @@ Test strategy:
 
 from __future__ import annotations
 
-import os
-import sys
 from argparse import Namespace
-from io import StringIO
 from pathlib import Path
 
 import pytest
@@ -159,7 +156,6 @@ class TestOnboardScan:
         monkeypatch.setattr(lp, "find_legacy_placeholders", _spy)
 
         # Import after monkeypatching so cli.py picks up the spy
-        from td_release_packager import cli as cli_mod
         monkeypatch.setattr(
             "td_release_packager.legacy_placeholders.find_legacy_placeholders",
             _spy,

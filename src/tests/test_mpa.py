@@ -12,14 +12,11 @@ Covers:
 
 from __future__ import annotations
 
-import hashlib
 import json
 import zipfile
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from unittest import mock
 
-import pytest
 
 from database_package_deployer.mpa import (
     generate_approval_code,
@@ -100,7 +97,6 @@ def test_mpa_fail_expired_code(tmp_path, monkeypatch):
     _write_build_json(pkg_dir, zip_name, require_approvals=2)
 
     # Generate a code using yesterday's date
-    from database_package_deployer import mpa as _mpa_mod
     from database_package_deployer.preflight import _sha256_of_file
     from database_package_deployer.signing import compute_hmac
 

@@ -200,11 +200,11 @@ def _check_working_tree(source_dir: str, allow_dirty: bool) -> bool:
         )
         return False
 
-    dirty_lines = [l for l in result.stdout.splitlines() if l.strip()]
+    dirty_lines = [line for line in result.stdout.splitlines() if line.strip()]
     if not dirty_lines:
         return False
 
-    summary = "\n".join(f"  {l}" for l in dirty_lines[:10])
+    summary = "\n".join(f"  {line}" for line in dirty_lines[:10])
     if len(dirty_lines) > 10:
         summary += f"\n  ... and {len(dirty_lines) - 10} more"
 
@@ -2183,6 +2183,18 @@ def _generate_readme(pkg_dir: str, manifest: BuildManifest):
   Built:       {manifest.timestamp}
   Author:      {manifest.author}
   Description: {manifest.description}
+
+================================================================
+  READ FIRST
+================================================================
+
+  Agents, CI/CD jobs, MCP clients and operators should read:
+
+    ships.index.json
+
+  ships.index.json is the canonical package entrypoint. It lists
+  the SHIPS metadata files, describes each file, gives the recommended
+  read order, and carries agent instructions for safe downstream action.
 
 ================================================================
   PREREQUISITES

@@ -28,7 +28,6 @@ Example: send traces to a local Jaeger instance
 from __future__ import annotations
 
 import contextlib
-import os
 from typing import Any, Dict, Iterator, Optional
 
 # ---------------------------------------------------------------------------
@@ -129,7 +128,7 @@ def current_trace_id() -> Optional[str]:
     Return the active OTel trace ID as a 32-character lowercase hex string.
 
     Returns ``None`` when OTel is not installed or no span is active.
-    Use this to embed the trace ID in ``decisions.json`` so the two
+    Use this to embed the trace ID in ``ships.decisions.json`` so the two
     systems can be correlated in a post-mortem.
 
     Example::

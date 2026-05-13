@@ -1238,9 +1238,9 @@ def check_package_signature(package_dir: str) -> List[PreflightCheck]:
                 database="(package)",
                 message=(
                     "package_signature — cannot verify signature: "
-                    f"SHIPS_SIGNING_KEY is not set. Set the environment "
-                    f"variable or remove the .hmac sidecar if verification "
-                    f"is not required."
+                    "SHIPS_SIGNING_KEY is not set. Set the environment "
+                    "variable or remove the .hmac sidecar if verification "
+                    "is not required."
                 ),
                 severity="ERROR",
             )

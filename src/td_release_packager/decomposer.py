@@ -498,7 +498,6 @@ def format_env_config_file(env: str, result: DecompositionResult) -> str:
     final_purpose = None
     final_content = None
     if result.outliers:
-        from td_release_packager.kind_suffix import TYPE_TO_KIND
 
         # Standard kinds emitted for outlier databases: _T (tables) and
         # _V (views).  These are the two mandatory kinds in a SHIPS
@@ -598,7 +597,7 @@ def format_decomposition_report(
         )
         lines.append("")
         for token, literals in sorted(result.collisions.items()):
-            lines.append(f"- `{token}`: {', '.join(f'`{l}`' for l in literals)}")
+            lines.append(f"- `{token}`: {', '.join(f'`{literal}`' for literal in literals)}")
         lines.append("")
 
     if result.outliers:

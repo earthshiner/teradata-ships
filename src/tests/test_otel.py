@@ -17,7 +17,6 @@ to verify that real spans are created, or the no-op path when SDK is absent.
 
 from __future__ import annotations
 
-import os
 from unittest.mock import MagicMock, patch
 
 import pytest

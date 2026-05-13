@@ -96,7 +96,6 @@ class TestCheckWorkingTree:
 
     def _run(self, stdout="", returncode=0, side_effect=None):
         """Helper: mock subprocess.run and call _check_working_tree."""
-        import subprocess
 
         mock_result = type("R", (), {"returncode": returncode, "stdout": stdout})()
         with patch("td_release_packager.builder.subprocess.run") as mock_run:
@@ -111,7 +110,6 @@ class TestCheckWorkingTree:
         assert dirty is False
 
     def test_dirty_tree_raises_without_flag(self):
-        import subprocess
 
         mock_result = type("R", (), {"returncode": 0, "stdout": " M some_file.tbl\n"})()
         with patch(
@@ -121,7 +119,6 @@ class TestCheckWorkingTree:
                 _check_working_tree("/fake/dir", allow_dirty=False)
 
     def test_dirty_tree_returns_true_with_allow_dirty(self):
-        import subprocess
 
         mock_result = type("R", (), {"returncode": 0, "stdout": " M some_file.tbl\n"})()
         with patch(
@@ -131,7 +128,6 @@ class TestCheckWorkingTree:
         assert dirty is True
 
     def test_git_not_found_returns_false(self):
-        import subprocess
 
         dirty, _ = self._run(side_effect=FileNotFoundError("git not found"))
         assert dirty is False
@@ -141,7 +137,6 @@ class TestCheckWorkingTree:
         assert dirty is False
 
     def test_error_message_lists_changed_files(self):
-        import subprocess
 
         mock_result = type(
             "R", (), {"returncode": 0, "stdout": " M file_a.tbl\n M file_b.viw\n"}

@@ -19,14 +19,13 @@ from __future__ import annotations
 import os
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from database_package_deployer.deployer import (
     _deploy_replace_in_place,
     _rollback_single,
     rollback_package,
 )
-from database_package_deployer.manifest import DeploymentManifest, MANIFEST_FILENAME
+from database_package_deployer.manifest import DeploymentManifest
 from database_package_deployer.models import (
     DeployIntent,
     DeployState,
@@ -522,7 +521,7 @@ class TestWaveRollback:
                 object_name=qn.split(".")[1],
                 object_type=ObjectType.VIEW,
                 state=DeployState.ROLLED_BACK,
-                message=f"ok",
+                message="ok",
             )
 
         with patch(

@@ -16,15 +16,12 @@ from __future__ import annotations
 import hashlib
 import hmac as _hmac
 import json
-import os
 import zipfile
 from pathlib import Path
 
-import pytest
 
 from database_package_deployer.signing import (
     compute_hmac,
-    resolve_signing_key,
     sign_package,
     verify_hmac,
 )

@@ -1,6 +1,6 @@
 """
 test_stage_wiring_integration.py — Verify that the newly wired CLI stages
-(scaffold, harvest, analyse, package) write well-formed decisions.json via
+(scaffold, harvest, analyse, package) write well-formed ships.decisions.json via
 the orchestrator foundation.
 
 Build-order items 4c–4f: refactor the four remaining SHIPS stages onto the
@@ -8,10 +8,10 @@ cascade + decisions integration pattern.
 
 Pattern mirrors test_inspect_orchestrator_integration.py: each test invokes
 the CLI function directly with a Namespace, traps the SystemExit, then loads
-decisions.json and asserts on its structure.
+ships.decisions.json and asserts on its structure.
 
 Covers:
-    Scaffold  — records config, outputs; decisions.json written post-hoc
+    Scaffold  — records config, outputs; ships.decisions.json written post-hoc
     Harvest   — records inputs/outputs/issues; HARVEST_* codes emitted
     Analyse   — records wave/dep/cycle counts; ANALYSE_* codes emitted
     Package   — records archive outputs; PACKAGE_WARNING codes emitted
@@ -21,7 +21,6 @@ Covers:
 from __future__ import annotations
 
 import json
-import os
 from argparse import Namespace
 from pathlib import Path
 
@@ -45,7 +44,7 @@ from td_release_packager.orchestrator import issue_codes
 
 
 def _read_decisions(project: Path) -> dict:
-    return json.loads((project / "decisions.json").read_text(encoding="utf-8"))
+    return json.loads((project / "ships.decisions.json").read_text(encoding="utf-8"))
 
 
 def _run(fn, args) -> int:
@@ -90,10 +89,7 @@ class TestNewIssueCodes:
     def test_new_codes_exportable_from_orchestrator_package(self):
         from td_release_packager.orchestrator import (
             HARVEST_UNCLASSIFIED,
-            HARVEST_CLASSIFICATION_WARNING,
-            HARVEST_TOKEN_CANDIDATE,
             ANALYSE_CYCLE,
-            ANALYSE_EXTERNAL_REF,
             PACKAGE_WARNING,
         )
 
@@ -122,11 +118,11 @@ class TestNewIssueCodes:
 
 
 class TestScaffoldStageRecording:
-    """scaffold writes decisions.json after creating the project."""
+    """scaffold writes ships.decisions.json after creating the project."""
 
     def test_scaffold_writes_decisions_json(self, tmp_path):
         project = _make_project(tmp_path)
-        assert (project / "decisions.json").exists()
+        assert (project / "ships.decisions.json").exists()
 
     def test_scaffold_stage_has_success_status(self, tmp_path):
         project = _make_project(tmp_path)
@@ -169,7 +165,7 @@ class TestScaffoldStageRecording:
     def test_scaffold_non_project_parent_no_litter(self, tmp_path):
         """Scaffold records decisions INSIDE the new project, not the parent."""
         _make_project(tmp_path)
-        assert not (tmp_path / "decisions.json").exists()
+        assert not (tmp_path / "ships.decisions.json").exists()
 
 
 # ---------------------------------------------------------------
@@ -195,7 +191,7 @@ def _make_harvest_args(source: Path, project: Path, **overrides) -> Namespace:
 
 
 class TestHarvestStageRecording:
-    """harvest stage writes inputs/outputs/issues to decisions.json."""
+    """harvest stage writes inputs/outputs/issues to ships.decisions.json."""
 
     def test_harvest_writes_stage_to_decisions(self, tmp_path):
         project = _make_project(tmp_path)
@@ -288,7 +284,7 @@ def _make_analyse_args(source: Path, **overrides) -> Namespace:
 
 
 class TestAnalyseStageRecording:
-    """analyse stage writes object/wave/cycle counts to decisions.json."""
+    """analyse stage writes object/wave/cycle counts to ships.decisions.json."""
 
     def _seed_project_with_table(self, project: Path) -> None:
         payload = project / "payload" / "database" / "DDL" / "tables"
@@ -349,14 +345,14 @@ class TestAnalyseStageRecording:
         assert cycle_issues[0]["severity"] == "error"
 
     def test_analyse_non_project_dir_no_decisions(self, tmp_path):
-        """Running analyse against a bare directory does not create decisions.json."""
+        """Running analyse against a bare directory does not create ships.decisions.json."""
         loose = tmp_path / "loose"
         loose.mkdir()
 
         args = _make_analyse_args(loose)
         _run(_cmd_analyze, args)
 
-        assert not (loose / "decisions.json").exists()
+        assert not (loose / "ships.decisions.json").exists()
 
 
 # ---------------------------------------------------------------
@@ -538,7 +534,7 @@ class TestProcessMetaVerb:
         return project, source
 
     def test_process_writes_single_run_with_multiple_stages(self, tmp_path):
-        """One process run in decisions.json contains multiple stage entries."""
+        """One process run in ships.decisions.json contains multiple stage entries."""
         project, source = self._seed_project_with_source(tmp_path)
 
         args = _make_process_args(project, source)
@@ -548,7 +544,7 @@ class TestProcessMetaVerb:
         process_run = next(
             (r for r in d["runs"] if r.get("command") == "process"), None
         )
-        assert process_run is not None, "expected a 'process' run in decisions.json"
+        assert process_run is not None, "expected a 'process' run in ships.decisions.json"
         stage_names = [s["stage"] for s in process_run["stages"]]
         assert "harvest" in stage_names
         assert "inspect" in stage_names
@@ -598,7 +594,7 @@ class TestProcessMetaVerb:
 
         # No --strict — pipeline should complete even if warnings exist
         args = _make_process_args(project, source)
-        rc = _run(_cmd_process, args)
+        _run(_cmd_process, args)
 
         # Should complete all stages, exit 0 (or non-zero only on hard errors)
         d = _read_decisions(project)
@@ -628,7 +624,7 @@ def _make_explain_args(project: Path, **overrides) -> Namespace:
 
 
 class TestExplainCommand:
-    """explain renders a human-readable report from decisions.json."""
+    """explain renders a human-readable report from ships.decisions.json."""
 
     def _run_process_and_get_project(self, tmp_path: Path) -> Path:
         project, source = TestProcessMetaVerb()._seed_project_with_source(tmp_path)
@@ -644,10 +640,10 @@ class TestExplainCommand:
 
     def test_explain_no_decisions_json_exits_1(self, tmp_path):
         project = _make_project(tmp_path)
-        # Don't run any pipeline — no decisions.json content beyond scaffold
-        # (scaffold writes decisions.json but has no process run)
+        # Don't run any pipeline — no ships.decisions.json content beyond scaffold
+        # (scaffold writes ships.decisions.json but has no process run)
         # Delete it to simulate truly empty state
-        (project / "decisions.json").unlink(missing_ok=True)
+        (project / "ships.decisions.json").unlink(missing_ok=True)
         args = _make_explain_args(project)
         rc = _run(_cmd_explain, args)
         assert rc == 1
@@ -693,10 +689,10 @@ def _make_verify_args(project: Path, **overrides) -> Namespace:
 
 
 class TestVerifyCommand:
-    """verify checks package readiness from decisions.json."""
+    """verify checks package readiness from ships.decisions.json."""
 
     def test_verify_no_package_stage_exits_1(self, tmp_path):
-        """No package stage in decisions.json → NOT READY."""
+        """No package stage in ships.decisions.json → NOT READY."""
         project = _make_project(tmp_path)
         # Run process without packaging (no --env etc.)
         source = tmp_path / "src"
@@ -713,7 +709,7 @@ class TestVerifyCommand:
 
     def test_verify_no_decisions_json_exits_1(self, tmp_path):
         project = _make_project(tmp_path)
-        (project / "decisions.json").unlink(missing_ok=True)
+        (project / "ships.decisions.json").unlink(missing_ok=True)
         args = _make_verify_args(project)
         rc = _run(_cmd_verify, args)
         assert rc == 1

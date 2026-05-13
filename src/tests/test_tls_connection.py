@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 
 from database_package_deployer.preflight import check_tls_connection
 

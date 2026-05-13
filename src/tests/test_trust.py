@@ -2,7 +2,7 @@
 test_trust.py — Tests for the Phase 1 Trust Report.
 
 Covers:
-    - Signal computation from decisions.json (inspect stages)
+    - Signal computation from ships.decisions.json (inspect stages)
     - Provenance signal from filesystem state
     - Label derivation (READY / READY-WITH-CAVEATS / BLOCKED)
     - to_dict serialisation matches ships.build.json schema
@@ -37,7 +37,6 @@ from td_release_packager.trust import (
 from td_release_packager.orchestrator.issue_codes import (
     INSPECT_LINT_VIOLATION,
     INSPECT_TOKEN_MALFORMED,
-    INSPECT_GRANT_VIOLATION,
 )
 
 
@@ -195,7 +194,7 @@ def _write_decisions(path: Path, runs: list) -> None:
 class TestComputeTrustReport:
     def test_ready_with_clean_decisions(self, tmp_path):
         _write_decisions(
-            tmp_path / "decisions.json",
+            tmp_path / "ships.decisions.json",
             [
                 {
                     "command": "inspect",
@@ -209,7 +208,7 @@ class TestComputeTrustReport:
 
     def test_blocked_on_token_malformed_error(self, tmp_path):
         _write_decisions(
-            tmp_path / "decisions.json",
+            tmp_path / "ships.decisions.json",
             [
                 {
                     "command": "inspect",
@@ -235,7 +234,7 @@ class TestComputeTrustReport:
 
     def test_caveats_on_lint_warning(self, tmp_path):
         _write_decisions(
-            tmp_path / "decisions.json",
+            tmp_path / "ships.decisions.json",
             [
                 {
                     "command": "inspect",
@@ -261,7 +260,7 @@ class TestComputeTrustReport:
         assert report.signals["inspect_lint"].status == TRUST_WARN
 
     def test_caveats_when_no_decisions_json(self, tmp_path):
-        """No decisions.json means inspect never ran — signals are UNKNOWN."""
+        """No ships.decisions.json means inspect never ran — signals are UNKNOWN."""
         report = compute_trust_report(str(tmp_path), str(tmp_path))
         assert report.label == LABEL_CAVEATS  # UNKNOWN signals → caveats
         for sig in report.signals.values():
@@ -273,7 +272,7 @@ class TestComputeTrustReport:
     def test_uses_last_inspect_stage(self, tmp_path):
         """When multiple runs exist, the last inspect stage wins."""
         _write_decisions(
-            tmp_path / "decisions.json",
+            tmp_path / "ships.decisions.json",
             [
                 {
                     "command": "inspect",
@@ -399,7 +398,7 @@ class TestBuildPackageStampsTrust:
         assert "provenance_complete" in trust["signals"]
 
     def test_trust_label_ready_with_clean_inspect(self, tmp_path, tmp_project):
-        """When decisions.json has a clean inspect run, label should be READY."""
+        """When ships.decisions.json has a clean inspect run, label should be READY."""
         from td_release_packager.builder import build_package
         from td_release_packager.models import BuildConfig
 
@@ -407,7 +406,7 @@ class TestBuildPackageStampsTrust:
             tmp_project / "payload/database/DDL/tables/Dev.T.tbl",
             "CREATE MULTISET TABLE Dev.T (Id INTEGER) PRIMARY INDEX (Id);\n",
         )
-        # Seed a clean decisions.json
+        # Seed a clean ships.decisions.json
         decisions = {
             "schema_version": 1,
             "runs": [
@@ -423,7 +422,7 @@ class TestBuildPackageStampsTrust:
                 }
             ],
         }
-        (tmp_project / "decisions.json").write_text(
+        (tmp_project / "ships.decisions.json").write_text(
             json.dumps(decisions), encoding="utf-8"
         )
         # Seed provenance

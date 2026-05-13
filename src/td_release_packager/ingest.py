@@ -26,7 +26,7 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from td_release_packager.classifier import (
     TYPE_TO_EXTENSION as _TYPE_TO_EXT,
@@ -1420,7 +1420,7 @@ def _extract_prereq_parent(content: str) -> Optional[Tuple[str, str]]:
     return (name, parent)
 
 
-def _emit_prereq_order(prereq_dir: str) -> "PrereqOrderResult":
+def _emit_prereq_order(prereq_dir: str) -> Any:
     """Topologically sort pre-requisite files by their FROM dependencies
     and write ``_order.txt`` into ``prereq_dir``.
 

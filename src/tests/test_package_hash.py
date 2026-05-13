@@ -16,7 +16,6 @@ import json
 import zipfile
 from pathlib import Path
 
-import pytest
 
 from database_package_deployer.preflight import check_package_hash
 
@@ -89,7 +88,7 @@ def test_check_package_hash_pass(tmp_path):
 def test_check_package_hash_fail_mismatch(tmp_path):
     """Tampered sidecar (wrong hash) → ERROR raised identifying the file."""
     zip_name = "DEV_TestPkg_BUILD_0001.zip"
-    zip_path = _make_zip(tmp_path, zip_name)
+    _make_zip(tmp_path, zip_name)
 
     # Write a deliberately wrong hash
     wrong_hash = "a" * 64

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
 
 from database_package_deployer.preflight import _check_excess_privilege
 

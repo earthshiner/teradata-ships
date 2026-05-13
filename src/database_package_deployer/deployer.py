@@ -2736,9 +2736,9 @@ def _rollback_single_dry_run(
                     _rb_text = _f.read()
                 if _is_c_external(_rb_text):
                     base_msg += (
-                        f" ⚠ C external routine — DDL will be restored but the "
-                        f"compiled binary may not match. Consider 'ships rollback "
-                        f"--to-tag <prev-tag>' for a complete binary rollback."
+                        " ⚠ C external routine — DDL will be restored but the "
+                        "compiled binary may not match. Consider 'ships rollback "
+                        "--to-tag <prev-tag>' for a complete binary rollback."
                     )
             except OSError:
                 pass

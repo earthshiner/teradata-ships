@@ -312,10 +312,6 @@ class TestFormatPropertiesFile:
 
     def test_collision_emits_warn_comment(self):
         # Two literals that decompose to the same token name
-        names = [
-            "PDE_DEV_00_MDL_0_T",
-            "PDE_DEV_00_MDL_0_T",  # exact duplicate gets dedup'd by reader,
-        ]
         # Use a different path to construct collision: same layer/kind/tier
         # but the reader dedupes exact duplicates, so we hand-craft:
         result = decomp.decompose_all(["PDE_DEV_00_MDL_0_T"])

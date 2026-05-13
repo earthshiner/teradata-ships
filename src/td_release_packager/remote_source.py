@@ -45,7 +45,6 @@ import os
 import tarfile
 import urllib.error
 import urllib.request
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 

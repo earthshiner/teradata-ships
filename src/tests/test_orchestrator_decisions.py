@@ -1,5 +1,5 @@
 """
-test_orchestrator_decisions.py — Tests for the decisions.json
+test_orchestrator_decisions.py — Tests for the ships.decisions.json
 manifest writer.
 
 Covers:
@@ -417,7 +417,7 @@ class TestModuleInvariants:
         assert set(FINAL_STATUSES) == {"success", "warning", "partial", "failed"}
 
     def test_decisions_filename_constant(self):
-        assert DECISIONS_FILENAME == "decisions.json"
+        assert DECISIONS_FILENAME == "ships.decisions.json"
 
     def test_schema_version_is_one(self):
         # Foundation lands at v1; bumping this is a deliberate

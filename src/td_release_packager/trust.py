@@ -18,9 +18,9 @@ to fix.
 
 | Signal               | Source                      | Fail condition           |
 |----------------------|-----------------------------|--------------------------|
-| inspect_token_format | decisions.json inspect stage | Any INSPECT_TOKEN_MALFORMED error   |
-| inspect_lint         | decisions.json inspect stage | Any INSPECT_LINT_VIOLATION error    |
-| inspect_grants       | decisions.json inspect stage | Any INSPECT_GRANT_VIOLATION error   |
+| inspect_token_format | ships.decisions.json inspect stage | Any INSPECT_TOKEN_MALFORMED error   |
+| inspect_lint         | ships.decisions.json inspect stage | Any INSPECT_LINT_VIOLATION error    |
+| inspect_grants       | ships.decisions.json inspect stage | Any INSPECT_GRANT_VIOLATION error   |
 | provenance_complete  | ships.provenance.json existence   | File absent from payload |
 
 **Label derivation**
@@ -104,7 +104,7 @@ def compute_trust_report(source_dir: str, pkg_dir: str) -> TrustReport:
     Compute Phase 1 trust signals and derive the trust label.
 
     Args:
-        source_dir: SHIPS project root (contains decisions.json).
+        source_dir: SHIPS project root (contains ships.decisions.json).
         pkg_dir:    Built package root (contains the payload tree).
 
     Returns:
@@ -112,8 +112,8 @@ def compute_trust_report(source_dir: str, pkg_dir: str) -> TrustReport:
     """
     signals: Dict[str, TrustSignal] = {}
 
-    # Load decisions.json — source of inspect signals
-    decisions_path = os.path.join(source_dir, "decisions.json")
+    # Load ships.decisions.json — source of inspect signals
+    decisions_path = os.path.join(source_dir, "ships.decisions.json")
     decisions = _load_decisions(decisions_path)
     inspect_stage = _find_latest_inspect_stage(decisions)
 
@@ -151,7 +151,7 @@ def compute_trust_report(source_dir: str, pkg_dir: str) -> TrustReport:
 
 
 def _load_decisions(path: str) -> dict:
-    """Load decisions.json or return an empty structure if absent."""
+    """Load ships.decisions.json or return an empty structure if absent."""
     if not os.path.exists(path):
         return {"runs": []}
     try:
@@ -186,7 +186,7 @@ def _inspect_signal(
     if stage is None:
         return TrustSignal(
             status=TRUST_UNKNOWN,
-            message=f"Inspect stage not found in decisions.json — run inspect first",
+            message="Inspect stage not found in ships.decisions.json — run inspect first",
         )
 
     matching = [i for i in stage.get("issues", []) if i.get("code") == issue_code]
