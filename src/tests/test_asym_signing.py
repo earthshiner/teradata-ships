@@ -5,7 +5,6 @@ All tests are skipped gracefully when the ``cryptography`` package is not
 installed, so the test suite passes in environments without it.
 """
 
-import hashlib
 import json
 import os
 import tempfile
@@ -17,14 +16,12 @@ cryptography = pytest.importorskip(
     reason="cryptography package not installed — skipping Ed25519 signing tests.",
 )
 
-from database_package_deployer.asym_signing import (
+from database_package_deployer.asym_signing import (  # noqa: E402
     generate_keypair,
-    resolve_private_key_pem,
-    resolve_public_key_pem,
     sign_zip,
     verify_zip,
 )
-from database_package_deployer.preflight import check_asymmetric_signature
+from database_package_deployer.preflight import check_asymmetric_signature  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

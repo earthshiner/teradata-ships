@@ -19,10 +19,8 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from database_package_deployer.drift import (
-    DriftResult,
     baseline_path,
     check_drift,
     normalise_show,
@@ -202,7 +200,6 @@ class TestDispatchDeployDrift:
     def _make_parsed(self, db="OMR_STD", obj="Customer", obj_type=None, strategy=None):
         from database_package_deployer.models import (
             DeployIntent,
-            DeployState,
             DeployStrategy,
             ObjectType,
             ParsedStatement,
@@ -223,7 +220,6 @@ class TestDispatchDeployDrift:
 
     def _make_manifest(self, tmp_path, parsed=None):
         from database_package_deployer.manifest import DeploymentManifest
-        from database_package_deployer.models import DeployState
 
         m = DeploymentManifest(package_dir=str(tmp_path))
         if parsed is not None:
@@ -321,7 +317,6 @@ class TestDispatchDeployDrift:
 
     def test_no_drift_check_when_baseline_dir_empty(self, tmp_path):
         from database_package_deployer import deployer
-        from database_package_deployer.models import DeployState
 
         parsed = self._make_parsed()
         manifest = self._make_manifest(tmp_path, parsed)
@@ -345,7 +340,6 @@ class TestDispatchDeployDrift:
 
     def test_no_drift_check_on_dry_run(self, tmp_path):
         from database_package_deployer import deployer
-        from database_package_deployer.models import DeployState
 
         parsed = self._make_parsed()
         manifest = self._make_manifest(tmp_path, parsed)

@@ -301,12 +301,12 @@ class TestIngestProducesPrereqOrder:
 
         order_file = project / "payload" / "database" / "pre-requisites" / "_order.txt"
         lines = [
-            l
-            for l in order_file.read_text(encoding="utf-8").splitlines()
-            if not l.startswith("#") and l.strip()
+            line
+            for line in order_file.read_text(encoding="utf-8").splitlines()
+            if not line.startswith("#") and line.strip()
         ]
-        parent_idx = next(i for i, l in enumerate(lines) if "P_PARENT" in l)
-        child_idx = next(i for i, l in enumerate(lines) if "B_CHILD" in l)
+        parent_idx = next(i for i, line in enumerate(lines) if "P_PARENT" in line)
+        child_idx = next(i for i, line in enumerate(lines) if "B_CHILD" in line)
         assert parent_idx < child_idx
 
     def test_no_order_txt_when_no_prereqs(self, tmp_path):

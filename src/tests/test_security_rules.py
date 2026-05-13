@@ -16,9 +16,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-import pytest
 
-from td_release_packager.security_rules import scan_secret_patterns, scan_dynamic_sql
+from td_release_packager.security_rules import scan_secret_patterns
 from td_release_packager.validate import ValidationResult
 
 

@@ -1,6 +1,6 @@
 """
 test_inspect_orchestrator_integration.py — Verify the ``inspect`` CLI
-stage writes a well-formed decisions.json via the orchestrator
+stage writes a well-formed ships.decisions.json via the orchestrator
 foundation.
 
 Item 4b in the orchestrator build order: refactor inspect onto the
@@ -8,7 +8,7 @@ cascade + decisions integration pattern that the scan stage piloted.
 
 Each test invokes ``_cmd_validate`` directly with a constructed
 argparse.Namespace, traps the SystemExit it raises (the CLI convention
-for unix-style exit codes), then loads the resulting decisions.json
+for unix-style exit codes), then loads the resulting ships.decisions.json
 and asserts on its structure.
 
 Covers:
@@ -21,7 +21,7 @@ Covers:
     6. Status auto-rollup: lint errors → status=error;
        lint warnings only → status=warning
     7. Append-only across multiple inspect runs
-    8. Non-project directory → no decisions.json written
+    8. Non-project directory → no ships.decisions.json written
 """
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ def _run_inspect(args) -> int:
 
 
 def _read_decisions(project: Path) -> dict:
-    return json.loads((project / "decisions.json").read_text(encoding="utf-8"))
+    return json.loads((project / "ships.decisions.json").read_text(encoding="utf-8"))
 
 
 def _make_project(tmp_path: Path) -> Path:
@@ -87,7 +87,7 @@ def _make_project(tmp_path: Path) -> Path:
 
 class TestInspectCleanRun:
     """A project whose DDL passes every rule produces a clean
-    decisions.json — single stage, no issues, status=success."""
+    ships.decisions.json — single stage, no issues, status=success."""
 
     def test_clean_project_writes_success_run(self, tmp_path, capsys):
         project = _make_project(tmp_path)
@@ -166,7 +166,7 @@ class TestInspectCleanRun:
 
 
 class TestInspectRecordsLintIssues:
-    """Lint findings from validate.py become decisions.json issues
+    """Lint findings from validate.py become ships.decisions.json issues
     with code=INSPECT_LINT_VIOLATION; the rule name is preserved in
     the message so explain can group by rule."""
 
@@ -297,7 +297,7 @@ class TestInspectAppendsAcrossRuns:
 
 class TestInspectSkipsManifestForNonProject:
     """Ad-hoc inspect invocations against arbitrary directories must
-    not litter the filesystem with decisions.json."""
+    not litter the filesystem with ships.decisions.json."""
 
     def test_no_manifest_for_directory_without_payload(self, tmp_path, capsys):
         loose_dir = tmp_path / "loose"
@@ -311,5 +311,5 @@ class TestInspectSkipsManifestForNonProject:
         _run_inspect(_make_namespace(loose_dir))
         capsys.readouterr()
 
-        # Stdout still works; decisions.json must NOT have appeared.
-        assert not (loose_dir / "decisions.json").exists()
+        # Stdout still works; ships.decisions.json must NOT have appeared.
+        assert not (loose_dir / "ships.decisions.json").exists()

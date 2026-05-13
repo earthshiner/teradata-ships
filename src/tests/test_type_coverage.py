@@ -19,7 +19,6 @@ Intentional exclusions (NOT_DEPLOYED types):
 
 from __future__ import annotations
 
-import pytest
 
 from td_release_packager.classifier import BASE_TYPES
 from database_package_deployer.models import (

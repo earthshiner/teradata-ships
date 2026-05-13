@@ -12,12 +12,8 @@ Covers:
 from __future__ import annotations
 
 import hashlib
-import json
-import os
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 
 from database_package_deployer.deployer import _capture_existing_definition
 from database_package_deployer.models import ObjectType

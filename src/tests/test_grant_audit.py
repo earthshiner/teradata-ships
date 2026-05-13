@@ -11,11 +11,9 @@ Covers:
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
 
 from database_package_deployer.grant_audit import audit_grants, _parse_dcl_grants
 

@@ -32,6 +32,10 @@ from td_release_packager.classifier import (
     TYPE_TO_EXTENSION as _CANONICAL_EXT,
     _CLASSIFY_PATTERNS as _ALL_CLASSIFY_PATTERNS,
 )
+from td_release_packager.sql_text import (
+    strip_comments_and_string_literals as _strip_sql_comments,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -106,12 +110,12 @@ DEFAULT_RULES: Dict[str, str] = {
 
 # -- Valid severity values --
 # Casing convention: UPPER in config files (inspect.conf), lower in
-# decisions.json / JSON output. The vocab is the same; the casing
+# ships.decisions.json / JSON output. The vocab is the same; the casing
 # follows each format's own convention.
 #
 # INFO is intentionally separate from OFF: INFO emits a visible note
 # (e.g. "comma_style=as-per-source: consistency not enforced") that
-# appears in the report and is recorded in decisions.json so the
+# appears in the report and is recorded in ships.decisions.json so the
 # policy is auditable. OFF is completely silent.
 _VALID_SEVERITIES = {"ERROR", "WARNING", "INFO", "OFF"}
 
@@ -122,7 +126,7 @@ _VALID_SEVERITIES = {"ERROR", "WARNING", "INFO", "OFF"}
 #     leading        flag files that use trailing commas (default)
 #     trailing       flag files that use leading commas
 #     as-per-source  do not enforce any convention; emit a single
-#                    INFO note so decisions.json records the policy
+#                    INFO note so ships.decisions.json records the policy
 #                    explicitly (differs from comma_log_level=OFF
 #                    which is completely silent)
 #
@@ -250,13 +254,13 @@ def generate_default_config() -> str:
         "# Severity values (for rules that accept severities):",
         "#   ERROR   — must fix before deployment (blocks --strict)",
         "#   WARNING — advisory, does not block deployment",
-        "#   INFO    — informational; visible in report and decisions.json",
+        "#   INFO    — informational; visible in report and ships.decisions.json",
         "#             but does not count as a failure. Use for rules that",
         "#             record a deliberate policy choice rather than a violation.",
         "#   OFF     — rule is disabled and completely silent",
         "#",
         "# Casing note: use UPPER here (config file convention).",
-        "# decisions.json uses lowercase (JSON convention) for the same vocab.",
+        "# ships.decisions.json uses lowercase (JSON convention) for the same vocab.",
         "#",
         "# --strict mode promotes all WARNING rules to ERROR.",
         "# OFF rules remain off even in strict mode.",
@@ -280,7 +284,7 @@ def generate_default_config() -> str:
         "#   leading      (default) — flag files that use trailing commas.",
         "#   trailing               — flag files that use leading commas.",
         "#   as-per-source          — no enforcement; one INFO note is emitted",
-        "#                           so decisions.json records this as a deliberate",
+        "#                           so ships.decisions.json records this as a deliberate",
         "#                           policy choice (differs from comma_log_level=OFF",
         "#                           which is completely silent with no record).",
         f"comma_style={DEFAULT_COMMA_STYLE}",
@@ -586,10 +590,6 @@ _INTRA_QUALIFIED_NAME_RE = re.compile(
 # and builder all use the same position-preserving implementation.
 # Without comment stripping, regex content scans match keywords
 # inside /* ... */ header comments and trigger spurious warnings.
-
-from td_release_packager.sql_text import (
-    strip_comments_and_string_literals as _strip_sql_comments,
-)
 
 
 # -- Multi-DDL-statement detection --
@@ -1487,7 +1487,7 @@ def _check_leading_commas(
 
     ``as-per-source``
         Does not check comma placement. An INFO finding is emitted
-        once so ``decisions.json`` records that comma consistency was
+        once so ``ships.decisions.json`` records that comma consistency was
         a deliberate policy choice rather than an oversight.
 
     Args:
@@ -1502,7 +1502,7 @@ def _check_leading_commas(
     """
     if style == "as-per-source":
         # Emit once per-file INFO so the omission is visible in the report
-        # and recorded in decisions.json — not silently swallowed.
+        # and recorded in ships.decisions.json — not silently swallowed.
         return [
             ValidationIssue(
                 file=rel_path,

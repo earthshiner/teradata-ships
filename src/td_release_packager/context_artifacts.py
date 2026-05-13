@@ -1,17 +1,19 @@
 """
 context_artifacts.py — Agent-facing SHIPS context artefacts.
 
-The package builder already emits ships.build.json, ships.provenance.json, reports,
-and deployment scripts.  Those files are excellent for machines and DBAs,
-but autonomous agents also need a compact, stable context contract that
-explains what the package is, where it sits in the workflow, what evidence
-exists, and what should happen next.
+The package builder already emits ships.build.json, ships.provenance.json,
+ships.integrity.json, reports, and deployment scripts. Those files are
+excellent for machines and DBAs, but autonomous agents also need a compact,
+stable context contract that explains what the package is, where it sits in
+the workflow, what evidence exists, and what should happen next.
 
-This module writes three small JSON documents into each generated package:
+This module writes the SHIPS agent-context artefacts into each generated
+package:
 
-    ships.context.json   — durable workflow context and constraints
-    ships.manifest.json  — agent-safe package inventory and governance summary
-    ships.handoff.json   — next-actor instructions and readiness guidance
+    ships.index.json      — canonical read-first entrypoint for agents
+    ships.context.json    — durable workflow context and constraints
+    ships.manifest.json   — agent-safe package inventory and governance summary
+    ships.handoff.json    — next-actor instructions and readiness guidance
 
 They intentionally reference detailed evidence instead of duplicating it.
 That keeps the context budget small while preserving traceability.
@@ -29,9 +31,17 @@ from typing import Any, Dict, Optional
 from td_release_packager.models import BuildConfig, BuildManifest
 
 CONTEXT_SCHEMA_VERSION = "1.0"
+INDEX_SCHEMA_VERSION = "1.0"
+INDEX_FILENAME = "ships.index.json"
 CONTEXT_FILENAME = "ships.context.json"
 MANIFEST_FILENAME = "ships.manifest.json"
 HANDOFF_FILENAME = "ships.handoff.json"
+BUILD_FILENAME = "ships.build.json"
+PROVENANCE_FILENAME = "ships.provenance.json"
+INTEGRITY_FILENAME = "ships.integrity.json"
+DECISIONS_FILENAME = "ships.decisions.json"
+PACKAGE_REPORT_FILENAME = "package_report.html"
+README_FILENAME = "README.txt"
 
 
 def write_context_artifacts(
@@ -40,7 +50,7 @@ def write_context_artifacts(
     config: Optional[BuildConfig] = None,
 ) -> Dict[str, str]:
     """
-    Write the three SHIPS agent-context artefacts into a package directory.
+    Write SHIPS agent-context artefacts into a package directory.
 
     Args:
         pkg_dir: Package directory that will later be archived.
@@ -49,7 +59,7 @@ def write_context_artifacts(
             path; omitted when regenerating context for an auto-split sibling.
 
     Returns:
-        Mapping of logical artefact name to filesystem path.
+        Mapping of logical artefact filename to filesystem path.
     """
     os.makedirs(pkg_dir, exist_ok=True)
 
@@ -71,6 +81,11 @@ def write_context_artifacts(
             manifest=manifest_dict,
         ),
         HANDOFF_FILENAME: _build_handoff_document(
+            context_id=context_id,
+            generated_at=generated_at,
+            manifest=manifest_dict,
+        ),
+        INDEX_FILENAME: _build_index_document(
             context_id=context_id,
             generated_at=generated_at,
             manifest=manifest_dict,
@@ -139,25 +154,123 @@ def _governance(manifest: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _entrypoints() -> Dict[str, Dict[str, Any]]:
+    """Return self-describing SHIPS package entrypoints."""
+    return {
+        "index": {
+            "path": INDEX_FILENAME,
+            "description": "Canonical read-first package index. Describes the SHIPS metadata files, recommended read order, and agent instructions.",
+            "required": True,
+            "audience": ["agent", "human", "ci_cd", "dba", "governance"],
+        },
+        "handoff": {
+            "path": HANDOFF_FILENAME,
+            "description": "Next-actor instructions describing what should happen next, what must be reviewed, and what evidence should be checked before deployment.",
+            "required": True,
+            "audience": ["agent", "dba", "human"],
+        },
+        "context": {
+            "path": CONTEXT_FILENAME,
+            "description": "Durable workflow context for agents and humans, including objective, current state, constraints, assumptions, governance, trust status, and references.",
+            "required": True,
+            "audience": ["agent", "human", "ci_cd"],
+        },
+        "build": {
+            "path": BUILD_FILENAME,
+            "description": "Authoritative technical build manifest containing build identity, package version, target environment, token summary, trust label, policy flags, and build-time metadata.",
+            "required": True,
+            "audience": ["agent", "human", "ci_cd", "dba"],
+        },
+        "manifest": {
+            "path": MANIFEST_FILENAME,
+            "description": "Compact, agent-safe package inventory describing included artefacts, object counts, token usage, dependency contract, governance settings, and deployment-relevant contents.",
+            "required": True,
+            "audience": ["agent", "dba", "ci_cd", "governance"],
+        },
+        "integrity": {
+            "path": INTEGRITY_FILENAME,
+            "description": "Hashes and tamper-evidence metadata used to confirm that package contents have not changed unexpectedly.",
+            "required": True,
+            "audience": ["agent", "ci_cd", "dba", "governance"],
+        },
+        "provenance": {
+            "path": PROVENANCE_FILENAME,
+            "description": "Source lineage and origin evidence, including source-to-package filename transformations and traceability metadata.",
+            "required": True,
+            "audience": ["agent", "governance", "ci_cd", "dba"],
+        },
+        "decisions": {
+            "path": DECISIONS_FILENAME,
+            "description": "Project-level decision log containing build-stage decisions, warnings, issue codes, rule outcomes, and rationale captured during SHIPS pipeline execution.",
+            "required": False,
+            "audience": ["agent", "human", "governance"],
+        },
+        "package_report": {
+            "path": PACKAGE_REPORT_FILENAME,
+            "description": "Human-readable HTML report with package inventory, wave visualisation, trust report, and deploy command guidance.",
+            "required": False,
+            "audience": ["human", "dba", "governance"],
+        },
+        "readme": {
+            "path": README_FILENAME,
+            "description": "Human quick-start instructions for inspecting, verifying, and deploying the package.",
+            "required": False,
+            "audience": ["human", "dba"],
+        },
+    }
+
+
+def _recommended_read_order() -> list[str]:
+    """Return the canonical read order by entrypoint key."""
+    return [
+        "index",
+        "handoff",
+        "context",
+        "build",
+        "manifest",
+        "integrity",
+        "provenance",
+        "decisions",
+        "package_report",
+    ]
+
+
+def _agent_instructions() -> Dict[str, Any]:
+    """Return standing instructions for downstream SHIPS-aware agents."""
+    return {
+        "summary": "Before taking action on this package, read ships.index.json first, then follow recommended_read_order.",
+        "before_action": [
+            "Read ships.index.json to discover the package context contract and entrypoints.",
+            "Read ships.handoff.json to determine the requested next action and blocking conditions.",
+            "Read ships.context.json to understand workflow state, constraints, governance settings, and trust status.",
+            "Read ships.integrity.json before trusting package contents.",
+            "Read ships.manifest.json before modifying, deploying, summarising, or routing package contents.",
+            "Read ships.provenance.json when source lineage, repository traceability, or filename transformation evidence matters.",
+            "Read ships.decisions.json when stage outcomes, warnings, issue codes, or decision rationale are needed.",
+        ],
+        "must_not_assume": [
+            "target environment",
+            "deployment approval",
+            "trust status",
+            "object deployment order",
+            "token resolution status",
+            "package integrity",
+            "source provenance",
+        ],
+        "blocking_rule": "Do not deploy or approve a package when the trust label is BLOCKED or when integrity, signature, target-environment, approval, change-reference, or TLS policy checks fail.",
+    }
+
+
 def _evidence_files() -> Dict[str, str]:
     """Canonical evidence files expected within a SHIPS package."""
-    return {
-        "build_manifest": "ships.build.json",
-        "context": CONTEXT_FILENAME,
-        "agent_manifest": MANIFEST_FILENAME,
-        "handoff": HANDOFF_FILENAME,
-        "provenance": "ships.provenance.json",
-        "integrity": "ships.integrity.json",
-        "package_report": "package_report.html",
-        "readme": "README.txt",
-    }
+    return {key: value["path"] for key, value in _entrypoints().items()}
 
 
 def _safe_token_summary(manifest: Dict[str, Any]) -> Dict[str, Any]:
     """
     Summarise token usage without duplicating resolved values.
 
-    ships.build.json already contains the full token map.  Agent context should be
+    ships.build.json already contains the full token map. Agent context should be
     small and should avoid re-spreading environment-specific values unless an
     actor deliberately opens ships.build.json.
     """
@@ -167,6 +280,34 @@ def _safe_token_summary(manifest: Dict[str, Any]) -> Dict[str, Any]:
         "token_names": sorted(tokens.keys()),
         "values_redacted": True,
         "full_values_reference": "ships.build.json#/tokens_resolved",
+    }
+
+
+def _build_index_document(
+    *,
+    context_id: str,
+    generated_at: str,
+    manifest: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Build ships.index.json, the canonical package read-first contract."""
+    return {
+        "schema": "teradata-ships/package-index/v1",
+        "schema_version": INDEX_SCHEMA_VERSION,
+        "package_type": "teradata-ships",
+        "index_version": INDEX_SCHEMA_VERSION,
+        "read_first": INDEX_FILENAME,
+        "context_id": context_id,
+        "generated_at": generated_at,
+        "package": {
+            "name": manifest.get("package_name"),
+            "filename": manifest.get("package_filename"),
+            "environment": manifest.get("environment"),
+            "build_number": manifest.get("build_number"),
+            "current_state": _package_state(manifest),
+        },
+        "entrypoints": _entrypoints(),
+        "recommended_read_order": _recommended_read_order(),
+        "agent_instructions": _agent_instructions(),
     }
 
 
@@ -203,6 +344,7 @@ def _build_context_document(
             "env_config_file": config.get("env_config_file", ""),
         },
         "constraints": [
+            "Read ships.index.json first; it is the canonical package entrypoint and context contract.",
             "Preserve Teradata SQL syntax and deployment order.",
             "Do not change business logic during package handoff or deployment.",
             "Use ships.build.json as the authoritative technical build manifest.",
@@ -213,7 +355,7 @@ def _build_context_document(
         "governance": _governance(manifest),
         "trust": manifest.get("trust") or {},
         "context_budget": {
-            "preferred_agent_prompting": "Load this file first, then open referenced evidence only when needed.",
+            "preferred_agent_prompting": "Load ships.index.json first, then open referenced evidence only when needed.",
             "detailed_evidence_is_referenced_not_repeated": True,
             "token_values_are_not_duplicated_here": True,
         },
@@ -272,6 +414,7 @@ def _build_handoff_document(
     """Build ships.handoff.json."""
     governance = _governance(manifest)
     required_actions = [
+        "Read ships.index.json first and follow recommended_read_order.",
         "Review ships.build.json, ships.manifest.json, and package_report.html.",
         "Verify package integrity before deployment.",
         "Confirm target environment matches the package target_env.",
@@ -280,13 +423,13 @@ def _build_handoff_document(
         "Capture deployment logs and post-deploy evidence.",
     ]
     if governance["require_change_ref"]:
-        required_actions.insert(1, "Confirm a valid change_ref is present before deployment.")
+        required_actions.insert(2, "Confirm a valid change_ref is present before deployment.")
     if governance["require_signature"] or governance["require_asymmetric_signature"]:
-        required_actions.insert(1, "Verify package signature before deployment.")
+        required_actions.insert(2, "Verify package signature before deployment.")
     if governance["require_approvals"] > 1:
-        required_actions.insert(1, "Obtain the required four-eyes approval before deployment.")
+        required_actions.insert(2, "Obtain the required four-eyes approval before deployment.")
     if governance["require_tls"]:
-        required_actions.insert(1, "Use a TLS/SSL-protected Teradata connection.")
+        required_actions.insert(2, "Use a TLS/SSL-protected Teradata connection.")
 
     return {
         "schema_version": CONTEXT_SCHEMA_VERSION,

@@ -12,7 +12,7 @@ to lowest precedence:
 
 For any setting, the highest layer that defines a value wins; lower
 layers provide fallbacks. The resolved view (value plus the source
-layer that supplied it) is what gets recorded to ``decisions.json``,
+layer that supplied it) is what gets recorded to ``ships.decisions.json``,
 so callers don't just need the value — they need provenance.
 
 This module exposes a single class, ``Cascade``, plus the supporting
@@ -72,7 +72,7 @@ class ResolvedSetting:
         source_path:  Best-effort filesystem origin (e.g. ``ships.yaml``,
                       ``config/env/DEV.conf``, or
                       ``"default"`` / ``"cli"``). Useful in
-                      ``decisions.json`` for human review.
+                      ``ships.decisions.json`` for human review.
     """
 
     value: Any

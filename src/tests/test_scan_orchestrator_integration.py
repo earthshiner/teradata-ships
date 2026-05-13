@@ -1,12 +1,12 @@
 """
 test_scan_orchestrator_integration.py — Verify the `scan` CLI stage
-writes a well-formed decisions.json via the orchestrator foundation.
+writes a well-formed ships.decisions.json via the orchestrator foundation.
 
 This is the pilot for build-order item 4 (refactor existing stages
 onto cascade + decisions). Each test invokes ``_cmd_scan`` directly
 with a constructed argparse.Namespace (faster than subprocess and
 easier to introspect failures), then loads the resulting
-decisions.json and asserts on its structure.
+ships.decisions.json and asserts on its structure.
 
 Covers:
     1. Single run produces a valid manifest with one ``scan`` stage
@@ -15,7 +15,7 @@ Covers:
     4. Validation errors → issues with severity=error, code=TOKEN_UNDEFINED
     5. Validation warnings → issues with severity=warning, code=TOKEN_UNUSED
     6. Status auto-rollup: errors → status=error, warnings → status=warning
-    7. Multiple scan runs append to existing decisions.json
+    7. Multiple scan runs append to existing ships.decisions.json
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ def _make_project(tmp_path: Path, *, ddl_content: str) -> Path:
 
 
 def _read_decisions(project: Path) -> dict:
-    return json.loads((project / "decisions.json").read_text(encoding="utf-8"))
+    return json.loads((project / "ships.decisions.json").read_text(encoding="utf-8"))
 
 
 # ---------------------------------------------------------------
@@ -194,7 +194,7 @@ class TestScanAppendsAcrossRuns:
 
 class TestScanSkipsManifestForNonProjectDirectories:
     """Ad-hoc scans against arbitrary directories must not litter
-    the filesystem with decisions.json. The gate is project
+    the filesystem with ships.decisions.json. The gate is project
     detection (presence of payload/ or ships.yaml)."""
 
     def test_no_manifest_for_directory_without_payload(self, tmp_path, capsys):
@@ -208,8 +208,8 @@ class TestScanSkipsManifestForNonProjectDirectories:
         _cmd_scan(Namespace(source=str(loose_dir), env_config=None))
         capsys.readouterr()
 
-        # Stdout still works; decisions.json must NOT have appeared
-        assert not (loose_dir / "decisions.json").exists()
+        # Stdout still works; ships.decisions.json must NOT have appeared
+        assert not (loose_dir / "ships.decisions.json").exists()
 
     def test_manifest_written_when_ships_yaml_present(self, tmp_path, capsys):
         """ships.yaml alone (no payload/) is sufficient to trigger
@@ -221,7 +221,7 @@ class TestScanSkipsManifestForNonProjectDirectories:
         _cmd_scan(Namespace(source=str(proj), env_config=None))
         capsys.readouterr()
 
-        assert (proj / "decisions.json").exists()
+        assert (proj / "ships.decisions.json").exists()
 
 
 # ---------------------------------------------------------------

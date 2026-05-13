@@ -26,7 +26,6 @@ network requests.  It opens directly from the filesystem (file: URL).
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from typing import Dict, List, Optional, Tuple
@@ -100,9 +99,14 @@ _SKIP_NAMES = frozenset(
         "_order.txt",
         ".gitkeep",
         ".gitignore",
+        "ships.index.json",
         "ships.integrity.json",
         "ships.provenance.json",
         "ships.build.json",
+        "ships.context.json",
+        "ships.manifest.json",
+        "ships.handoff.json",
+        "ships.decisions.json",
     }
 )
 _SKIP_EXTS = frozenset({".json", ".py", ".sh", ".bat", ".txt", ".html", ".jar"})
@@ -534,22 +538,22 @@ def _deploy_tab(manifest_dict: dict) -> str:
 
     blocks += cmd_block(
         "Dry run (recommended first)",
-        f"python deploy.py --host &lt;host&gt; --user &lt;user&gt; --dry-run",
+        "python deploy.py --host &lt;host&gt; --user &lt;user&gt; --dry-run",
         "Validates the pipeline and runs pre-flight checks. No DDL is executed.",
     )
     blocks += cmd_block(
         "Standard deployment",
-        f"python deploy.py --host &lt;host&gt; --user &lt;user&gt;",
+        "python deploy.py --host &lt;host&gt; --user &lt;user&gt;",
         "Serial deployment. Safe for small packages.",
     )
     blocks += cmd_block(
         "Wave-parallel deployment",
-        f"python deploy.py --host &lt;host&gt; --user &lt;user&gt; --streams 4",
+        "python deploy.py --host &lt;host&gt; --user &lt;user&gt; --streams 4",
         "Deploys independent objects in parallel. Faster for large packages (50+ objects).",
     )
     blocks += cmd_block(
         "Continue on error (collect all failures in one pass)",
-        f"python deploy.py --host &lt;host&gt; --user &lt;user&gt; --continue-on-error",
+        "python deploy.py --host &lt;host&gt; --user &lt;user&gt; --continue-on-error",
     )
 
     return f"""

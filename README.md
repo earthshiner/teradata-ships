@@ -1,8 +1,8 @@
-﻿# SHIPS — Teradata Deployment Agent
+# SHIPS — Teradata SHIPS
 
 **S**caffold · **H**arvest · **I**nspect · **P**ackage · **S**hip
 
-An autonomous deployment agent for Teradata. SHIPS takes raw DDL from any source — extracted, generated, hand-coded, migrated — and produces self-contained, environment-specific release packages that a DBA can deploy without any knowledge of the build process.
+A structured packaging, validation, deployment, evidence, and context-exchange framework for Teradata assets. SHIPS takes raw DDL from any source — extracted, generated, hand-coded, migrated — and produces self-contained, environment-specific release packages that a DBA can deploy without any knowledge of the build process.
 
 Equally usable by humans at the command line, CI/CD pipelines, and autonomous AI agents.
 
@@ -234,6 +234,22 @@ See [`docs/security_prerequisites.md`](docs/security_prerequisites.md) and
 
 ---
 
+## Agent context artefacts
+
+Every generated package now includes three agent-facing context files alongside
+`ships.build.json`, `ships.provenance.json`, and the package report:
+
+| File | Purpose |
+|---|---|
+| `ships.context.json` | Durable workflow context, source-of-truth pointers, constraints, governance controls, trust state, and evidence references. |
+| `ships.manifest.json` | Compact agent-safe package inventory and dependency contract. Token names are listed, but token values are not duplicated here. |
+| `ships.handoff.json` | Next-actor instructions for a human, CI/CD job, MCP tool, or autonomous deployment agent. |
+
+These files let SHIPS packages move between actors without relying on chat
+history or hidden agent state.
+
+---
+
 ## Documentation
 
 - **[Installation Guide](docs/INSTALLATION.md)** — Prerequisites, setup, verification
@@ -255,7 +271,7 @@ See [src/tests/README.md](src/tests/README.md) for the full test guide including
 ## Project Structure
 
 ```
-teradata-deployment-agent/
+teradata-ships/
     src/
         td_release_packager/    ← Packager pipeline
             orchestrator/       ← Orchestrator foundation (ships.yaml, cascade, decisions)

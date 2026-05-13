@@ -14,11 +14,9 @@ Exit codes (used by the CLI):
     1 — drift detected (any UNDECLARED or MISSING)
 """
 
-import json
 import logging
 import os
 import re
-import sys
 from typing import Any, Dict, List, Set, Tuple
 
 logger = logging.getLogger(__name__)

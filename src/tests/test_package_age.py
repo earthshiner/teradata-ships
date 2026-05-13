@@ -15,7 +15,6 @@ import json
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-import pytest
 
 from database_package_deployer.preflight import check_package_age
 

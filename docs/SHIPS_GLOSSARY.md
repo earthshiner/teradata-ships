@@ -7,7 +7,7 @@ SHIPS is a structured packaging, validation, deployment, evidence, and context-e
 | Term | Meaning |
 |---|---|
 | SHIPS | The framework and methodology for turning database assets into trusted, deployable packages with validation, provenance, governance, and evidence. |
-| `teradata-deployment-agent` | The repository/project name for the SHIPS implementation focused on Teradata packaging and deployment. |
+| `teradata-ships` | The repository/project name for the SHIPS implementation focused on Teradata packaging and deployment. |
 | Agent | An autonomous or semi-autonomous actor that can read SHIPS artefacts, make bounded decisions, and invoke SHIPS workflows. SHIPS enables agents but is not itself an agent. |
 | Agentic context | A workflow where one or more agents participate in build, validation, review, deployment, or evidence collection while using durable package context instead of transient chat memory. |
 | Human-in-the-loop | A workflow where a human developer, DBA, approver, or operator reviews and authorises specific stages rather than delegating the whole process to automation. |
@@ -29,7 +29,7 @@ SHIPS is a structured packaging, validation, deployment, evidence, and context-e
 | Analyse / Analyze | The stage that examines dependency relationships, produces deployment waves, and can export graph formats. |
 | Package | The stage that resolves tokens for a target environment and creates a self-contained release package. |
 | Ship | The deployment stage where the package is executed against a target environment by a human, tool, CI/CD job, or deployment agent. |
-| Process | The meta-command that runs the SHIPS stages in sequence and records one coherent run in `decisions.json`. |
+| Process | The meta-command that runs the SHIPS stages in sequence and records one coherent run in `ships.decisions.json`. |
 | Strict mode | A mode where errors stop the pipeline immediately, normally used for platform or controlled promotion workflows. |
 | Developer mode | A more permissive mode designed for fast iteration, where warnings are surfaced but do not necessarily stop the workflow. |
 
@@ -38,7 +38,7 @@ SHIPS is a structured packaging, validation, deployment, evidence, and context-e
 | Artefact | Meaning |
 |---|---|
 | `ships.yaml` | Project-level SHIPS configuration, including environments, paths, stage policy, and deployment controls. |
-| `decisions.json` | Append-only stage/run audit trail. It records what happened, which options were resolved, what decisions were made, and what issues were encountered. |
+| `ships.decisions.json` | Append-only stage/run audit trail. It records what happened, which options were resolved, what decisions were made, and what issues were encountered. |
 | `ships.build.json` | Authoritative package build manifest embedded in the package. It contains technical package metadata, resolved token values, inventory, trust flags, and deployment controls. |
 | `ships.context.json` | Agent-facing durable workflow context. It explains current state, objective, constraints, source-of-truth pointers, trust state, governance controls, and evidence references. |
 | `ships.manifest.json` | Agent-safe package inventory and dependency contract. It summarises the package without duplicating sensitive or high-volume details. Token values are deliberately redacted here and referenced through `ships.build.json`. |
@@ -123,3 +123,12 @@ SHIPS is a structured packaging, validation, deployment, evidence, and context-e
 | Handoff evidence | The result data a receiving actor should return after completing its stage. |
 | Source of truth | The canonical reference for package content and decisions, typically the Git commit, package metadata, and embedded evidence files. |
 | Context engineering | Designing durable, compact, machine-readable context so agents remain efficient, safe, and effective across handoffs. |
+
+## New/updated package metadata artefacts
+
+| Term | Meaning |
+|---|---|
+| `ships.index.json` | Canonical read-first SHIPS package index. Describes each package metadata file, marks required artefacts, provides the recommended read order, and carries standing agent instructions. |
+| `ships.decisions.json` | Canonical project-level decision/audit trail. Replaces the older `decisions.json` name and records pipeline stage outcomes, decisions, issue codes, config provenance, and output references. |
+| Context entrypoint | The machine-readable pointer returned by MCP/package tooling that tells a downstream agent to read `ships.index.json` before taking action. |
+| Recommended read order | The ordered list in `ships.index.json` that tells agents and operators how to inspect SHIPS metadata before deployment, approval, modification, or summary. |

@@ -11,7 +11,6 @@ Covers every touch-point:
 
 from __future__ import annotations
 
-import pytest
 
 from database_package_deployer.models import (
     DeployScope,
