@@ -17,7 +17,7 @@ stdio (default) — subprocess transport for local clients:
             "ships": {
                 "command": "uv",
                 "args": ["run", "python", "-m", "ships_mcp"],
-                "cwd": "/path/to/teradata-deployment-agent"
+                "cwd": "/path/to/teradata-ships"
             }
         }
     }
@@ -390,7 +390,7 @@ def ships_package(
 
     Resolves all {{TOKEN}} references in the payload using the env config,
     assembles a self-contained archive with the deployment engine, and
-    stamps BUILD.json with provenance, integrity hash, and trust report.
+    stamps ships.build.json with provenance, integrity hash, and trust report.
 
     Args:
         project: SHIPS project directory.
@@ -782,7 +782,7 @@ def ships_decisions(project: str, run_id: Optional[str] = None) -> dict:
 def ships_verify(project: str) -> dict:
     """Check whether the last built package is ready to deploy.
 
-    Reads the trust block from BUILD.json in the releases directory
+    Reads the trust block from ships.build.json in the releases directory
     and checks: archive exists, no package warnings, package stage
     succeeded. Returns READY / NOT READY with a per-check breakdown.
 
@@ -840,7 +840,7 @@ def ships_verify(project: str) -> dict:
         ]
         ready = all(c["passed"] for c in checks)
 
-        # Read trust label from BUILD.json if available
+        # Read trust label from ships.build.json if available
         trust_label = "UNKNOWN"
         if archive_exists:
             build_json = _find_build_json(archive)
@@ -1030,13 +1030,13 @@ def _package_result_to_dict(result) -> dict:
 
 
 def _find_build_json(archive_path: str) -> Optional[dict]:
-    """Extract BUILD.json from a package zip, or None if not found."""
+    """Extract ships.build.json from a package zip, or None if not found."""
     import zipfile
 
     try:
         with zipfile.ZipFile(archive_path) as zf:
             for name in zf.namelist():
-                if name.endswith("BUILD.json"):
+                if name.endswith("ships.build.json"):
                     return json.loads(zf.read(name).decode("utf-8"))
     except Exception:
         pass

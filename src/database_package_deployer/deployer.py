@@ -128,18 +128,18 @@ def _clean_db_error(raw: str) -> str:
 
 
 def _load_baseline_dir(package_dir: str) -> str:
-    """Read ``baseline_dir`` from BUILD.json, or return empty string.
+    """Read ``baseline_dir`` from ships.build.json, or return empty string.
 
     An empty return means drift detection was not configured in
     ``ships.yaml`` at build time and is therefore disabled.
 
     Args:
-        package_dir: Directory containing BUILD.json.
+        package_dir: Directory containing ships.build.json.
 
     Returns:
         Baseline directory path string, or ``""`` if absent.
     """
-    build_json = os.path.join(package_dir, "BUILD.json")
+    build_json = os.path.join(package_dir, "ships.build.json")
     if not os.path.isfile(build_json):
         return ""
     try:
@@ -147,7 +147,7 @@ def _load_baseline_dir(package_dir: str) -> str:
             data = json.load(f)
         return data.get("baseline_dir", "") or ""
     except Exception:  # noqa: BLE001
-        logger.debug("deployer: could not read baseline_dir from BUILD.json")
+        logger.debug("deployer: could not read baseline_dir from ships.build.json")
     return ""
 
 
@@ -190,21 +190,21 @@ def _run_show_text(
 
 
 def _load_build_extensions(package_dir: str) -> Optional[list]:
-    """Return the ``discovery.extensions`` list from BUILD.json, or ``None``.
+    """Return the ``discovery.extensions`` list from ships.build.json, or ``None``.
 
     Reads the ``discovery.extensions`` field stamped by the packager
-    at build time.  Returns ``None`` when BUILD.json is absent, the
+    at build time.  Returns ``None`` when ships.build.json is absent, the
     field is missing, or the value is not a list of strings — callers
     should fall back to the hard-coded default set in that case.
 
     Args:
-        package_dir: Directory containing BUILD.json.
+        package_dir: Directory containing ships.build.json.
 
     Returns:
         Sorted list of normalised extension strings (e.g.
         ``[".bteq", ".sql", ".tbl", ...]``) or ``None``.
     """
-    build_json = os.path.join(package_dir, "BUILD.json")
+    build_json = os.path.join(package_dir, "ships.build.json")
     if not os.path.isfile(build_json):
         return None
     try:
@@ -214,7 +214,7 @@ def _load_build_extensions(package_dir: str) -> Optional[list]:
         if isinstance(exts, list) and all(isinstance(e, str) for e in exts):
             return exts
     except Exception:  # noqa: BLE001
-        logger.debug("deployer: could not read discovery.extensions from BUILD.json")
+        logger.debug("deployer: could not read discovery.extensions from ships.build.json")
     return None
 
 
@@ -251,9 +251,9 @@ def deploy_package(
 
     Args:
         baseline_dir: Shared filesystem path for schema drift baselines.
-                      When ``None``, reads from BUILD.json (stamped from
+                      When ``None``, reads from ships.build.json (stamped from
                       ``ships.yaml``'s ``deployment.baseline_dir``).
-                      Empty string or unconfigured BUILD.json → drift
+                      Empty string or unconfigured ships.build.json → drift
                       detection disabled.
         on_drift:     Action when drift is detected: ``abort`` (default),
                       ``skip``, or ``continue``.
@@ -265,7 +265,7 @@ def deploy_package(
     )
     from ships_tracing import stage_span
 
-    # Resolve baseline_dir: explicit arg > BUILD.json > disabled
+    # Resolve baseline_dir: explicit arg > ships.build.json > disabled
     _effective_baseline_dir = (
         baseline_dir if baseline_dir is not None else _load_baseline_dir(package_dir)
     )
@@ -446,7 +446,7 @@ def _deploy_package_impl(
             if build_exts is not None:
                 file_patterns = [f"*{ext}" for ext in build_exts]
                 logger.debug(
-                    "deployer: using %d extensions from BUILD.json discovery block",
+                    "deployer: using %d extensions from ships.build.json discovery block",
                     len(file_patterns),
                 )
             else:
@@ -1460,7 +1460,7 @@ def _explain_package_impl(
             # Extensions stamped at build time — honours custom ships.yaml entries.
             ext_set = frozenset(build_exts)
             logger.debug(
-                "explain: using %d extensions from BUILD.json discovery block",
+                "explain: using %d extensions from ships.build.json discovery block",
                 len(ext_set),
             )
         else:

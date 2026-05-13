@@ -22,13 +22,13 @@ Audit event schema (minimum fields):
 
     event            "ships.deploy"
     timestamp        ISO 8601 UTC
-    package_name     From BUILD.json
+    package_name     From ships.build.json
     package_hash     SHA-256 hex digest of the ZIP (if available)
-    target_env       From BUILD.json
-    change_ref       From BUILD.json (null if not set)
+    target_env       From ships.build.json
+    change_ref       From ships.build.json (null if not set)
     operator         os.getlogin() or SHIPS_OPERATOR env var
     hostname         socket.gethostname()
-    trust_label      From BUILD.json trust.label
+    trust_label      From ships.build.json trust.label
     outcome          "SUCCESS" or "FAILURE"
     objects_deployed Count of COMPLETED objects
     objects_failed   Count of FAILED objects
@@ -72,8 +72,8 @@ def _resolve_operator() -> str:
 
 
 def _read_build_json(package_dir: str) -> Dict[str, Any]:
-    """Read BUILD.json from package_dir; return empty dict on failure."""
-    path = os.path.join(package_dir, "BUILD.json")
+    """Read ships.build.json from package_dir; return empty dict on failure."""
+    path = os.path.join(package_dir, "ships.build.json")
     if not os.path.isfile(path):
         return {}
     try:
@@ -243,7 +243,7 @@ def emit_audit_event(
 
     if not sink_uri:
         # Try ships.yaml
-        build_json = os.path.join(package_dir, "BUILD.json")
+        build_json = os.path.join(package_dir, "ships.build.json")
         if os.path.isfile(build_json):
             try:
                 with open(build_json, encoding="utf-8") as fh:

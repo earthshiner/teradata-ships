@@ -866,7 +866,7 @@ def _sha256_of_file(file_path: str) -> str:
 def check_package_hash(package_dir: str) -> List[PreflightCheck]:
     """Verify the release ZIP against its SHA-256 sidecar (GAP-001).
 
-    Reads BUILD.json from *package_dir* to discover the ZIP filename,
+    Reads ships.build.json from *package_dir* to discover the ZIP filename,
     then locates the archive and its ``.sha256`` sidecar in the parent
     directory.  If the sidecar is absent or the computed hash does not
     match the recorded value, an ERROR-level check is returned.
@@ -879,15 +879,15 @@ def check_package_hash(package_dir: str) -> List[PreflightCheck]:
 
     Args:
         package_dir: Path to the extracted package directory (which
-                     contains BUILD.json).
+                     contains ships.build.json).
 
     Returns:
         List of PreflightCheck results (zero or one entry).
     """
-    build_json = os.path.join(package_dir, "BUILD.json")
+    build_json = os.path.join(package_dir, "ships.build.json")
     if not os.path.isfile(build_json):
         logger.debug(
-            "package_hash: BUILD.json not found in '%s' — skipping check.", package_dir
+            "package_hash: ships.build.json not found in '%s' — skipping check.", package_dir
         )
         return []
 
@@ -895,13 +895,13 @@ def check_package_hash(package_dir: str) -> List[PreflightCheck]:
         with open(build_json, encoding="utf-8") as fh:
             manifest = json.load(fh)
     except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("package_hash: could not read BUILD.json: %s", exc)
+        logger.warning("package_hash: could not read ships.build.json: %s", exc)
         return []
 
     package_filename = manifest.get("package_filename", "")
     if not package_filename:
         logger.debug(
-            "package_hash: package_filename absent from BUILD.json — skipping."
+            "package_hash: package_filename absent from ships.build.json — skipping."
         )
         return []
 
@@ -995,7 +995,7 @@ def check_package_hash(package_dir: str) -> List[PreflightCheck]:
 def check_env_lock(package_dir: str, deployed_env: str) -> List[PreflightCheck]:
     """Verify the package's target environment matches the deployment target (GAP-002).
 
-    Reads ``target_env`` from BUILD.json and compares it to *deployed_env*
+    Reads ``target_env`` from ships.build.json and compares it to *deployed_env*
     (the ``--env`` flag supplied to the Ship command).  A mismatch — or a
     missing ``target_env`` field in older packages — is an ERROR that
     prevents any DDL from executing.
@@ -1005,7 +1005,7 @@ def check_env_lock(package_dir: str, deployed_env: str) -> List[PreflightCheck]:
     enforcement.
 
     Args:
-        package_dir:  Path to the extracted package directory (contains BUILD.json).
+        package_dir:  Path to the extracted package directory (contains ships.build.json).
         deployed_env: Target environment supplied by the operator (e.g. ``'PRD'``).
                       Pass an empty string or ``None`` to skip the check.
 
@@ -1016,22 +1016,22 @@ def check_env_lock(package_dir: str, deployed_env: str) -> List[PreflightCheck]:
         logger.debug("env_lock: no --env supplied — skipping environment lock check.")
         return []
 
-    build_json = os.path.join(package_dir, "BUILD.json")
+    build_json = os.path.join(package_dir, "ships.build.json")
     if not os.path.isfile(build_json):
-        logger.debug("env_lock: BUILD.json not found in '%s' — skipping.", package_dir)
+        logger.debug("env_lock: ships.build.json not found in '%s' — skipping.", package_dir)
         return []
 
     try:
         with open(build_json, encoding="utf-8") as fh:
             manifest = json.load(fh)
     except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("env_lock: could not read BUILD.json: %s", exc)
+        logger.warning("env_lock: could not read ships.build.json: %s", exc)
         return []
 
     target_env = manifest.get("target_env", "")
     if not target_env:
         logger.error(
-            "env_lock: 'target_env' absent from BUILD.json — package must be rebuilt "
+            "env_lock: 'target_env' absent from ships.build.json — package must be rebuilt "
             "with a version of SHIPS that stamps environment lock information."
         )
         return [
@@ -1040,7 +1040,7 @@ def check_env_lock(package_dir: str, deployed_env: str) -> List[PreflightCheck]:
                 passed=False,
                 database="(package)",
                 message=(
-                    "env_lock — 'target_env' is absent from BUILD.json. "
+                    "env_lock — 'target_env' is absent from ships.build.json. "
                     "Rebuild this package with SHIPS v2+ to stamp the environment "
                     "lock field, or remove --env from the Ship command to skip "
                     "this check."
@@ -1089,7 +1089,7 @@ def check_env_lock(package_dir: str, deployed_env: str) -> List[PreflightCheck]:
 def check_change_ref_present(package_dir: str) -> List[PreflightCheck]:
     """Verify a change ticket reference is present when required (GAP-004).
 
-    Reads ``require_change_ref`` and ``change_ref`` from BUILD.json.
+    Reads ``require_change_ref`` and ``change_ref`` from ships.build.json.
     When ``require_change_ref`` is True and ``change_ref`` is null or
     absent, an ERROR is returned.
 
@@ -1102,16 +1102,16 @@ def check_change_ref_present(package_dir: str) -> List[PreflightCheck]:
     Returns:
         List of PreflightCheck results (zero or one entry).
     """
-    build_json = os.path.join(package_dir, "BUILD.json")
+    build_json = os.path.join(package_dir, "ships.build.json")
     if not os.path.isfile(build_json):
-        logger.debug("change_ref_present: BUILD.json not found — skipping.")
+        logger.debug("change_ref_present: ships.build.json not found — skipping.")
         return []
 
     try:
         with open(build_json, encoding="utf-8") as fh:
             manifest = json.load(fh)
     except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("change_ref_present: could not read BUILD.json: %s", exc)
+        logger.warning("change_ref_present: could not read ships.build.json: %s", exc)
         return []
 
     require = manifest.get("require_change_ref", False)
@@ -1160,11 +1160,11 @@ def check_change_ref_present(package_dir: str) -> List[PreflightCheck]:
 def check_package_signature(package_dir: str) -> List[PreflightCheck]:
     """Verify the HMAC-SHA256 package signature sidecar (GAP-005).
 
-    Locates the release ZIP via BUILD.json's ``package_filename``, then
+    Locates the release ZIP via ships.build.json's ``package_filename``, then
     looks for a ``.hmac`` sidecar file beside it.  The check is
     conditional on three states:
 
-    - ``require_signature: true`` in BUILD.json AND no ``.hmac`` file →
+    - ``require_signature: true`` in ships.build.json AND no ``.hmac`` file →
       ERROR.
     - ``.hmac`` file present but ``SHIPS_SIGNING_KEY`` not set (no key
       to verify) → ERROR.
@@ -1181,7 +1181,7 @@ def check_package_signature(package_dir: str) -> List[PreflightCheck]:
     """
     from database_package_deployer.signing import resolve_signing_key, verify_hmac
 
-    build_json = os.path.join(package_dir, "BUILD.json")
+    build_json = os.path.join(package_dir, "ships.build.json")
     if not os.path.isfile(build_json):
         return []
 
@@ -1189,7 +1189,7 @@ def check_package_signature(package_dir: str) -> List[PreflightCheck]:
         with open(build_json, encoding="utf-8") as fh:
             manifest = json.load(fh)
     except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("package_signature: could not read BUILD.json: %s", exc)
+        logger.warning("package_signature: could not read ships.build.json: %s", exc)
         return []
 
     package_filename = manifest.get("package_filename", "")
@@ -1298,7 +1298,7 @@ def check_mpa_approval(
 ) -> List[PreflightCheck]:
     """Verify a 4-eyes approval code when require_approvals >= 2 (GAP-006).
 
-    The check reads ``require_approvals`` from BUILD.json.  When it is 1
+    The check reads ``require_approvals`` from ships.build.json.  When it is 1
     (or absent), the check passes with no findings.  When it is >= 2:
 
     - No ``--approval-code`` supplied → ERROR.
@@ -1315,7 +1315,7 @@ def check_mpa_approval(
     Returns:
         List of PreflightCheck results (zero or one entry).
     """
-    build_json = os.path.join(package_dir, "BUILD.json")
+    build_json = os.path.join(package_dir, "ships.build.json")
     if not os.path.isfile(build_json):
         return []
 
@@ -1323,7 +1323,7 @@ def check_mpa_approval(
         with open(build_json, encoding="utf-8") as fh:
             manifest = json.load(fh)
     except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("mpa_approval: could not read BUILD.json: %s", exc)
+        logger.warning("mpa_approval: could not read ships.build.json: %s", exc)
         return []
 
     require_approvals = manifest.get("require_approvals", 1)
@@ -1353,7 +1353,7 @@ def check_mpa_approval(
     # Locate the ZIP to verify the approval code against
     package_filename = manifest.get("package_filename", "")
     if not package_filename:
-        logger.warning("mpa_approval: package_filename absent from BUILD.json.")
+        logger.warning("mpa_approval: package_filename absent from ships.build.json.")
         return []
 
     zip_path = Path(package_dir).parent / package_filename
@@ -1403,7 +1403,7 @@ def check_package_age(package_dir: str) -> List[PreflightCheck]:
     """Check whether the release package has exceeded its TTL (GAP-012).
 
     Reads ``package_built_at`` (falling back to ``timestamp``) and
-    ``package_max_age_days`` from BUILD.json.  When the package age
+    ``package_max_age_days`` from ships.build.json.  When the package age
     exceeds the threshold, emits a WARNING or ERROR depending on
     ``package_age_violation_level``.
 
@@ -1415,7 +1415,7 @@ def check_package_age(package_dir: str) -> List[PreflightCheck]:
     Returns:
         List of PreflightCheck results (zero or one entry).
     """
-    build_json = os.path.join(package_dir, "BUILD.json")
+    build_json = os.path.join(package_dir, "ships.build.json")
     if not os.path.isfile(build_json):
         return []
 
@@ -1423,7 +1423,7 @@ def check_package_age(package_dir: str) -> List[PreflightCheck]:
         with open(build_json, encoding="utf-8") as fh:
             manifest = json.load(fh)
     except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("package_age: could not read BUILD.json: %s", exc)
+        logger.warning("package_age: could not read ships.build.json: %s", exc)
         return []
 
     max_age = manifest.get("package_max_age_days", 30)
@@ -1494,7 +1494,7 @@ def check_tls_connection(
     (``encryptdata``, ``sslmode``, ``ssl``).  When none are present or
     the value is falsy, a WARNING is emitted.
 
-    When ``require_tls: true`` is set in BUILD.json (stamped from
+    When ``require_tls: true`` is set in ships.build.json (stamped from
     ships.yaml), the check is promoted to ERROR.
 
     Args:
@@ -1509,9 +1509,9 @@ def check_tls_connection(
         logger.debug("tls_connection: no connection params supplied — skipping.")
         return []
 
-    # Read require_tls from BUILD.json
+    # Read require_tls from ships.build.json
     require_tls = False
-    build_json = os.path.join(package_dir, "BUILD.json")
+    build_json = os.path.join(package_dir, "ships.build.json")
     if os.path.isfile(build_json):
         try:
             with open(build_json, encoding="utf-8") as fh:
@@ -1577,13 +1577,13 @@ def check_asymmetric_signature(
 
     Resolution order for the public key:
         1. *public_key_path* argument — path to a PEM file.
-        2. BUILD.json ``ships_public_key`` field — PEM string embedded at build time.
+        2. ships.build.json ``ships_public_key`` field — PEM string embedded at build time.
         3. ``SHIPS_PUBLIC_KEY_PATH`` env var — path to a PEM file.
         4. ``SHIPS_PUBLIC_KEY`` env var — raw PEM string.
         5. None — returns an ERROR (no key to verify against).
 
     Skips silently (returns ``[]``) when no ``.sig`` file exists AND
-    ``require_asymmetric_signature`` is False in BUILD.json.
+    ``require_asymmetric_signature`` is False in ships.build.json.
 
     Args:
         package_dir:     Extracted package directory.
@@ -1592,7 +1592,7 @@ def check_asymmetric_signature(
     Returns:
         List of PreflightCheck results (zero or one entry).
     """
-    build_json = os.path.join(package_dir, "BUILD.json")
+    build_json = os.path.join(package_dir, "ships.build.json")
     manifest: dict = {}
     if os.path.isfile(build_json):
         try:
@@ -1649,7 +1649,7 @@ def check_asymmetric_signature(
                 database="(package)",
                 message=(
                     "asym_signature — Ed25519 .sig sidecar is absent but "
-                    "require_asymmetric_signature is true in BUILD.json. "
+                    "require_asymmetric_signature is true in ships.build.json. "
                     "Rebuild the package with --asymmetric-key."
                 ),
             )
@@ -1661,7 +1661,7 @@ def check_asymmetric_signature(
         verify_zip,
     )
 
-    # Priority: arg → BUILD.json embedded key → env vars (handled by resolve_public_key_pem)
+    # Priority: arg → ships.build.json embedded key → env vars (handled by resolve_public_key_pem)
     embedded_pem = manifest.get("ships_public_key", "").strip()
     public_pem = resolve_public_key_pem(public_key_path or None)
     if not public_pem and embedded_pem:

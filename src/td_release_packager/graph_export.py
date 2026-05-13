@@ -39,7 +39,7 @@ from td_release_packager.analyser import AnalysisResult
 logger = logging.getLogger(__name__)
 
 # -- Producer URI for OpenLineage events -------------------------
-_PRODUCER = "https://github.com/earthshiner/teradata-deployment-agent"
+_PRODUCER = "https://github.com/earthshiner/teradata-ships"
 
 # -- OpenLineage schema URLs ------------------------------------
 _OL_SCHEMA_URL = "https://openlineage.io/spec/2-0-2/OpenLineage.json#/$defs/RunEvent"

@@ -3873,7 +3873,7 @@ def _build_parser():
         dest="allow_dirty",
         default=False,
         help="Build even if the working tree has uncommitted changes. "
-        "Stamps source_dirty=true in BUILD.json so the Trust Report "
+        "Stamps source_dirty=true in ships.build.json so the Trust Report "
         "flags the package as READY-WITH-CAVEATS.",
     )
     bp.add_argument(
@@ -3894,7 +3894,7 @@ def _build_parser():
         metavar="TICKET_ID",
         help=(
             "Change management ticket reference (e.g. CHG0012345). "
-            "Written to BUILD.json as change_ref. Required when the "
+            "Written to ships.build.json as change_ref. Required when the "
             "target environment has require_change_ref: true in ships.yaml."
         ),
     )
@@ -4416,7 +4416,7 @@ def _build_parser():
         help="Action when schema drift is detected during the subsequent deploy "
         "(default: continue — rollback overwrites out-of-band changes).",
     )
-    rb.add_argument("--author", help="Author metadata for BUILD.json.")
+    rb.add_argument("--author", help="Author metadata for ships.build.json.")
     rb.add_argument(
         "--description",
         help="Release description (default: 'Rollback to <tag>').",

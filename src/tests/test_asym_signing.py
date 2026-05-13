@@ -41,10 +41,10 @@ def _make_zip(tmp_dir: str, content: bytes = b"fake zip content") -> str:
 
 
 def _make_build_json(tmp_dir: str, package_filename: str = "test_package.zip", **extra):
-    """Write a minimal BUILD.json alongside the fake ZIP."""
+    """Write a minimal ships.build.json alongside the fake ZIP."""
     manifest = {"package_filename": package_filename}
     manifest.update(extra)
-    build_json = os.path.join(tmp_dir, "BUILD.json")
+    build_json = os.path.join(tmp_dir, "ships.build.json")
     with open(build_json, "w", encoding="utf-8") as fh:
         json.dump(manifest, fh)
     return build_json
@@ -149,7 +149,7 @@ def test_check_asym_sig_pass_valid_sig():
 
         results = check_asymmetric_signature(tmp, public_key_path="")
         # Public key must be passed via env var since there's no key file
-        # Use the BUILD.json embedded key approach
+        # Use the ships.build.json embedded key approach
         _make_build_json(tmp, ships_public_key=public_pem)
 
         results = check_asymmetric_signature(tmp, public_key_path="")

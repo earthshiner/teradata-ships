@@ -150,7 +150,7 @@ def fetch_github_source(
 
     Returns:
         The full 40-character commit SHA for the resolved ref.  Record
-        this as ``source_commit`` in ``BUILD.json`` for traceability.
+        this as ``source_commit`` in ``ships.build.json`` for traceability.
 
     Raises:
         ValueError: On HTTP error, missing ref, or extraction failure.
