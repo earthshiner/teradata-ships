@@ -29,6 +29,12 @@ def test_write_context_artifacts_emits_agent_context_contract(tmp_path):
     written = write_context_artifacts(str(tmp_path), manifest, config)
 
     assert sorted(written) == [
+        "prompts/README.md",
+        "prompts/agent_operating_instructions.prompt.md",
+        "prompts/deployment_agent.prompt.md",
+        "prompts/evidence_agent.prompt.md",
+        "prompts/remediation_agent.prompt.md",
+        "prompts/verification_agent.prompt.md",
         "ships.context.json",
         "ships.handoff.json",
         "ships.index.json",
@@ -37,7 +43,9 @@ def test_write_context_artifacts_emits_agent_context_contract(tmp_path):
 
     index = json.loads((tmp_path / "context" / "ships.index.json").read_text())
     context = json.loads((tmp_path / "context" / "ships.context.json").read_text())
-    agent_manifest = json.loads((tmp_path / "context" / "ships.manifest.json").read_text())
+    agent_manifest = json.loads(
+        (tmp_path / "context" / "ships.manifest.json").read_text()
+    )
     handoff = json.loads((tmp_path / "context" / "ships.handoff.json").read_text())
 
     assert index["read_first"] == "context/ships.index.json"
@@ -50,6 +58,12 @@ def test_write_context_artifacts_emits_agent_context_contract(tmp_path):
     assert index["entrypoints"]["integrity"]["path"] == "context/ships.integrity.json"
     assert "tamper-evidence" in index["entrypoints"]["integrity"]["description"]
     assert index["entrypoints"]["decisions"]["path"] == "context/ships.decisions.json"
+    assert index["entrypoints"]["prompts"]["path"] == "context/prompts/"
+    assert (
+        "context/prompts/deployment_agent.prompt.md"
+        in index["entrypoints"]["prompts"]["contains"]
+    )
+    assert "prompts" in index["recommended_read_order"]
     assert index["agent_instructions"]["before_action"][0].startswith(
         "Read context/ships.index.json"
     )
@@ -61,3 +75,12 @@ def test_write_context_artifacts_emits_agent_context_contract(tmp_path):
     assert agent_manifest["tokens"]["token_names"] == ["CORE_T", "CORE_V"]
     assert handoff["preconditions"]["tls_required"] is True
     assert handoff["required_actions"][0].startswith("Read context/ships.index.json")
+
+    prompts_dir = tmp_path / "context" / "prompts"
+    assert (prompts_dir / "README.md").is_file()
+    agent_prompt = prompts_dir / "agent_operating_instructions.prompt.md"
+    deploy_prompt = prompts_dir / "deployment_agent.prompt.md"
+    remediation_prompt = prompts_dir / "remediation_agent.prompt.md"
+    assert "Do not deploy if package trust is BLOCKED" in agent_prompt.read_text()
+    assert "Your task is to deploy a SHIPS package" in deploy_prompt.read_text()
+    assert "View column lists must not be invented" in remediation_prompt.read_text()

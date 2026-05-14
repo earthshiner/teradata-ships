@@ -1067,7 +1067,9 @@ def _ships_context_response(
     )
     if extracted_dir:
         entrypoint = os.path.join(extracted_dir, "context", "ships.index.json")
-        reads = [os.path.join(extracted_dir, *name.split("/")) for name in context_names]
+        reads = [
+            os.path.join(extracted_dir, *name.split("/")) for name in context_names
+        ]
     else:
         entrypoint = _archive_member_ref(package_ref, "context/ships.index.json")
         reads = [_archive_member_ref(package_ref, name) for name in context_names]
