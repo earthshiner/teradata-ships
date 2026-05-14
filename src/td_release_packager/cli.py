@@ -29,10 +29,15 @@ Usage:
 """
 
 import argparse
+import json
 import logging
 import os
+import shutil
 import sys
-from typing import Dict, Optional
+import tarfile
+import tempfile
+import zipfile
+from typing import Any, Dict, Optional
 
 from td_release_packager.builder import build_package
 from td_release_packager.build_counter import read_build_number
@@ -2298,6 +2303,165 @@ def _run_build(args, stage, issue_codes) -> int:
     return 0
 
 
+def _normalise_stage_result(stage_entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a package-local JSON-safe stage result document."""
+    return {
+        "schema": "teradata-ships/stage-result/v1",
+        "stage": stage_entry.get("stage"),
+        "status": stage_entry.get("status"),
+        "started_at": stage_entry.get("started_at"),
+        "finished_at": stage_entry.get("finished_at"),
+        "duration_ms": stage_entry.get("duration_ms", 0),
+        "inputs": stage_entry.get("inputs", {}),
+        "outputs": stage_entry.get("outputs", {}),
+        "decisions": stage_entry.get("decisions", {}),
+        "issues": stage_entry.get("issues", []),
+        "issue_counts": _count_stage_issues(stage_entry),
+    }
+
+
+def _count_stage_issues(stage_entry: Dict[str, Any]) -> Dict[str, int]:
+    """Count issues by severity for a stage entry."""
+    counts = {"error": 0, "warning": 0, "info": 0}
+    for issue in stage_entry.get("issues", []):
+        severity = str(issue.get("severity", "info")).lower()
+        counts[severity if severity in counts else "info"] += 1
+    return counts
+
+
+def _build_package_process_results(
+    project_dir: str,
+    run_entry: Dict[str, Any],
+) -> Dict[str, Dict[str, Any]]:
+    """Build package-local current-run result documents.
+
+    The project-level ``ships.decisions.json`` remains the full append-only
+    history.  These files are a compact, package-local snapshot of the current
+    process run so an extracted archive is useful to agents without copying the
+    whole project history into every package.
+    """
+    stages = run_entry.get("stages", [])
+    stage_summaries = [
+        {
+            "stage": s.get("stage"),
+            "status": s.get("status"),
+            "started_at": s.get("started_at"),
+            "finished_at": s.get("finished_at"),
+            "duration_ms": s.get("duration_ms", 0),
+            "issue_counts": _count_stage_issues(s),
+        }
+        for s in stages
+    ]
+    results: Dict[str, Dict[str, Any]] = {
+        "process.result.json": {
+            "schema": "teradata-ships/process-result/v1",
+            "run_id": run_entry.get("run_id"),
+            "command": run_entry.get("command"),
+            "final_status": run_entry.get("final_status"),
+            "started_at": run_entry.get("started_at"),
+            "finished_at": run_entry.get("finished_at"),
+            "duration_ms": run_entry.get("duration_ms", 0),
+            "project_decisions_path": os.path.join(project_dir, "ships.decisions.json"),
+            "package_local": True,
+            "stages": stage_summaries,
+        }
+    }
+    for stage in stages:
+        name = stage.get("stage")
+        if name:
+            results[f"{name}.result.json"] = _normalise_stage_result(stage)
+    return results
+
+
+def _archive_root_for_zip(archive_path: str) -> str:
+    """Return the top-level directory prefix inside a zip archive."""
+    with zipfile.ZipFile(archive_path, "r") as archive:
+        for info in archive.infolist():
+            parts = info.filename.split("/", 1)
+            if parts and parts[0]:
+                return parts[0]
+    return os.path.splitext(os.path.basename(archive_path))[0]
+
+
+def _write_process_results_to_zip(
+    archive_path: str,
+    results: Dict[str, Dict[str, Any]],
+) -> None:
+    """Append package-local process/stage result files to a zip archive."""
+    package_root = _archive_root_for_zip(archive_path)
+    with zipfile.ZipFile(
+        archive_path, "a", compression=zipfile.ZIP_DEFLATED
+    ) as archive:
+        for filename, payload in sorted(results.items()):
+            arcname = f"{package_root}/context/stages/{filename}"
+            archive.writestr(
+                arcname,
+                json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True)
+                + "\n",
+            )
+
+
+def _write_process_results_to_tar_gz(
+    archive_path: str,
+    results: Dict[str, Dict[str, Any]],
+) -> None:
+    """Inject package-local process/stage result files into a tar.gz archive."""
+    with tempfile.TemporaryDirectory(prefix="ships_process_results_") as tmp_dir:
+        with tarfile.open(archive_path, "r:gz") as archive:
+            archive.extractall(tmp_dir, filter="data")
+        roots = [
+            name
+            for name in os.listdir(tmp_dir)
+            if os.path.isdir(os.path.join(tmp_dir, name))
+        ]
+        package_root = (
+            roots[0] if roots else os.path.splitext(os.path.basename(archive_path))[0]
+        )
+        stages_dir = os.path.join(tmp_dir, package_root, "context", "stages")
+        os.makedirs(stages_dir, exist_ok=True)
+        for filename, payload in sorted(results.items()):
+            with open(os.path.join(stages_dir, filename), "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, ensure_ascii=False, sort_keys=True)
+                f.write("\n")
+
+        rebuilt = shutil.make_archive(
+            base_name=os.path.join(tmp_dir, "rebuilt"),
+            format="gztar",
+            root_dir=tmp_dir,
+            base_dir=package_root,
+        )
+        shutil.copyfile(rebuilt, archive_path)
+
+
+def _write_package_run_context_to_archives(
+    project_dir: str,
+    archive_paths: list[str],
+    run,
+) -> list[str]:
+    """Write package-local current-run context into each generated archive."""
+    run_entry = getattr(run, "_run_entry", None)
+    if not isinstance(run_entry, dict):
+        return []
+
+    results = _build_package_process_results(project_dir, run_entry)
+    written: list[str] = []
+    for archive_path in archive_paths:
+        if not archive_path or not os.path.exists(archive_path):
+            continue
+        if archive_path.endswith(".zip"):
+            _write_process_results_to_zip(archive_path, results)
+            written.append(archive_path)
+        elif archive_path.endswith(".tar.gz"):
+            _write_process_results_to_tar_gz(archive_path, results)
+            written.append(archive_path)
+        else:
+            logger.warning(
+                "Skipping package-local process context for unsupported archive: %s",
+                archive_path,
+            )
+    return written
+
+
 def _cmd_process(args):
     """
     [S-H-I-P-S] Run the full pipeline in sequence.
@@ -2353,8 +2517,11 @@ def _cmd_process_impl(args):
 
     failed_stages = []
     package_ran = False
+    package_archive_paths: list[str] = []
+    process_run = None
 
     with _process_recording(project_dir) as run:
+        process_run = run
         # ---- [H] Harvest ----------------------------------------
         if args.source:
             print("  [H] Harvest …")
@@ -2457,6 +2624,11 @@ def _cmd_process_impl(args):
             try:
                 with run.stage("package") as stage:
                     _run_build(pkg_args, stage, _ic)
+                package_outputs = getattr(stage, "_entry", {}).get("outputs", {})
+                for output_key in ("archive_path", "companion_archive_path"):
+                    output_path = package_outputs.get(output_key)
+                    if output_path:
+                        package_archive_paths.append(output_path)
                 if stage.status == "error":
                     failed_stages.append("package")
                     if strict:
@@ -2474,11 +2646,24 @@ def _cmd_process_impl(args):
                 "  [P] Package … skipped (provide --env --env-config --name to enable)"
             )
 
+    package_context_archives = []
+    if package_archive_paths and process_run is not None:
+        package_context_archives = _write_package_run_context_to_archives(
+            project_dir,
+            package_archive_paths,
+            process_run,
+        )
+
     # -- Summary banner -------------------------------------------
     print(f"\n{'=' * 64}")
     if failed_stages:
         print(f"  Process completed with errors in: {', '.join(failed_stages)}")
-        print("  Review ships.decisions.json for full detail.")
+        decisions_path = os.path.join(project_dir, "ships.decisions.json")
+        print(f"  Review {decisions_path} for full process detail.")
+        if package_context_archives:
+            print(
+                "  Package-local run context written to context/stages/ in generated archive(s)."
+            )
         print(f"{'=' * 64}\n")
         sys.exit(1)
     else:
@@ -2491,6 +2676,10 @@ def _cmd_process_impl(args):
         ]
         stages_run = [s for s in stages_run if s]
         print(f"  ✓ Process complete: {' → '.join(stages_run)}")
+        if package_context_archives:
+            print(
+                "  Package-local run context written to context/stages/ in generated archive(s)."
+            )
         print(f"{'=' * 64}\n")
         sys.exit(0)
 
