@@ -9,7 +9,7 @@ Covers:
     - Split detection with prereqs + dependants
     - Tokenised prereq + tokenised dependant pair through the build
     - Manifest tying: shared release_group, role, requires linkage
-    - Filename convention (``_prereqs_BUILD_`` infix on the prereqs zip)
+    - Filename convention (shared release group plus ``_01_prereqs`` / ``_02_main`` suffixes)
     - Per-archive phase_inventory recount post-split
     - Both archives contain full infrastructure (config/, lib/,
       deploy.py, ships.build.json, etc.)
@@ -309,15 +309,22 @@ class TestBuildPackageAutoSplit:
         assert os.path.isfile(prereqs_archive)
         assert main_archive != prereqs_archive
 
-    def test_prereqs_archive_has_prereqs_infix(self, split_config):
-        """The prereqs zip filename has '_prereqs_BUILD_' infix; the
-        main zip filename is unchanged from a non-split build."""
+    def test_split_archive_names_sort_as_deploy_pair(self, split_config):
+        """Split package filenames keep the release identity first and
+        append deploy-order role suffixes so the pair sorts together."""
         (_main_pair, companion_pair) = build_package(split_config)
         main_archive = _main_pair[0]
         prereqs_archive = companion_pair[0]
 
-        assert "_prereqs_BUILD_" in os.path.basename(prereqs_archive)
-        assert "_prereqs_BUILD_" not in os.path.basename(main_archive)
+        main_name = os.path.basename(main_archive)
+        prereqs_name = os.path.basename(prereqs_archive)
+
+        assert main_name.endswith("_02_main.zip")
+        assert prereqs_name.endswith("_01_prereqs.zip")
+        assert main_name.replace("_02_main.zip", "") == prereqs_name.replace(
+            "_01_prereqs.zip", ""
+        )
+        assert sorted([main_name, prereqs_name]) == [prereqs_name, main_name]
 
     def test_manifest_role_and_requires_linkage(self, split_config):
         """Main manifest has role='main' and requires=[prereqs zip].
@@ -339,9 +346,9 @@ class TestBuildPackageAutoSplit:
 
         assert main_manifest.release_group == prereqs_manifest.release_group
         assert main_manifest.release_group != ""
-        # The release_group is derivable from the main archive basename.
+        # The release_group is the shared, unsuffixed basename before role suffixes.
         main_basename = os.path.splitext(os.path.basename(main_archive))[0]
-        assert main_manifest.release_group == main_basename
+        assert main_basename == f"{main_manifest.release_group}_02_main"
 
     def test_phase_inventory_per_archive(self, split_config):
         """Each manifest's phase_inventory reflects only what its own
