@@ -43,9 +43,7 @@ def test_write_context_artifacts_emits_agent_context_contract(tmp_path):
 
     index = json.loads((tmp_path / "context" / "ships.index.json").read_text())
     context = json.loads((tmp_path / "context" / "ships.context.json").read_text())
-    agent_manifest = json.loads(
-        (tmp_path / "context" / "ships.manifest.json").read_text()
-    )
+    agent_manifest = json.loads((tmp_path / "context" / "ships.manifest.json").read_text())
     handoff = json.loads((tmp_path / "context" / "ships.handoff.json").read_text())
 
     assert index["read_first"] == "context/ships.index.json"
@@ -67,13 +65,26 @@ def test_write_context_artifacts_emits_agent_context_contract(tmp_path):
     assert index["agent_instructions"]["before_action"][0].startswith(
         "Read context/ships.index.json"
     )
+    assert index["agent_policy"]["do_not_infer_missing_tokens"] is True
+    assert index["agent_policy"]["do_not_modify_payload"] is True
+    assert index["agent_policy"]["do_not_deploy_if_blocked"] is True
+    assert index["agent_policy"]["do_not_ignore_failed_integrity"] is True
+    assert index["agent_policy"]["payload_modification_allowed"] is False
+    assert "preflight_error" in index["agent_policy"]["stop_conditions"]
+    assert (
+        "tls_policy_not_satisfied"
+        in index["agent_policy"]["ask_for_human_approval_when"]
+    )
 
     assert context["current_state"] == "package-built-awaiting-deployment"
     assert context["source_of_truth"]["source_commit"] == "abc123"
     assert context["references"]["index"] == "context/ships.index.json"
+    assert context["agent_policy"]["do_not_modify_payload"] is True
+    assert agent_manifest["agent_policy"]["do_not_ignore_failed_integrity"] is True
     assert agent_manifest["tokens"]["values_redacted"] is True
     assert agent_manifest["tokens"]["token_names"] == ["CORE_T", "CORE_V"]
     assert handoff["preconditions"]["tls_required"] is True
+    assert handoff["agent_policy"]["deployment_allowed_when_trust_blocked"] is False
     assert handoff["required_actions"][0].startswith("Read context/ships.index.json")
 
     prompts_dir = tmp_path / "context" / "prompts"
