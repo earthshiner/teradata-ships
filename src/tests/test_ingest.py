@@ -264,6 +264,23 @@ class TestExtractQualifiedName:
         assert db == "MyDB"
         assert obj == "ActiveCustomers"
 
+    def test_grant_create_table_on_database_uses_on_target_not_privilege(self):
+        """GRANT CREATE TABLE ON db is DCL, not CREATE TABLE ON."""
+        db, obj = _extract_qualified_name(
+            "GRANT CREATE TABLE ON GDEV1T_UTLFW TO GDEV1P_UT;"
+        )
+        assert db is None
+        assert obj == "GDEV1T_UTLFW"
+
+    def test_grant_on_procedure_skips_object_kind_token(self):
+        """ON PROCEDURE db.object is named from db.object, not Procedure."""
+        db, obj = _extract_qualified_name(
+            "GRANT EXECUTE PROCEDURE, ALTER EXTERNAL PROCEDURE, "
+            'DROP PROCEDURE ON Procedure "SQLJ"."INSTALL_JAR" TO dbc;'
+        )
+        assert db == "SQLJ"
+        assert obj == "INSTALL_JAR"
+
     def test_no_match_returns_none(self):
         """Unclassifiable content returns (None, None)."""
         db, obj = _extract_qualified_name("SELECT 1;")
