@@ -69,15 +69,6 @@ def _context_file(pkg_dir: str, filename: str) -> str:
 
 logger = logging.getLogger(__name__)
 
-CONTEXT_DIR = "context"
-
-
-def _context_file(pkg_dir: str, filename: str) -> str:
-    """Return the canonical package path for a SHIPS JSON metadata file."""
-    context_dir = os.path.join(pkg_dir, CONTEXT_DIR)
-    os.makedirs(context_dir, exist_ok=True)
-    return os.path.join(context_dir, filename)
-
 
 def _context_relpath(filename: str) -> str:
     """Return the package-relative path for a SHIPS JSON metadata file."""
@@ -511,35 +502,11 @@ def _build_package_impl(
         ships_public_key=_read_signing_public_key(config.source_dir),
     )
 
-    # -- Phase 8a: Compute and stamp Phase 1 Trust Report --
-    # Discrete signals (inspect results + provenance) derive a label
-    # (READY / READY-WITH-CAVEATS / BLOCKED) that tells a DBA or
-    # deployment agent whether this package is safe to promote.
-    from td_release_packager.trust import compute_trust_report, format_trust_banner
-
-    trust_report = compute_trust_report(config.source_dir, pkg_dir)
-    manifest.trust = trust_report.to_dict()
-
-    manifest_path = _context_file(pkg_dir, "ships.build.json")
-    with open(manifest_path, "w", encoding="utf-8") as f:
-        json.dump(manifest.__dict__, f, indent=2, ensure_ascii=False)
-
-    # -- Phase 8b: Write agent-facing context artefacts --
-    # These files are a compact handoff contract for humans, CI/CD,
-    # MCP tools, and autonomous agents.  They reference ships.build.json and
-    # ships.provenance.json rather than duplicating detailed evidence.
-    write_context_artifacts(pkg_dir, manifest, config)
-
-    # Print trust banner to CLI
-    print(format_trust_banner(trust_report))
-
-    # -- Phase 8b: Write provenance document (v2) --
+    # -- Phase 8a: Write provenance document (v2) --
     # Records the full filename-transformation chain (source →
     # eponymous → token-resolved → package) for every payload file.
-    # The HTML report uses this to render a drill-down that shows
-    # the DBA exactly where in the pipeline each filename was
-    # rewritten — critical for diagnosing mapping bugs that only
-    # surface at deploy time.
+    # This must be written BEFORE the trust report is computed so
+    # provenance_complete can validate the actual package artefact.
     provenance_path = _context_file(pkg_dir, "ships.provenance.json")
     provenance_doc.write(provenance_path)
     logger.info(
@@ -548,6 +515,34 @@ def _build_package_impl(
         len(provenance_doc.entries),
         provenance_path,
     )
+
+    # Write an initial manifest before trust computation.  The trust
+    # build_reproducible signal reads source_dirty from ships.build.json;
+    # the manifest is overwritten below after the trust block is stamped.
+    manifest_path = _context_file(pkg_dir, "ships.build.json")
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(manifest.__dict__, f, indent=2, ensure_ascii=False)
+
+    # -- Phase 8b: Compute and stamp Phase 1 Trust Report --
+    # Discrete signals (inspect results + package context artefacts) derive
+    # a label (READY / READY-WITH-CAVEATS / BLOCKED) that tells a DBA or
+    # deployment agent whether this package is safe to promote.
+    from td_release_packager.trust import compute_trust_report, format_trust_banner
+
+    trust_report = compute_trust_report(config.source_dir, pkg_dir)
+    manifest.trust = trust_report.to_dict()
+
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(manifest.__dict__, f, indent=2, ensure_ascii=False)
+
+    # -- Phase 8c: Write agent-facing context artefacts --
+    # These files are a compact handoff contract for humans, CI/CD,
+    # MCP tools, and autonomous agents.  They reference ships.build.json and
+    # ships.provenance.json rather than duplicating detailed evidence.
+    write_context_artifacts(pkg_dir, manifest, config)
+
+    # Print trust banner to CLI
+    print(format_trust_banner(trust_report))
 
     # -- Phase 9: Generate deploy.py --
     _generate_deploy_script(pkg_dir, manifest)

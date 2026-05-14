@@ -123,15 +123,10 @@ class TestInspectSignal:
 
 
 class TestProvenanceSignal:
-    def test_pass_when_provenance_in_payload(self, tmp_path):
-        payload = tmp_path / "payload" / "database"
-        payload.mkdir(parents=True)
-        (payload / "ships.provenance.json").write_text("{}", encoding="utf-8")
-        sig = _provenance_signal(str(tmp_path))
-        assert sig.status == TRUST_PASS
-
-    def test_pass_when_provenance_in_source_root(self, tmp_path):
-        (tmp_path / "ships.provenance.json").write_text("{}", encoding="utf-8")
+    def test_pass_when_provenance_in_context_dir(self, tmp_path):
+        context_dir = tmp_path / "context"
+        context_dir.mkdir(parents=True)
+        (context_dir / "ships.provenance.json").write_text("{}", encoding="utf-8")
         sig = _provenance_signal(str(tmp_path))
         assert sig.status == TRUST_PASS
 
@@ -202,7 +197,10 @@ class TestComputeTrustReport:
                 }
             ],
         )
-        (tmp_path / "ships.provenance.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "context").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "context" / "ships.provenance.json").write_text(
+            "{}", encoding="utf-8"
+        )
         report = compute_trust_report(str(tmp_path), str(tmp_path))
         assert report.label == LABEL_READY
 
@@ -254,7 +252,10 @@ class TestComputeTrustReport:
                 }
             ],
         )
-        (tmp_path / "ships.provenance.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "context").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "context" / "ships.provenance.json").write_text(
+            "{}", encoding="utf-8"
+        )
         report = compute_trust_report(str(tmp_path), str(tmp_path))
         assert report.label == LABEL_CAVEATS
         assert report.signals["inspect_lint"].status == TRUST_WARN
@@ -296,7 +297,10 @@ class TestComputeTrustReport:
                 },
             ],
         )
-        (tmp_path / "ships.provenance.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "context").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "context" / "ships.provenance.json").write_text(
+            "{}", encoding="utf-8"
+        )
         report = compute_trust_report(str(tmp_path), str(tmp_path))
         # Second run (clean) should win
         assert report.signals["inspect_token_format"].status == TRUST_PASS
@@ -398,6 +402,8 @@ class TestBuildPackageStampsTrust:
         assert "signals" in trust
         assert "inspect_token_format" in trust["signals"]
         assert "provenance_complete" in trust["signals"]
+        assert trust["signals"]["provenance_complete"]["status"] == TRUST_PASS
+        assert trust["signals"]["build_reproducible"]["status"] == TRUST_PASS
 
     def test_trust_label_ready_with_clean_inspect(self, tmp_path, tmp_project):
         """When ships.decisions.json has a clean inspect run, label should be READY."""
@@ -428,7 +434,10 @@ class TestBuildPackageStampsTrust:
             json.dumps(decisions), encoding="utf-8"
         )
         # Seed provenance
-        (tmp_project / "ships.provenance.json").write_text("{}", encoding="utf-8")
+        (tmp_project / "context").mkdir(parents=True, exist_ok=True)
+        (tmp_project / "context" / "ships.provenance.json").write_text(
+            "{}", encoding="utf-8"
+        )
 
         props = tmp_path / "DEV.conf"
         props.write_text("SHIPS_ENV=DEV\n", encoding="utf-8")
@@ -466,21 +475,24 @@ class TestBuildReproducibleSignal:
         assert sig.status == TRUST_PASS
 
     def test_pass_when_source_dirty_false(self, tmp_path):
-        (tmp_path / "ships.build.json").write_text(
+        (tmp_path / "context").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "context" / "ships.build.json").write_text(
             '{"source_dirty": false}', encoding="utf-8"
         )
         sig = _build_reproducible_signal(str(tmp_path))
         assert sig.status == TRUST_PASS
 
     def test_pass_when_source_dirty_absent(self, tmp_path):
-        (tmp_path / "ships.build.json").write_text(
+        (tmp_path / "context").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "context" / "ships.build.json").write_text(
             '{"build_number": "0001"}', encoding="utf-8"
         )
         sig = _build_reproducible_signal(str(tmp_path))
         assert sig.status == TRUST_PASS
 
     def test_warn_when_source_dirty_true(self, tmp_path):
-        (tmp_path / "ships.build.json").write_text(
+        (tmp_path / "context").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "context" / "ships.build.json").write_text(
             '{"source_dirty": true}', encoding="utf-8"
         )
         sig = _build_reproducible_signal(str(tmp_path))
@@ -488,10 +500,14 @@ class TestBuildReproducibleSignal:
         assert "dirty" in sig.message.lower()
 
     def test_dirty_build_triggers_caveats_label(self, tmp_path):
-        (tmp_path / "ships.build.json").write_text(
+        (tmp_path / "context").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "context" / "ships.build.json").write_text(
             '{"source_dirty": true}', encoding="utf-8"
         )
-        (tmp_path / "ships.provenance.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "context").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "context" / "ships.provenance.json").write_text(
+            "{}", encoding="utf-8"
+        )
         report = compute_trust_report(str(tmp_path), str(tmp_path))
         assert report.label == LABEL_CAVEATS
         assert report.signals["build_reproducible"].status == TRUST_WARN
