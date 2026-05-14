@@ -57,12 +57,19 @@ def test_write_context_artifacts_emits_agent_context_contract(tmp_path):
     ]
     assert index["entrypoints"]["integrity"]["path"] == "context/ships.integrity.json"
     assert "tamper-evidence" in index["entrypoints"]["integrity"]["description"]
-    assert index["entrypoints"]["decisions"]["path"] == "context/ships.decisions.json"
+    assert index["entrypoints"]["stage_results"]["path"] == "context/stages/"
+    assert (
+        "context/stages/process.result.json"
+        in index["entrypoints"]["stage_results"]["contains"]
+    )
+    assert index["entrypoints"]["decisions"]["path"] == "ships.decisions.json"
+    assert index["entrypoints"]["decisions"]["package_local"] is False
     assert index["entrypoints"]["prompts"]["path"] == "context/prompts/"
     assert (
         "context/prompts/deployment_agent.prompt.md"
         in index["entrypoints"]["prompts"]["contains"]
     )
+    assert "stage_results" in index["recommended_read_order"]
     assert "prompts" in index["recommended_read_order"]
     assert index["agent_instructions"]["before_action"][0].startswith(
         "Read context/ships.index.json"
