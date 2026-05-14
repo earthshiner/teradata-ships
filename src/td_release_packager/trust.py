@@ -136,7 +136,7 @@ def compute_trust_report(source_dir: str, pkg_dir: str) -> TrustReport:
         "Grant validation clean",
     )
 
-    signals["provenance_complete"] = _provenance_signal(source_dir)
+    signals["provenance_complete"] = _provenance_signal(pkg_dir)
     signals["build_reproducible"] = _build_reproducible_signal(pkg_dir)
 
     label = _derive_label(signals)
@@ -211,9 +211,8 @@ def _inspect_signal(
     return TrustSignal(status=TRUST_PASS, message=pass_message)
 
 
-def _provenance_signal(source_dir: str) -> TrustSignal:
-    """
-    Check whether ``ships.provenance.json`` exists in the payload tree.
+def _provenance_signal(pkg_dir: str) -> TrustSignal:
+    """Check whether the package contains ``context/ships.provenance.json``.
 
     The provenance file records the full source → payload file
     transformation chain and enables the deployer to link each
@@ -221,31 +220,19 @@ def _provenance_signal(source_dir: str) -> TrustSignal:
     it, the deploy report's drill-down and edit-source hints are
     disabled.
     """
-    # Walk the payload tree looking for ships.provenance.json
-    payload_dir = os.path.join(source_dir, "payload")
-    if os.path.isdir(payload_dir):
-        for root, _dirs, files in os.walk(payload_dir):
-            if "ships.provenance.json" in files:
-                return TrustSignal(
-                    status=TRUST_PASS,
-                    message="ships.provenance.json present — deploy report drill-downs enabled",
-                )
-
-    # Also check directly in source_dir
-    if os.path.exists(
-        os.path.join(source_dir, "context", "ships.provenance.json")
-    ) or os.path.exists(os.path.join(source_dir, "ships.provenance.json")):
+    provenance_path = os.path.join(pkg_dir, "context", "ships.provenance.json")
+    if os.path.exists(provenance_path):
         return TrustSignal(
             status=TRUST_PASS,
-            message="ships.provenance.json present — deploy report drill-downs enabled",
+            message="context/ships.provenance.json present — deploy report drill-downs enabled",
         )
 
     return TrustSignal(
         status=TRUST_WARN,
         message=(
-            "ships.provenance.json not found — deploy report drill-downs will be "
-            "disabled. Rebuild the package with the current SHIPS version to "
-            "generate provenance."
+            "context/ships.provenance.json not found — deploy report drill-downs "
+            "will be disabled. Rebuild the package with the current SHIPS version "
+            "to generate provenance."
         ),
     )
 
@@ -261,11 +248,9 @@ def _build_reproducible_signal(pkg_dir: str) -> TrustSignal:
     """
     build_json = os.path.join(pkg_dir, "context", "ships.build.json")
     if not os.path.exists(build_json):
-        build_json = os.path.join(pkg_dir, "ships.build.json")
-    if not os.path.exists(build_json):
         return TrustSignal(
             status=TRUST_PASS,
-            message="ships.build.json absent — no evidence of dirty-tree build",
+            message="context/ships.build.json absent — no evidence of dirty-tree build",
         )
     try:
         with open(build_json, encoding="utf-8") as f:
@@ -273,7 +258,7 @@ def _build_reproducible_signal(pkg_dir: str) -> TrustSignal:
     except Exception:
         return TrustSignal(
             status=TRUST_PASS,
-            message="ships.build.json unreadable — assuming clean build",
+            message="context/ships.build.json unreadable — assuming clean build",
         )
 
     if manifest.get("source_dirty", False):
