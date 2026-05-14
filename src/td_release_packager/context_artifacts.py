@@ -45,6 +45,8 @@ PACKAGE_REPORT_FILENAME = "package_report.html"
 README_FILENAME = "README.txt"
 
 PROMPTS_DIR = "prompts"
+STAGES_DIR = "stages"
+PROCESS_RESULT_FILENAME = "process.result.json"
 PROMPT_README_FILENAME = "README.md"
 AGENT_OPERATING_PROMPT_FILENAME = "agent_operating_instructions.prompt.md"
 VERIFICATION_AGENT_PROMPT_FILENAME = "verification_agent.prompt.md"
@@ -365,11 +367,25 @@ def _entrypoints() -> Dict[str, Dict[str, Any]]:
             "required": True,
             "audience": ["agent", "governance", "ci_cd", "dba"],
         },
-        "decisions": {
-            "path": _context_path(DECISIONS_FILENAME),
-            "description": "Project-level decision log containing build-stage decisions, warnings, issue codes, rule outcomes, and rationale captured during SHIPS pipeline execution.",
+        "stage_results": {
+            "path": _context_path(f"{STAGES_DIR}/"),
+            "description": "Package-local current-run stage result JSON files. These summarise the process run that produced this package without copying the full project decisions history.",
             "required": False,
-            "audience": ["agent", "human", "governance"],
+            "audience": ["agent", "human", "ci_cd", "governance"],
+            "contains": [
+                _context_path(f"{STAGES_DIR}/{PROCESS_RESULT_FILENAME}"),
+                _context_path(f"{STAGES_DIR}/harvest.result.json"),
+                _context_path(f"{STAGES_DIR}/inspect.result.json"),
+                _context_path(f"{STAGES_DIR}/analyse.result.json"),
+                _context_path(f"{STAGES_DIR}/package.result.json"),
+            ],
+        },
+        "decisions": {
+            "path": DECISIONS_FILENAME,
+            "description": "Project-level decision log. This normally lives in the SHIPS project root, not inside the package. Use stage_results for package-local current-run evidence.",
+            "required": False,
+            "audience": ["human", "governance"],
+            "package_local": False,
         },
         "package_report": {
             "path": PACKAGE_REPORT_FILENAME,
@@ -409,7 +425,7 @@ def _recommended_read_order() -> list[str]:
         "manifest",
         "integrity",
         "provenance",
-        "decisions",
+        "stage_results",
         "prompts",
         "package_report",
     ]
@@ -477,7 +493,7 @@ def _agent_instructions() -> Dict[str, Any]:
             "Read context/ships.integrity.json before trusting package contents.",
             "Read context/ships.manifest.json before modifying, deploying, summarising, or routing package contents.",
             "Read context/ships.provenance.json when source lineage, repository traceability, or filename transformation evidence matters.",
-            "Read context/ships.decisions.json when stage outcomes, warnings, issue codes, or decision rationale are needed.",
+            "Read context/stages/process.result.json when package-local stage outcomes, warnings, issue codes, or decision rationale are needed.",
             "Use context/prompts/*.prompt.md as bounded role-specific operating instructions, not as deployment approval.",
         ],
         "must_not_assume": [
