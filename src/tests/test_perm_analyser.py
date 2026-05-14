@@ -24,9 +24,19 @@ Tests cover:
 
 from __future__ import annotations
 
-import os
 import textwrap
-import pytest
+
+
+from td_release_packager.perm_analyser import (
+    _extract_database_from_ddl,
+    _extract_perm_declarations,
+    _format_bytes,
+    _parse_perm_bytes,
+    analyse_perm_space,
+)
+from td_release_packager.sql_text import (
+    strip_comments_and_string_literals as _strip_comments,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers for building temporary payload directories
@@ -39,26 +49,6 @@ def _write(tmp_path, rel_path: str, content: str) -> str:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(textwrap.dedent(content), encoding="utf-8")
     return str(target)
-
-
-# ---------------------------------------------------------------------------
-# Import the module under test
-# ---------------------------------------------------------------------------
-
-from td_release_packager.perm_analyser import (
-    _extract_database_from_ddl,
-    _extract_perm_declarations,
-    _format_bytes,
-    _parse_perm_bytes,
-    analyse_perm_space,
-)
-
-# _strip_comments delegates to sql_text — test comment stripping via
-# _extract_perm_declarations (which calls it internally) rather than
-# calling the private wrapper directly.
-from td_release_packager.sql_text import (
-    strip_comments_and_string_literals as _strip_comments,
-)
 
 
 # ===========================================================================
@@ -350,7 +340,6 @@ class TestAnalysePermSpace:
 
     def test_multiple_tables_accumulate_floor(self, tmp_path):
         """Multiple tables accumulate their individual floors."""
-        perm_bytes = 100 * 1024 ** 2  # 100 MB
         _write(tmp_path, "MultiDb/pre-requisites/databases/MultiDb.db",
                "CREATE DATABASE MultiDb AS PERM = 100M;")
         for i in range(3):

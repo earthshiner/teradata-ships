@@ -232,7 +232,7 @@ def _provenance_signal(source_dir: str) -> TrustSignal:
                 )
 
     # Also check directly in source_dir
-    if os.path.exists(os.path.join(source_dir, "ships.provenance.json")):
+    if os.path.exists(os.path.join(source_dir, "context", "ships.provenance.json")) or os.path.exists(os.path.join(source_dir, "ships.provenance.json")):
         return TrustSignal(
             status=TRUST_PASS,
             message="ships.provenance.json present — deploy report drill-downs enabled",
@@ -257,7 +257,9 @@ def _build_reproducible_signal(pkg_dir: str) -> TrustSignal:
     - ``source_dirty: false`` or absent → PASS
     - ships.build.json not found    → UNKNOWN
     """
-    build_json = os.path.join(pkg_dir, "ships.build.json")
+    build_json = os.path.join(pkg_dir, "context", "ships.build.json")
+    if not os.path.exists(build_json):
+        build_json = os.path.join(pkg_dir, "ships.build.json")
     if not os.path.exists(build_json):
         return TrustSignal(
             status=TRUST_PASS,

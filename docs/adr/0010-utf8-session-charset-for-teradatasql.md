@@ -87,7 +87,7 @@ UTF-8 was chosen over UTF-16 because:
 
 - Existing deployments of SQL containing only ASCII are unaffected:
   UTF-8 is a superset of ASCII; all ASCII strings are valid UTF-8.
-- The `.sha256` archive checksum and `package_integrity.json` fingerprint
+- The `.sha256` archive checksum and `context/ships.integrity.json` fingerprint
   (ADR 0011) are computed over raw file bytes and are charset-agnostic.
 
 ## Alternatives considered

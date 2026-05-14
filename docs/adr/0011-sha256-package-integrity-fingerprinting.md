@@ -19,7 +19,7 @@ realised using Ed25519 (see `ships keygen`, `ships package --asymmetric-key`). T
 private key is held exclusively by the CI pipeline; the public key is committed to
 the project repository. This closes the adversarial threat model gap noted in the
 Consequences section — an attacker with write access to the extracted package can
-no longer forge a valid signature by recomputing `package_integrity.json`. The SHA-256
+no longer forge a valid signature by recomputing `context/ships.integrity.json`. The SHA-256
 hash layer is retained as a complementary, lower-overhead chain-of-custody check.
 
 GitHub issue #76 (asymmetric signing) is resolved.
@@ -63,8 +63,8 @@ produced it.
 
 The packager computes a **SHA-256 fingerprint over every file under
 `payload/`** at the end of the build, before archiving. The fingerprint
-is stored in `package_integrity.json` in the package root alongside
-`BUILD.json` and `deploy.py`.
+is stored in `context/ships.integrity.json` in the package root alongside
+`context/ships.build.json` and `deploy.py`.
 
 **Fingerprint derivation:**
 
@@ -92,7 +92,7 @@ The generated `deploy.py` (embedded in every package) calls
 connection is opened**. The verifier:
 
 1. Recomputes all file hashes.
-2. Checks for added, removed, or modified files against `package_integrity.json`.
+2. Checks for added, removed, or modified files against `context/ships.integrity.json`.
 3. Recomputes `package_hash` and compares with the stored value.
 4. Aborts with a non-zero exit code and a diagnostic log if any
    discrepancy is found.
@@ -111,7 +111,7 @@ A `--skip-integrity-check` flag provides a development escape hatch.
 Its use is logged at WARNING level. When skipped, `PKG_HASH=SKIPPED`
 appears in the query band so the bypass is visible in DBQL.
 
-For auto-split packages (prereqs + main), `package_integrity.json` is
+For auto-split packages (prereqs + main), `context/ships.integrity.json` is
 generated independently for each half after the phase partitioning,
 so each archive's fingerprint covers only its own payload.
 
@@ -129,7 +129,7 @@ so each archive's fingerprint covers only its own payload.
   executed statement and the exact package version. Audit queries can
   confirm "all DDL in this deployment came from build 0002 with hash
   a3f8c2d1e9b74056."
-- Individual file hashes in `package_integrity.json` allow precise
+- Individual file hashes in `context/ships.integrity.json` allow precise
   forensic identification of which file was changed, not just that
   *something* changed.
 - The `--skip-integrity-check` bypass is recorded in both the deploy log
@@ -139,26 +139,26 @@ so each archive's fingerprint covers only its own payload.
 
 - The trust guarantee is **chain-of-custody**, not **adversarial**. An
   attacker with write access to the extracted package directory can
-  modify both a payload file and `package_integrity.json` to match,
+  modify both a payload file and `context/ships.integrity.json` to match,
   defeating the check. The hash provides no protection against an
   attacker who controls the package directory. Protecting against that
   threat requires asymmetric signing (see Alternatives).
-- `package_integrity.json` is generated before archiving and lives
+- `context/ships.integrity.json` is generated before archiving and lives
   inside the archive. It is regenerated correctly by the build pipeline
   on every build. However, a developer who manually edits a payload file
-  after extraction and then also manually recomputes `package_integrity.json`
+  after extraction and then also manually recomputes `context/ships.integrity.json`
   could produce a consistent but fraudulent pair. This is a human
   control problem, not a technical one; the fix is key-based signing.
 - The `PKG_HASH` field in the query band is 16 hex characters (64 bits
   of the 256-bit hash). It is not collision-resistant at that truncation
   but is sufficient for DBQL correlation. The full hash is in
-  `package_integrity.json` and in the deploy log for forensic use.
+  `context/ships.integrity.json` and in the deploy log for forensic use.
 
 **Neutral**
 
 - The existing archive-level `.sha256` sidecar is retained. It and
-  `package_integrity.json` serve complementary purposes: `.sha256`
-  covers transit integrity of the zip container; `package_integrity.json`
+  `context/ships.integrity.json` serve complementary purposes: `.sha256`
+  covers transit integrity of the zip container; `context/ships.integrity.json`
   covers deployment integrity of the extracted payload.
 - File hashing adds negligible time to the build for typical package
   sizes (< 1 second for hundreds of files).
@@ -194,12 +194,12 @@ other hashes. The use case (selective verification of one file) is not
 a SHIPS deployment pattern. A flat sorted-concatenation hash is simpler
 and achieves the same tamper detection for the full-package case.
 
-**Embed fingerprint in `BUILD.json` rather than a separate file.**
-Rejected: `BUILD.json` is a manifest written during the build and is
+**Embed fingerprint in `context/ships.build.json` rather than a separate file.**
+Rejected: `context/ships.build.json` is a manifest written during the build and is
 used by downstream tooling (deploy report, split-package detection).
 Embedding a computed field in it would require computing the fingerprint
 before the manifest is finalised, or a two-pass write. A separate
-`package_integrity.json` keeps the concerns separate and matches the
+`context/ships.integrity.json` keeps the concerns separate and matches the
 single-responsibility principle established for other generated files.
 
 ## References

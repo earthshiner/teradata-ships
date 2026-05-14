@@ -237,13 +237,13 @@ See [`docs/security_prerequisites.md`](docs/security_prerequisites.md) and
 ## Agent context artefacts
 
 Every generated package now includes three agent-facing context files alongside
-`ships.build.json`, `ships.provenance.json`, and the package report:
+`context/ships.build.json`, `context/ships.provenance.json`, and the package report:
 
 | File | Purpose |
 |---|---|
-| `ships.context.json` | Durable workflow context, source-of-truth pointers, constraints, governance controls, trust state, and evidence references. |
-| `ships.manifest.json` | Compact agent-safe package inventory and dependency contract. Token names are listed, but token values are not duplicated here. |
-| `ships.handoff.json` | Next-actor instructions for a human, CI/CD job, MCP tool, or autonomous deployment agent. |
+| `context/ships.context.json` | Durable workflow context, source-of-truth pointers, constraints, governance controls, trust state, and evidence references. |
+| `context/ships.manifest.json` | Compact agent-safe package inventory and dependency contract. Token names are listed, but token values are not duplicated here. |
+| `context/ships.handoff.json` | Next-actor instructions for a human, CI/CD job, MCP tool, or autonomous deployment agent. |
 
 These files let SHIPS packages move between actors without relying on chat
 history or hidden agent state.

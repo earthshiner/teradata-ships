@@ -85,8 +85,8 @@ A Data Product wraps data so consumers can trust it without understanding the ET
 ```
 OMR_DEV_BUILD_0042_20260510.zip
     deploy.py                   ← The only thing anyone runs
-    BUILD.json                  ← Who built it, when, from what commit
-    package_integrity.json      ← SHA-256 tamper detection
+    context/ships.build.json                  ← Who built it, when, from what commit
+    context/ships.integrity.json      ← SHA-256 tamper detection
     _waves.txt                  ← Deployment dependency ordering
     lib/
         database_package_deployer/   ← Full deployment engine, embedded
@@ -314,4 +314,4 @@ python -m td_release_packager process \
     --name MyProject
 ```
 
-SHIPS downloads the repository tarball via the GitHub REST API — no `git` required. The resolved commit SHA is stamped into `BUILD.json` automatically. For GitHub Enterprise Server, set `SHIPS_GITHUB_API_URL`.
+SHIPS downloads the repository tarball via the GitHub REST API — no `git` required. The resolved commit SHA is stamped into `context/ships.build.json` automatically. For GitHub Enterprise Server, set `SHIPS_GITHUB_API_URL`.
