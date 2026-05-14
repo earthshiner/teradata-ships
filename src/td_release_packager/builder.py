@@ -790,22 +790,30 @@ def _split_into_paired_packages(
         in-memory directories are cleaned up by ``_archive_package``.
     """
     parent_dir = os.path.dirname(pkg_dir)
-    main_basename = os.path.basename(pkg_dir)
+    release_group = os.path.basename(pkg_dir)
 
-    # Insert "prereqs" before "BUILD" — keeps both filenames easy to
-    # eyeball as a pair in a directory listing.
-    if "_BUILD_" not in main_basename:
-        # Defensive: should never happen given the canonical naming
-        # in build_package, but if it does, fall back to a suffix.
-        prereqs_basename = main_basename + "_prereqs"
-    else:
-        prereqs_basename = main_basename.replace("_BUILD_", "_prereqs_BUILD_", 1)
+    # Keep the shared release identity at the start of both split archive
+    # names, and put the deploy-order/role suffix at the end. This makes
+    # Windows Explorer, shells, humans, and agents sort the pair together
+    # in deployment order:
+    #   <release_group>_01_prereqs.zip
+    #   <release_group>_02_main.zip
+    main_basename = f"{release_group}_02_main"
+    prereqs_basename = f"{release_group}_01_prereqs"
+
+    main_pkg_dir = os.path.join(parent_dir, main_basename)
     prereqs_pkg_dir = os.path.join(parent_dir, prereqs_basename)
 
-    # The release_group ID = the main archive's basename. Derivable
-    # from filename (eyeball), embedded in both manifests
-    # (programmatic), and the requires list adds the third tie.
-    release_group = main_basename
+    # The pre-split package directory is named with the release_group only.
+    # Rename it to the final MAIN package directory before archiving so the
+    # folder inside the zip and the zip filename both carry the _02_main role
+    # suffix. The release_group itself remains the unsuffixed pair identity.
+    if os.path.exists(main_pkg_dir):
+        shutil.rmtree(main_pkg_dir)
+    if os.path.exists(prereqs_pkg_dir):
+        shutil.rmtree(prereqs_pkg_dir)
+    os.rename(pkg_dir, main_pkg_dir)
+    pkg_dir = main_pkg_dir
 
     # 1. Clone the main package wholesale → prereqs sibling. Then we
     #    selectively empty payload phases on each side.
