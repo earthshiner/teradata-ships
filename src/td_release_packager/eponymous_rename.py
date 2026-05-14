@@ -23,6 +23,7 @@ import re
 from pathlib import Path
 from typing import List, NamedTuple, Optional, Tuple
 
+
 logger = logging.getLogger(__name__)
 
 # -- Comment stripping (same as ddl_parser.py) --

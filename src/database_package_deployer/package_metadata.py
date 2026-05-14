@@ -26,7 +26,11 @@ def package_file(package_dir: str, filename: str) -> str:
     if filename.startswith("ships.") and filename.endswith(".json"):
         canonical = os.path.join(root, CONTEXT_DIR, filename)
         legacy = os.path.join(root, filename)
-        return canonical if os.path.exists(canonical) or not os.path.exists(legacy) else legacy
+        return (
+            canonical
+            if os.path.exists(canonical) or not os.path.exists(legacy)
+            else legacy
+        )
     return os.path.join(root, filename)
 
 

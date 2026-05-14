@@ -194,7 +194,6 @@ Return a concise evidence summary with paths to all generated artefacts.
 }
 
 
-
 def _context_path(filename: str) -> str:
     """Return the package-relative path for a SHIPS context JSON artefact."""
     return f"{CONTEXT_DIR}/{filename}"
@@ -416,7 +415,6 @@ def _recommended_read_order() -> list[str]:
     ]
 
 
-
 def _agent_policy(manifest: Dict[str, Any]) -> Dict[str, Any]:
     """Return explicit do-not-guess safety controls for agents.
 
@@ -466,6 +464,7 @@ def _agent_policy(manifest: Dict[str, Any]) -> Dict[str, Any]:
         ],
         "instruction": "When any stop_condition is present, stop and return the evidence instead of guessing, bypassing controls, modifying payload, or proceeding to deployment.",
     }
+
 
 def _agent_instructions() -> Dict[str, Any]:
     """Return standing instructions for downstream SHIPS-aware agents."""
