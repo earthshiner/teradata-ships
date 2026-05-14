@@ -27,7 +27,6 @@ If it returns `main`, create a feature branch first — do not proceed on main.
 
 - One logical change per commit.
 - Commit message format: `<type>(<scope>): <summary> — closes #<issue>`
-- Always append `Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>` to commits.
 - Run `uv run ruff format src/` before committing (the Stop hook does this automatically).
 
 ## PR workflow
