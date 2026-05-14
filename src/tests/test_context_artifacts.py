@@ -43,7 +43,9 @@ def test_write_context_artifacts_emits_agent_context_contract(tmp_path):
 
     index = json.loads((tmp_path / "context" / "ships.index.json").read_text())
     context = json.loads((tmp_path / "context" / "ships.context.json").read_text())
-    agent_manifest = json.loads((tmp_path / "context" / "ships.manifest.json").read_text())
+    agent_manifest = json.loads(
+        (tmp_path / "context" / "ships.manifest.json").read_text()
+    )
     handoff = json.loads((tmp_path / "context" / "ships.handoff.json").read_text())
 
     assert index["read_first"] == "context/ships.index.json"

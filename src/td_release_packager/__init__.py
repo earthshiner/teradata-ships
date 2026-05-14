@@ -11,7 +11,7 @@ Standardised Teradata DDL deployment methodology.
     Ship:      python deploy.py --host myserver --user dbc
 """
 
-__version__ = "1.1.0"
+from td_release_packager._version import __version__
 
 from td_release_packager.builder import build_package
 from td_release_packager.scaffolder import scaffold_project
@@ -28,6 +28,7 @@ from td_release_packager.models import (
 )
 
 __all__ = [
+    "__version__",
     # builder
     "build_package",
     # scaffolder

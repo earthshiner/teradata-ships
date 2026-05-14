@@ -46,6 +46,8 @@ import zipfile
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from td_release_packager._version import __version__ as SHIPS_VERSION
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -754,6 +756,13 @@ def _parse_args():
     )
     p.add_argument(
         "--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1)"
+    )
+    p.add_argument(
+        "-V",
+        "--version",
+        action="version",
+        version=f"ships_dashboard {SHIPS_VERSION}",
+        help="Show version and exit.",
     )
     return p.parse_args()
 

@@ -26,6 +26,7 @@ network requests.  It opens directly from the filesystem (file: URL).
 
 from __future__ import annotations
 
+import html
 import logging
 import os
 from typing import Dict, List, Optional, Tuple
@@ -187,6 +188,10 @@ def _scan_payload(pkg_dir: str) -> List[Dict]:
             stem = os.path.splitext(fname)[0]  # e.g. "OMR_STD.Customer"
             wave = wave_map.get(fname)
 
+            rel_file = os.path.relpath(os.path.join(root, fname), pkg_dir).replace(
+                "\\", "/"
+            )
+
             records.append(
                 {
                     "name": stem,
@@ -194,6 +199,7 @@ def _scan_payload(pkg_dir: str) -> List[Dict]:
                     "phase": _phase_label(os.path.join(payload_dir, phase_dir)),
                     "wave": wave,
                     "file": fname,
+                    "path": rel_file,
                     "ext": ext,
                 }
             )
@@ -243,6 +249,34 @@ def _trust_label_style(label: str) -> Tuple[str, str]:
     return "#FFC107", _NAVY  # READY-WITH-CAVEATS
 
 
+def _h(value: object) -> str:
+    """HTML-escape text content."""
+    return html.escape(str(value), quote=False)
+
+
+def _a(value: object) -> str:
+    """HTML-escape attribute values."""
+    return html.escape(str(value), quote=True)
+
+
+def _truncated(value: object, max_len: int = 28) -> str:
+    """Return a display-safe truncated value with an ellipsis."""
+    text = str(value)
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 1] + "…"
+
+
+def _file_link(record: Dict) -> str:
+    """Return a package-relative hyperlink for a payload file."""
+    path = record.get("path") or record.get("file", "")
+    label = record.get("file", path)
+    return (
+        f'<a href="{_a(path)}" title="{_a(path)}" '
+        f'style="color:#0D6EFD;text-decoration:none">{_h(label)}</a>'
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tab builders
 # ---------------------------------------------------------------------------
@@ -258,12 +292,12 @@ def _objects_tab(records: List[Dict]) -> str:
     )
 
     rows = "\n".join(
-        f'<tr data-type="{r["type"]}">'
-        f"<td style='font-family:monospace'>{r['name']}</td>"
+        f'<tr data-type="{_a(r["type"])}">'
+        f"<td style='font-family:monospace' title='{_a(r['name'])}'>{_h(r['name'])}</td>"
         f"<td>{_type_badge(r['type'])}</td>"
-        f"<td>{r['phase']}</td>"
+        f"<td>{_h(r['phase'])}</td>"
         f"<td>{'Wave ' + str(r['wave']) if r['wave'] else '—'}</td>"
-        f"<td style='color:#6C757D;font-size:12px'>{r['file']}</td>"
+        f"<td style='color:#6C757D;font-size:12px'>{_file_link(r)}</td>"
         "</tr>"
         for r in records
     )
@@ -371,12 +405,12 @@ def _waves_tab(records: List[Dict]) -> str:
             svg_parts.append(
                 f'<circle cx="{x + 14}" cy="{iy + 13}" r="5" fill="{bg}"/>'
             )
-            # object name (truncate to fit)
-            name = item["name"]
-            if len(name) > 28:
-                name = name[:25] + "…"
+            # object name (truncate to fit); SVG <title> exposes full name as a tooltip.
+            full_name = item["name"]
+            display_name = _truncated(full_name, 28)
             svg_parts.append(
-                f'<text x="{x + 26}" y="{iy + 17}" font-size="11" fill="#333">{name}</text>'
+                f'<text x="{x + 26}" y="{iy + 17}" font-size="11" fill="#333">'
+                f"<title>{_h(full_name)}</title>{_h(display_name)}</text>"
             )
 
         if len(items) > 40:

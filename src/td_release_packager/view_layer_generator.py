@@ -84,6 +84,8 @@ from typing import Dict, List, Optional, Set, Tuple
 # Logging
 # ---------------------------------------------------------------------------
 
+from td_release_packager.version_args import add_version_argument
+
 logger = logging.getLogger("generate_view_layer")
 
 
@@ -1478,6 +1480,7 @@ def _build_arg_parser(prog: Optional[str] = None) -> argparse.ArgumentParser:
         action="store_true",
         help="Enable verbose logging (INFO level).",
     )
+    add_version_argument(parser)
     return parser
 
 

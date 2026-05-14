@@ -54,6 +54,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 
+from td_release_packager.version_args import add_version_argument
+
 logger = logging.getLogger(__name__)
 
 
@@ -671,6 +673,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Verbose logging (INFO level).",
     )
+    add_version_argument(p)
     return p
 
 

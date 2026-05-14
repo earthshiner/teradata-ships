@@ -25,6 +25,7 @@ import os
 import sys
 import tempfile
 
+from database_package_deployer import __version__ as DEPLOYER_VERSION
 from database_package_deployer.deployer import (
     deploy_package,
     resume_package,
@@ -792,6 +793,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable debug logging.",
     )
+    parser.add_argument(
+        "-V",
+        "--version",
+        action="version",
+        version=f"database_package_deployer {DEPLOYER_VERSION}",
+        help="Show version and exit.",
+    )
 
     subs = parser.add_subparsers(
         dest="command",
@@ -1026,6 +1034,16 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "package_zip",
         help="Path to the release ZIP archive to approve.",
     )
+
+    for name, subparser in subs.choices.items():
+        if "--version" not in subparser._option_string_actions:
+            subparser.add_argument(
+                "-V",
+                "--version",
+                action="version",
+                version=f"database_package_deployer {name} {DEPLOYER_VERSION}",
+                help="Show version and exit.",
+            )
 
     return parser
 

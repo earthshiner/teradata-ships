@@ -62,6 +62,8 @@ from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 
+from td_release_packager._version import __version__ as SHIPS_VERSION
+
 logger = logging.getLogger(__name__)
 
 mcp = FastMCP(
@@ -1067,7 +1069,9 @@ def _ships_context_response(
     )
     if extracted_dir:
         entrypoint = os.path.join(extracted_dir, "context", "ships.index.json")
-        reads = [os.path.join(extracted_dir, *name.split("/")) for name in context_names]
+        reads = [
+            os.path.join(extracted_dir, *name.split("/")) for name in context_names
+        ]
     else:
         entrypoint = _archive_member_ref(package_ref, "context/ships.index.json")
         reads = [_archive_member_ref(package_ref, name) for name in context_names]
@@ -1213,6 +1217,13 @@ def main() -> None:
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         default=None,
         help="Log level for the MCP server (default: INFO).",
+    )
+    parser.add_argument(
+        "-V",
+        "--version",
+        action="version",
+        version=f"ships_mcp {SHIPS_VERSION}",
+        help="Show version and exit.",
     )
 
     # -- Auth flags (HTTP transports only) ----------------------------------
