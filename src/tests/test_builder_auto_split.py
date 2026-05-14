@@ -407,6 +407,47 @@ class TestBuildPackageAutoSplit:
         assert prereqs_json["release_group"] == main_manifest.release_group
         assert prereqs_json["requires"] == []
 
+    def test_split_package_reports_are_package_local(self, split_config):
+        """Each split package report must only index files that exist in that archive."""
+        ((main_archive, _), (prereqs_archive, _)) = build_package(split_config)
+
+        main_report = _read_zip_member(main_archive, "package_report.html")
+        prereqs_report = _read_zip_member(prereqs_archive, "package_report.html")
+
+        assert "MyDB.Customer.tbl" in main_report
+        assert "MyDB.db" not in main_report
+
+        assert "MyDB.db" in prereqs_report
+        assert "MyDB.Customer.tbl" not in prereqs_report
+
+    def test_prereqs_report_title_mentions_pre_requisites(self, split_config):
+        """The prereqs report title should clearly identify the companion archive."""
+        ((_main_archive, _), (prereqs_archive, _)) = build_package(split_config)
+
+        prereqs_report = _read_zip_member(prereqs_archive, "package_report.html")
+
+        assert "Pre-requisites Package Report" in prereqs_report
+
+    def test_split_provenance_is_package_local(self, split_config):
+        """Per-archive provenance should not reference files removed by the split."""
+        ((main_archive, _), (prereqs_archive, _)) = build_package(split_config)
+
+        main_provenance = json.loads(
+            _read_zip_member(main_archive, "context/ships.provenance.json")
+        )
+        prereqs_provenance = json.loads(
+            _read_zip_member(prereqs_archive, "context/ships.provenance.json")
+        )
+
+        main_entries = main_provenance.get("entries", {})
+        prereqs_entries = prereqs_provenance.get("entries", {})
+
+        assert any("MyDB.Customer.tbl" in path for path in main_entries)
+        assert not any("MyDB.db" in path for path in main_entries)
+
+        assert any("MyDB.db" in path for path in prereqs_entries)
+        assert not any("MyDB.Customer.tbl" in path for path in prereqs_entries)
+
     def test_checksum_sidecar_for_both(self, split_config):
         """Both archives get a .sha256 sidecar so the DBA can verify
         each one independently."""
