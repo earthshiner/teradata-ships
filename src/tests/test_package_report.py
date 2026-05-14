@@ -127,6 +127,7 @@ class TestScanPayload:
         assert len(records) == 1
         assert records[0]["type"] == "TABLE"
         assert records[0]["name"] == "DB.Customer"
+        assert records[0]["path"] == "payload/03_ddl/tables/DB.Customer.tbl"
 
     def test_viw_classified_as_view(self, tmp_path):
         _make_payload(
@@ -221,6 +222,17 @@ class TestObjectsTab:
         assert "Wave 1" in html
         assert "Wave 2" in html
 
+    def test_file_names_are_package_relative_links(self):
+        records = self._sample_records()
+        records[0]["path"] = "payload/03_ddl/tables/DB.Customer.tbl"
+        html = _objects_tab(records)
+        assert 'href="payload/03_ddl/tables/DB.Customer.tbl"' in html
+        assert 'title="payload/03_ddl/tables/DB.Customer.tbl"' in html
+
+    def test_object_names_have_full_name_tooltips(self):
+        html = _objects_tab(self._sample_records())
+        assert "title='DB.Customer'" in html
+
     def test_empty_records_no_crash(self):
         html = _objects_tab([])
         assert "<table" in html
@@ -259,6 +271,21 @@ class TestWavesTab:
         assert "<svg" in html
         assert "Wave 1" in html
         assert "Wave 2" in html
+
+    def test_truncated_wave_names_have_full_name_tooltip(self):
+        records = [
+            {
+                "name": "DB.VeryLongObjectNameThatShouldBeTruncatedInSvg",
+                "type": "VIEW",
+                "phase": "DDL",
+                "wave": 1,
+                "file": "DB.VeryLongObjectNameThatShouldBeTruncatedInSvg.viw",
+                "ext": ".viw",
+            },
+        ]
+        html = _waves_tab(records)
+        assert "…" in html
+        assert "<title>DB.VeryLongObjectNameThatShouldBeTruncatedInSvg</title>" in html
 
     def test_serial_column_for_none_wave(self):
         records = [

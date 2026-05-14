@@ -66,6 +66,7 @@ def _context_file(pkg_dir: str, filename: str) -> str:
     os.makedirs(context_dir, exist_ok=True)
     return os.path.join(context_dir, filename)
 
+
 logger = logging.getLogger(__name__)
 
 CONTEXT_DIR = "context"
@@ -2164,6 +2165,9 @@ def parse_args():
                    help="Continue past failures.")
     p.add_argument("-v", "--verbose", action="store_true",
                    help="Debug logging.")
+    p.add_argument("-V", "--version", action="version",
+                   version="deploy.py {manifest.build_number}",
+                   help="Show version and exit.")
     p.add_argument("--skip-integrity-check", action="store_true",
                    help="Skip package integrity verification (development use only).")
     p.add_argument("--skip-trust-check", action="store_true",

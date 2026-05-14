@@ -394,8 +394,11 @@ class TestAnalysePermSpace:
 
     def test_multiple_tables_accumulate_floor(self, tmp_path):
         """Multiple tables accumulate their individual floors."""
-        _write(tmp_path, "MultiDb/pre-requisites/databases/MultiDb.db",
-               "CREATE DATABASE MultiDb AS PERM = 100M;")
+        _write(
+            tmp_path,
+            "MultiDb/pre-requisites/databases/MultiDb.db",
+            "CREATE DATABASE MultiDb AS PERM = 100M;",
+        )
         for i in range(3):
             _write(
                 tmp_path,

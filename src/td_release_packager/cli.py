@@ -50,6 +50,7 @@ from td_release_packager.token_engine import (
     validate_tokens,
 )
 from td_release_packager.validate import validate_directory, read_inspect_config
+from td_release_packager.version_args import add_version_argument
 from td_release_packager.validate_grants import (
     validate_grants,
     fix_grants,
@@ -3628,6 +3629,7 @@ def _build_parser():
         "Standardised Teradata DDL deployment methodology.",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
+    add_version_argument(parser, prog="td_release_packager")
 
     subs = parser.add_subparsers(dest="command")
 
@@ -4483,6 +4485,9 @@ def _build_parser():
             "ships_signing_public.pem (default: current directory)."
         ),
     )
+
+    for name, subparser in subs.choices.items():
+        add_version_argument(subparser, prog=f"td_release_packager {name}")
 
     return parser
 
