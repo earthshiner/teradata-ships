@@ -695,6 +695,43 @@ def _compute_phase_inventory(pkg_dir: str) -> Dict[str, int]:
     return inventory
 
 
+def _filter_provenance_to_present_payload(pkg_dir: str) -> None:
+    """Keep provenance entries only for payload files present in ``pkg_dir``.
+
+    Auto-split starts by cloning the full package, so the copied
+    ``context/ships.provenance.json`` initially describes the pre-split union.
+    After payload phases are emptied for each half, filter the provenance
+    document so package report drill-downs and agent context only reference
+    files that physically exist in that archive.
+    """
+    provenance_path = _context_file(pkg_dir, "ships.provenance.json")
+    if not os.path.isfile(provenance_path):
+        return
+
+    with open(provenance_path, encoding="utf-8") as f:
+        document = json.load(f)
+
+    entries = document.get("entries", {})
+    if not isinstance(entries, dict):
+        return
+
+    filtered = {}
+    for package_path, chain in entries.items():
+        normalized = str(package_path).replace("\\", "/").lstrip("/")
+        parts = normalized.split("/")
+        candidates = [
+            os.path.join(pkg_dir, *parts),
+            os.path.join(pkg_dir, "payload", *parts),
+        ]
+        if any(os.path.isfile(candidate) for candidate in candidates):
+            filtered[package_path] = chain
+
+    document["entries"] = filtered
+    with open(provenance_path, "w", encoding="utf-8") as f:
+        json.dump(document, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+
+
 def _empty_phase_subtree(pkg_dir: str, phase_name: str):
     """Remove every file under ``payload/<phase_name>/`` but keep the
     top-level directory so the deployer's phase walk still finds it.
@@ -830,7 +867,15 @@ def _split_into_paired_packages(
         package_age_violation_level=manifest.package_age_violation_level,
     )
 
-    # 7. Re-write ships.build.json on both sides.
+    # 7. Re-write per-package metadata on both sides.
+    #
+    # The pre-split package report and provenance describe the union of
+    # prereqs + main payload.  After the payload phases are partitioned,
+    # regenerate every package-local metadata artefact that depends on the
+    # physical payload contents.  Otherwise the prereqs report can list main
+    # objects and create dead links to files that are not in that archive.
+    from td_release_packager.package_report import generate_package_report
+
     for target_pkg_dir, target_manifest in (
         (pkg_dir, manifest),
         (prereqs_pkg_dir, prereqs_manifest),
@@ -838,7 +883,10 @@ def _split_into_paired_packages(
         manifest_path = _context_file(target_pkg_dir, "ships.build.json")
         with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(target_manifest.__dict__, f, indent=2, ensure_ascii=False)
+
+        _filter_provenance_to_present_payload(target_pkg_dir)
         write_context_artifacts(target_pkg_dir, target_manifest)
+        generate_package_report(target_pkg_dir, target_manifest.__dict__)
 
     # 8. Integrity fingerprints, then archive both. Prereqs first so
     #    the on-disk creation order matches the deploy order.

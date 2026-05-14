@@ -282,6 +282,16 @@ def _file_link(record: Dict) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _package_report_label(manifest_dict: dict) -> str:
+    """Return the report label, including split role when applicable."""
+    role = str(manifest_dict.get("role") or "").lower()
+    if role == "prereqs":
+        return "Pre-requisites Package Report"
+    if role == "main":
+        return "Main Package Report"
+    return "Package Report"
+
+
 def _objects_tab(records: List[Dict]) -> str:
     """Filterable object inventory table."""
     type_set = sorted({r["type"] for r in records})
@@ -628,6 +638,7 @@ def generate_package_report(pkg_dir: str, manifest_dict: dict) -> str:
     trust = manifest_dict.get("trust", {})
 
     pkg_name = manifest_dict.get("package_name", "Package")
+    report_label = _package_report_label(manifest_dict)
     build_no = manifest_dict.get("build_number", "?")
     env = manifest_dict.get("environment", "?")
     file_count = manifest_dict.get("file_count", len(records))
@@ -651,7 +662,7 @@ def generate_package_report(pkg_dir: str, manifest_dict: dict) -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SHIPS Package Report — {pkg_name} {build_no}</title>
+<title>SHIPS {report_label} — {pkg_name} {build_no}</title>
 <style>
 *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
 body {{ font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -697,7 +708,7 @@ pre {{ white-space: pre-wrap; word-break: break-all; }}
           letter-spacing="-.3" fill="#fff">Teradata</text>
   </svg>
   <div>
-    <div class="hdr-title">Package Report &nbsp;·&nbsp; {pkg_name}</div>
+    <div class="hdr-title">{report_label} &nbsp;·&nbsp; {pkg_name}</div>
     <div class="hdr-sub">Build {build_no} &nbsp;·&nbsp; {env}</div>
   </div>
   <div class="trust-pill">{trust_label or "—"}</div>
