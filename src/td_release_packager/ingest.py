@@ -75,14 +75,14 @@ def _has_multi_table_dml_marker(content: str) -> bool:
 # ({{TOKEN}}.Object or {{TOKEN}}) in DDL statements.
 _NAME_PART = r'(?:\{\{[A-Z][A-Z0-9_]*\}\}|"?[A-Za-z_]\w*"?)'
 _QUALIFIED_NAME_RE = re.compile(
-    r"(?:CREATE|REPLACE)\s+(?:MULTISET\s+|SET\s+)?"
+    r"^\s*(?:CREATE|REPLACE)\s+(?:MULTISET\s+|SET\s+)?"
     r"(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?"
     r"(?:TRACE\s+)?"
     r"(?:SPECIFIC\s+)?"
     r"(?:TABLE|VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER|"
     r"JOIN\s+INDEX|HASH\s+INDEX|DATABASE|USER|PROFILE|ROLE)\s+"
     rf"({_NAME_PART}(?:\.{_NAME_PART})?)",
-    re.IGNORECASE,
+    re.IGNORECASE | re.MULTILINE,
 )
 
 # -- Name extraction for COMMENT ON statements --
@@ -144,15 +144,21 @@ _DML_NAME_RE = re.compile(
 # database-level grant or ``<db>.<table>.dcl`` for a table-level
 # grant). Aggregates multiple grants on the same object into one
 # .dcl file rather than the source-filename fallback.
-#   GRANT  privileges  ON  {{DB}}[.t]  TO    grantee [WITH GRANT OPTION]
-#   REVOKE privileges  ON  {{DB}}[.t]  FROM  grantee
+#   GRANT  privileges  ON  [TABLE|VIEW|...] {{DB}}[.t]  TO    grantee
+#   REVOKE privileges  ON  [TABLE|VIEW|...] {{DB}}[.t]  FROM  grantee
 # The ``ON`` clause is the unambiguous marker; the privilege list
 # between the verb and ON varies (``SELECT``, ``ALL PRIVILEGES``,
-# ``EXECUTE FUNCTION``, etc.) and is consumed by ``.*?``.
+# ``CREATE TABLE``, ``EXECUTE PROCEDURE``, etc.) and is consumed
+# by ``.*?``.  The optional object-kind token after ON is deliberately
+# skipped so grants such as ``ON PROCEDURE SQLJ.INSTALL_JAR`` are named
+# from the target object rather than producing ``Procedure.dcl``.
 _GRANT_REVOKE_NAME_RE = re.compile(
-    r"\b(?:GRANT|REVOKE)\b.*?\bON\s+"
+    r"^\s*(?:GRANT|REVOKE)\b.*?\bON\s+"
+    r"(?:TABLE\s+|VIEW\s+|MACRO\s+|PROCEDURE\s+|"
+    r"EXTERNAL\s+PROCEDURE\s+|FUNCTION\s+|DATABASE\s+|"
+    r"USER\s+|ROLE\s+|PROFILE\s+)?"
     rf"({_NAME_PART}(?:\.{_NAME_PART})?)",
-    re.IGNORECASE | re.DOTALL,
+    re.IGNORECASE | re.MULTILINE | re.DOTALL,
 )
 
 # -- Detect REPLACE VIEW vs CREATE VIEW --
@@ -1225,7 +1231,7 @@ def _extract_qualified_name(content: str) -> Tuple[Optional[str], Optional[str]]
         2. COMMENT ON TABLE/COLUMN Database.Object[.column]
         3. COLLECT STATISTICS ... ON Database.Object
         4. INSERT / UPDATE / DELETE / MERGE — DML target
-        5. GRANT / REVOKE ... ON Database[.Object]
+        5. GRANT / REVOKE ... ON [object-kind] Database[.Object]
 
     For COMMENT ON COLUMN, the column name is ignored — only the
     database.table portion is used for eponymous naming.
@@ -1254,6 +1260,9 @@ def _extract_qualified_name(content: str) -> Tuple[Optional[str], Optional[str]]
     scan = strip_string_literals_preserving_positions(content)
 
     # --- Standard DDL (CREATE/REPLACE) ---
+    # Anchored to statement start so DCL like
+    # ``GRANT CREATE TABLE ON db TO role`` is not mistaken for
+    # ``CREATE TABLE ON`` and harvested as ``ON.dcl``.
     match = _QUALIFIED_NAME_RE.search(scan)
     if match:
         qualified = match.group(1)
