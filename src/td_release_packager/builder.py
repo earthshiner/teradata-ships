@@ -66,7 +66,6 @@ def _context_file(pkg_dir: str, filename: str) -> str:
     os.makedirs(context_dir, exist_ok=True)
     return os.path.join(context_dir, filename)
 
-
 logger = logging.getLogger(__name__)
 
 CONTEXT_DIR = "context"

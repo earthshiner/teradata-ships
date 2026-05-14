@@ -194,6 +194,7 @@ Return a concise evidence summary with paths to all generated artefacts.
 }
 
 
+
 def _context_path(filename: str) -> str:
     """Return the package-relative path for a SHIPS context JSON artefact."""
     return f"{CONTEXT_DIR}/{filename}"
@@ -415,6 +416,57 @@ def _recommended_read_order() -> list[str]:
     ]
 
 
+
+def _agent_policy(manifest: Dict[str, Any]) -> Dict[str, Any]:
+    """Return explicit do-not-guess safety controls for agents.
+
+    The policy is intentionally conservative. It tells a downstream agent what
+    it must not infer and which package states require a hard stop or human
+    approval instead of autonomous action.
+    """
+    trust = manifest.get("trust") or {}
+    trust_label = str(trust.get("label", "")).upper()
+    governance = _governance(manifest)
+
+    ask_for_human_approval_when = [
+        "trust_status_blocked",
+        "package_integrity_failed",
+        "target_environment_mismatch",
+        "missing_required_approval",
+        "required_companion_package_not_deployed",
+    ]
+    if governance["require_change_ref"]:
+        ask_for_human_approval_when.append("missing_change_ref")
+    if governance["require_signature"] or governance["require_asymmetric_signature"]:
+        ask_for_human_approval_when.append("missing_or_invalid_signature")
+    if governance["require_tls"]:
+        ask_for_human_approval_when.append("tls_policy_not_satisfied")
+
+    return {
+        "policy_version": "1.0",
+        "purpose": "Bound downstream agent behaviour and prevent unsafe inference or bypass of SHIPS controls.",
+        "do_not_infer_missing_tokens": True,
+        "do_not_modify_payload": True,
+        "do_not_deploy_if_blocked": True,
+        "do_not_ignore_failed_integrity": True,
+        "trust_label_at_build": trust_label or "UNKNOWN",
+        "payload_modification_allowed": False,
+        "deployment_allowed_when_trust_blocked": False,
+        "ask_for_human_approval_when": ask_for_human_approval_when,
+        "stop_conditions": [
+            "trust_status_blocked",
+            "package_integrity_failed",
+            "signature_verification_failed",
+            "target_environment_mismatch",
+            "unresolved_tokens",
+            "missing_required_approval",
+            "missing_required_change_ref",
+            "required_companion_package_not_deployed",
+            "preflight_error",
+        ],
+        "instruction": "When any stop_condition is present, stop and return the evidence instead of guessing, bypassing controls, modifying payload, or proceeding to deployment.",
+    }
+
 def _agent_instructions() -> Dict[str, Any]:
     """Return standing instructions for downstream SHIPS-aware agents."""
     return {
@@ -488,6 +540,7 @@ def _build_index_document(
         },
         "entrypoints": _entrypoints(),
         "recommended_read_order": _recommended_read_order(),
+        "agent_policy": _agent_policy(manifest),
         "agent_instructions": _agent_instructions(),
     }
 
@@ -535,6 +588,7 @@ def _build_context_document(
         ],
         "governance": _governance(manifest),
         "trust": manifest.get("trust") or {},
+        "agent_policy": _agent_policy(manifest),
         "context_budget": {
             "preferred_agent_prompting": "Load context/ships.index.json first, then open referenced evidence only when needed.",
             "detailed_evidence_is_referenced_not_repeated": True,
@@ -582,6 +636,7 @@ def _build_agent_manifest_document(
         "warnings": manifest.get("warnings") or [],
         "governance": _governance(manifest),
         "trust": manifest.get("trust") or {},
+        "agent_policy": _agent_policy(manifest),
         "evidence": _evidence_files(),
     }
 
@@ -655,5 +710,6 @@ def _build_handoff_document(
             "post-install validation outputs",
             "any drift, skipped, failed, or waived object details",
         ],
+        "agent_policy": _agent_policy(manifest),
         "references": _evidence_files(),
     }
