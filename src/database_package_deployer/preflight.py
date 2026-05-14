@@ -887,7 +887,8 @@ def check_package_hash(package_dir: str) -> List[PreflightCheck]:
     build_json = os.path.join(package_dir, "ships.build.json")
     if not os.path.isfile(build_json):
         logger.debug(
-            "package_hash: ships.build.json not found in '%s' — skipping check.", package_dir
+            "package_hash: ships.build.json not found in '%s' — skipping check.",
+            package_dir,
         )
         return []
 
@@ -1018,7 +1019,9 @@ def check_env_lock(package_dir: str, deployed_env: str) -> List[PreflightCheck]:
 
     build_json = os.path.join(package_dir, "ships.build.json")
     if not os.path.isfile(build_json):
-        logger.debug("env_lock: ships.build.json not found in '%s' — skipping.", package_dir)
+        logger.debug(
+            "env_lock: ships.build.json not found in '%s' — skipping.", package_dir
+        )
         return []
 
     try:

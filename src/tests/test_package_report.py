@@ -299,7 +299,10 @@ class TestTrustTab:
             "signals": {
                 # message is the canonical key (real trust signals)
                 "inspect_lint": {"status": "pass", "message": "No violations"},
-                "inspect_token_format": {"status": "fail", "message": "Malformed token"},
+                "inspect_token_format": {
+                    "status": "fail",
+                    "message": "Malformed token",
+                },
                 # detail is the legacy key — kept for backward compat
                 "inspect_grants": {"status": "warn", "detail": "Legacy detail key"},
             },

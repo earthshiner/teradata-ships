@@ -386,7 +386,9 @@ class TestBuildPackageStampsTrust:
         (main_arc, manifest), _companion = build_package(cfg)
 
         with zipfile.ZipFile(main_arc) as zf:
-            build_json_name = next(n for n in zf.namelist() if n.endswith("ships.build.json"))
+            build_json_name = next(
+                n for n in zf.namelist() if n.endswith("ships.build.json")
+            )
             build_data = json.loads(zf.read(build_json_name))
 
         assert "trust" in build_data, "ships.build.json must contain a trust block"
@@ -442,7 +444,9 @@ class TestBuildPackageStampsTrust:
         (main_arc, _), _companion = build_package(cfg)
 
         with zipfile.ZipFile(main_arc) as zf:
-            build_json_name = next(n for n in zf.namelist() if n.endswith("ships.build.json"))
+            build_json_name = next(
+                n for n in zf.namelist() if n.endswith("ships.build.json")
+            )
             build_data = json.loads(zf.read(build_json_name))
 
         assert build_data["trust"]["label"] == LABEL_READY
@@ -476,13 +480,17 @@ class TestBuildReproducibleSignal:
         assert sig.status == TRUST_PASS
 
     def test_warn_when_source_dirty_true(self, tmp_path):
-        (tmp_path / "ships.build.json").write_text('{"source_dirty": true}', encoding="utf-8")
+        (tmp_path / "ships.build.json").write_text(
+            '{"source_dirty": true}', encoding="utf-8"
+        )
         sig = _build_reproducible_signal(str(tmp_path))
         assert sig.status == TRUST_WARN
         assert "dirty" in sig.message.lower()
 
     def test_dirty_build_triggers_caveats_label(self, tmp_path):
-        (tmp_path / "ships.build.json").write_text('{"source_dirty": true}', encoding="utf-8")
+        (tmp_path / "ships.build.json").write_text(
+            '{"source_dirty": true}', encoding="utf-8"
+        )
         (tmp_path / "ships.provenance.json").write_text("{}", encoding="utf-8")
         report = compute_trust_report(str(tmp_path), str(tmp_path))
         assert report.label == LABEL_CAVEATS

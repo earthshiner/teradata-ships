@@ -82,7 +82,7 @@ EXTENSION_TO_KIND: Dict[str, str] = {
     ".sjr": "P",  # JAR install scripts colocate with calling procedure
     ".dml": "T",  # DML targets are always tables
     ".ins": "T",
-    ".fk": "T",   # FK alter scripts target tables → same _T database
+    ".fk": "T",  # FK alter scripts target tables → same _T database
 }
 
 # ---------------------------------------------------------------------------

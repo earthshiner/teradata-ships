@@ -257,9 +257,7 @@ class TestCmdOnboard:
         """onboard with a non-existent source directory calls sys.exit."""
         from td_release_packager.cli import _cmd_onboard
 
-        args = Namespace(
-            source=str(tmp_path / "does_not_exist"), env="DEV", auto=False
-        )
+        args = Namespace(source=str(tmp_path / "does_not_exist"), env="DEV", auto=False)
         with pytest.raises(SystemExit) as exc_info:
             _cmd_onboard(args)
         assert exc_info.value.code != 0

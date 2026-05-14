@@ -760,7 +760,10 @@ def ships_decisions(project: str, run_id: Optional[str] = None) -> dict:
     try:
         decisions_path = os.path.join(project, "ships.decisions.json")
         if not os.path.exists(decisions_path):
-            return {"success": False, "error": "ships.decisions.json not found in project"}
+            return {
+                "success": False,
+                "error": "ships.decisions.json not found in project",
+            }
 
         with open(decisions_path, encoding="utf-8") as f:
             data = json.load(f)
@@ -1048,7 +1051,9 @@ def _archive_member_ref(archive_path: str, filename: str) -> Optional[str]:
     return None
 
 
-def _ships_context_response(package_ref: str, extracted_dir: Optional[str] = None) -> dict:
+def _ships_context_response(
+    package_ref: str, extracted_dir: Optional[str] = None
+) -> dict:
     """Return the standard SHIPS context handoff fields for tool responses."""
     if extracted_dir:
         entrypoint = os.path.join(extracted_dir, "ships.index.json")
@@ -1298,10 +1303,15 @@ def main() -> None:
         )
 
     # -- Validate: auth flags require HTTP transport --------------------
-    auth_flags_set = any([
-        args.auth_jwks_uri, args.auth_issuer, args.auth_audience,
-        args.auth_required_scopes, args.auth_resource_url,
-    ])
+    auth_flags_set = any(
+        [
+            args.auth_jwks_uri,
+            args.auth_issuer,
+            args.auth_audience,
+            args.auth_required_scopes,
+            args.auth_resource_url,
+        ]
+    )
     if auth_flags_set and args.transport == "stdio":
         parser.error(
             "--auth-* flags are only valid with "

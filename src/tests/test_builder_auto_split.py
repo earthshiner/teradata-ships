@@ -459,7 +459,9 @@ class TestDeployChaining:
         deploy_py = _read_zip_member(main_arc, "deploy.py")
 
         # Core chaining keywords must all be present
-        assert "requires" in deploy_py, "deploy.py must read 'requires' from ships.build.json"
+        assert "requires" in deploy_py, (
+            "deploy.py must read 'requires' from ships.build.json"
+        )
         assert "prereqs" in deploy_py.lower(), (
             "deploy.py must reference companion prereqs"
         )
@@ -474,7 +476,9 @@ class TestDeployChaining:
         build = json.loads(_read_zip_member(main_arc, "ships.build.json"))
 
         assert build.get("role") == "main"
-        assert build.get("requires"), "main ships.build.json must have non-empty requires"
+        assert build.get("requires"), (
+            "main ships.build.json must have non-empty requires"
+        )
         assert build["requires"][0].endswith(".zip")
 
     def test_prereqs_build_json_requires_empty(self, tmp_path, tmp_project):

@@ -113,7 +113,10 @@ class TestJWKSCache:
             with patch.object(cache, "_fetch", new=AsyncMock()) as mock_fetch:
                 # Populate keys as _fetch would
                 import jwt
-                cache._keys = {k.key_id: k for k in jwt.PyJWKSet.from_dict(jwks).keys if k.key_id}
+
+                cache._keys = {
+                    k.key_id: k for k in jwt.PyJWKSet.from_dict(jwks).keys if k.key_id
+                }
                 cache._fetched_at = time.monotonic()
                 mock_fetch.side_effect = None
                 key = await cache.get_key("k1")
@@ -133,7 +136,9 @@ class TestJWKSCache:
         cache = JWKSCache("https://example.com/.well-known/jwks.json")
 
         async def _fake_fetch(self_inner=None):
-            cache._keys = {k.key_id: k for k in _jwt.PyJWKSet.from_dict(jwks).keys if k.key_id}
+            cache._keys = {
+                k.key_id: k for k in _jwt.PyJWKSet.from_dict(jwks).keys if k.key_id
+            }
             cache._fetched_at = time.monotonic()
 
         async def run():
@@ -196,9 +201,7 @@ class TestJWTTokenVerifier:
         )
         # Pre-populate the cache so no HTTP call is made
         verifier._jwks_cache._keys = {
-            k.key_id: k
-            for k in _jwt.PyJWKSet.from_dict(jwks).keys
-            if k.key_id
+            k.key_id: k for k in _jwt.PyJWKSet.from_dict(jwks).keys if k.key_id
         }
         verifier._jwks_cache._fetched_at = time.monotonic()
         return verifier
@@ -316,7 +319,7 @@ class TestJWTTokenVerifier:
         jwks = _make_jwks(public_key)
         verifier = JWTTokenVerifier(
             jwks_uri="https://example.com/.well-known/jwks.json",
-            issuer=None,      # no issuer check
+            issuer=None,  # no issuer check
             audience="api://ships-mcp",
         )
         verifier._jwks_cache._keys = {
@@ -338,7 +341,7 @@ class TestJWTTokenVerifier:
         verifier = JWTTokenVerifier(
             jwks_uri="https://example.com/.well-known/jwks.json",
             issuer="https://issuer.example.com",
-            audience=None,    # no audience check
+            audience=None,  # no audience check
         )
         verifier._jwks_cache._keys = {
             k.key_id: k for k in _jwt.PyJWKSet.from_dict(jwks).keys if k.key_id
@@ -357,6 +360,7 @@ class TestJWTTokenVerifier:
 
 class FakeSettings:
     """Minimal replica of FastMCP Settings for auth CLI tests."""
+
     def __init__(self):
         self.host = "127.0.0.1"
         self.port = 8000
@@ -369,6 +373,7 @@ class FakeSettings:
 
 class FakeFastMCP:
     """Minimal replica of FastMCP for auth CLI tests."""
+
     def __init__(self, *args, **kwargs):
         self.settings = FakeSettings()
         self._token_verifier = None
@@ -380,6 +385,7 @@ class FakeFastMCP:
     def tool(self):
         def decorator(fn):
             return fn
+
         return decorator
 
     def run(self, transport="stdio"):
@@ -421,8 +427,11 @@ def fresh_ships_mcp_for_auth():
     mcp package are not contaminated by the fakes.
     """
     MCP_KEYS = [
-        "mcp", "mcp.server", "mcp.server.fastmcp",
-        "mcp.server.auth", "mcp.server.auth.settings",
+        "mcp",
+        "mcp.server",
+        "mcp.server.fastmcp",
+        "mcp.server.auth",
+        "mcp.server.auth.settings",
     ]
 
     # Snapshot originals before touching anything (None = didn't exist)
@@ -432,6 +441,7 @@ def fresh_ships_mcp_for_auth():
     _install_fake_mcp_for_auth()
 
     import ships_mcp  # noqa: F401
+
     yield
 
     # Teardown: drop ships_mcp and restore every mcp.* entry
@@ -448,6 +458,7 @@ def fresh_ships_mcp_for_auth():
 
 def _run_auth_main(argv):
     import ships_mcp as m
+
     old_argv = sys.argv
     try:
         sys.argv = ["ships_mcp"] + argv
@@ -462,62 +473,89 @@ class TestAuthCLIFlags:
     def test_auth_jwks_uri_with_stdio_raises(self):
         """--auth-jwks-uri with stdio is rejected."""
         with pytest.raises(SystemExit) as exc_info:
-            _run_auth_main([
-                "--auth-jwks-uri", "https://example.com/jwks",
-                "--auth-resource-url", "http://localhost:8000",
-            ])
+            _run_auth_main(
+                [
+                    "--auth-jwks-uri",
+                    "https://example.com/jwks",
+                    "--auth-resource-url",
+                    "http://localhost:8000",
+                ]
+            )
         assert exc_info.value.code != 0
 
     def test_auth_without_resource_url_raises(self):
         """--auth-jwks-uri without --auth-resource-url is rejected."""
         with pytest.raises(SystemExit) as exc_info:
-            _run_auth_main([
-                "--transport", "streamable-http",
-                "--auth-jwks-uri", "https://example.com/jwks",
-            ])
+            _run_auth_main(
+                [
+                    "--transport",
+                    "streamable-http",
+                    "--auth-jwks-uri",
+                    "https://example.com/jwks",
+                ]
+            )
         assert exc_info.value.code != 0
 
     def test_auth_with_http_transport_accepted(self):
         """--auth-jwks-uri with streamable-http and --auth-resource-url is valid."""
         with patch("ships_mcp_auth.JWTTokenVerifier") as MockVerifier:
             MockVerifier.return_value = MagicMock()
-            _run_auth_main([
-                "--transport", "streamable-http",
-                "--auth-jwks-uri", "https://example.com/jwks",
-                "--auth-issuer", "https://issuer.example.com",
-                "--auth-audience", "api://ships-mcp",
-                "--auth-resource-url", "http://ships-mcp.internal:8000",
-            ])
+            _run_auth_main(
+                [
+                    "--transport",
+                    "streamable-http",
+                    "--auth-jwks-uri",
+                    "https://example.com/jwks",
+                    "--auth-issuer",
+                    "https://issuer.example.com",
+                    "--auth-audience",
+                    "api://ships-mcp",
+                    "--auth-resource-url",
+                    "http://ships-mcp.internal:8000",
+                ]
+            )
         MockVerifier.assert_called_once()
 
     def test_auth_sets_token_verifier_on_mcp(self):
         """When auth is configured, mcp._token_verifier is set."""
         import ships_mcp as m
+
         fake_verifier = MagicMock()
 
         with patch("ships_mcp_auth.JWTTokenVerifier", return_value=fake_verifier):
-            _run_auth_main([
-                "--transport", "streamable-http",
-                "--auth-jwks-uri", "https://example.com/jwks",
-                "--auth-resource-url", "http://ships-mcp.internal:8000",
-            ])
+            _run_auth_main(
+                [
+                    "--transport",
+                    "streamable-http",
+                    "--auth-jwks-uri",
+                    "https://example.com/jwks",
+                    "--auth-resource-url",
+                    "http://ships-mcp.internal:8000",
+                ]
+            )
         assert m.mcp._token_verifier is fake_verifier
 
     def test_auth_jwks_uri_passed_to_verifier(self):
         """The JWKS URI is forwarded to JWTTokenVerifier."""
         with patch("ships_mcp_auth.JWTTokenVerifier") as MockVerifier:
             MockVerifier.return_value = MagicMock()
-            _run_auth_main([
-                "--transport", "streamable-http",
-                "--auth-jwks-uri", "https://my-idp.example.com/keys",
-                "--auth-resource-url", "http://ships:8000",
-            ])
+            _run_auth_main(
+                [
+                    "--transport",
+                    "streamable-http",
+                    "--auth-jwks-uri",
+                    "https://my-idp.example.com/keys",
+                    "--auth-resource-url",
+                    "http://ships:8000",
+                ]
+            )
         call_kwargs = MockVerifier.call_args
         assert call_kwargs.kwargs.get("jwks_uri") == "https://my-idp.example.com/keys"
 
     def test_no_auth_leaves_token_verifier_none(self):
         """Without --auth-jwks-uri, mcp._token_verifier remains None."""
         import ships_mcp as m
+
         _run_auth_main(["--transport", "streamable-http"])
         assert m.mcp._token_verifier is None
 
@@ -525,9 +563,14 @@ class TestAuthCLIFlags:
         """--auth-jwks-uri with sse transport is valid."""
         with patch("ships_mcp_auth.JWTTokenVerifier") as MockVerifier:
             MockVerifier.return_value = MagicMock()
-            _run_auth_main([
-                "--transport", "sse",
-                "--auth-jwks-uri", "https://example.com/jwks",
-                "--auth-resource-url", "http://ships-mcp.internal:8000",
-            ])
+            _run_auth_main(
+                [
+                    "--transport",
+                    "sse",
+                    "--auth-jwks-uri",
+                    "https://example.com/jwks",
+                    "--auth-resource-url",
+                    "http://ships-mcp.internal:8000",
+                ]
+            )
         MockVerifier.assert_called_once()

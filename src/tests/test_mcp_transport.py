@@ -54,8 +54,10 @@ class FakeFastMCP:
 
     def tool(self):
         """No-op decorator so @mcp.tool() works at ships_mcp module level."""
+
         def decorator(fn):
             return fn
+
         return decorator
 
     def run(self, transport="stdio"):
@@ -103,6 +105,7 @@ def fresh_ships_mcp():
     _install_fake_mcp()
 
     import ships_mcp  # noqa: F401
+
     yield
 
     # Teardown: drop ships_mcp and restore every mcp.* entry
@@ -121,6 +124,7 @@ def fresh_ships_mcp():
 def _run_main(argv: List[str]) -> None:
     """Invoke ships_mcp.main() with argv, restoring sys.argv after."""
     import ships_mcp as m
+
     old_argv = sys.argv
     try:
         sys.argv = ["ships_mcp"] + argv
@@ -132,12 +136,14 @@ def _run_main(argv: List[str]) -> None:
 def _settings():
     """Return the FakeSettings attached to the current ships_mcp.mcp instance."""
     import ships_mcp as m
+
     return m.mcp.settings
 
 
 def _run_mock():
     """Return the MagicMock tracking mcp.run() calls."""
     import ships_mcp as m
+
     return m.mcp._run
 
 
@@ -254,14 +260,21 @@ class TestSettingsMutation:
 
     def test_combined_http_flags(self):
         """All HTTP flags applied together."""
-        _run_main([
-            "--transport", "streamable-http",
-            "--host", "10.0.0.5",
-            "--port", "7777",
-            "--path", "/ships/mcp",
-            "--stateless",
-            "--log-level", "WARNING",
-        ])
+        _run_main(
+            [
+                "--transport",
+                "streamable-http",
+                "--host",
+                "10.0.0.5",
+                "--port",
+                "7777",
+                "--path",
+                "/ships/mcp",
+                "--stateless",
+                "--log-level",
+                "WARNING",
+            ]
+        )
         s = _settings()
         assert s.host == "10.0.0.5"
         assert s.port == 7777
@@ -292,6 +305,7 @@ class TestStartupBanner:
 
     def test_streamable_http_emits_banner(self, caplog):
         import logging
+
         with caplog.at_level(logging.INFO, logger="ships_mcp"):
             _run_main(["--transport", "streamable-http", "--port", "8888"])
         assert any("streamable-http" in r.message for r in caplog.records)
@@ -299,12 +313,14 @@ class TestStartupBanner:
 
     def test_sse_emits_banner(self, caplog):
         import logging
+
         with caplog.at_level(logging.INFO, logger="ships_mcp"):
             _run_main(["--transport", "sse", "--port", "7070"])
         assert any("sse" in r.message for r in caplog.records)
 
     def test_stdio_emits_no_banner(self, caplog):
         import logging
+
         with caplog.at_level(logging.INFO, logger="ships_mcp"):
             _run_main([])
         assert not any(

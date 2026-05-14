@@ -58,6 +58,21 @@ from td_release_packager.context_artifacts import write_context_artifacts
 
 logger = logging.getLogger(__name__)
 
+CONTEXT_DIR = "context"
+
+
+def _context_file(pkg_dir: str, filename: str) -> str:
+    """Return the canonical package path for a SHIPS JSON metadata file."""
+    context_dir = os.path.join(pkg_dir, CONTEXT_DIR)
+    os.makedirs(context_dir, exist_ok=True)
+    return os.path.join(context_dir, filename)
+
+
+def _context_relpath(filename: str) -> str:
+    """Return the package-relative path for a SHIPS JSON metadata file."""
+    return os.path.join(CONTEXT_DIR, filename).replace(os.sep, "/")
+
+
 # -- Regex for MULTISET injection (duplicated from database_package_deployer --
 # to avoid import dependency at build time)
 
@@ -494,7 +509,7 @@ def _build_package_impl(
     trust_report = compute_trust_report(config.source_dir, pkg_dir)
     manifest.trust = trust_report.to_dict()
 
-    manifest_path = os.path.join(pkg_dir, "ships.build.json")
+    manifest_path = _context_file(pkg_dir, "ships.build.json")
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest.__dict__, f, indent=2, ensure_ascii=False)
 
@@ -514,7 +529,7 @@ def _build_package_impl(
     # the DBA exactly where in the pipeline each filename was
     # rewritten — critical for diagnosing mapping bugs that only
     # surface at deploy time.
-    provenance_path = os.path.join(pkg_dir, "ships.provenance.json")
+    provenance_path = _context_file(pkg_dir, "ships.provenance.json")
     provenance_doc.write(provenance_path)
     logger.info(
         "Provenance document (v%d): %d entries → %s",
@@ -814,7 +829,7 @@ def _split_into_paired_packages(
         (pkg_dir, manifest),
         (prereqs_pkg_dir, prereqs_manifest),
     ):
-        manifest_path = os.path.join(target_pkg_dir, "ships.build.json")
+        manifest_path = _context_file(target_pkg_dir, "ships.build.json")
         with open(manifest_path, "w", encoding="utf-8") as f:
             json.dump(target_manifest.__dict__, f, indent=2, ensure_ascii=False)
         write_context_artifacts(target_pkg_dir, target_manifest)
@@ -1629,7 +1644,7 @@ def main():
     # label and per-signal status before any database connection is
     # opened.  A BLOCKED label means the package should not be
     # deployed without investigating and resolving the blocking signals.
-    _build_json = os.path.join(SCRIPT_DIR, "ships.build.json")
+    _build_json = os.path.join(SCRIPT_DIR, "context", "ships.build.json")
     if os.path.exists(_build_json):
         with open(_build_json, encoding="utf-8") as _f:
             _bdata = json.load(_f)
@@ -1696,7 +1711,7 @@ def main():
     #     This ensures parent databases physically exist when EXPLAIN
     #     validates the main package's DDL (fixes issue #53 Option 2).
     #
-    build_json_path = os.path.join(SCRIPT_DIR, "ships.build.json")
+    build_json_path = os.path.join(SCRIPT_DIR, "context", "ships.build.json")
     requires = []
     if os.path.exists(build_json_path):
         with open(build_json_path, encoding="utf-8") as _f:
@@ -1927,7 +1942,7 @@ def _verify_integrity(script_dir, logger, skip=False):
     Returns the package_hash string so callers can embed it in the
     query band.  Returns 'SKIPPED' when --skip-integrity-check is set.
     """
-    integrity_file = os.path.join(script_dir, "ships.integrity.json")
+    integrity_file = os.path.join(script_dir, "context", "ships.integrity.json")
 
     if skip:
         logger.warning("Integrity check SKIPPED (--skip-integrity-check).")
@@ -2434,7 +2449,7 @@ def _generate_integrity_file(pkg_dir: str) -> str:
         "files": file_hashes,
     }
 
-    out_path = os.path.join(pkg_dir, "ships.integrity.json")
+    out_path = _context_file(pkg_dir, "ships.integrity.json")
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(integrity, f, indent=2, ensure_ascii=False)
 

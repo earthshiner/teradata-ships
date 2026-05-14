@@ -214,7 +214,9 @@ def _load_build_extensions(package_dir: str) -> Optional[list]:
         if isinstance(exts, list) and all(isinstance(e, str) for e in exts):
             return exts
     except Exception:  # noqa: BLE001
-        logger.debug("deployer: could not read discovery.extensions from ships.build.json")
+        logger.debug(
+            "deployer: could not read discovery.extensions from ships.build.json"
+        )
     return None
 
 

@@ -51,6 +51,7 @@ def _jwt():
     """Lazily import PyJWT."""
     try:
         import jwt as _jwt_mod
+
         return _jwt_mod
     except ImportError as exc:  # pragma: no cover
         raise ImportError(
@@ -63,11 +64,11 @@ def _httpx():
     """Lazily import httpx."""
     try:
         import httpx as _httpx_mod
+
         return _httpx_mod
     except ImportError as exc:  # pragma: no cover
         raise ImportError(
-            "httpx is required for JWKS fetching. "
-            "Install it with: pip install httpx"
+            "httpx is required for JWKS fetching. Install it with: pip install httpx"
         ) from exc
 
 
@@ -106,7 +107,9 @@ class JWKSCache:
 
     def _is_stale(self) -> bool:
         """Return True if the cache is empty or past its TTL."""
-        return not self._keys or (time.monotonic() - self._fetched_at) > self._ttl_seconds
+        return (
+            not self._keys or (time.monotonic() - self._fetched_at) > self._ttl_seconds
+        )
 
     async def _fetch(self) -> None:
         """Fetch the JWKS endpoint and update the key cache."""
