@@ -15,7 +15,6 @@ WARNING rule.
 from __future__ import annotations
 
 
-
 from td_release_packager.validate import (
     _check_zero_tokens,
     validate_directory,

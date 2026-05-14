@@ -151,7 +151,9 @@ def test_file_sink_appends(tmp_path, monkeypatch, capsys):
     emit_audit_event(pkg, "SUCCESS", 5, 0, 3.0, sink_uri=sink)
     emit_audit_event(pkg, "FAILURE", 0, 2, 1.5, sink_uri=sink)
 
-    lines = [line for line in audit_file.read_text(encoding="utf-8").splitlines() if line]
+    lines = [
+        line for line in audit_file.read_text(encoding="utf-8").splitlines() if line
+    ]
     assert len(lines) == 2
     assert json.loads(lines[1])["outcome"] == "FAILURE"
 

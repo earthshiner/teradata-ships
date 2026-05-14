@@ -167,7 +167,9 @@ def _read_build_meta(package_dir: str) -> dict:
             if isinstance(data.get(key), str):
                 defaults[key] = data[key]
     except Exception:  # noqa: BLE001
-        logger.debug("ships_lineage: could not read ships.build.json at %s", package_dir)
+        logger.debug(
+            "ships_lineage: could not read ships.build.json at %s", package_dir
+        )
     return defaults
 
 

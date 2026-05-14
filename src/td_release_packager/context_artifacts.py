@@ -431,11 +431,15 @@ def _build_handoff_document(
         "Capture deployment logs and post-deploy evidence.",
     ]
     if governance["require_change_ref"]:
-        required_actions.insert(2, "Confirm a valid change_ref is present before deployment.")
+        required_actions.insert(
+            2, "Confirm a valid change_ref is present before deployment."
+        )
     if governance["require_signature"] or governance["require_asymmetric_signature"]:
         required_actions.insert(2, "Verify package signature before deployment.")
     if governance["require_approvals"] > 1:
-        required_actions.insert(2, "Obtain the required four-eyes approval before deployment.")
+        required_actions.insert(
+            2, "Obtain the required four-eyes approval before deployment."
+        )
     if governance["require_tls"]:
         required_actions.insert(2, "Use a TLS/SSL-protected Teradata connection.")
 

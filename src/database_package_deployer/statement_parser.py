@@ -249,7 +249,9 @@ _DML_RE = re.compile(
 _FOREIGN_KEY_RE = re.compile(
     r"""
     ALTER\s+TABLE\s+
-    """ + _QNAME + r"""
+    """
+    + _QNAME
+    + r"""
     \s+ADD\s+FOREIGN\s+KEY\b
     """,
     re.IGNORECASE | re.VERBOSE,

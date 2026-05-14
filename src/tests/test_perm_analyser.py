@@ -51,6 +51,19 @@ def _write(tmp_path, rel_path: str, content: str) -> str:
     return str(target)
 
 
+# ---------------------------------------------------------------------------
+# Helpers for building temporary payload directories
+# ---------------------------------------------------------------------------
+
+
+def _write(tmp_path, rel_path: str, content: str) -> str:
+    """Write *content* to *tmp_path / rel_path*, creating parents as needed."""
+    target = tmp_path / rel_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(textwrap.dedent(content), encoding="utf-8")
+    return str(target)
+
+
 # ===========================================================================
 # _parse_perm_bytes
 # ===========================================================================
@@ -69,24 +82,24 @@ class TestParsePermanentBytes:
 
     def test_megabytes(self):
         """M suffix multiplies by 1024^2."""
-        assert _parse_perm_bytes("500", "M") == 500 * 1024 ** 2
+        assert _parse_perm_bytes("500", "M") == 500 * 1024**2
 
     def test_gigabytes(self):
         """G suffix multiplies by 1024^3."""
-        assert _parse_perm_bytes("2", "G") == 2 * 1024 ** 3
+        assert _parse_perm_bytes("2", "G") == 2 * 1024**3
 
     def test_terabytes(self):
         """T suffix multiplies by 1024^4."""
-        assert _parse_perm_bytes("1", "T") == 1024 ** 4
+        assert _parse_perm_bytes("1", "T") == 1024**4
 
     def test_lowercase_suffix(self):
         """Suffix matching is case-insensitive."""
-        assert _parse_perm_bytes("4", "g") == 4 * 1024 ** 3
+        assert _parse_perm_bytes("4", "g") == 4 * 1024**3
 
     def test_decimal_megabytes(self):
         """Decimal values are supported (rounded to int)."""
         result = _parse_perm_bytes("1.5", "M")
-        assert result == int(1.5 * 1024 ** 2)
+        assert result == int(1.5 * 1024**2)
 
 
 # ===========================================================================
@@ -113,7 +126,9 @@ class TestStripComments:
 
     def test_multiline_block_comment(self):
         """Multi-line block comments are fully removed."""
-        content = "/*\n  Description of the database\n*/\nCREATE DATABASE Foo PERM = 300;"
+        content = (
+            "/*\n  Description of the database\n*/\nCREATE DATABASE Foo PERM = 300;"
+        )
         stripped = _strip_comments(content)
         assert "Description" not in stripped
         assert "PERM = 300" in stripped
@@ -149,7 +164,7 @@ class TestExtractPermDeclarations:
         decls = _extract_perm_declarations("/some/path/MyUser.usr", content)
         assert len(decls) == 1
         assert decls[0].container_name == "MyUser"
-        assert decls[0].perm_bytes == 500 * 1024 ** 2
+        assert decls[0].perm_bytes == 500 * 1024**2
         assert decls[0].is_modify is False
 
     def test_modify_database_perm(self):
@@ -158,7 +173,7 @@ class TestExtractPermDeclarations:
         decls = _extract_perm_declarations("/some/path/MyDb.db", content)
         assert len(decls) == 1
         assert decls[0].is_modify is True
-        assert decls[0].perm_bytes == 2 * 1024 ** 3
+        assert decls[0].perm_bytes == 2 * 1024**3
 
     def test_no_perm_clause(self):
         """Files without a PERM clause return an empty list."""
@@ -183,7 +198,7 @@ class TestExtractPermDeclarations:
         decls = _extract_perm_declarations("/some/path/SpaceDb.db", content)
         # The M suffix should be parsed from the regex
         assert len(decls) == 1
-        assert decls[0].perm_bytes == 256 * 1024 ** 2
+        assert decls[0].perm_bytes == 256 * 1024**2
 
 
 # ===========================================================================
@@ -230,10 +245,10 @@ class TestFormatBytes:
         assert _format_bytes(2048) == "2.0 KB"
 
     def test_megabytes(self):
-        assert _format_bytes(5 * 1024 ** 2) == "5.0 MB"
+        assert _format_bytes(5 * 1024**2) == "5.0 MB"
 
     def test_gigabytes(self):
-        assert _format_bytes(3 * 1024 ** 3) == "3.0 GB"
+        assert _format_bytes(3 * 1024**3) == "3.0 GB"
 
 
 # ===========================================================================
@@ -253,10 +268,16 @@ class TestAnalysePermSpace:
     def test_ok_sufficient_perm(self, tmp_path):
         """Status is OK when declared PERM exceeds estimated floor by >20%."""
         # 500 MB PERM, one table (512 KB floor) → well above threshold
-        _write(tmp_path, "MyDb/pre-requisites/databases/MyDb.db",
-               "CREATE DATABASE MyDb AS PERM = 500M;")
-        _write(tmp_path, "MyDb/DDL/tables/Customers.tbl",
-               "CREATE MULTISET TABLE MyDb.Customers, NO FALLBACK (Id INTEGER);")
+        _write(
+            tmp_path,
+            "MyDb/pre-requisites/databases/MyDb.db",
+            "CREATE DATABASE MyDb AS PERM = 500M;",
+        )
+        _write(
+            tmp_path,
+            "MyDb/DDL/tables/Customers.tbl",
+            "CREATE MULTISET TABLE MyDb.Customers, NO FALLBACK (Id INTEGER);",
+        )
 
         result = analyse_perm_space(str(tmp_path))
         finding = next(f for f in result.findings if f.database_name == "MyDb")
@@ -267,10 +288,16 @@ class TestAnalysePermSpace:
     def test_insufficient_perm(self, tmp_path):
         """Status is INSUFFICIENT when estimated floor exceeds declared PERM."""
         # 100 KB PERM, one table (512 KB floor) → insufficient
-        _write(tmp_path, "SmallDb/pre-requisites/databases/SmallDb.db",
-               "CREATE DATABASE SmallDb AS PERM = 100K;")
-        _write(tmp_path, "SmallDb/DDL/tables/Orders.tbl",
-               "CREATE MULTISET TABLE SmallDb.Orders, NO FALLBACK (Id INTEGER);")
+        _write(
+            tmp_path,
+            "SmallDb/pre-requisites/databases/SmallDb.db",
+            "CREATE DATABASE SmallDb AS PERM = 100K;",
+        )
+        _write(
+            tmp_path,
+            "SmallDb/DDL/tables/Orders.tbl",
+            "CREATE MULTISET TABLE SmallDb.Orders, NO FALLBACK (Id INTEGER);",
+        )
 
         result = analyse_perm_space(str(tmp_path))
         finding = next(f for f in result.findings if f.database_name == "SmallDb")
@@ -280,10 +307,16 @@ class TestAnalysePermSpace:
     def test_warning_headroom_below_20pct(self, tmp_path):
         """Status is WARNING when headroom is below 20% of declared PERM."""
         # 600 KB PERM, one table (512 KB floor) → 88 KB headroom ≈ 14.6%
-        _write(tmp_path, "TightDb/pre-requisites/databases/TightDb.db",
-               "CREATE DATABASE TightDb AS PERM = 600K;")
-        _write(tmp_path, "TightDb/DDL/tables/Products.tbl",
-               "CREATE MULTISET TABLE TightDb.Products, NO FALLBACK (Id INTEGER);")
+        _write(
+            tmp_path,
+            "TightDb/pre-requisites/databases/TightDb.db",
+            "CREATE DATABASE TightDb AS PERM = 600K;",
+        )
+        _write(
+            tmp_path,
+            "TightDb/DDL/tables/Products.tbl",
+            "CREATE MULTISET TABLE TightDb.Products, NO FALLBACK (Id INTEGER);",
+        )
 
         result = analyse_perm_space(str(tmp_path))
         finding = next(f for f in result.findings if f.database_name == "TightDb")
@@ -292,8 +325,11 @@ class TestAnalysePermSpace:
     def test_unknown_no_create_in_package(self, tmp_path):
         """Status is UNKNOWN when objects exist but no CREATE DATABASE is in the package."""
         # No .db file — database is assumed to already exist on the target
-        _write(tmp_path, "ExistingDb/DDL/tables/Widget.tbl",
-               "CREATE MULTISET TABLE ExistingDb.Widget, NO FALLBACK (Id INTEGER);")
+        _write(
+            tmp_path,
+            "ExistingDb/DDL/tables/Widget.tbl",
+            "CREATE MULTISET TABLE ExistingDb.Widget, NO FALLBACK (Id INTEGER);",
+        )
 
         result = analyse_perm_space(str(tmp_path))
         finding = next(f for f in result.findings if f.database_name == "ExistingDb")
@@ -303,23 +339,35 @@ class TestAnalysePermSpace:
     def test_modify_updates_effective_perm(self, tmp_path):
         """A MODIFY DATABASE statement changes the effective PERM."""
         # CREATE 100M, MODIFY to 500M → effective should be 500M
-        _write(tmp_path, "FlexDb/pre-requisites/databases/FlexDb.db",
-               "CREATE DATABASE FlexDb AS PERM = 100M;\nMODIFY DATABASE FlexDb AS PERM = 500M;")
-        _write(tmp_path, "FlexDb/DDL/tables/Logs.tbl",
-               "CREATE MULTISET TABLE FlexDb.Logs, NO FALLBACK (Id INTEGER);")
+        _write(
+            tmp_path,
+            "FlexDb/pre-requisites/databases/FlexDb.db",
+            "CREATE DATABASE FlexDb AS PERM = 100M;\nMODIFY DATABASE FlexDb AS PERM = 500M;",
+        )
+        _write(
+            tmp_path,
+            "FlexDb/DDL/tables/Logs.tbl",
+            "CREATE MULTISET TABLE FlexDb.Logs, NO FALLBACK (Id INTEGER);",
+        )
 
         result = analyse_perm_space(str(tmp_path))
         finding = next(f for f in result.findings if f.database_name == "FlexDb")
-        assert finding.effective_perm == 500 * 1024 ** 2
+        assert finding.effective_perm == 500 * 1024**2
         assert finding.status == "OK"
 
     def test_no_space_consuming_objects(self, tmp_path):
         """A database with only views/macros has OK status and zero floor."""
-        _write(tmp_path, "MetaDb/pre-requisites/databases/MetaDb.db",
-               "CREATE DATABASE MetaDb AS PERM = 10M;")
+        _write(
+            tmp_path,
+            "MetaDb/pre-requisites/databases/MetaDb.db",
+            "CREATE DATABASE MetaDb AS PERM = 10M;",
+        )
         # Only a view — not space-consuming
-        _write(tmp_path, "MetaDb/DDL/views/SummaryView.viw",
-               "REPLACE VIEW MetaDb.SummaryView AS SELECT 1 AS Col1;")
+        _write(
+            tmp_path,
+            "MetaDb/DDL/views/SummaryView.viw",
+            "REPLACE VIEW MetaDb.SummaryView AS SELECT 1 AS Col1;",
+        )
 
         result = analyse_perm_space(str(tmp_path))
         finding = next(f for f in result.findings if f.database_name == "MetaDb")
@@ -328,10 +376,16 @@ class TestAnalysePermSpace:
 
     def test_procedure_counted_as_space_consuming(self, tmp_path):
         """Stored procedures (.spl) are counted and add to the estimated floor."""
-        _write(tmp_path, "ProcDb/pre-requisites/databases/ProcDb.db",
-               "CREATE DATABASE ProcDb AS PERM = 50M;")
-        _write(tmp_path, "ProcDb/DDL/procedures/MyProc.spl",
-               "REPLACE PROCEDURE ProcDb.MyProc () BEGIN END;")
+        _write(
+            tmp_path,
+            "ProcDb/pre-requisites/databases/ProcDb.db",
+            "CREATE DATABASE ProcDb AS PERM = 50M;",
+        )
+        _write(
+            tmp_path,
+            "ProcDb/DDL/procedures/MyProc.spl",
+            "REPLACE PROCEDURE ProcDb.MyProc () BEGIN END;",
+        )
 
         result = analyse_perm_space(str(tmp_path))
         finding = next(f for f in result.findings if f.database_name == "ProcDb")
@@ -343,8 +397,11 @@ class TestAnalysePermSpace:
         _write(tmp_path, "MultiDb/pre-requisites/databases/MultiDb.db",
                "CREATE DATABASE MultiDb AS PERM = 100M;")
         for i in range(3):
-            _write(tmp_path, f"MultiDb/DDL/tables/Table{i}.tbl",
-                   f"CREATE MULTISET TABLE MultiDb.Table{i}, NO FALLBACK (Id INTEGER);")
+            _write(
+                tmp_path,
+                f"MultiDb/DDL/tables/Table{i}.tbl",
+                f"CREATE MULTISET TABLE MultiDb.Table{i}, NO FALLBACK (Id INTEGER);",
+            )
 
         result = analyse_perm_space(str(tmp_path))
         finding = next(f for f in result.findings if f.database_name == "MultiDb")
@@ -354,24 +411,37 @@ class TestAnalysePermSpace:
     def test_perm_comment_not_extracted(self, tmp_path):
         """PERM values inside comments are not parsed as live declarations."""
         # The comment contains PERM = 9999G — should not affect declared_perm
-        _write(tmp_path, "CommentDb/pre-requisites/databases/CommentDb.db",
-               "-- PERM = 9999G  (old value, do not use)\n"
-               "CREATE DATABASE CommentDb AS PERM = 10M;")
-        _write(tmp_path, "CommentDb/DDL/tables/T.tbl",
-               "CREATE MULTISET TABLE CommentDb.T, NO FALLBACK (Id INTEGER);")
+        _write(
+            tmp_path,
+            "CommentDb/pre-requisites/databases/CommentDb.db",
+            "-- PERM = 9999G  (old value, do not use)\n"
+            "CREATE DATABASE CommentDb AS PERM = 10M;",
+        )
+        _write(
+            tmp_path,
+            "CommentDb/DDL/tables/T.tbl",
+            "CREATE MULTISET TABLE CommentDb.T, NO FALLBACK (Id INTEGER);",
+        )
 
         result = analyse_perm_space(str(tmp_path))
         finding = next(f for f in result.findings if f.database_name == "CommentDb")
         # Effective PERM should be 10M, not 9999G
-        assert finding.declared_perm == 10 * 1024 ** 2
+        assert finding.declared_perm == 10 * 1024**2
 
     def test_result_to_dict_serialisable(self, tmp_path):
         """PermAnalysisResult.to_dict() produces a JSON-serialisable structure."""
         import json
-        _write(tmp_path, "SerialDb/pre-requisites/databases/SerialDb.db",
-               "CREATE DATABASE SerialDb AS PERM = 50M;")
-        _write(tmp_path, "SerialDb/DDL/tables/T.tbl",
-               "CREATE MULTISET TABLE SerialDb.T, NO FALLBACK (Id INTEGER);")
+
+        _write(
+            tmp_path,
+            "SerialDb/pre-requisites/databases/SerialDb.db",
+            "CREATE DATABASE SerialDb AS PERM = 50M;",
+        )
+        _write(
+            tmp_path,
+            "SerialDb/DDL/tables/T.tbl",
+            "CREATE MULTISET TABLE SerialDb.T, NO FALLBACK (Id INTEGER);",
+        )
 
         result = analyse_perm_space(str(tmp_path))
         # Must not raise
@@ -382,11 +452,17 @@ class TestAnalysePermSpace:
 
     def test_directory_inference_when_no_qualified_name(self, tmp_path):
         """Database name is inferred from directory when DDL has no qualified name."""
-        _write(tmp_path, "InferDb/pre-requisites/databases/InferDb.db",
-               "CREATE DATABASE InferDb AS PERM = 50M;")
+        _write(
+            tmp_path,
+            "InferDb/pre-requisites/databases/InferDb.db",
+            "CREATE DATABASE InferDb AS PERM = 50M;",
+        )
         # Table DDL uses unqualified name — database must be inferred from path
-        _write(tmp_path, "InferDb/DDL/tables/Unqualified.tbl",
-               "CREATE MULTISET TABLE Unqualified, NO FALLBACK (Id INTEGER);")
+        _write(
+            tmp_path,
+            "InferDb/DDL/tables/Unqualified.tbl",
+            "CREATE MULTISET TABLE Unqualified, NO FALLBACK (Id INTEGER);",
+        )
 
         result = analyse_perm_space(str(tmp_path))
         # The object should still be attributed to InferDb via directory inference

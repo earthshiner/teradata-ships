@@ -109,7 +109,9 @@ def _make_project(tmp_path: Path, archives: list[tuple[str, dict]]) -> Path:
 class TestReadBuildJsonFromZip:
     def test_reads_build_json(self, tmp_path):
         bd = _build_json()
-        archive = _make_zip(tmp_path, "pkg.zip", {"pkg/ships.build.json": json.dumps(bd)})
+        archive = _make_zip(
+            tmp_path, "pkg.zip", {"pkg/ships.build.json": json.dumps(bd)}
+        )
         result = read_build_json_from_zip(archive)
         assert result is not None
         assert result["package_name"] == "OMR"

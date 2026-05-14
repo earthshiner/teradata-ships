@@ -1292,7 +1292,7 @@ def _collect_ddl_files(payload_dir: str) -> List[str]:
         # DML
         ".dml",  # DML scripts
         # FK alters
-        ".fk",   # ALTER TABLE ... ADD FOREIGN KEY
+        ".fk",  # ALTER TABLE ... ADD FOREIGN KEY
         # Generic
         ".sql",
         ".ddl",
