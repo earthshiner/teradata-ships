@@ -20,7 +20,7 @@ Here is the honest before-and-after.
 | Email scripts to the DBA and hope for the best | Hand off a package with a trust score — the DBA knows exactly what they're deploying |
 | "Hardcode DEV database names and manually fix for PRD" | Write `{{MY_DATABASE}}` once; the package resolves it per environment |
 | One giant `create_everything.sql` | One file per object — SHIPS enforces it and names the file for you |
-| No idea what deployed where | `decisions.json` and `BUILD.json` tell you what ran, when, from what source |
+| No idea what deployed where | `decisions.json` and `context/ships.build.json` tell you what ran, when, from what source |
 | "The DBA handles deployment" | You still just write SQL — SHIPS is what turns your SQL into the package the DBA deploys |
 | Fix forward — patch live DDL | Fix in source, re-harvest, re-package — the audit trail is intact |
 
@@ -108,7 +108,7 @@ The DBA does not get your SQL files. They get a **package** — a `.zip` that co
 - A deployment manifest listing every object, its type, and its deployment strategy
 - A SHA-256 fingerprint that proves the package was not tampered with
 - A `deploy.py` script — the DBA runs `python deploy.py --host myserver --user dbc`
-- Three agent-facing context artefacts (`ships.context.json`, `ships.manifest.json`, `ships.handoff.json`) for autonomous agent and CI/CD handoff
+- Three agent-facing context artefacts (`context/ships.context.json`, `context/ships.manifest.json`, `context/ships.handoff.json`) for autonomous agent and CI/CD handoff
 
 You never touch the deployment. You produce the package; the DBA runs it.
 
@@ -649,9 +649,9 @@ Press Enter or `y` to continue, `n` to abort, `q` to quit cleanly. Suppressed au
 
 ## Package Trust Report
 
-Every package built with `ships package` or `ships process` (with packaging enabled) carries a **Trust Report** in `BUILD.json`. It tells you — and any agent or CI pipeline — whether the package is safe to promote.
+Every package built with `ships package` or `ships process` (with packaging enabled) carries a **Trust Report** in `context/ships.build.json`. It tells you — and any agent or CI pipeline — whether the package is safe to promote.
 
-The trust label is also surfaced in the agent-facing context artefacts (`ships.context.json`, `ships.manifest.json`, `ships.handoff.json`) that are written alongside `BUILD.json` into every package. Agents read the context artefacts first; the full trust detail is in `BUILD.json`.
+The trust label is also surfaced in the agent-facing context artefacts (`context/ships.context.json`, `context/ships.manifest.json`, `context/ships.handoff.json`) that are written alongside `context/ships.build.json` into every package. Agents read the context artefacts first; the full trust detail is in `context/ships.build.json`.
 
 ### Labels
 
@@ -670,7 +670,7 @@ The label is printed in the `ships package` banner and again in `deploy.py` befo
 | `inspect_token_format` | A `{{TOKEN}}` marker is malformed |
 | `inspect_lint` | An inspect ERROR-severity lint violation exists |
 | `inspect_grants` | Grant drift is detected at ERROR level |
-| `provenance_complete` | `_provenance.json` is absent from the payload |
+| `provenance_complete` | `context/ships.provenance.json` is absent from the payload |
 
 ### What to do when BLOCKED
 
@@ -823,7 +823,7 @@ python -m td_release_packager package \
 | `--author` | No | Author metadata |
 | `--description` | No | Release description |
 | `--commit` | No | Git commit hash for traceability. Set automatically when using `--source-github`. |
-| `--allow-dirty` | No | Build from a working tree with uncommitted changes. Stamps `source_dirty=true` in BUILD.json; Trust Report shows **READY-WITH-CAVEATS**. For development use only. |
+| `--allow-dirty` | No | Build from a working tree with uncommitted changes. Stamps `source_dirty=true` in context/ships.build.json; Trust Report shows **READY-WITH-CAVEATS**. For development use only. |
 | `--source-github OWNER/REPO` | No | Fetch DDL source directly from a GitHub repository. Mutually exclusive with `--source`. |
 | `--source-ref REF` | No | Branch, tag, or commit SHA to fetch (default: `main`). Used with `--source-github`. |
 | `--github-token TOKEN` | No | GitHub PAT for private repositories. Falls back to `GITHUB_TOKEN` env var. Public repositories work without a token. |
@@ -1139,7 +1139,7 @@ discovery:
     - .bteq
 ```
 
-This extends — not replaces — the built-in set. The resolved extension list is stamped into `BUILD.json` at package time under `discovery.extensions`, so the embedded deployer honours the same set at deploy time without any manual synchronisation.
+This extends — not replaces — the built-in set. The resolved extension list is stamped into `context/ships.build.json` at package time under `discovery.extensions`, so the embedded deployer honours the same set at deploy time without any manual synchronisation.
 
 ---
 

@@ -56,6 +56,16 @@ from database_package_deployer.provenance import (
 )
 from td_release_packager.context_artifacts import write_context_artifacts
 
+
+CONTEXT_DIR = "context"
+
+
+def _context_file(pkg_dir: str, filename: str) -> str:
+    """Return the canonical package path for a SHIPS JSON metadata file."""
+    context_dir = os.path.join(pkg_dir, CONTEXT_DIR)
+    os.makedirs(context_dir, exist_ok=True)
+    return os.path.join(context_dir, filename)
+
 logger = logging.getLogger(__name__)
 
 CONTEXT_DIR = "context"
@@ -1950,7 +1960,7 @@ def _verify_integrity(script_dir, logger, skip=False):
 
     if not os.path.exists(integrity_file):
         logger.error(
-            "INTEGRITY CHECK FAILED: ships.integrity.json not found — "
+            "INTEGRITY CHECK FAILED: context/ships.integrity.json not found — "
             "package may be incomplete or corrupted. "
             "Use --skip-integrity-check to override (development only)."
         )
@@ -2205,9 +2215,9 @@ def _generate_readme(pkg_dir: str, manifest: BuildManifest):
 
   Agents, CI/CD jobs, MCP clients and operators should read:
 
-    ships.index.json
+    context/ships.index.json
 
-  ships.index.json is the canonical package entrypoint. It lists
+  context/ships.index.json is the canonical package entrypoint. It lists
   the SHIPS metadata files, describes each file, gives the recommended
   read order, and carries agent instructions for safe downstream action.
 
@@ -2387,7 +2397,7 @@ def _generate_integrity_file(pkg_dir: str) -> str:
     Walks ``payload/`` and ``lib/`` recursively (sorted), hashes each file,
     then derives a single ``package_hash`` as SHA-256 of the sorted
     ``"rel/path:filehash\\n"`` concatenation.  Writes the result to
-    ``ships.integrity.json`` in the package root so the embedded
+    ``context/ships.integrity.json`` in the package so the embedded
     ``deploy.py`` can verify the package has not been tampered with
     before any database connection is opened.
 

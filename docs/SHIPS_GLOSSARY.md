@@ -16,7 +16,7 @@ SHIPS is a structured packaging, validation, deployment, evidence, and context-e
 | Package builder | The SHIPS component that resolves tokens, validates package inputs, copies payload, embeds the deployer, emits manifests/reports/context, and archives the result. |
 | Package deployer | The embedded or standalone deployment runtime that reads package metadata and executes package content against a Teradata target. |
 | Deployment contract | The machine-readable promises a package makes about what it contains, what it depends on, how it should be deployed, and what controls must be satisfied. |
-| Context contract | The durable context exchanged between actors and agents, represented by files such as `ships.context.json`, `ships.manifest.json`, and `ships.handoff.json`. |
+| Context contract | The durable context exchanged between actors and agents, represented by files such as `context/ships.context.json`, `context/ships.manifest.json`, and `context/ships.handoff.json`. |
 
 ## Pipeline terms
 
@@ -39,12 +39,12 @@ SHIPS is a structured packaging, validation, deployment, evidence, and context-e
 |---|---|
 | `ships.yaml` | Project-level SHIPS configuration, including environments, paths, stage policy, and deployment controls. |
 | `ships.decisions.json` | Append-only stage/run audit trail. It records what happened, which options were resolved, what decisions were made, and what issues were encountered. |
-| `ships.build.json` | Authoritative package build manifest embedded in the package. It contains technical package metadata, resolved token values, inventory, trust flags, and deployment controls. |
-| `ships.context.json` | Agent-facing durable workflow context. It explains current state, objective, constraints, source-of-truth pointers, trust state, governance controls, and evidence references. |
-| `ships.manifest.json` | Agent-safe package inventory and dependency contract. It summarises the package without duplicating sensitive or high-volume details. Token values are deliberately redacted here and referenced through `ships.build.json`. |
-| `ships.handoff.json` | Next-actor handoff instructions for a human, deployment agent, CI/CD job, or MCP tool. It lists required actions, preconditions, blocking conditions, and evidence to return. |
-| `ships.provenance.json` | File-level traceability from source to eponymous name, token-resolved name, and packaged file. |
-| `ships.integrity.json` | Package fingerprint manifest used to verify package contents have not changed unexpectedly. |
+| `context/ships.build.json` | Authoritative package build manifest embedded in the package. It contains technical package metadata, resolved token values, inventory, trust flags, and deployment controls. |
+| `context/ships.context.json` | Agent-facing durable workflow context. It explains current state, objective, constraints, source-of-truth pointers, trust state, governance controls, and evidence references. |
+| `context/ships.manifest.json` | Agent-safe package inventory and dependency contract. It summarises the package without duplicating sensitive or high-volume details. Token values are deliberately redacted here and referenced through `context/ships.build.json`. |
+| `context/ships.handoff.json` | Next-actor handoff instructions for a human, deployment agent, CI/CD job, or MCP tool. It lists required actions, preconditions, blocking conditions, and evidence to return. |
+| `context/ships.provenance.json` | File-level traceability from source to eponymous name, token-resolved name, and packaged file. |
+| `context/ships.integrity.json` | Package fingerprint manifest used to verify package contents have not changed unexpectedly. |
 | `package_report.html` | Human-readable package report showing inventory, trust information, and deployment guidance. |
 | `README.txt` | Operator-oriented package instructions embedded in the package. |
 | `.build_counter` | Project-local build counter used to allocate incrementing build numbers. |
@@ -128,7 +128,7 @@ SHIPS is a structured packaging, validation, deployment, evidence, and context-e
 
 | Term | Meaning |
 |---|---|
-| `ships.index.json` | Canonical read-first SHIPS package index. Describes each package metadata file, marks required artefacts, provides the recommended read order, and carries standing agent instructions. |
+| `context/ships.index.json` | Canonical read-first SHIPS package index. Describes each package metadata file, marks required artefacts, provides the recommended read order, and carries standing agent instructions. |
 | `ships.decisions.json` | Canonical project-level decision/audit trail. Replaces the older `decisions.json` name and records pipeline stage outcomes, decisions, issue codes, config provenance, and output references. |
-| Context entrypoint | The machine-readable pointer returned by MCP/package tooling that tells a downstream agent to read `ships.index.json` before taking action. |
-| Recommended read order | The ordered list in `ships.index.json` that tells agents and operators how to inspect SHIPS metadata before deployment, approval, modification, or summary. |
+| Context entrypoint | The machine-readable pointer returned by MCP/package tooling that tells a downstream agent to read `context/ships.index.json` before taking action. |
+| Recommended read order | The ordered list in `context/ships.index.json` that tells agents and operators how to inspect SHIPS metadata before deployment, approval, modification, or summary. |

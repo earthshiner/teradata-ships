@@ -441,7 +441,7 @@ def ships_package(
         if companion:
             result["companion_archive"] = companion[0]
             result["companion_context_entrypoint"] = _archive_member_ref(
-                companion[0], "ships.index.json"
+                companion[0], "context/ships.index.json"
             )
         return result
     except Exception as e:
@@ -1055,42 +1055,28 @@ def _ships_context_response(
     package_ref: str, extracted_dir: Optional[str] = None
 ) -> dict:
     """Return the standard SHIPS context handoff fields for tool responses."""
+    context_names = (
+        "context/ships.index.json",
+        "context/ships.handoff.json",
+        "context/ships.context.json",
+        "context/ships.build.json",
+        "context/ships.manifest.json",
+        "context/ships.integrity.json",
+        "context/ships.provenance.json",
+        "context/ships.decisions.json",
+    )
     if extracted_dir:
-        entrypoint = os.path.join(extracted_dir, "ships.index.json")
-        reads = [
-            os.path.join(extracted_dir, name)
-            for name in (
-                "ships.index.json",
-                "ships.handoff.json",
-                "ships.context.json",
-                "ships.build.json",
-                "ships.manifest.json",
-                "ships.integrity.json",
-                "ships.provenance.json",
-                "ships.decisions.json",
-            )
-        ]
+        entrypoint = os.path.join(extracted_dir, "context", "ships.index.json")
+        reads = [os.path.join(extracted_dir, *name.split("/")) for name in context_names]
     else:
-        entrypoint = _archive_member_ref(package_ref, "ships.index.json")
-        reads = [
-            _archive_member_ref(package_ref, name)
-            for name in (
-                "ships.index.json",
-                "ships.handoff.json",
-                "ships.context.json",
-                "ships.build.json",
-                "ships.manifest.json",
-                "ships.integrity.json",
-                "ships.provenance.json",
-                "ships.decisions.json",
-            )
-        ]
+        entrypoint = _archive_member_ref(package_ref, "context/ships.index.json")
+        reads = [_archive_member_ref(package_ref, name) for name in context_names]
         reads = [r for r in reads if r]
     return {
         "package_type": "teradata-ships",
         "context_entrypoint": entrypoint,
         "required_next_reads": reads,
-        "agent_instruction": "Read ships.index.json first, then follow its recommended_read_order before deploying, approving, modifying, or summarising this package.",
+        "agent_instruction": "Read context/ships.index.json first, then follow its recommended_read_order before deploying, approving, modifying, or summarising this package.",
     }
 
 

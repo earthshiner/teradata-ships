@@ -25,7 +25,7 @@ If you're reading the runsheet at [docs/sessions/runsheet-mortgage-ai-data-produ
 | Eponymous renaming | `_extract_qualified_name` in `td_release_packager/ingest.py` extracts `db.object` from CREATE / REPLACE / COMMENT ON / COLLECT STATISTICS / INSERT / UPDATE / DELETE / MERGE / GRANT / REVOKE; the harvester renames to `<db>.<obj>.<ext>` | PRs #61–#65 |
 | Object-type extensions | `_TYPE_TO_EXT` table in `ingest.py` — `.tbl`/`.viw`/`.mcr`/`.prc`/`.spl`/`.fnc`/`.trg`/`.jix`/`.hix`/`.grt`/`.cmt`/`.stt`/`.dml`/`.db`/`.usr`/`.rol`/`.prf`/`.aut`/`.map`/`.sjr`/`.fsv` | scaffolder + classifier |
 | Aggregating types (one file = many statements for one object) | COMMENT / STATISTICS / DML are aggregating types. The harvester appends per-statement; `.cmt` and `.stt` files collect every comment / statistic for a target into one eponymous file | PRs #63, #64, #65 |
-| Manifest as source of truth | `BUILD.json` carries metadata for each placed file; the deployer reads it for ordering and validation | builder + deployer |
+| Manifest as source of truth | `context/ships.build.json` carries metadata for each placed file; the deployer reads it for ordering and validation | builder + deployer |
 
 ## Open follow-ups (issues)
 

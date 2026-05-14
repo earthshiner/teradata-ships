@@ -34,6 +34,8 @@ import hashlib
 import json
 import logging
 import os
+
+from database_package_deployer.package_metadata import package_file
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -884,7 +886,7 @@ def check_package_hash(package_dir: str) -> List[PreflightCheck]:
     Returns:
         List of PreflightCheck results (zero or one entry).
     """
-    build_json = os.path.join(package_dir, "ships.build.json")
+    build_json = package_file(package_dir, "ships.build.json")
     if not os.path.isfile(build_json):
         logger.debug(
             "package_hash: ships.build.json not found in '%s' — skipping check.",
@@ -1017,7 +1019,7 @@ def check_env_lock(package_dir: str, deployed_env: str) -> List[PreflightCheck]:
         logger.debug("env_lock: no --env supplied — skipping environment lock check.")
         return []
 
-    build_json = os.path.join(package_dir, "ships.build.json")
+    build_json = package_file(package_dir, "ships.build.json")
     if not os.path.isfile(build_json):
         logger.debug(
             "env_lock: ships.build.json not found in '%s' — skipping.", package_dir
@@ -1105,7 +1107,7 @@ def check_change_ref_present(package_dir: str) -> List[PreflightCheck]:
     Returns:
         List of PreflightCheck results (zero or one entry).
     """
-    build_json = os.path.join(package_dir, "ships.build.json")
+    build_json = package_file(package_dir, "ships.build.json")
     if not os.path.isfile(build_json):
         logger.debug("change_ref_present: ships.build.json not found — skipping.")
         return []
@@ -1184,7 +1186,7 @@ def check_package_signature(package_dir: str) -> List[PreflightCheck]:
     """
     from database_package_deployer.signing import resolve_signing_key, verify_hmac
 
-    build_json = os.path.join(package_dir, "ships.build.json")
+    build_json = package_file(package_dir, "ships.build.json")
     if not os.path.isfile(build_json):
         return []
 
@@ -1318,7 +1320,7 @@ def check_mpa_approval(
     Returns:
         List of PreflightCheck results (zero or one entry).
     """
-    build_json = os.path.join(package_dir, "ships.build.json")
+    build_json = package_file(package_dir, "ships.build.json")
     if not os.path.isfile(build_json):
         return []
 
@@ -1418,7 +1420,7 @@ def check_package_age(package_dir: str) -> List[PreflightCheck]:
     Returns:
         List of PreflightCheck results (zero or one entry).
     """
-    build_json = os.path.join(package_dir, "ships.build.json")
+    build_json = package_file(package_dir, "ships.build.json")
     if not os.path.isfile(build_json):
         return []
 
@@ -1514,7 +1516,7 @@ def check_tls_connection(
 
     # Read require_tls from ships.build.json
     require_tls = False
-    build_json = os.path.join(package_dir, "ships.build.json")
+    build_json = package_file(package_dir, "ships.build.json")
     if os.path.isfile(build_json):
         try:
             with open(build_json, encoding="utf-8") as fh:
@@ -1595,7 +1597,7 @@ def check_asymmetric_signature(
     Returns:
         List of PreflightCheck results (zero or one entry).
     """
-    build_json = os.path.join(package_dir, "ships.build.json")
+    build_json = package_file(package_dir, "ships.build.json")
     manifest: dict = {}
     if os.path.isfile(build_json):
         try:

@@ -7,8 +7,8 @@ excellent for machines and DBAs, but autonomous agents also need a compact,
 stable context contract that explains what the package is, where it sits in
 the workflow, what evidence exists, and what should happen next.
 
-This module writes the SHIPS agent-context artefacts into the package
-context/ directory:
+This module writes the SHIPS agent-context artefacts into each generated
+package under the canonical ``context/`` directory:
 
     context/ships.index.json      — canonical read-first entrypoint for agents
     context/ships.context.json    — durable workflow context and constraints
@@ -46,7 +46,7 @@ README_FILENAME = "README.txt"
 
 
 def _context_path(filename: str) -> str:
-    """Return the canonical package-relative path for a context artefact."""
+    """Return the package-relative path for a SHIPS context JSON artefact."""
     return f"{CONTEXT_DIR}/{filename}"
 
 
@@ -67,6 +67,7 @@ def write_context_artifacts(
     Returns:
         Mapping of logical artefact filename to filesystem path.
     """
+    os.makedirs(pkg_dir, exist_ok=True)
     context_dir = os.path.join(pkg_dir, CONTEXT_DIR)
     os.makedirs(context_dir, exist_ok=True)
 

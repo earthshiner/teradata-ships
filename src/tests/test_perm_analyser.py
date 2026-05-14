@@ -26,9 +26,6 @@ from __future__ import annotations
 
 import textwrap
 
-# ---------------------------------------------------------------------------
-# Import the module under test
-# ---------------------------------------------------------------------------
 
 from td_release_packager.perm_analyser import (
     _extract_database_from_ddl,
@@ -37,13 +34,21 @@ from td_release_packager.perm_analyser import (
     _parse_perm_bytes,
     analyse_perm_space,
 )
-
-# _strip_comments delegates to sql_text — test comment stripping via
-# _extract_perm_declarations (which calls it internally) rather than
-# calling the private wrapper directly.
 from td_release_packager.sql_text import (
     strip_comments_and_string_literals as _strip_comments,
 )
+
+# ---------------------------------------------------------------------------
+# Helpers for building temporary payload directories
+# ---------------------------------------------------------------------------
+
+
+def _write(tmp_path, rel_path: str, content: str) -> str:
+    """Write *content* to *tmp_path / rel_path*, creating parents as needed."""
+    target = tmp_path / rel_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(textwrap.dedent(content), encoding="utf-8")
+    return str(target)
 
 
 # ---------------------------------------------------------------------------
@@ -389,11 +394,8 @@ class TestAnalysePermSpace:
 
     def test_multiple_tables_accumulate_floor(self, tmp_path):
         """Multiple tables accumulate their individual floors."""
-        _write(
-            tmp_path,
-            "MultiDb/pre-requisites/databases/MultiDb.db",
-            "CREATE DATABASE MultiDb AS PERM = 100M;",
-        )
+        _write(tmp_path, "MultiDb/pre-requisites/databases/MultiDb.db",
+               "CREATE DATABASE MultiDb AS PERM = 100M;")
         for i in range(3):
             _write(
                 tmp_path,

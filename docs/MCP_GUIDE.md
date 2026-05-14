@@ -334,7 +334,7 @@ Build the DDL dependency graph and generate wave ordering (`_waves.txt`).
 
 #### `ships_package`
 
-Build a release package for a target environment. Resolves all `{{TOKEN}}` references, assembles a self-contained archive, and stamps `BUILD.json` with provenance, integrity hash, and Trust Report.
+Build a release package for a target environment. Resolves all `{{TOKEN}}` references, assembles a self-contained archive, and stamps `context/ships.build.json` with provenance, integrity hash, and Trust Report.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -620,7 +620,7 @@ rollback_result = ships_rollback(
 
 ## Trust Report in agentic context
 
-Every `ships_package` call stamps a Trust Report into `BUILD.json`. The `trust_label` field is the primary gate for agent decision-making:
+Every `ships_package` call stamps a Trust Report into `context/ships.build.json`. The `trust_label` field is the primary gate for agent decision-making:
 
 | Label | Meaning | Agent action |
 |---|---|---|

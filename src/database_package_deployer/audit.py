@@ -38,6 +38,8 @@ Audit event schema (minimum fields):
 import json
 import logging
 import os
+
+from database_package_deployer.package_metadata import package_file
 import socket
 import sys
 from datetime import datetime, timezone
@@ -73,7 +75,7 @@ def _resolve_operator() -> str:
 
 def _read_build_json(package_dir: str) -> Dict[str, Any]:
     """Read ships.build.json from package_dir; return empty dict on failure."""
-    path = os.path.join(package_dir, "ships.build.json")
+    path = package_file(package_dir, "ships.build.json")
     if not os.path.isfile(path):
         return {}
     try:
@@ -243,7 +245,7 @@ def emit_audit_event(
 
     if not sink_uri:
         # Try ships.yaml
-        build_json = os.path.join(package_dir, "ships.build.json")
+        build_json = package_file(package_dir, "ships.build.json")
         if os.path.isfile(build_json):
             try:
                 with open(build_json, encoding="utf-8") as fh:
