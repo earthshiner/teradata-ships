@@ -47,7 +47,7 @@ AI agents can independently analyse source assets, construct deployment packages
 
 Packages can be generated directly from source control without requiring a local git clone. SHIPS supports:
 
-- **GitHub repository** — `--source-github owner/repo --source-ref main` downloads the repository tarball via the GitHub REST API, extracts it, and runs the full pipeline. No `git` installation required. The resolved commit SHA is automatically stamped into `BUILD.json`.
+- **GitHub repository** — `--source-github owner/repo --source-ref main` downloads the repository tarball via the GitHub REST API, extracts it, and runs the full pipeline. No `git` installation required. The resolved commit SHA is automatically stamped into `context/ships.build.json`.
 - **Local git archive** — `git archive <ref>` piped into a temp directory, then `ships process --source /tmp/extracted/`. The `ships rollback --to-tag` command uses this internally.
 - **CI/CD checkout** — the repository is already present in the workspace; SHIPS runs on the current directory.
 - **GitHub Enterprise Server** — set `SHIPS_GITHUB_API_URL` to route requests to an enterprise endpoint.
@@ -124,7 +124,7 @@ SHIPS is designed from the ground up to satisfy that obligation, and to do so in
 
 ### Tamper-Evident Packages
 
-Every SHIPS package carries a SHA-256 fingerprint computed over every file in the deployment payload before the package is archived. This fingerprint is stored in `package_integrity.json` inside the package itself.
+Every SHIPS package carries a SHA-256 fingerprint computed over every file in the deployment payload before the package is archived. This fingerprint is stored in `context/ships.integrity.json` inside the package itself.
 
 When the package is deployed — regardless of how long after it was built, and regardless of what transport mechanism carried it — the deployer recomputes the fingerprint and compares it to the stored value. **If any file has been added, removed, or modified, deployment is aborted before any database connection is opened.** No SQL reaches Teradata from a tampered package.
 
@@ -132,7 +132,7 @@ This means:
 - A package cannot be silently modified in transit (across SFTP, shared drives, email, or manual extraction steps)
 - A package cannot be partially applied or selectively tampered with
 - An operator cannot alter a payload file after it has been packaged without breaking the fingerprint
-- Individual file hashes in `package_integrity.json` enable precise forensic identification of which file was changed, not just that *something* changed
+- Individual file hashes in `context/ships.integrity.json` enable precise forensic identification of which file was changed, not just that *something* changed
 
 If the integrity check is bypassed via the `--skip-integrity-check` flag, this is recorded at WARNING level in the deployment log **and** written into the Teradata DBQL query band — it cannot be used silently.
 
@@ -189,7 +189,7 @@ SOX IT General Controls require that changes to systems that process financial d
 
 | SOX Control | SHIPS evidence |
 |---|---|
-| Change is authorised | Package provenance metadata (author, build timestamp, source ref) in `BUILD.json` |
+| Change is authorised | Package provenance metadata (author, build timestamp, source ref) in `context/ships.build.json` |
 | Change is what was approved | SHA-256 fingerprint / asymmetric signature proving the deployed payload matches the approved package |
 | Change is traceable to a specific execution | `PKG_HASH` in every DBQL record permanently associates the executed DDL with the package version |
 
@@ -200,7 +200,7 @@ APRA's operational risk framework (CPS 230) and information security standard (C
 | APRA requirement | SHIPS evidence |
 |---|---|
 | Change management — authorised change only | Trust Score and `--min-trust-score` CI gate enforce quality threshold before any deployment |
-| Audit log — who changed what and when | `BUILD.json` provenance + DBQL query band record |
+| Audit log — who changed what and when | `context/ships.build.json` provenance + DBQL query band record |
 | Integrity — deployed asset matches approved asset | SHA-256 fingerprint blocks deployment of any tampered package |
 | Recovery — ability to restore prior state | Pre-deployment SHOW captures in the rollback directory enable point-in-time reversion |
 

@@ -31,6 +31,8 @@ import glob
 import json
 import logging
 import os
+
+from database_package_deployer.package_metadata import package_file
 import re
 import threading
 from datetime import datetime, timezone
@@ -139,7 +141,7 @@ def _load_baseline_dir(package_dir: str) -> str:
     Returns:
         Baseline directory path string, or ``""`` if absent.
     """
-    build_json = os.path.join(package_dir, "ships.build.json")
+    build_json = package_file(package_dir, "ships.build.json")
     if not os.path.isfile(build_json):
         return ""
     try:
@@ -204,7 +206,7 @@ def _load_build_extensions(package_dir: str) -> Optional[list]:
         Sorted list of normalised extension strings (e.g.
         ``[".bteq", ".sql", ".tbl", ...]``) or ``None``.
     """
-    build_json = os.path.join(package_dir, "ships.build.json")
+    build_json = package_file(package_dir, "ships.build.json")
     if not os.path.isfile(build_json):
         return None
     try:
