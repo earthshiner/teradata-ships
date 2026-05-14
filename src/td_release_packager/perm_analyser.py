@@ -153,7 +153,7 @@ _QUALIFIED_NAME_RE = re.compile(
     r"(?:SPECIFIC\s+)?"
     r"(?:TABLE|VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER|"
     r"JOIN\s+INDEX|HASH\s+INDEX)\s+"
-    r'\"?([A-Za-z0-9_$]+)\"?\s*\.\s*\"?([A-Za-z0-9_$]+)\"?',
+    r"\"?([A-Za-z0-9_$]+)\"?\s*\.\s*\"?([A-Za-z0-9_$]+)\"?",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -177,10 +177,10 @@ def _parse_perm_bytes(value_str: str, suffix: str) -> int:
     value = float(value_str)
     multiplier_map = {
         "K": 1024,
-        "M": 1024 ** 2,
-        "G": 1024 ** 3,
-        "T": 1024 ** 4,
-        "":  1,
+        "M": 1024**2,
+        "G": 1024**3,
+        "T": 1024**4,
+        "": 1,
     }
     multiplier = multiplier_map.get(suffix.upper(), 1)
     return int(value * multiplier)
@@ -363,6 +363,7 @@ def _strip_comments(content: str) -> str:
     """
     return _strip_sql(content)
 
+
 def _extract_perm_declarations(
     file_path: str,
     content: str,
@@ -387,7 +388,7 @@ def _extract_perm_declarations(
         container_name = m.group(2)
         # The PERM clause is typically within the same statement.
         # We take a window from the match start to the next semicolon.
-        stmt_window = content[m.start(): content.find(";", m.start()) + 1]
+        stmt_window = content[m.start() : content.find(";", m.start()) + 1]
         perm_match = _PERM_RE.search(stmt_window)
         if perm_match:
             perm_bytes = _parse_perm_bytes(perm_match.group(1), perm_match.group(2))
@@ -401,14 +402,17 @@ def _extract_perm_declarations(
             )
             logger.debug(
                 "perm_analyser: CREATE %s '%s' PERM=%d from '%s'",
-                object_type, container_name, perm_bytes, os.path.basename(file_path),
+                object_type,
+                container_name,
+                perm_bytes,
+                os.path.basename(file_path),
             )
 
     # Find all MODIFY DATABASE/USER statements with a PERM clause.
     for m in _MODIFY_DB_USER_RE.finditer(content):
         object_type = m.group(1).upper()
         container_name = m.group(2)
-        stmt_window = content[m.start(): content.find(";", m.start()) + 1]
+        stmt_window = content[m.start() : content.find(";", m.start()) + 1]
         perm_match = _PERM_RE.search(stmt_window)
         if perm_match:
             perm_bytes = _parse_perm_bytes(perm_match.group(1), perm_match.group(2))
@@ -422,7 +426,10 @@ def _extract_perm_declarations(
             )
             logger.debug(
                 "perm_analyser: MODIFY %s '%s' PERM=%d from '%s'",
-                object_type, container_name, perm_bytes, os.path.basename(file_path),
+                object_type,
+                container_name,
+                perm_bytes,
+                os.path.basename(file_path),
             )
 
     return declarations
@@ -586,7 +593,8 @@ def analyse_perm_space(payload_dir: str) -> PermAnalysisResult:
             if db_name:
                 logger.debug(
                     "perm_analyser: inferred database '%s' from payload path for '%s'",
-                    db_name, os.path.basename(file_path),
+                    db_name,
+                    os.path.basename(file_path),
                 )
             else:
                 logger.warning(
@@ -633,17 +641,21 @@ def analyse_perm_space(payload_dir: str) -> PermAnalysisResult:
     for container in all_containers:
         # Last CREATE wins.
         create_decls = [
-            d for d in result.declarations
+            d
+            for d in result.declarations
             if d.container_name == container and not d.is_modify
         ]
-        declared_perm_map[container] = create_decls[-1].perm_bytes if create_decls else None
+        declared_perm_map[container] = (
+            create_decls[-1].perm_bytes if create_decls else None
+        )
 
         # Sum of MODIFY deltas.  Each MODIFY sets an absolute new PERM, not a
         # relative change — compute as (new_perm - previous_perm).
         # When no baseline is known the first MODIFY value is treated as the
         # full declaration (not a delta) and we flag it in the notes.
         modify_decls = [
-            d for d in result.declarations
+            d
+            for d in result.declarations
             if d.container_name == container and d.is_modify
         ]
         modify_delta_map[container] = 0
@@ -683,7 +695,8 @@ def analyse_perm_space(payload_dir: str) -> PermAnalysisResult:
         # Build notes.
         notes: List[str] = []
         modify_decls = [
-            d for d in result.declarations
+            d
+            for d in result.declarations
             if d.container_name == container and d.is_modify
         ]
         if modify_decls:

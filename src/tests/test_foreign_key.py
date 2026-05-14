@@ -49,8 +49,7 @@ _EXAMPLE_FK = (
 
 # Minimal unquoted variant.
 _SIMPLE_FK = (
-    "ALTER TABLE MyDB.my_table ADD FOREIGN KEY (col_id) "
-    "REFERENCES MyDB.other_table ;"
+    "ALTER TABLE MyDB.my_table ADD FOREIGN KEY (col_id) REFERENCES MyDB.other_table ;"
 )
 
 # Multi-column FK.
@@ -258,12 +257,14 @@ class TestDetectDeployIntentForeignKey:
     def test_example_fk_intent(self):
         """FOREIGN_KEY intent is DIRECT_EXECUTE."""
         from database_package_deployer.models import DeployIntent
+
         intent = _detect_deploy_intent(_EXAMPLE_FK, ObjectType.FOREIGN_KEY)
         assert intent == DeployIntent.DIRECT_EXECUTE
 
     def test_simple_fk_intent(self):
         """Unquoted FK intent is DIRECT_EXECUTE."""
         from database_package_deployer.models import DeployIntent
+
         intent = _detect_deploy_intent(_SIMPLE_FK, ObjectType.FOREIGN_KEY)
         assert intent == DeployIntent.DIRECT_EXECUTE
 
@@ -336,8 +337,7 @@ class TestParseStatementTextForeignKey:
     def test_fk_without_database_qualifier_raises(self):
         """A single-part table name (no database qualifier) must raise ValueError."""
         no_qualifier = (
-            "ALTER TABLE unqualified_table ADD FOREIGN KEY (c) "
-            "REFERENCES other_table ;"
+            "ALTER TABLE unqualified_table ADD FOREIGN KEY (c) REFERENCES other_table ;"
         )
         with pytest.raises(ValueError, match="database qualifier"):
             parse_statement_text(no_qualifier, file_path="unqualified_table.fk")
@@ -450,9 +450,7 @@ class TestAnalyserForeignKeyDependencies:
         """
         from td_release_packager.analyser import _scan_references
 
-        add_column = (
-            "ALTER TABLE MyDB.my_table ADD col_new VARCHAR(50) ;"
-        )
+        add_column = "ALTER TABLE MyDB.my_table ADD col_new VARCHAR(50) ;"
         internal, external = _scan_references(
             add_column,
             object_type="TABLE",
@@ -462,6 +460,6 @@ class TestAnalyserForeignKeyDependencies:
         all_refs = internal | external
         # my_table itself might appear due to other anchors, but the
         # key assertion is that the ALTER TABLE anchor did NOT fire.
-        assert not any(
-            "my_table" in r and r != "MyDB.my_table" for r in all_refs
-        ), f"Unexpected FK anchor hit on non-FK ALTER TABLE: {all_refs}"
+        assert not any("my_table" in r and r != "MyDB.my_table" for r in all_refs), (
+            f"Unexpected FK anchor hit on non-FK ALTER TABLE: {all_refs}"
+        )

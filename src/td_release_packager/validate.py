@@ -574,16 +574,16 @@ _VIEW_MACRO_DEF_NAME_RE = re.compile(
 # immediately followed by an opening parenthesis — those carry an
 # explicit column list and are therefore compliant.
 _VCL_IDENT_FRAG = (
-    r'(?:\{\{[A-Za-z_][A-Za-z0-9_-]*\}\}'  # {{TOKEN}}
-    r'|"[^"]+"'                             # "Quoted Identifier"
-    r'|[A-Za-z_]\w*)'                       # bare_identifier
+    r"(?:\{\{[A-Za-z_][A-Za-z0-9_-]*\}\}"  # {{TOKEN}}
+    r'|"[^"]+"'  # "Quoted Identifier"
+    r"|[A-Za-z_]\w*)"  # bare_identifier
 )
 _VIEW_NO_COLUMN_LIST_RE = re.compile(
     r"^\s*\b(?:CREATE|REPLACE)\b\s+\bVIEW\b\s+"
-    + _VCL_IDENT_FRAG               # database / schema part
-    + r"\s*\.\s*"                   # dot separator
-    + _VCL_IDENT_FRAG               # object name part
-    + r"\s*(?!\s*\()\s*\bAS\b",     # AS with NO preceding '(' → no column list
+    + _VCL_IDENT_FRAG  # database / schema part
+    + r"\s*\.\s*"  # dot separator
+    + _VCL_IDENT_FRAG  # object name part
+    + r"\s*(?!\s*\()\s*\bAS\b",  # AS with NO preceding '(' → no column list
     re.IGNORECASE | re.MULTILINE,
 )
 

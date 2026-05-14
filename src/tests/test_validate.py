@@ -297,10 +297,7 @@ class TestCheckDdlTerminator:
 
     def test_missing_terminator_before_next_ddl_flagged(self):
         """Each DDL segment must be terminated, not just the final file."""
-        ddl = (
-            "CREATE TABLE MyDB.T1 (Id INT)\n"
-            "CREATE TABLE MyDB.T2 (Id INT);\n"
-        )
+        ddl = "CREATE TABLE MyDB.T1 (Id INT)\nCREATE TABLE MyDB.T2 (Id INT);\n"
         issues = _check_ddl_terminator("multi.sql", ddl)
         assert len(issues) == 1
         assert issues[0].line == 1
@@ -1835,7 +1832,7 @@ class TestCheckViewColumnList:
         """Double-quoted identifiers with a column list are compliant."""
         ddl = (
             'REPLACE VIEW "MyDb"."MyView" (Col1, Col2) AS\n'
-            "SELECT t.Col1, t.Col2 FROM \"MyDb\".\"Base\" AS t;"
+            'SELECT t.Col1, t.Col2 FROM "MyDb"."Base" AS t;'
         )
         issues = _check_view_column_list("MyView.viw", ddl)
         assert issues == []
@@ -1879,10 +1876,7 @@ class TestCheckViewColumnList:
 
     def test_create_view_without_column_list_flagged(self):
         """CREATE VIEW (not REPLACE) without a column list is also flagged."""
-        ddl = (
-            "CREATE VIEW {{V_DB}}.MyView AS\n"
-            "SELECT a.Id FROM {{T_DB}}.Ref AS a;"
-        )
+        ddl = "CREATE VIEW {{V_DB}}.MyView AS\nSELECT a.Id FROM {{T_DB}}.Ref AS a;"
         issues = _check_view_column_list("MyView.viw", ddl)
         assert len(issues) == 1
         assert issues[0].rule == "view_column_list"
@@ -1898,19 +1892,13 @@ class TestCheckViewColumnList:
 
     def test_quoted_identifier_no_column_list_flagged(self):
         """Double-quoted view name without column list is flagged."""
-        ddl = (
-            'REPLACE VIEW "MyDb"."MyView" AS\n'
-            'SELECT t.Id FROM "MyDb"."Base" AS t;'
-        )
+        ddl = 'REPLACE VIEW "MyDb"."MyView" AS\nSELECT t.Id FROM "MyDb"."Base" AS t;'
         issues = _check_view_column_list("MyView.viw", ddl)
         assert len(issues) == 1
 
     def test_issue_message_contains_agent_context(self):
         """The warning message explains the agent-friendliness motivation."""
-        ddl = (
-            "REPLACE VIEW {{V_DB}}.MyView AS\n"
-            "SELECT 1 AS Dummy;"
-        )
+        ddl = "REPLACE VIEW {{V_DB}}.MyView AS\nSELECT 1 AS Dummy;"
         issues = _check_view_column_list("MyView.viw", ddl)
         assert len(issues) == 1
         assert "agent" in issues[0].message.lower()
@@ -1926,12 +1914,7 @@ class TestCheckViewColumnList:
         rather than the visual line of the keyword, so this test stays
         coupled to the actual implementation behaviour.
         """
-        ddl = (
-            "-- Header comment\n"
-            "\n"
-            "REPLACE VIEW {{V_DB}}.MyView AS\n"
-            "SELECT 1 AS Dummy;"
-        )
+        ddl = "-- Header comment\n\nREPLACE VIEW {{V_DB}}.MyView AS\nSELECT 1 AS Dummy;"
         issues = _check_view_column_list("MyView.viw", ddl)
         assert len(issues) == 1
         # Match starts on the blank line (line 2) due to ^\s* anchor.

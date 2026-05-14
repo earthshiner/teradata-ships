@@ -40,8 +40,8 @@ from database_package_deployer.models import (
 # "must be deployable" assertion.
 NOT_DEPLOYED_TYPES: frozenset[str] = frozenset(
     {
-        "C_SOURCE",   # C source file — compiled into a JAR, not executed
-        "C_HEADER",   # C header file — compiled into a JAR, not executed
+        "C_SOURCE",  # C source file — compiled into a JAR, not executed
+        "C_HEADER",  # C header file — compiled into a JAR, not executed
     }
 )
 
@@ -172,17 +172,24 @@ class TestTypeCoverage:
         - DML runs last
         """
         order = DEPLOY_ORDER
-        assert order[ObjectType.INDEX] > order[ObjectType.TABLE], \
+        assert order[ObjectType.INDEX] > order[ObjectType.TABLE], (
             "INDEX must deploy after TABLE"
-        assert order[ObjectType.FOREIGN_KEY] >= order[ObjectType.INDEX], \
+        )
+        assert order[ObjectType.FOREIGN_KEY] >= order[ObjectType.INDEX], (
             "FOREIGN_KEY must deploy after INDEX"
-        assert order[ObjectType.STATISTICS] > order[ObjectType.INDEX], \
+        )
+        assert order[ObjectType.STATISTICS] > order[ObjectType.INDEX], (
             "STATISTICS must deploy after INDEX (captures indexed column stats)"
-        assert order[ObjectType.VIEW] > order[ObjectType.STATISTICS], \
+        )
+        assert order[ObjectType.VIEW] > order[ObjectType.STATISTICS], (
             "VIEW must deploy after STATISTICS"
-        assert order[ObjectType.COMMENT] > order[ObjectType.VIEW], \
+        )
+        assert order[ObjectType.COMMENT] > order[ObjectType.VIEW], (
             "COMMENT must deploy after VIEW (can describe views)"
-        assert order[ObjectType.COMMENT] > order[ObjectType.PROCEDURE], \
+        )
+        assert order[ObjectType.COMMENT] > order[ObjectType.PROCEDURE], (
             "COMMENT must deploy after PROCEDURE (can describe procedures)"
-        assert order[ObjectType.DML] > order[ObjectType.TRIGGER], \
+        )
+        assert order[ObjectType.DML] > order[ObjectType.TRIGGER], (
             "DML must deploy after TRIGGER"
+        )

@@ -544,7 +544,9 @@ class TestProcessMetaVerb:
         process_run = next(
             (r for r in d["runs"] if r.get("command") == "process"), None
         )
-        assert process_run is not None, "expected a 'process' run in ships.decisions.json"
+        assert process_run is not None, (
+            "expected a 'process' run in ships.decisions.json"
+        )
         stage_names = [s["stage"] for s in process_run["stages"]]
         assert "harvest" in stage_names
         assert "inspect" in stage_names

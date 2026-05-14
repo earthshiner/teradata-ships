@@ -68,6 +68,21 @@ def _context_file(pkg_dir: str, filename: str) -> str:
 
 logger = logging.getLogger(__name__)
 
+CONTEXT_DIR = "context"
+
+
+def _context_file(pkg_dir: str, filename: str) -> str:
+    """Return the canonical package path for a SHIPS JSON metadata file."""
+    context_dir = os.path.join(pkg_dir, CONTEXT_DIR)
+    os.makedirs(context_dir, exist_ok=True)
+    return os.path.join(context_dir, filename)
+
+
+def _context_relpath(filename: str) -> str:
+    """Return the package-relative path for a SHIPS JSON metadata file."""
+    return os.path.join(CONTEXT_DIR, filename).replace(os.sep, "/")
+
+
 # -- Regex for MULTISET injection (duplicated from database_package_deployer --
 # to avoid import dependency at build time)
 

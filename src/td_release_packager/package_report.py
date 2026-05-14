@@ -452,7 +452,9 @@ def _trust_tab(trust: dict) -> str:
             else:
                 # Non-pass: highlight the message and list each issue
                 colour = "#B45309" if status == TRUST_WARN else "#991B1B"
-                detail = f"<span style='color:{colour};font-weight:600'>{message}</span>"
+                detail = (
+                    f"<span style='color:{colour};font-weight:600'>{message}</span>"
+                )
                 if issues:
                     issue_items = "".join(
                         f"<li style='margin-top:4px'>{i}</li>" for i in issues

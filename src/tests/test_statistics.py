@@ -35,12 +35,9 @@ from database_package_deployer.statement_parser import (
 _COLLECT_BASIC = (
     "COLLECT STATISTICS ON BerkaLoanRisk_Domain.Account_H COLUMN (account_id);"
 )
-_COLLECT_SUMMARY = (
-    "COLLECT SUMMARY STATISTICS ON BerkaLoanRisk_Domain.Account_H;"
-)
+_COLLECT_SUMMARY = "COLLECT SUMMARY STATISTICS ON BerkaLoanRisk_Domain.Account_H;"
 _COLLECT_COLUMN_FIRST = (
-    "COLLECT STATISTICS COLUMN (account_id, status) "
-    "ON BerkaLoanRisk_Domain.Account_H;"
+    "COLLECT STATISTICS COLUMN (account_id, status) ON BerkaLoanRisk_Domain.Account_H;"
 )
 _COLLECT_INDEX = (
     "COLLECT STATISTICS INDEX (account_id) ON BerkaLoanRisk_Domain.Account_H;"
@@ -154,11 +151,13 @@ class TestDetectDeployIntentStatistics:
 
     def test_collect_intent(self):
         from database_package_deployer.models import DeployIntent
+
         intent = _detect_deploy_intent(_COLLECT_BASIC, ObjectType.STATISTICS)
         assert intent == DeployIntent.DIRECT_EXECUTE
 
     def test_update_statistics_intent(self):
         from database_package_deployer.models import DeployIntent
+
         intent = _detect_deploy_intent(_UPDATE_STATISTICS, ObjectType.STATISTICS)
         assert intent == DeployIntent.DIRECT_EXECUTE
 
