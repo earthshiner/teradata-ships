@@ -12,11 +12,11 @@ As the operator, you receive a self-contained package `.zip` from the developmen
 ```
 OMR_DEV_BUILD_0005_20260509.zip
     deploy.py                   ← The only script you run
-    BUILD.json                  ← Build manifest (provenance, file list, integrity hash)
-    ships.context.json          ← Durable workflow context for agents, CI/CD, and MCP tools
-    ships.manifest.json         ← Compact agent-safe package inventory and dependency contract
-    ships.handoff.json          ← Next-actor instructions (human, CI/CD job, or deployment agent)
-    package_integrity.json      ← SHA-256 file hashes for tamper detection
+    context/ships.build.json                  ← Build manifest (provenance, file list, integrity hash)
+    context/ships.context.json          ← Durable workflow context for agents, CI/CD, and MCP tools
+    context/ships.manifest.json         ← Compact agent-safe package inventory and dependency contract
+    context/ships.handoff.json          ← Next-actor instructions (human, CI/CD job, or deployment agent)
+    context/ships.integrity.json      ← SHA-256 file hashes for tamper detection
     _waves.txt                  ← Deployment wave ordering
     lib/
         database_package_deployer/  ← Deployment engine (no separate install needed)
@@ -122,13 +122,13 @@ Run through this before every live deployment. It takes two minutes and prevents
 python deploy.py integrity-check
 ```
 
-This recomputes the SHA-256 hash of every file in the payload and compares it to the values in `package_integrity.json`. If any file has been modified since the package was built, this command exits with code 1 and lists the affected files.
+This recomputes the SHA-256 hash of every file in the payload and compares it to the values in `context/ships.integrity.json`. If any file has been modified since the package was built, this command exits with code 1 and lists the affected files.
 
 **If integrity fails:** do not deploy. Contact the developer to rebuild the package. A tampered package indicates either a transmission error or a deliberate modification — both require investigation before proceeding.
 
 ### 2. Read the Package Trust Report
 
-Every SHIPS package carries a Trust Report in `BUILD.json`, stamped at build time. The `deploy.py` script reads it and prints the label before connecting to the database:
+Every SHIPS package carries a Trust Report in `context/ships.build.json`, stamped at build time. The `deploy.py` script reads it and prints the label before connecting to the database:
 
 ```
 ================================================================
@@ -137,7 +137,7 @@ Every SHIPS package carries a Trust Report in `BUILD.json`, stamped at build tim
   ✓ inspect_token_format     No malformed token markers found
   ✓ inspect_lint             No lint violations found
   ✓ inspect_grants           Grant validation clean
-  ✓ provenance_complete      _provenance.json present
+  ✓ provenance_complete      context/ships.provenance.json present
 ================================================================
 ```
 
@@ -181,7 +181,7 @@ Address any pre-flight errors before proceeding to live deployment.
 
 ### 7. Confirm the companion archive is deployed first (if applicable)
 
-Some packages are auto-split into a `_prereqs_` companion archive and a main archive. If `BUILD.json` shows `"role": "main"` and `"requires": ["OMR_prereqs_DEV_BUILD_0005_...zip"]`, deploy the prereqs archive first:
+Some packages are auto-split into a `_prereqs_` companion archive and a main archive. If `context/ships.build.json` shows `"role": "main"` and `"requires": ["OMR_prereqs_DEV_BUILD_0005_...zip"]`, deploy the prereqs archive first:
 
 ```bash
 # Extract and deploy prereqs first
@@ -498,7 +498,7 @@ python deploy.py --host myserver --user dba --baseline-dir /alt/path/
 
 ### Drift and the audit trail
 
-The baseline files are the record of *what SHIPS last deployed* for each object. They are not a history — each file holds only the most recent deploy's SHOW output (rolling horizon). The full history of what deployed when is in `BUILD.json` (per-package) and DBQL (per-statement). The drift diff in the deployment report is the record of *what changed between SHIPS runs* — include it in incident reports when a hotfix is discovered.
+The baseline files are the record of *what SHIPS last deployed* for each object. They are not a history — each file holds only the most recent deploy's SHOW output (rolling horizon). The full history of what deployed when is in `context/ships.build.json` (per-package) and DBQL (per-statement). The drift diff in the deployment report is the record of *what changed between SHIPS runs* — include it in incident reports when a hotfix is discovered.
 
 ---
 
@@ -538,7 +538,7 @@ Use `--on-drift skip` instead of `--on-drift continue`. SHIPS will roll back all
 
 ### Rollback and the build counter
 
-Rollback packages get a new build number (auto-incremented from the current `.build_counter`). The `source_commit` in `BUILD.json` records the tag's commit hash, so the audit trail clearly shows "build 0048 was a rollback to tag v1.2.3 / commit abc1234".
+Rollback packages get a new build number (auto-incremented from the current `.build_counter`). The `source_commit` in `context/ships.build.json` records the tag's commit hash, so the audit trail clearly shows "build 0048 was a rollback to tag v1.2.3 / commit abc1234".
 
 ---
 
@@ -827,7 +827,7 @@ The deployer automatically retries these errors (3598: up to 3 times with 0.5 / 
 
 **Do not deploy.** The package payload does not match what was built and signed.
 
-1. Compare the SHA-256 hashes in `package_integrity.json` against the current files to identify which files changed
+1. Compare the SHA-256 hashes in `context/ships.integrity.json` against the current files to identify which files changed
 2. Obtain a fresh copy of the package from the build system
 3. Verify integrity on the fresh copy before deploying
 
@@ -988,14 +988,14 @@ The `--no-increment` flag reuses the build counter without advancing it. The onl
 Before deploying to TST or PRD, confirm:
 
 1. The build number matches the approved DEV build
-2. The package hash in `BUILD.json` matches the developer's build record
-3. The `SHIPS_ENV` in the package (`BUILD.json` → `environment`) matches the target
+2. The package hash in `context/ships.build.json` matches the developer's build record
+3. The `SHIPS_ENV` in the package (`context/ships.build.json` → `environment`) matches the target
 
 ```bash
 python -c "
 import json, zipfile
 with zipfile.ZipFile('OMR_TST_BUILD_0005_20260509.zip') as z:
-    build = json.loads(z.read('BUILD.json'))
+    build = json.loads(z.read('context/ships.build.json'))
 print('Build:', build['build_number'])
 print('Env:  ', build['environment'])
 print('Hash: ', build['package_hash'])
@@ -1015,7 +1015,7 @@ Copy this checklist for every deployment.
         → Exit 0: proceed
         → Exit 1: stop, contact developer
 [ ] 4. Deploy companion prereqs archive first (if applicable)
-        Check BUILD.json for "requires" field
+        Check context/ships.build.json for "requires" field
 [ ] 5. Dry run: python deploy.py --dry-run --host ... --user ...
         → Review logs/.deploy_report_*.html
         → Fix any pre-flight errors (space, permissions)

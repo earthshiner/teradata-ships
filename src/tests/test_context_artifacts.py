@@ -35,29 +35,29 @@ def test_write_context_artifacts_emits_agent_context_contract(tmp_path):
         "ships.manifest.json",
     ]
 
-    index = json.loads((tmp_path / "ships.index.json").read_text())
-    context = json.loads((tmp_path / "ships.context.json").read_text())
-    agent_manifest = json.loads((tmp_path / "ships.manifest.json").read_text())
-    handoff = json.loads((tmp_path / "ships.handoff.json").read_text())
+    index = json.loads((tmp_path / "context" / "ships.index.json").read_text())
+    context = json.loads((tmp_path / "context" / "ships.context.json").read_text())
+    agent_manifest = json.loads((tmp_path / "context" / "ships.manifest.json").read_text())
+    handoff = json.loads((tmp_path / "context" / "ships.handoff.json").read_text())
 
-    assert index["read_first"] == "ships.index.json"
+    assert index["read_first"] == "context/ships.index.json"
     assert index["recommended_read_order"][:4] == [
         "index",
         "handoff",
         "context",
         "build",
     ]
-    assert index["entrypoints"]["integrity"]["path"] == "ships.integrity.json"
+    assert index["entrypoints"]["integrity"]["path"] == "context/ships.integrity.json"
     assert "tamper-evidence" in index["entrypoints"]["integrity"]["description"]
-    assert index["entrypoints"]["decisions"]["path"] == "ships.decisions.json"
+    assert index["entrypoints"]["decisions"]["path"] == "context/ships.decisions.json"
     assert index["agent_instructions"]["before_action"][0].startswith(
-        "Read ships.index.json"
+        "Read context/ships.index.json"
     )
 
     assert context["current_state"] == "package-built-awaiting-deployment"
     assert context["source_of_truth"]["source_commit"] == "abc123"
-    assert context["references"]["index"] == "ships.index.json"
+    assert context["references"]["index"] == "context/ships.index.json"
     assert agent_manifest["tokens"]["values_redacted"] is True
     assert agent_manifest["tokens"]["token_names"] == ["CORE_T", "CORE_V"]
     assert handoff["preconditions"]["tls_required"] is True
-    assert handoff["required_actions"][0].startswith("Read ships.index.json")
+    assert handoff["required_actions"][0].startswith("Read context/ships.index.json")

@@ -164,7 +164,7 @@ if result.returncode != 0:
 
 ## Trust Report
 
-Every `ships package` call (or `process` with package stage enabled) stamps a Trust Report into `BUILD.json`. The `trust.label` field is the primary deployment gate:
+Every `ships package` call (or `process` with package stage enabled) stamps a Trust Report into `context/ships.build.json`. The `trust.label` field is the primary deployment gate:
 
 | Label | Meaning |
 |---|---|
@@ -179,15 +179,15 @@ Every `ships package` call (or `process` with package stage enabled) stamps a Tr
 | `inspect_token_format` | Any malformed `{{TOKEN}}` marker found |
 | `inspect_lint` | Any Coding Discipline ERROR-severity violation |
 | `inspect_grants` | Any grant drift ERROR detected |
-| `provenance_complete` | `_provenance.json` absent from payload |
+| `provenance_complete` | `context/ships.provenance.json` absent from payload |
 
 **Reading trust in a CLI pipeline:**
 ```bash
-# Check trust label from BUILD.json inside the archive
+# Check trust label from context/ships.build.json inside the archive
 python -c "
 import zipfile, json, sys
 with zipfile.ZipFile('$ARCHIVE_PATH') as z:
-    name = next(n for n in z.namelist() if n.endswith('BUILD.json'))
+    name = next(n for n in z.namelist() if n.endswith('context/ships.build.json'))
     build = json.loads(z.read(name))
 label = build['trust']['label']
 print(f'Trust: {label}')
@@ -360,7 +360,7 @@ result = subprocess.run([
     "--strict",
 ], capture_output=True, text=True)
 
-# The resolved commit SHA is automatically stamped into BUILD.json
+# The resolved commit SHA is automatically stamped into context/ships.build.json
 ```
 
 Environment variables accepted:
@@ -592,29 +592,29 @@ Every successfully deployed object appears as an output dataset in the catalog. 
 
 ## Agent context artefacts
 
-Every package built by `ships package` or `ships process` includes three compact, agent-facing JSON files alongside `BUILD.json` and `_provenance.json`. They are designed so an agent can understand the package, validate preconditions, and act — without needing shared memory with the builder or access to the source project.
+Every package built by `ships package` or `ships process` includes three compact, agent-facing JSON files alongside `context/ships.build.json` and `context/ships.provenance.json`. They are designed so an agent can understand the package, validate preconditions, and act — without needing shared memory with the builder or access to the source project.
 
 | File | Role |
 |---|---|
-| `ships.context.json` | Durable workflow context: current state, objective, constraints, governance controls, trust label, source-of-truth pointers, and evidence references. |
-| `ships.manifest.json` | Compact package inventory and dependency contract. Token *names* are listed; resolved values are deliberately omitted — open `BUILD.json` only when you need them. |
-| `ships.handoff.json` | Next-actor instructions: required actions, preconditions that must be satisfied, blocking conditions, and the evidence an actor should return after deployment. |
+| `context/ships.context.json` | Durable workflow context: current state, objective, constraints, governance controls, trust label, source-of-truth pointers, and evidence references. |
+| `context/ships.manifest.json` | Compact package inventory and dependency contract. Token *names* are listed; resolved values are deliberately omitted — open `context/ships.build.json` only when you need them. |
+| `context/ships.handoff.json` | Next-actor instructions: required actions, preconditions that must be satisfied, blocking conditions, and the evidence an actor should return after deployment. |
 
 ### Recommended agent prompting pattern
 
 ```
-1. Load ships.context.json → understand current_state, trust label, governance controls.
-2. Load ships.manifest.json → confirm inventory, dependency_contract.requires, warnings.
-3. Load ships.handoff.json → follow required_actions; check preconditions and blocking_conditions.
-4. Open BUILD.json only if you need full token values or detailed trust signal breakdown.
-5. Open _provenance.json only if you need file-level source-to-package traceability.
+1. Load context/ships.context.json → understand current_state, trust label, governance controls.
+2. Load context/ships.manifest.json → confirm inventory, dependency_contract.requires, warnings.
+3. Load context/ships.handoff.json → follow required_actions; check preconditions and blocking_conditions.
+4. Open context/ships.build.json only if you need full token values or detailed trust signal breakdown.
+5. Open context/ships.provenance.json only if you need file-level source-to-package traceability.
 ```
 
-> **Context budget:** The three context artefacts are intentionally small. Token values are not duplicated in `ships.manifest.json`; they remain in `BUILD.json`. This keeps agent prompts compact and avoids spreading environment-specific credentials into agent memory unnecessarily.
+> **Context budget:** The three context artefacts are intentionally small. Token values are not duplicated in `context/ships.manifest.json`; they remain in `context/ships.build.json`. This keeps agent prompts compact and avoids spreading environment-specific credentials into agent memory unnecessarily.
 
 ### Auto-split packages
 
-When SHIPS emits a paired pre-requisite + main package (auto-split), each package gets its own set of context artefacts. The main package's `ships.manifest.json` lists the pre-requisite package filename in `dependency_contract.requires`. Deploy the pre-requisite package first.
+When SHIPS emits a paired pre-requisite + main package (auto-split), each package gets its own set of context artefacts. The main package's `context/ships.manifest.json` lists the pre-requisite package filename in `dependency_contract.requires`. Deploy the pre-requisite package first.
 
 ---
 
@@ -623,10 +623,10 @@ When SHIPS emits a paired pre-requisite + main package (auto-split), each packag
 | Artefact | Location | What an agent reads |
 |---|---|---|
 | `decisions.json` | `<project>/decisions.json` | Stage outcomes, issue codes, config provenance, output counts |
-| `BUILD.json` | Inside the package `.zip` | Build number, environment, file list, token count, integrity hash, **trust report**, baseline\_dir, discovery extensions |
-| `ships.context.json` | Inside the package `.zip` | Durable workflow context: current state, constraints, governance controls, source-of-truth pointers, trust label, and evidence references. **Load this first.** |
-| `ships.manifest.json` | Inside the package `.zip` | Compact agent-safe inventory: file counts, phase breakdown, dependency contract, token-name summary (values redacted — see `BUILD.json`), governance summary, warnings |
-| `ships.handoff.json` | Inside the package `.zip` | Next-actor instructions: required actions, preconditions, blocking conditions, and evidence to return after deployment |
+| `context/ships.build.json` | Inside the package `.zip` | Build number, environment, file list, token count, integrity hash, **trust report**, baseline\_dir, discovery extensions |
+| `context/ships.context.json` | Inside the package `.zip` | Durable workflow context: current state, constraints, governance controls, source-of-truth pointers, trust label, and evidence references. **Load this first.** |
+| `context/ships.manifest.json` | Inside the package `.zip` | Compact agent-safe inventory: file counts, phase breakdown, dependency contract, token-name summary (values redacted — see `context/ships.build.json`), governance summary, warnings |
+| `context/ships.handoff.json` | Inside the package `.zip` | Next-actor instructions: required actions, preconditions, blocking conditions, and evidence to return after deployment |
 | `_waves.txt` | `<project>/_waves.txt` | Topologically sorted deployment order |
 | `config/token_map.conf` | `<project>/config/token_map.conf` | Literal → `{{TOKEN}}` mapping |
 | `config/env/*.conf` | `<project>/config/env/` | Token → resolved value per environment |

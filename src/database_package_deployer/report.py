@@ -164,7 +164,7 @@ def _load_provenance(pkg_dir: str) -> Tuple[Optional[ProvenanceDocument], str]:
     """
     candidate = os.path.abspath(pkg_dir)
     for _ in range(6):  # current dir + up to 5 ancestors
-        provenance_path = os.path.join(candidate, "ships.provenance.json")
+        provenance_path = os.path.join(candidate, "context", "ships.provenance.json")
         if os.path.exists(provenance_path):
             try:
                 return ProvenanceDocument.load(provenance_path), ""

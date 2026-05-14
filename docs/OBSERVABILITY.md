@@ -166,7 +166,7 @@ Every event carries a custom `ships` run facet with build provenance:
 }
 ```
 
-This links the lineage event directly to the package build — a data engineer can look up which build created a dataset and pull the full provenance from `BUILD.json`.
+This links the lineage event directly to the package build — a data engineer can look up which build created a dataset and pull the full provenance from `context/ships.build.json`.
 
 ### Activation
 

@@ -163,7 +163,7 @@ signing:
 
 ### lib/ integrity
 
-`package_integrity.json` now covers both `payload/` and `lib/` — the embedded deployer
+`context/ships.integrity.json` now covers both `payload/` and `lib/` — the embedded deployer
 code is hashed alongside the DDL payload. Any modification to the deployer files
 changes the package hash and aborts deployment before any database connection is made.
 This closes the attack vector of editing `lib/` to bypass security checks; combined

@@ -373,9 +373,9 @@ You do not need to fix everything before you can package.
 
 - `source_dirty=true` — you built with `--allow-dirty`. The package was built from an uncommitted working tree.
 - `inspect_grants` warning — some grants are missing or mismatched.
-- `provenance_complete` — `_provenance.json` was not produced (unusual).
+- `provenance_complete` — `context/ships.provenance.json` was not produced (unusual).
 
-Review the per-signal breakdown in the trust banner or the `BUILD.json` `trust.signals` field. For most warning-level signals, proceed with deployment but investigate the underlying issue before the next release.
+Review the per-signal breakdown in the trust banner or the `context/ships.build.json` `trust.signals` field. For most warning-level signals, proceed with deployment but investigate the underlying issue before the next release.
 
 ---
 
@@ -412,7 +412,7 @@ This is the correct pattern for promoting a DEV package to TST or PRD — same s
 
 ### The `--allow-dirty` flag — when should I use it?
 
-Only in development. `--allow-dirty` lets you build a package from an uncommitted working tree. It stamps `source_dirty=true` in `BUILD.json` and degrades the trust label to `READY-WITH-CAVEATS`. Never use it for a package you intend to promote to production — the package cannot be reproducibly rebuilt from source because the uncommitted changes are not in version control.
+Only in development. `--allow-dirty` lets you build a package from an uncommitted working tree. It stamps `source_dirty=true` in `context/ships.build.json` and degrades the trust label to `READY-WITH-CAVEATS`. Never use it for a package you intend to promote to production — the package cannot be reproducibly rebuilt from source because the uncommitted changes are not in version control.
 
 ---
 
@@ -472,7 +472,7 @@ Look for `backup_table` in the object record. If it is set, you can query `SELEC
 
 ### I need to deploy a package built before schema drift detection was added. Will drift detection break it?
 
-No. If `BUILD.json` has no `baseline_dir` field (older package), drift detection is silently disabled. `_load_baseline_dir()` returns an empty string and the deployment proceeds normally.
+No. If `context/ships.build.json` has no `baseline_dir` field (older package), drift detection is silently disabled. `_load_baseline_dir()` returns an empty string and the deployment proceeds normally.
 
 ---
 
@@ -578,7 +578,7 @@ python -m td_release_packager package \
     --no-increment    ← same build number as DEV
 ```
 
-The DDL structure is identical. Only the token resolution differs — `{{OMR_STD}}` resolves to `T_OMR_STD` instead of `A_D01_OMR_STD`. Always verify the `environment` field in BUILD.json before handing off to the DBA.
+The DDL structure is identical. Only the token resolution differs — `{{OMR_STD}}` resolves to `T_OMR_STD` instead of `A_D01_OMR_STD`. Always verify the `environment` field in context/ships.build.json before handing off to the DBA.
 
 ---
 
@@ -588,7 +588,7 @@ The DDL structure is identical. Only the token resolution differs — `{{OMR_STD
 python -c "
 import zipfile, json
 with zipfile.ZipFile('OMR_PRD_BUILD_0042.zip') as z:
-    name = next(n for n in z.namelist() if n.endswith('BUILD.json'))
+    name = next(n for n in z.namelist() if n.endswith('context/ships.build.json'))
     b = json.loads(z.read(name))
 print('Package: ', b['package_name'])
 print('Build:   ', b['build_number'])
@@ -614,7 +614,7 @@ deployment:
   baseline_dir: /shared/nfs/ships-baselines/OMR/
 ```
 
-This path must be accessible from every machine that deploys this package. After adding it, rebuild the package — the path is stamped into `BUILD.json` and travels with the package automatically. Operators do not need to set any flags.
+This path must be accessible from every machine that deploys this package. After adding it, rebuild the package — the path is stamped into `context/ships.build.json` and travels with the package automatically. Operators do not need to set any flags.
 
 If no shared path is available, use a local directory for development:
 
@@ -741,7 +741,7 @@ jobs:
             --strict
 ```
 
-The `--commit` flag records the GitHub SHA in `BUILD.json` so every deployed object is traceable back to the exact commit.
+The `--commit` flag records the GitHub SHA in `context/ships.build.json` so every deployed object is traceable back to the exact commit.
 
 ---
 
@@ -844,7 +844,7 @@ python -m td_release_packager process \
     ...
 ```
 
-SHIPS downloads the repository tarball via the GitHub REST API, extracts it to a temporary directory, runs the full pipeline, and then cleans up. The resolved commit SHA is automatically stamped into `BUILD.json` as `source_commit`. No `git` installation required.
+SHIPS downloads the repository tarball via the GitHub REST API, extracts it to a temporary directory, runs the full pipeline, and then cleans up. The resolved commit SHA is automatically stamped into `context/ships.build.json` as `source_commit`. No `git` installation required.
 
 Authentication: `--github-token TOKEN` or `GITHUB_TOKEN` environment variable. Public repositories work without a token (subject to 60 req/hr rate limit). Private repositories require a PAT with `repo` scope.
 
@@ -854,7 +854,7 @@ Authentication: `--github-token TOKEN` or `GITHUB_TOKEN` environment variable. P
 
 ### How do I prevent someone from editing the embedded deployer code to bypass security checks?
 
-Two layers. First, `package_integrity.json` now covers both `payload/` and `lib/` — any
+Two layers. First, `context/ships.integrity.json` now covers both `payload/` and `lib/` — any
 edit to the deployer files changes the package hash and the deploy fails before any
 database connection is made. Second, use Ed25519 asymmetric signing
 (`ships package --asymmetric-key private.pem`): only the CI pipeline with the private
@@ -977,7 +977,7 @@ discovery:
     - .tdsql
 ```
 
-This tells harvest and the deployer to include files with that extension. The extension is stamped into `BUILD.json` so the deployer honours it automatically. You will still need to ensure your DDL files parse correctly — SHIPS classifies by looking for `CREATE`/`REPLACE` verbs regardless of extension.
+This tells harvest and the deployer to include files with that extension. The extension is stamped into `context/ships.build.json` so the deployer honours it automatically. You will still need to ensure your DDL files parse correctly — SHIPS classifies by looking for `CREATE`/`REPLACE` verbs regardless of extension.
 
 ---
 
@@ -992,11 +992,11 @@ with zipfile.ZipFile("OMR_DEV_BUILD_0042.zip") as z:
     # List all files
     print("\n".join(z.namelist()))
 
-    # Read BUILD.json
-    name = next(n for n in z.namelist() if n.endswith("BUILD.json"))
+    # Read context/ships.build.json
+    name = next(n for n in z.namelist() if n.endswith("context/ships.build.json"))
     build = json.loads(z.read(name))
     print(f"Trust: {build['trust']['label']}")
     print(f"Files: {build['file_count']}")
 ```
 
-Or use the SHIPS Deployment Dashboard (`ships_dashboard.py`) which reads BUILD.json from every archive in your `releases/` directory without extracting.
+Or use the SHIPS Deployment Dashboard (`ships_dashboard.py`) which reads context/ships.build.json from every archive in your `releases/` directory without extracting.

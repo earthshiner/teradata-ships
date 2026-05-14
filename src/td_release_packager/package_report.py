@@ -99,14 +99,7 @@ _SKIP_NAMES = frozenset(
         "_order.txt",
         ".gitkeep",
         ".gitignore",
-        "ships.index.json",
-        "ships.integrity.json",
-        "ships.provenance.json",
-        "ships.build.json",
-        "ships.context.json",
-        "ships.manifest.json",
-        "ships.handoff.json",
-        "ships.decisions.json",
+        "context",
     }
 )
 _SKIP_EXTS = frozenset({".json", ".py", ".sh", ".bat", ".txt", ".html", ".jar"})

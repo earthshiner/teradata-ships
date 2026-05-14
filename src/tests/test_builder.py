@@ -54,7 +54,7 @@ class TestGenerateIntegrityFile:
             pkg_dir = self._make_package_dir(tmp)
             _generate_integrity_file(pkg_dir)
 
-            integrity_path = os.path.join(pkg_dir, "ships.integrity.json")
+            integrity_path = os.path.join(pkg_dir, "context", "ships.integrity.json")
             assert os.path.isfile(integrity_path)
 
             with open(integrity_path, encoding="utf-8") as fh:
