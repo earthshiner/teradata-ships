@@ -194,7 +194,6 @@ Return a concise evidence summary with paths to all generated artefacts.
 }
 
 
-
 def _context_path(filename: str) -> str:
     """Return the package-relative path for a SHIPS context JSON artefact."""
     return f"{CONTEXT_DIR}/{filename}"
