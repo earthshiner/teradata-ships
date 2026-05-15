@@ -2111,7 +2111,7 @@ def connect(args):
     clear, actionable messages for the DBA.
     """
     import teradatasql
-    params = {{"host": args.host, "user": args.user, "charset": "UTF8"}}
+    params = {{"host": args.host, "user": args.user}}
     if args.password:
         params["password"] = args.password
     if args.logmech:

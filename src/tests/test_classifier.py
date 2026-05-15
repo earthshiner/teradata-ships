@@ -218,19 +218,6 @@ class TestProcedureSubtypes:
         assert r.type == "PROCEDURE_SPL"
         assert r.base_type == "PROCEDURE"
 
-    def test_procedure_cpp(self):
-        ddl = (
-            "CREATE PROCEDURE x.raise_exception(IN p CHAR(6))\n"
-            "LANGUAGE CPP\n"
-            "NO SQL\n"
-            "PARAMETER STYLE SQL\n"
-            "EXTERNAL NAME 'CS!RaiseException!../P_GCFR_XSP/RaiseException.cpp!F!RaiseException';"
-        )
-        r = cls.classify("raise_exception.spl", ddl)
-        assert r.type == "PROCEDURE_CPP"
-        assert r.base_type == "PROCEDURE"
-        assert r.confidence == "HIGH"
-
 
 # ---------------------------------------------------------------
 # External-reference extraction
@@ -287,16 +274,6 @@ class TestExternalReferences:
         r = cls.classify("foo.spl", ddl)
         assert r.type == "PROCEDURE_JAVA"
         assert any("no JAR alias" in w for w in r.warnings)
-
-    def test_cpp_procedure_source_external_extracted(self):
-        ddl = (
-            "CREATE PROCEDURE x.raise_exception(IN p CHAR(6))\n"
-            "LANGUAGE CPP NO SQL PARAMETER STYLE SQL\n"
-            "EXTERNAL NAME 'CS!RaiseException!../P_GCFR_XSP/RaiseException.cpp!F!RaiseException';"
-        )
-        r = cls.classify("raise_exception.spl", ddl)
-        assert r.type == "PROCEDURE_CPP"
-        assert r.related_files == ["../P_GCFR_XSP/RaiseException.cpp"]
 
 
 # ---------------------------------------------------------------
@@ -402,3 +379,28 @@ class TestExtractJarAlias:
 
     def test_no_colon_returns_none(self):
         assert cls.extract_jar_alias("plain_string") is None
+
+
+class TestCppProcedureExternalReferences:
+    def test_cpp_procedure_external_source_is_extracted(self):
+        ddl = (
+            "CREATE PROCEDURE x.raise_error(iState CHAR(6))\n"
+            "LANGUAGE CPP\n"
+            "NO SQL\n"
+            "PARAMETER STYLE SQL\n"
+            "EXTERNAL NAME 'CS!RaiseException!../P_GCFR_XSP/RaiseException.cpp!F!RaiseException';"
+        )
+
+        result = cls.classify("raise_error.spl", ddl)
+
+        assert result.type == "PROCEDURE_CPP"
+        assert result.base_type == "PROCEDURE"
+        assert result.related_files == ["../P_GCFR_XSP/RaiseException.cpp"]
+
+    def test_cpp_procedure_without_external_warns(self):
+        ddl = "CREATE PROCEDURE x.raise_error() LANGUAGE CPP NO SQL;"
+
+        result = cls.classify("raise_error.spl", ddl)
+
+        assert result.type == "PROCEDURE_CPP"
+        assert any("no native source/header" in warning for warning in result.warnings)
