@@ -187,9 +187,9 @@ Address any pre-flight errors before proceeding to live deployment.
 
 ### 7. Confirm the release-group deploy order
 
-Every build is delivered as a release-group directory. Read the group-level `README.txt` or `release_group.json` before deploying. A single-package release contains `_01_main`; a multi-package release may contain `_00_environment_prereqs`, `_01_prereqs`, and `_02_main`.
+Every build is delivered as a release-group directory. Read the group-level `README.txt` or `release_group.json` before deploying. A single-package release contains `_01_main`; a multi-package release normally contains `_01_prereqs` and `_02_main`. A review-gated `_00_environment_prereqs` archive is generated only when `--generate-environment-prereqs` is explicitly supplied.
 
-Example deploy order:
+Example deploy order with optional environment prerequisites:
 
 ```text
 1. DEV_GCFR_BUILD_0012_20260515144900_00_environment_prereqs.zip
@@ -1019,7 +1019,7 @@ Copy this checklist for every deployment.
 [ ] 3. Run: python deploy.py integrity-check
         → Exit 0: proceed
         → Exit 1: stop, contact developer
-[ ] 4. Deploy ordered archives: _00_environment_prereqs, _01_prereqs, then _02_main when present
+[ ] 4. Deploy ordered archives: _01_prereqs, then _02_main; include _00_environment_prereqs first only when explicitly generated
         Check release_group.json and each archive's context/ships.build.json "requires" field
 [ ] 5. Dry run: python deploy.py --dry-run --host ... --user ...
         → Review logs/.deploy_report_*.html

@@ -2229,6 +2229,9 @@ def _run_build(args, stage, issue_codes) -> int:
         source_commit=args.commit or "",
         allow_dirty=getattr(args, "allow_dirty", False),
         change_ref=getattr(args, "change_ref", None),
+        generate_environment_prereqs=getattr(
+            args, "generate_environment_prereqs", False
+        ),
     )
 
     (main_pair, companion_pair) = build_package(config)
@@ -2652,6 +2655,9 @@ def _cmd_process_impl(args):
                 commit=getattr(args, "commit", ""),
                 build_number=None,
                 no_increment=False,
+                generate_environment_prereqs=getattr(
+                    args, "generate_environment_prereqs", False
+                ),
             )
             try:
                 with run.stage("package") as stage:
@@ -4133,6 +4139,18 @@ def _build_parser():
         ),
     )
 
+    bp.add_argument(
+        "--generate-environment-prereqs",
+        action="store_true",
+        default=False,
+        help=(
+            "Opt in to generating a review-gated _00_environment_prereqs "
+            "package for missing external parent databases/users. By default, "
+            "SHIPS reports the DBA requirement and keeps the release to the "
+            "normal _01_prereqs/_02_main packages."
+        ),
+    )
+
     # -- repackage --
     rp = subs.add_parser(
         "repackage",
@@ -4508,6 +4526,18 @@ def _build_parser():
         "Useful for supervised runs where you want to inspect output "
         "before proceeding. Suppressed automatically in CI environments "
         "(CI, SHIPS_CI, NO_PROMPT env vars) or when stdout is not a TTY.",
+    )
+
+    pr.add_argument(
+        "--generate-environment-prereqs",
+        action="store_true",
+        default=False,
+        help=(
+            "Opt in to generating a review-gated _00_environment_prereqs "
+            "package for missing external parent databases/users. By default, "
+            "SHIPS reports the DBA requirement and produces the normal "
+            "_01_prereqs/_02_main package pair."
+        ),
     )
 
     # -- explain --

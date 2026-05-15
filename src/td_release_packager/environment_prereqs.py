@@ -2,9 +2,10 @@
 
 Detects CREATE DATABASE / CREATE USER parent containers that are required by
 package prerequisites but are not themselves created by the package.  These
-external parents are platform/environment responsibilities, so SHIPS emits a
-reviewable _00_environment_prereqs package instead of silently creating them
-inside the application package.
+external parents are platform/environment responsibilities. By default SHIPS
+reports DBA action inside the application prereqs package; an optional
+reviewable _00_environment_prereqs package is emitted only when explicitly
+requested.
 """
 
 from __future__ import annotations

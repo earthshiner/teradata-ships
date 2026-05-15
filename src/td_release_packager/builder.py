@@ -29,6 +29,9 @@ Multi-package release groups may also include:
     *_00_environment_prereqs.zip
     *_01_prereqs.zip
     *_02_main.zip
+
+Optional, when --generate-environment-prereqs is requested:
+    *_00_environment_prereqs.zip
 """
 
 import hashlib
@@ -611,7 +614,10 @@ def _build_package_impl(
     # so the user never has to fix it manually.
     if _is_auto_split_needed(pkg_dir):
         (main_pair, prereqs_pair) = _split_into_paired_packages(
-            pkg_dir, manifest, config.archive_format
+            pkg_dir,
+            manifest,
+            config.archive_format,
+            config.generate_environment_prereqs,
         )
         main_archive, main_manifest = main_pair
         prereqs_archive, _prereqs_manifest = prereqs_pair
@@ -957,6 +963,7 @@ def _split_into_paired_packages(
     pkg_dir: str,
     manifest: BuildManifest,
     archive_format: str,
+    generate_environment_prereqs: bool = False,
 ) -> Tuple[Tuple[str, BuildManifest], Tuple[str, BuildManifest]]:
     """Partition a fully-built package into a prereqs + main pair.
 
@@ -984,6 +991,12 @@ def _split_into_paired_packages(
                         the main manifest.
         archive_format: 'zip' or 'tar.gz'. Determines the suffix on
                         the requires reference and on both archives.
+        generate_environment_prereqs: When true, emit an optional
+                        _00_environment_prereqs package for missing external
+                        parent databases/users. The default is false: SHIPS
+                        reports the DBA requirement inside the _01_prereqs
+                        package and relies on deploy preflight to verify the
+                        parent exists.
 
     Returns:
         ``((main_archive, main_manifest), (prereqs_archive, prereqs_manifest))``.
@@ -1082,24 +1095,69 @@ def _split_into_paired_packages(
         package_age_violation_level=manifest.package_age_violation_level,
     )
 
-    # 7. Detect external parent database/user dependencies and, when present,
-    #    emit a _00_environment_prereqs package in the same release group.
+    # 7. Detect external parent database/user dependencies.
     #
-    # The application prereqs package contains CREATE DATABASE/USER statements
-    # such as ``CREATE DATABASE CHILD FROM PARENT``.  If PARENT is neither
-    # created by this package nor a known platform root (DBC), deployment will
-    # fail before the child can be created.  Rather than leaving a loose DBA
-    # script outside the audit trail, SHIPS emits a sibling package carrying
-    # a review script and machine-readable requirement/evidence contract.
-    env_prereq_pair = _create_environment_prereqs_package_if_needed(
-        prereqs_pkg_dir=prereqs_pkg_dir,
-        manifest=manifest,
-        release_group=release_group,
-        archive_format=archive_format,
-    )
-    if env_prereq_pair is not None:
-        env_archive, _env_manifest = env_prereq_pair
-        prereqs_manifest.requires = [os.path.basename(env_archive)]
+    # By default, SHIPS reports these as DBA/platform prerequisites inside the
+    # _01_prereqs package instead of automatically generating a separate
+    # _00_environment_prereqs package.  The intended simple workflow is:
+    # DBA creates/confirms the environment parent through normal governance,
+    # then the application release deploys as the usual _01_prereqs + _02_main
+    # pair.  A generated _00 package remains available as an explicit opt-in.
+    env_prereq_pair = None
+    environment_requirements = analyse_environment_parent_requirements(prereqs_pkg_dir)
+    if environment_requirements and generate_environment_prereqs:
+        env_prereq_pair = _create_environment_prereqs_package_if_needed(
+            prereqs_pkg_dir=prereqs_pkg_dir,
+            manifest=manifest,
+            release_group=release_group,
+            archive_format=archive_format,
+        )
+        if env_prereq_pair is not None:
+            env_archive, _env_manifest = env_prereq_pair
+            prereqs_manifest.requires = [os.path.basename(env_archive)]
+    elif environment_requirements:
+        write_environment_prereq_context(
+            prereqs_pkg_dir,
+            environment_requirements,
+            release_group=release_group,
+            package_filename=prereqs_archive_filename,
+            payload_paths=[],
+        )
+        parents = ", ".join(req.parent_name for req in environment_requirements)
+        prereqs_manifest.warnings.append(
+            "Environment parent prerequisite(s) must be created or confirmed "
+            f"before deploying this package: {parents}. Review "
+            "context/prerequisites/create_missing_parents.review.sql."
+        )
+        prereqs_manifest.trust = {
+            "label": "READY-WITH-CAVEATS",
+            "computed_at": datetime.now(timezone.utc).isoformat(),
+            "signals": {
+                "environment_prereq_requires_dba_action": {
+                    "status": "warn",
+                    "message": (
+                        "External parent database/user prerequisites were "
+                        "detected. DBA must create or confirm them before "
+                        "deployment. Deploy preflight will verify live state."
+                    ),
+                    "issues": [req.parent_name for req in environment_requirements],
+                }
+            },
+        }
+        print(
+            "\n"
+            "================================================================\n"
+            "  Environment prerequisite(s) detected\n"
+            "================================================================\n"
+            f"  Required parent(s): {parents}\n"
+            "  DBA review script written to:\n"
+            f"    {os.path.join(prereqs_pkg_dir, 'context', 'prerequisites', 'create_missing_parents.review.sql')}\n"
+            "  Default behaviour: no _00_environment_prereqs package was created.\n"
+            "  Have the DBA create/confirm the parent(s), then deploy the normal\n"
+            "  _01_prereqs and _02_main packages. Use --generate-environment-prereqs\n"
+            "  only when you explicitly want SHIPS to emit a review-gated _00 package.\n"
+            "================================================================\n"
+        )
 
     # 8. Re-write per-package metadata on both sides.
     #
