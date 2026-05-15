@@ -26,7 +26,7 @@ Three things this module does that the old classifier didn't:
 
   3. **Sub-types** that distinguish dialect:
        ``FUNCTION_C``     vs ``FUNCTION_SQL``
-       ``PROCEDURE_JAVA`` vs ``PROCEDURE_SPL``
+       ``PROCEDURE_JAVA`` / ``PROCEDURE_CPP`` vs ``PROCEDURE_SPL``
      The base type ("FUNCTION", "PROCEDURE") is preserved through
      ``base_type()`` for callers that don't care about dialect.
      Extensions and subdirectories are unchanged from the base.
@@ -93,6 +93,7 @@ SUBTYPE_TO_BASE: Dict[str, str] = {
     "FUNCTION_C": "FUNCTION",
     "FUNCTION_SQL": "FUNCTION",
     "PROCEDURE_JAVA": "PROCEDURE",
+    "PROCEDURE_CPP": "PROCEDURE",
     "PROCEDURE_SPL": "PROCEDURE",
 }
 
@@ -116,6 +117,7 @@ TYPE_TO_EXTENSION: Dict[str, str] = {
     "PROCEDURE": ".spl",
     "PROCEDURE_SPL": ".spl",
     "PROCEDURE_JAVA": ".spl",
+    "PROCEDURE_CPP": ".spl",
     "FUNCTION": ".fnc",
     "FUNCTION_SQL": ".fnc",
     "FUNCTION_C": ".fnc",
@@ -153,6 +155,7 @@ TYPE_TO_SUBDIR: Dict[str, str] = {
     "PROCEDURE": "DDL/procedures",
     "PROCEDURE_SPL": "DDL/procedures",
     "PROCEDURE_JAVA": "DDL/procedures",
+    "PROCEDURE_CPP": "DDL/procedures",
     "FUNCTION": "DDL/functions",
     "FUNCTION_SQL": "DDL/functions",
     "FUNCTION_C": "DDL/functions",
@@ -190,7 +193,7 @@ EXTENSION_TO_EXPECTED: Dict[str, Optional[Set[str]]] = {
     ".tbl": {"TABLE"},
     ".viw": {"VIEW"},
     ".mcr": {"MACRO"},
-    ".spl": {"PROCEDURE", "PROCEDURE_SPL", "PROCEDURE_JAVA"},
+    ".spl": {"PROCEDURE", "PROCEDURE_SPL", "PROCEDURE_JAVA", "PROCEDURE_CPP"},
     ".fnc": {"FUNCTION", "FUNCTION_SQL", "FUNCTION_C"},
     ".trg": {"TRIGGER"},
     ".jix": {"JOIN_INDEX"},
@@ -359,6 +362,7 @@ _CLASSIFY_PATTERNS: List[Tuple[re.Pattern, str]] = [
 
 
 _LANGUAGE_C_RE = re.compile(r"\bLANGUAGE\s+C\b", re.I)
+_LANGUAGE_CPP_RE = re.compile(r"\bLANGUAGE\s+(?:CPP|C\+\+)\b", re.I)
 _LANGUAGE_JAVA_RE = re.compile(r"\bLANGUAGE\s+JAVA\b", re.I)
 _LANGUAGE_SQL_RE = re.compile(r"\bLANGUAGE\s+SQL\b", re.I)
 
@@ -376,14 +380,17 @@ def _refine_function_subtype(content: str) -> str:
 
 
 def _refine_procedure_subtype(content: str) -> str:
-    """Decide between PROCEDURE_JAVA and PROCEDURE_SPL.
+    """Decide the Teradata procedure dialect.
 
     LANGUAGE JAVA explicit → PROCEDURE_JAVA.
+    LANGUAGE CPP / C++ explicit → PROCEDURE_CPP.
     Anything else → PROCEDURE_SPL (Teradata's default for procedures
     when no LANGUAGE clause is present).
     """
     if _LANGUAGE_JAVA_RE.search(content):
         return "PROCEDURE_JAVA"
+    if _LANGUAGE_CPP_RE.search(content):
+        return "PROCEDURE_CPP"
     return "PROCEDURE_SPL"
 
 
@@ -503,10 +510,10 @@ def extract_sqlj_jar_paths(content: str) -> List[str]:
 
 
 def extract_externals(content: str, type_hint: str) -> List[str]:
-    """Extract external references for FUNCTION_C / PROCEDURE_JAVA / JAR.
+    """Extract external references for FUNCTION_C / PROCEDURE_CPP / PROCEDURE_JAVA / JAR.
 
     Returns:
-        For FUNCTION_C: list of .c/.h paths from EXTERNAL NAME.
+        For FUNCTION_C / PROCEDURE_CPP: list of .c/.cpp/.h paths from EXTERNAL NAME.
         For PROCEDURE_JAVA: single-element list with the JAR alias
                             from EXTERNAL NAME.
         For JAR (SQLJ install script): list of binary paths from
@@ -521,7 +528,7 @@ def extract_externals(content: str, type_hint: str) -> List[str]:
         return []
 
     body = m.group(1)
-    if type_hint == "FUNCTION_C":
+    if type_hint in ("FUNCTION_C", "PROCEDURE_CPP"):
         return extract_c_externals(body)
     if type_hint == "PROCEDURE_JAVA":
         alias = extract_jar_alias(body)
@@ -612,17 +619,24 @@ def classify(path: str, content: str) -> ClassificationResult:
         result.type = _refine_procedure_subtype(content)
         if result.type == "PROCEDURE_JAVA":
             result.evidence.append("LANGUAGE JAVA → PROCEDURE_JAVA")
+        elif result.type == "PROCEDURE_CPP":
+            result.evidence.append("LANGUAGE CPP → PROCEDURE_CPP")
         else:
-            result.evidence.append("no LANGUAGE JAVA → PROCEDURE_SPL")
+            result.evidence.append("no LANGUAGE JAVA/CPP → PROCEDURE_SPL")
     else:
         result.type = base
 
     # Stage 3: extract external references where relevant
-    if result.type in ("FUNCTION_C", "PROCEDURE_JAVA", "JAR"):
+    if result.type in ("FUNCTION_C", "PROCEDURE_CPP", "PROCEDURE_JAVA", "JAR"):
         result.related_files = extract_externals(content, result.type)
         if result.type == "FUNCTION_C" and not result.related_files:
             result.warnings.append(
                 "FUNCTION_C detected but no .c/.h files referenced "
+                "in EXTERNAL NAME clause — verify the dependency."
+            )
+        if result.type == "PROCEDURE_CPP" and not result.related_files:
+            result.warnings.append(
+                "PROCEDURE_CPP detected but no .c/.cpp/.h files referenced "
                 "in EXTERNAL NAME clause — verify the dependency."
             )
         if result.type == "PROCEDURE_JAVA" and not result.related_files:
@@ -696,10 +710,11 @@ def _score_confidence(
     # Sub-types are HIGH when an explicit LANGUAGE clause confirmed
     # them, MEDIUM when defaulted.
     explicit_subtype = any(
-        "→ FUNCTION_C" in e or "→ PROCEDURE_JAVA" in e for e in evidence
+        "→ FUNCTION_C" in e or "→ PROCEDURE_JAVA" in e or "→ PROCEDURE_CPP" in e
+        for e in evidence
     )
     defaulted_subtype = any(
-        "no LANGUAGE C" in e or "no LANGUAGE JAVA" in e for e in evidence
+        "no LANGUAGE C" in e or "no LANGUAGE JAVA/CPP" in e for e in evidence
     )
     if explicit_subtype:
         return "HIGH"
