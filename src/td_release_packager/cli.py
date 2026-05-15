@@ -1935,12 +1935,45 @@ def _run_inspect(args, stage, issue_codes) -> int:
             print(f"{'=' * 64}")
 
         # ==============================================================
+        # Step 3 — Static database hierarchy PERM capacity
+        # ==============================================================
+
+        from td_release_packager.hierarchy_perm_analyser import (
+            analyse_hierarchy_perm_capacity,
+            format_hierarchy_perm_report,
+        )
+
+        hierarchy_result = analyse_hierarchy_perm_capacity(payload_dir)
+        hierarchy_ok = hierarchy_result.passed
+        hierarchy_icon = "✓" if hierarchy_ok else "✗"
+        hierarchy_status = "PASSED" if hierarchy_ok else "FAILED"
+
+        print(f"\n{'=' * 64}")
+        print(
+            f"  {hierarchy_icon} Step 3: Database Hierarchy PERM Capacity — "
+            f"{hierarchy_status}"
+        )
+        print(f"{'=' * 64}")
+        print(format_hierarchy_perm_report(hierarchy_result))
+        print(f"{'=' * 64}")
+
+        for finding in hierarchy_result.findings:
+            if finding.passed:
+                continue
+            stage.add_issue(
+                "error",
+                issue_codes.INSPECT_LINT_VIOLATION,
+                f"[database_hierarchy_perm_capacity] {finding.message}",
+                location=finding.parent_source_file or finding.parent_name,
+            )
+
+        # ==============================================================
         # Overall result
         # ==============================================================
 
         lint_ok = lint_result.passed
         grant_ok = grant_result.passed if grant_result else True
-        overall_ok = token_ok and lint_ok and grant_ok
+        overall_ok = token_ok and lint_ok and grant_ok and hierarchy_ok
 
         overall_icon = "✓" if overall_ok else "✗"
         overall_status = "PASSED" if overall_ok else "FAILED"
@@ -1986,6 +2019,18 @@ def _run_inspect(args, stage, issue_codes) -> int:
             m = len(grant_result.missing)
             o = len(grant_result.orphaned)
             print(f"  Step 2 (Grants): FAILED — {d} drifted, {m} missing, {o} orphaned")
+
+        # -- Step 3 line
+        if hierarchy_ok:
+            print(
+                "  Step 3 (Hierarchy PERM): PASSED — "
+                f"{len(hierarchy_result.findings)} parent container(s) checked"
+            )
+        else:
+            print(
+                "  Step 3 (Hierarchy PERM): FAILED — "
+                f"{hierarchy_result.errors} insufficient parent allocation(s)"
+            )
 
         # -- Top-failures recap: keeps actionable detail visible even
         #    when the long per-file output has scrolled off the terminal.
@@ -2041,6 +2086,8 @@ def _run_inspect(args, stage, issue_codes) -> int:
             token_format_passed=token_ok,
             lint_passed=lint_ok,
             grants_passed=grant_ok,
+            hierarchy_perm_passed=hierarchy_ok,
+            hierarchy_perm_errors=hierarchy_result.errors,
             overall_passed=overall_ok,
             lint_errors=lint_result.errors,
             lint_warnings=lint_result.warnings,
@@ -2229,9 +2276,6 @@ def _run_build(args, stage, issue_codes) -> int:
         source_commit=args.commit or "",
         allow_dirty=getattr(args, "allow_dirty", False),
         change_ref=getattr(args, "change_ref", None),
-        generate_environment_prereqs=getattr(
-            args, "generate_environment_prereqs", False
-        ),
     )
 
     (main_pair, companion_pair) = build_package(config)
@@ -2655,9 +2699,6 @@ def _cmd_process_impl(args):
                 commit=getattr(args, "commit", ""),
                 build_number=None,
                 no_increment=False,
-                generate_environment_prereqs=getattr(
-                    args, "generate_environment_prereqs", False
-                ),
             )
             try:
                 with run.stage("package") as stage:
@@ -4139,18 +4180,6 @@ def _build_parser():
         ),
     )
 
-    bp.add_argument(
-        "--generate-environment-prereqs",
-        action="store_true",
-        default=False,
-        help=(
-            "Opt in to generating a review-gated _00_environment_prereqs "
-            "package for missing external parent databases/users. By default, "
-            "SHIPS reports the DBA requirement and keeps the release to the "
-            "normal _01_prereqs/_02_main packages."
-        ),
-    )
-
     # -- repackage --
     rp = subs.add_parser(
         "repackage",
@@ -4526,18 +4555,6 @@ def _build_parser():
         "Useful for supervised runs where you want to inspect output "
         "before proceeding. Suppressed automatically in CI environments "
         "(CI, SHIPS_CI, NO_PROMPT env vars) or when stdout is not a TTY.",
-    )
-
-    pr.add_argument(
-        "--generate-environment-prereqs",
-        action="store_true",
-        default=False,
-        help=(
-            "Opt in to generating a review-gated _00_environment_prereqs "
-            "package for missing external parent databases/users. By default, "
-            "SHIPS reports the DBA requirement and produces the normal "
-            "_01_prereqs/_02_main package pair."
-        ),
     )
 
     # -- explain --

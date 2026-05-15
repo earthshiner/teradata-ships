@@ -61,7 +61,7 @@ _CREATE_PARENT_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 _PERM_RE = re.compile(
-    r"\bperm\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*([kmgt]?)\b",
+    r"\bperm\s*=\s*([0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)\s*([kmgt]?)\b",
     re.IGNORECASE,
 )
 _KNOWN_EXTERNAL_PARENTS = {"DBC"}
@@ -373,12 +373,14 @@ def _check_parent_dependencies(
     """
     checks: List[PreflightCheck] = []
     required_perm_by_parent: Dict[str, int] = {}
+    declared_perm_by_container: Dict[str, int] = {}
 
     for parsed in parsed_ddls:
         dependency = _extract_parent_dependency(parsed)
         if not dependency:
             continue
         child, parent, perm_bytes = dependency
+        declared_perm_by_container[child] = perm_bytes
         required_perm_by_parent[parent] = (
             required_perm_by_parent.get(parent, 0) + perm_bytes
         )
@@ -428,7 +430,27 @@ def _check_parent_dependencies(
         )
 
     for parent, required_perm in sorted(required_perm_by_parent.items()):
-        if parent in containers_being_created or parent in _KNOWN_EXTERNAL_PARENTS:
+        if parent in containers_being_created:
+            parent_perm = declared_perm_by_container.get(parent)
+            if parent_perm is None:
+                continue
+            headroom = parent_perm - required_perm
+            checks.append(
+                PreflightCheck(
+                    check_name="database_hierarchy_perm_capacity",
+                    passed=headroom >= 0,
+                    database=parent,
+                    message=(
+                        f"Package parent '{parent}' declares "
+                        f"{_format_bytes(parent_perm)}; direct child PERM requires "
+                        f"{_format_bytes(required_perm)}; headroom "
+                        f"{_format_bytes(headroom)}."
+                    ),
+                    severity="INFO" if headroom >= 0 else "ERROR",
+                )
+            )
+            continue
+        if parent in _KNOWN_EXTERNAL_PARENTS:
             continue
         if not _database_exists(cursor, parent):
             continue
