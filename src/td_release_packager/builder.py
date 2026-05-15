@@ -13,13 +13,22 @@ Build process:
     4. Create package directory structure.
     5. Copy and resolve payload files (substitute tokens).
     6. Embed the deployment engine (database_package_deployer library).
-    7. Generate ships.build.json manifest.
+    7. Generate context/ships.build.json manifest.
     8. Generate deploy.py (DBA entry point).
     9. Generate README.txt (DBA instructions).
-   10. Archive as .zip or .tar.gz.
+   10. Archive as .zip or .tar.gz under a release-group directory.
 
-Package naming:
-    {{ENV}}_{{PACKAGE_NAME}}_BUILD_{{BUILD_NO}}_{{TIMESTAMP}}.zip
+Package output layout:
+    releases/{{ENV}}_{{PACKAGE_NAME}}_BUILD_{{BUILD_NO}}_{{TIMESTAMP}}/
+        {{ENV}}_{{PACKAGE_NAME}}_BUILD_{{BUILD_NO}}_{{TIMESTAMP}}_01_main.zip
+        {{ENV}}_{{PACKAGE_NAME}}_BUILD_{{BUILD_NO}}_{{TIMESTAMP}}_01_main.zip.sha256
+        release_group.json
+        README.txt
+
+Multi-package release groups may also include:
+    *_00_environment_prereqs.zip
+    *_01_prereqs.zip
+    *_02_main.zip
 """
 
 import hashlib
@@ -3013,8 +3022,9 @@ def _generate_checksum(archive_path: str) -> str:
 
     The DBA verifies the package with a single command:
 
-        sha256sum -c DEV_SHIPS_TEST_BUILD_0008.zip.sha256
-        # DEV_SHIPS_TEST_BUILD_0008.zip: OK
+        cd releases/DEV_SHIPS_TEST_BUILD_0008_20260515120000
+        sha256sum -c DEV_SHIPS_TEST_BUILD_0008_20260515120000_01_main.zip.sha256
+        # DEV_SHIPS_TEST_BUILD_0008_20260515120000_01_main.zip: OK
 
     Args:
         archive_path: Path to the .zip or .tar.gz archive.

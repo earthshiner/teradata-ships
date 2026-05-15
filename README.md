@@ -59,11 +59,45 @@ python -m td_release_packager package \
     --output releases/
 
 # Ship (deploy)
-python -m database_package_deployer deploy ./releases/MyProject_DEV_b0001 --dry-run                       # No database — validates pipeline, parsing, wave ordering
-python -m database_package_deployer deploy ./releases/MyProject_DEV_b0001 --host myserver --user dbc      # Connect and execute DDL
-python -m database_package_deployer resume   ./releases/MyProject_DEV_b0001/.deploy_manifest.json --host myserver --user dbc   # Resume an interrupted deployment
-python -m database_package_deployer status   ./releases/MyProject_DEV_b0001/.deploy_manifest.json         # Show manifest state
+# Packages are written under a release-group directory, even when only one archive is produced.
+cd ./releases/DEV_MyProject_BUILD_0001_<timestamp>/DEV_MyProject_BUILD_0001_<timestamp>_01_main/
+python deploy.py --dry-run                       # No database — validates pipeline, parsing, wave ordering
+python deploy.py --host myserver --user dbc      # Connect and execute DDL
+python deploy.py status logs/.deploy_manifest_<id>.json         # Show manifest state
 ```
+
+
+## Release group output layout
+
+Every SHIPS build writes its deliverables under a release-group directory named after the shared release identity. This is true even when the build produces only one package archive.
+
+Single-package build:
+
+```text
+releases/
+    DEV_MyProject_BUILD_0001_20260515120000/
+        DEV_MyProject_BUILD_0001_20260515120000_01_main.zip
+        DEV_MyProject_BUILD_0001_20260515120000_01_main.zip.sha256
+        release_group.json
+        README.txt
+```
+
+Multi-package build with environment prerequisites:
+
+```text
+releases/
+    DEV_GCFR_BUILD_0012_20260515144900/
+        DEV_GCFR_BUILD_0012_20260515144900_00_environment_prereqs.zip
+        DEV_GCFR_BUILD_0012_20260515144900_00_environment_prereqs.zip.sha256
+        DEV_GCFR_BUILD_0012_20260515144900_01_prereqs.zip
+        DEV_GCFR_BUILD_0012_20260515144900_01_prereqs.zip.sha256
+        DEV_GCFR_BUILD_0012_20260515144900_02_main.zip
+        DEV_GCFR_BUILD_0012_20260515144900_02_main.zip.sha256
+        release_group.json
+        README.txt
+```
+
+`release_group.json` is the group-level index for humans, CI/CD jobs, dashboards, and agents. It records package roles, deploy order, checksums, and `context/ships.index.json` entrypoints inside each archive.
 
 ## Architecture
 
@@ -136,8 +170,9 @@ The deployer has two CLI-exposed modes plus an EXPLAIN engine and an automatic R
 
 ```bash
 # Recommended workflow
-python -m database_package_deployer deploy ./releases/MyProject_DEV_b0001 --dry-run                  # Pipeline validation
-python -m database_package_deployer deploy ./releases/MyProject_DEV_b0001 --host myserver --user dbc # Execute
+cd ./releases/DEV_MyProject_BUILD_0001_<timestamp>/DEV_MyProject_BUILD_0001_<timestamp>_01_main/
+python deploy.py --dry-run                  # Pipeline validation
+python deploy.py --host myserver --user dbc # Execute
 ```
 
 ### Dependency Analysis

@@ -160,7 +160,8 @@ Every event carries a custom `ships` run facet with build provenance:
     "build_number": "0042",
     "environment": "PRD",
     "package_name": "OMR",
-    "package_filename": "OMR_PRD_BUILD_0042_20260510.zip",
+    "package_filename": "PRD_OMR_BUILD_0042_20260510_01_main.zip",
+    "release_group": "PRD_OMR_BUILD_0042_20260510",
     "dry_run": false
   }
 }
