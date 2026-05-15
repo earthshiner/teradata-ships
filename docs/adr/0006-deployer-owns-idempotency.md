@@ -57,26 +57,38 @@ scripts. It was rejected for the following reasons:
    X." The deployment action (create if absent, replace if
    present) is the deployer's concern, not the file's concern.
 
-4. **Snapshot impossibility.** If the deployer executes a
-   `REPLACE` statement that the source file provides, it has
-   no natural point at which to capture the pre-execution state
-   of the object. With Position B, the deployer intercepts
-   between the `CREATE` in source and the execution on target,
-   capturing the existing object's DDL via `SHOW` before
-   executing.
+4. **Snapshot timing.** When the deployer executes a `REPLACE`
+   statement, it still captures the pre-execution state of the
+   object via `SHOW` before issuing the `REPLACE`. The
+   `REPLACE_IN_PLACE` strategy (used for views, procedures, macros,
+   functions) follows the same snapshot-first sequence as
+   `DROP_AND_CREATE`: read the existing DDL, store it in
+   `_rollback/`, then execute. Rollback coverage is therefore
+   equivalent for both verbs. The advantage of `CREATE`-in-source
+   is uniformity and auditability of intent — not a superior
+   rollback path.
 
 ## Decision
 
 **Position B: The deployer owns idempotency.** DDL source files
-always use `CREATE`. The deployer is responsible for making
-execution idempotent on the target environment. This is
-implemented as follows:
+prefer `CREATE`. The deployer is responsible for making
+execution idempotent on the target environment. `REPLACE` is
+also permitted (the deployer handles it safely via the
+`REPLACE_IN_PLACE` strategy with pre-flight snapshot), but
+`CREATE` is the opinionated convention and the Inspect
+`deploy_intent` rule surfaces `REPLACE` usage as an advisory
+WARNING. Projects may raise this to ERROR via `inspect.conf` if
+they wish to enforce strict `CREATE`-only. This is implemented
+as follows:
 
-1. **Source uses `CREATE` exclusively.** Any `REPLACE`, `DROP`,
-   or `CREATE OR REPLACE` in a DDL source file is a
-   Discipline violation at Inspect time (see ADR 0009 for the
-   configurable relaxation of this rule). Source files are
-   declarative definitions.
+1. **Source prefers `CREATE`.** `REPLACE` in a DDL source file
+   triggers an advisory WARNING at Inspect time (rule
+   `deploy_intent` — see ADR 0009 for the full rule history).
+   `REPLACE` is not blocked: the deployer handles it safely.
+   The WARNING nudges new development toward `CREATE` without
+   forcing mass remediation of existing codebases. Projects that
+   wish to enforce strict `CREATE`-only may set
+   `deploy_intent=ERROR` in `inspect.conf`.
 
 2. **Strategy map by object type.** The deployer maintains a
    `STRATEGY_MAP` that assigns an execution strategy to each

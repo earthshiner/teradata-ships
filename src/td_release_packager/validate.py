@@ -12,7 +12,7 @@ engineering discipline rules:
     6. Eponymous file naming (filename matches DDL content)
     7. No type suffixes on object names (_V, _T, VW_, SP_, etc.)
     8. {{TOKENS}} used (not hardcoded database names)
-    9. CREATE required (REPLACE prohibited — deployer owns idempotency)
+    9. CREATE preferred (REPLACE permitted — deployer captures rollback snapshot for both)
    10. Correct file extension per object type
    11. Object placement (views must not reference tables databases directly)
    12. View column list (views should declare an explicit column list before AS)
@@ -62,7 +62,7 @@ except ImportError:
 DEFAULT_RULES: Dict[str, str] = {
     "db_qualifier": "ERROR",
     "set_multiset": "WARNING",
-    "deploy_intent": "ERROR",
+    "deploy_intent": "WARNING",
     "one_object": "WARNING",
     "eponymous": "WARNING",
     # Security rules (GAP-003, GAP-008).
@@ -284,8 +284,9 @@ def generate_default_config() -> str:
         "# Structural rules",
         f"db_qualifier={DEFAULT_RULES['db_qualifier']}",
         f"set_multiset={DEFAULT_RULES['set_multiset']}",
-        "# deploy_intent: REPLACE is prohibited — use CREATE.",
-        "# The deployer owns idempotency via DROP+CREATE with rollback.",
+        "# deploy_intent: REPLACE is permitted; CREATE is the preferred convention.",
+        "# The deployer captures a pre-flight snapshot before executing either verb,",
+        "# so rollback coverage is equivalent. Set to ERROR to enforce CREATE-only.",
         f"deploy_intent={DEFAULT_RULES['deploy_intent']}",
         f"one_object={DEFAULT_RULES['one_object']}",
         f"eponymous={DEFAULT_RULES['eponymous']}",
@@ -1134,43 +1135,45 @@ def _check_deploy_intent(
     rel_path: str, content: str, strict: bool = False
 ) -> List[ValidationIssue]:
     """
-    Enforce CREATE over REPLACE for all replaceable object types.
+    Advise on CREATE vs REPLACE usage in DDL source files.
 
-    REPLACE is idempotent but provides no rollback path — the
-    previous definition is silently overwritten with no backup.
-    CREATE forces the deployer to explicitly handle existence:
+    REPLACE is a valid Teradata DDL verb for views, procedures,
+    macros, functions, and triggers.  It is *not* valid for tables —
+    there is no risk of accidental data loss from this rule.
 
-        1. Capture existing DDL via SHOW (rollback artefact)
-        2. DROP the existing object
-        3. CREATE the new definition
-        4. On failure → re-CREATE from the captured backup
+    The deployer captures the existing object definition via SHOW
+    before executing either CREATE (via DROP+CREATE) or REPLACE
+    (via REPLACE_IN_PLACE).  Rollback coverage is therefore
+    equivalent for both verbs.
 
-    This gives autonomous agents (and humans) a clean rollback
-    to the pre-package state.
-
-    The deployer owns idempotency — not the developer's DDL verb.
+    The default posture is WARNING rather than ERROR.  Projects may
+    raise this to ERROR via inspect.conf (``deploy_intent=ERROR``)
+    if they wish to enforce a strict CREATE-only convention.
 
     Args:
         rel_path: Relative path of the DDL file being checked.
         content:  Raw DDL file content.
-        strict:   Not used for this rule (always ERROR by default),
-                  kept for interface consistency.
+        strict:   When True, promotes WARNING issues to ERROR.
 
     Returns:
-        List of ValidationIssue — one issue if REPLACE is found,
-        empty list if the file uses CREATE (correct).
+        List of ValidationIssue — one advisory issue if REPLACE is
+        detected, empty list otherwise.
     """
     if _LEADING_REPLACE_RE.search(content):
+        severity = "ERROR" if strict else "WARNING"
         return [
             ValidationIssue(
                 file=rel_path,
                 rule="deploy_intent",
-                severity="ERROR",
+                severity=severity,
                 message=(
-                    "Uses REPLACE — use CREATE instead. "
-                    "The deployer handles idempotency via "
-                    "DROP-and-CREATE with automatic rollback. "
-                    "REPLACE overwrites silently with no backup."
+                    "Uses REPLACE — consider CREATE instead. "
+                    "CREATE is the preferred SHIPS convention: "
+                    "it makes deployment intent explicit and lets "
+                    "the deployer own idempotency via pre-flight "
+                    "snapshot and DROP+CREATE. "
+                    "REPLACE is fully supported and the deployer "
+                    "captures a rollback snapshot before executing it."
                 ),
             )
         ]

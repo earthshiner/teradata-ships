@@ -153,7 +153,7 @@ class TestInspectScansBteq:
     def test_btq_file_scanned(self, tmp_path):
         ddl_dir = tmp_path / "DDL" / "views"
         ddl_dir.mkdir(parents=True)
-        # REPLACE VIEW fires deploy_intent (ERROR by default).
+        # REPLACE VIEW fires deploy_intent (WARNING by default).
         (ddl_dir / "MyDB.V.btq").write_text(
             "REPLACE VIEW MyDB.V AS SELECT 1;",
             encoding="utf-8",
