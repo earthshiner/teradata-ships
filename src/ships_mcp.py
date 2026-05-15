@@ -591,7 +591,6 @@ def ships_deploy(
             password=password,
             logmech=logmech,
             encryptdata=True,
-            charset="UTF8",
         ).cursor()
         try:
             all_waves, all_files, use_waves = _collect_package_files(package_dir)
@@ -652,7 +651,6 @@ def ships_deploy_explain(
             password=password,
             logmech=logmech,
             encryptdata=True,
-            charset="UTF8",
         ).cursor()
         try:
             all_waves, all_files, use_waves = _collect_package_files(package_dir)
@@ -718,7 +716,6 @@ def ships_rollback(
                 password=password,
                 logmech=logmech,
                 encryptdata=True,
-                charset="UTF8",
             ).cursor()
 
         try:
