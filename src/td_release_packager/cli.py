@@ -238,6 +238,8 @@ def _main():
         _cmd_validate(args)
     elif args.command == "package":
         _cmd_build(args)
+    elif args.command == "repackage":
+        _cmd_repackage(args)
     elif args.command == "scan":
         sys.exit(_cmd_scan(args))
     elif args.command in ("analyze", "analyse"):
@@ -2063,6 +2065,36 @@ def _run_inspect(args, stage, issue_codes) -> int:
     except FileNotFoundError as e:
         print(f"\nERROR: {e}", file=sys.stderr)
         return 1
+
+
+def _cmd_repackage(args):
+    """Rebuild an edited extracted package directory."""
+    try:
+        from td_release_packager.builder import repackage_package_dir
+
+        archive_path, manifest = repackage_package_dir(
+            args.package_dir,
+            strict=getattr(args, "strict", False),
+        )
+        print("\nSHIPS repackage complete")
+        print(f"  Package dir: {args.package_dir}")
+        print(f"  Archive:     {archive_path}")
+        print(f"  Checksum:    {archive_path}.sha256")
+        print(f"  Trust:       {manifest.trust.get('label', 'UNKNOWN')}")
+        if manifest.trust.get("label") == "BLOCKED":
+            print("\nPackage remains BLOCKED.")
+            print(
+                "  Replace DBA placeholders in the generated payload files, then rerun:"
+            )
+            print(
+                "  python -m td_release_packager repackage "
+                f'--package-dir "{args.package_dir}" --strict'
+            )
+            sys.exit(1 if getattr(args, "strict", False) else 0)
+        sys.exit(0)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"\nERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 def _cmd_build(args):
@@ -4099,6 +4131,22 @@ def _build_parser():
             "(or SHIPS_PRIVATE_KEY_PATH is set), a .sig sidecar is written "
             "alongside the archive. Requires the cryptography package."
         ),
+    )
+
+    # -- repackage --
+    rp = subs.add_parser(
+        "repackage",
+        help="Rebuild an edited extracted SHIPS package directory.",
+    )
+    rp.add_argument(
+        "--package-dir",
+        required=True,
+        help="Extracted package directory to repackage, for example the edited _00_environment_prereqs directory.",
+    )
+    rp.add_argument(
+        "--strict",
+        action="store_true",
+        help="Fail if the package remains blocked, for example because DBA placeholders remain.",
     )
 
     # -- scan --

@@ -68,7 +68,9 @@ from database_package_deployer.provenance import (
 from td_release_packager.context_artifacts import write_context_artifacts
 from td_release_packager.environment_prereqs import (
     analyse_environment_parent_requirements,
+    has_dba_placeholders,
     write_environment_prereq_context,
+    write_environment_prereq_payload,
 )
 
 
@@ -832,6 +834,7 @@ def _create_environment_prereqs_package_if_needed(
 
     _create_package_structure(env_pkg_dir)
     _embed_deployer(env_pkg_dir)
+    payload_paths = write_environment_prereq_payload(env_pkg_dir, requirements)
 
     total_required_perm = sum(req.minimum_required_perm_bytes for req in requirements)
     env_manifest = BuildManifest(
@@ -887,12 +890,15 @@ def _create_environment_prereqs_package_if_needed(
         },
     }
 
+    env_manifest.phase_inventory = _compute_phase_inventory(env_pkg_dir)
+    env_manifest.file_count = sum(env_manifest.phase_inventory.values())
+
     manifest_path = _context_file(env_pkg_dir, "ships.build.json")
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(env_manifest.__dict__, f, indent=2, ensure_ascii=False)
 
-    # Empty provenance document: this package carries generated prerequisite
-    # evidence, not source payload DDL.
+    # Minimal provenance document: this package carries generated DBA-reviewed
+    # payload rather than user-authored source DDL.
     provenance_path = _context_file(env_pkg_dir, "ships.provenance.json")
     with open(provenance_path, "w", encoding="utf-8") as f:
         json.dump({"version": 2, "entries": {}}, f, indent=2, ensure_ascii=False)
@@ -903,6 +909,7 @@ def _create_environment_prereqs_package_if_needed(
         requirements,
         release_group=release_group,
         package_filename=env_archive_filename,
+        payload_paths=payload_paths,
     )
     write_context_artifacts(env_pkg_dir, env_manifest)
     _generate_deploy_script(env_pkg_dir, env_manifest)
@@ -1249,6 +1256,187 @@ def _finalize_single_package(
         group_dir=group_dir,
         release_group=release_group,
         manifests_and_archives=[(archive_path, manifest)],
+    )
+    return archive_path, manifest
+
+
+def _build_manifest_from_dict(data: dict) -> BuildManifest:
+    """Create a BuildManifest from a JSON dictionary, ignoring unknown keys."""
+    from dataclasses import fields
+
+    allowed = {field.name for field in fields(BuildManifest)}
+    return BuildManifest(
+        **{key: value for key, value in data.items() if key in allowed}
+    )
+
+
+def _read_manifest_from_package_dir(pkg_dir: str) -> BuildManifest:
+    """Read context/ships.build.json from an extracted package directory."""
+    manifest_path = os.path.join(pkg_dir, CONTEXT_DIR, "ships.build.json")
+    if not os.path.isfile(manifest_path):
+        raise FileNotFoundError(
+            f"Package manifest not found: {manifest_path}. "
+            "Expected an extracted SHIPS package directory."
+        )
+    with open(manifest_path, "r", encoding="utf-8") as f:
+        return _build_manifest_from_dict(json.load(f))
+
+
+def _read_manifest_from_archive(archive_path: str) -> BuildManifest | None:
+    """Read context/ships.build.json from a sibling zip archive if possible."""
+    import zipfile
+
+    if not archive_path.lower().endswith(".zip") or not os.path.isfile(archive_path):
+        return None
+    try:
+        with zipfile.ZipFile(archive_path) as zf:
+            matches = [
+                name
+                for name in zf.namelist()
+                if name.replace("\\", "/").endswith("/context/ships.build.json")
+            ]
+            if not matches:
+                return None
+            with zf.open(matches[0]) as fh:
+                return _build_manifest_from_dict(json.loads(fh.read().decode("utf-8")))
+    except (OSError, zipfile.BadZipFile, json.JSONDecodeError):
+        return None
+
+
+def _remove_transient_python_cache(root_dir: str) -> None:
+    """Remove Python runtime cache artefacts before integrity/archive work."""
+    for current_root, dirs, files in os.walk(root_dir):
+        for dirname in list(dirs):
+            if dirname == "__pycache__":
+                _rmtree_robust(os.path.join(current_root, dirname))
+                dirs.remove(dirname)
+        for filename in files:
+            if filename.endswith((".pyc", ".pyo")):
+                try:
+                    os.remove(os.path.join(current_root, filename))
+                except OSError:
+                    pass
+
+
+def _refresh_environment_prereq_trust(pkg_dir: str, manifest: BuildManifest) -> None:
+    """Refresh trust state for a reviewed environment prerequisite package."""
+    if manifest.role != "environment_prereqs":
+        return
+
+    if has_dba_placeholders(pkg_dir):
+        manifest.trust = {
+            "label": "BLOCKED",
+            "computed_at": datetime.now(timezone.utc).isoformat(),
+            "signals": {
+                "environment_prereq_requires_dba_values": {
+                    "status": "fail",
+                    "message": (
+                        "DBA placeholders remain in environment prerequisite "
+                        "payload/context. Replace <DBA_SELECTED_PARENT> and "
+                        "<DBA_REVIEWED_PERM>, then repackage."
+                    ),
+                }
+            },
+        }
+    else:
+        manifest.trust = {
+            "label": "READY_WITH_CAVEATS",
+            "computed_at": datetime.now(timezone.utc).isoformat(),
+            "signals": {
+                "environment_prereq_dba_reviewed": {
+                    "status": "warn",
+                    "message": (
+                        "Environment prerequisite payload no longer contains DBA "
+                        "placeholders. Deploy only after DBA approval and target "
+                        "preflight verification."
+                    ),
+                }
+            },
+        }
+
+
+def _collect_release_group_archives(
+    group_dir: str, current_archive: str, current_manifest: BuildManifest
+) -> list[tuple[str, BuildManifest]]:
+    """Collect current and sibling package archives for release_group.json."""
+    collected: dict[str, tuple[str, BuildManifest]] = {
+        os.path.basename(current_archive): (current_archive, current_manifest)
+    }
+    release_group = current_manifest.release_group or os.path.basename(group_dir)
+    for filename in os.listdir(group_dir):
+        if not filename.startswith(release_group) or not filename.endswith(".zip"):
+            continue
+        path = os.path.join(group_dir, filename)
+        if os.path.abspath(path) == os.path.abspath(current_archive):
+            continue
+        manifest = _read_manifest_from_archive(path)
+        if manifest is not None:
+            collected[filename] = (path, manifest)
+    return list(collected.values())
+
+
+def repackage_package_dir(
+    package_dir: str, *, strict: bool = False
+) -> tuple[str, BuildManifest]:
+    """Repackage an edited extracted SHIPS package directory.
+
+    This is intended for DBA-reviewed _00_environment_prereqs packages. It
+    recalculates package-local metadata after the DBA edits generated payload,
+    recreates the archive/checksum, and refreshes the release-group manifest.
+
+    Args:
+        package_dir: Extracted package directory to repackage.
+        strict: If True, raise ValueError when DBA placeholders remain.
+
+    Returns:
+        Tuple of archive path and refreshed BuildManifest.
+    """
+    package_dir = os.path.abspath(package_dir)
+    if not os.path.isdir(package_dir):
+        raise FileNotFoundError(f"Package directory does not exist: {package_dir}")
+
+    manifest = _read_manifest_from_package_dir(package_dir)
+    _remove_transient_python_cache(package_dir)
+    manifest.phase_inventory = _compute_phase_inventory(package_dir)
+    manifest.file_count = sum(manifest.phase_inventory.values())
+    manifest.package_built_at = datetime.now(timezone.utc).isoformat()
+
+    _refresh_environment_prereq_trust(package_dir, manifest)
+    if strict and manifest.trust.get("label") == "BLOCKED":
+        raise ValueError(
+            "Package remains BLOCKED. Replace DBA placeholders in the generated "
+            "environment prerequisite payload, then run repackage again."
+        )
+
+    _write_manifest_json(package_dir, manifest)
+    write_context_artifacts(package_dir, manifest)
+
+    from td_release_packager.package_report import generate_package_report
+
+    generate_package_report(package_dir, manifest.__dict__)
+    _generate_integrity_file(package_dir)
+
+    group_dir = os.path.dirname(package_dir)
+    archive_format = (
+        "tar.gz" if manifest.package_filename.endswith(".tar.gz") else "zip"
+    )
+    archive_path = os.path.join(group_dir, manifest.package_filename)
+    if os.path.exists(archive_path):
+        os.remove(archive_path)
+    checksum_path = archive_path + ".sha256"
+    if os.path.exists(checksum_path):
+        os.remove(checksum_path)
+
+    archive_path = _archive_package(package_dir, archive_format)
+    _generate_checksum(archive_path)
+
+    release_group = manifest.release_group or os.path.basename(group_dir)
+    _write_release_group_files(
+        group_dir=group_dir,
+        release_group=release_group,
+        manifests_and_archives=_collect_release_group_archives(
+            group_dir, archive_path, manifest
+        ),
     )
     return archive_path, manifest
 
