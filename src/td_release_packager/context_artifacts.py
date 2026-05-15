@@ -393,6 +393,17 @@ def _entrypoints() -> Dict[str, Dict[str, Any]]:
             "required": False,
             "audience": ["human", "dba", "governance"],
         },
+        "prerequisites": {
+            "path": _context_path("prerequisites/"),
+            "description": "Reviewable environment prerequisite requirements, DBA scripts, and execution-evidence contracts generated when external parent databases/users are required.",
+            "required": False,
+            "audience": ["agent", "dba", "governance", "ci_cd"],
+            "contains": [
+                _context_path("prerequisites/database_parent_requirements.json"),
+                _context_path("prerequisites/create_missing_parents.review.sql"),
+                _context_path("prerequisites/create_missing_parents.manifest.json"),
+            ],
+        },
         "prompts": {
             "path": _context_path(f"{PROMPTS_DIR}/"),
             "description": "Directory containing bounded agent operating instructions and role-specific SHIPS playbooks.",
@@ -426,6 +437,7 @@ def _recommended_read_order() -> list[str]:
         "integrity",
         "provenance",
         "stage_results",
+        "prerequisites",
         "prompts",
         "package_report",
     ]
@@ -552,6 +564,9 @@ def _build_index_document(
             "filename": manifest.get("package_filename"),
             "environment": manifest.get("environment"),
             "build_number": manifest.get("build_number"),
+            "role": manifest.get("role") or "single",
+            "release_group": manifest.get("release_group") or "",
+            "requires": manifest.get("requires") or [],
             "current_state": _package_state(manifest),
         },
         "entrypoints": _entrypoints(),
