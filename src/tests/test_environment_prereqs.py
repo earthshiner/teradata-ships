@@ -225,3 +225,51 @@ def test_repackage_unblocks_reviewed_environment_payload(tmp_project, tmp_path):
     assert "as perm = 50G" in rebuilt
     assert "<DBA_SELECTED_PARENT>" not in rebuilt
     assert "<DBA_REVIEWED_PERM>" not in rebuilt
+
+
+def test_environment_prereqs_zip_contains_dba_instructions(tmp_project, tmp_path):
+    """DBA remediation instructions are package-local and include shell commands."""
+    payload = tmp_project / "payload" / "database"
+    _write(
+        payload / "pre-requisites" / "databases" / "GDEV1_BASE.db",
+        "create database GDEV1_BASE from GCFR_MAIN as perm = 0;\n",
+    )
+    _write(
+        payload / "DDL" / "tables" / "GDEV1_BASE.Customer.tbl",
+        "create multiset table GDEV1_BASE.Customer (Id integer) primary index (Id);\n",
+    )
+
+    cfg = BuildConfig(
+        source_dir=str(tmp_project),
+        environment="DEV",
+        package_name="GCFR",
+        env_config_file=str(_properties_for("DEV", tmp_path)),
+        build_number=1,
+        output_dir=str(tmp_path),
+    )
+
+    (main_pair, _prereqs_pair) = build_package(cfg)
+    release_group = main_pair[1].release_group
+    env_archive = (
+        tmp_path / release_group / f"{release_group}_00_environment_prereqs.zip"
+    )
+
+    instructions = _read_zip_member(
+        str(env_archive), "context/prerequisites/DBA_INSTRUCTIONS.md"
+    )
+    assert "PowerShell" in instructions
+    assert "Bash / Git Bash / Linux shell" in instructions
+    assert "python -m td_release_packager repackage" in instructions
+    assert "payload/01_pre_requisites/databases/GCFR_MAIN.db" in instructions
+    assert "<DBA_SELECTED_PARENT>" in instructions
+    assert "<DBA_REVIEWED_PERM>" in instructions
+
+    root_readme = _read_zip_member(str(env_archive), "README.txt")
+    assert "context/prerequisites/DBA_INSTRUCTIONS.md" in root_readme
+    assert "python -m td_release_packager repackage" in root_readme
+
+    ships_index = json.loads(
+        _read_zip_member(str(env_archive), "context/ships.index.json")
+    )
+    prereq_entry = ships_index["entrypoints"]["prerequisites"]
+    assert "context/prerequisites/DBA_INSTRUCTIONS.md" in prereq_entry["contains"]

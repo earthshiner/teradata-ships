@@ -2840,10 +2840,6 @@ def _generate_readme(pkg_dir: str, manifest: BuildManifest):
     --continue-on-error Continue past failures
     -v, --verbose       Debug-level logging
 
-================================================================
-  PARALLEL DEPLOYMENT
-================================================================
-
   DDL phases with a _waves.txt file deploy objects in parallel
   across multiple database connections (streams). Each wave is
   a synchronisation barrier — wave N+1 starts only after all
@@ -2899,6 +2895,30 @@ def _generate_readme(pkg_dir: str, manifest: BuildManifest):
 ================================================================
   CONTENTS
 ================================================================
+
+"""
+
+    if manifest.role == "environment_prereqs":
+        readme += """
+================================================================
+  ENVIRONMENT PREREQUISITE DBA ACTION REQUIRED
+================================================================
+
+  This _00_environment_prereqs package is generated for missing
+  platform/environment parent databases or users. It may be BLOCKED
+  until a DBA reviews and amends generated payload placeholders.
+
+  Read these package-local instructions first:
+
+    context/prerequisites/DBA_INSTRUCTIONS.md
+
+  DBA-reviewed payload files are under:
+
+    payload/01_pre_requisites/
+
+  After editing the generated payload file(s), repackage with:
+
+    python -m td_release_packager repackage --package-dir "<extracted_00_environment_prereqs_dir>" --strict
 
 """
 
