@@ -176,6 +176,10 @@ class BuildConfig:
     allow_dirty: bool = False
     # GAP-004: optional change management ticket reference.
     change_ref: Optional[str] = None
+    # Environment parent prerequisites are normally handled by the DBA
+    # before packaging/deployment.  When True, SHIPS emits an optional
+    # _00_environment_prereqs package for missing external parents.
+    generate_environment_prereqs: bool = False
 
 
 @dataclass
