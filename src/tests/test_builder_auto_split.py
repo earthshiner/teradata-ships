@@ -682,3 +682,72 @@ class TestPrereqOrderResolvedNames:
         assert parent_pos < child_pos, (
             "Parent database must appear before child in _order.txt"
         )
+
+
+class TestDeployChainingResolutionScript:
+    """Regression tests for generated deploy.py companion resolution."""
+
+    def test_generated_deploy_script_resolves_release_group_siblings(
+        self, tmp_project, tmp_path
+    ):
+        """Main deploy.py must search release-group siblings, including
+        double-nested extraction layouts, not inside the main package only."""
+        payload = tmp_project / "payload" / "database"
+        _write(
+            payload / "pre-requisites" / "databases" / "MyDB.db",
+            "CREATE DATABASE MyDB AS PERM = 1000000;\n",
+        )
+        _write(
+            payload / "DDL" / "tables" / "MyDB.Customer.tbl",
+            "CREATE MULTISET TABLE MyDB.Customer (Id INTEGER) PRIMARY INDEX (Id);\n",
+        )
+
+        properties = _properties_for("DEV", tmp_path)
+        config = BuildConfig(
+            source_dir=str(tmp_project),
+            environment="DEV",
+            package_name="ships_test",
+            env_config_file=str(properties),
+            build_number=1,
+            output_dir=str(tmp_path),
+        )
+
+        (main_pair, _companion_pair) = build_package(config)
+        deploy_py = _read_zip_member(main_pair[0], "deploy.py")
+
+        assert "def _find_companion_package" in deploy_py
+        assert "def _normalise_package_dir" in deploy_py
+        assert "required_base, required_base" in deploy_py
+        assert "companion prereqs package not found" in deploy_py
+        assert "os.path.dirname(SCRIPT_DIR), _prereqs_basename" not in deploy_py
+
+    def test_package_copy_ignore_excludes_runtime_and_backup_artifacts(self):
+        """Embedded runtime packages must not ship bytecode or backup files."""
+        from td_release_packager.builder import _package_copy_ignore
+
+        ignored = _package_copy_ignore(
+            "ignored",
+            [
+                "__pycache__",
+                "preflight.py.bak",
+                "module.pyc",
+                "module.pyo",
+                "scratch.tmp",
+                "old_file.old",
+                "patch.rej",
+                "swap.swp",
+                "~temp",
+                "deployer.py",
+            ],
+        )
+
+        assert "__pycache__" in ignored
+        assert "preflight.py.bak" in ignored
+        assert "module.pyc" in ignored
+        assert "module.pyo" in ignored
+        assert "scratch.tmp" in ignored
+        assert "old_file.old" in ignored
+        assert "patch.rej" in ignored
+        assert "swap.swp" in ignored
+        assert "~temp" in ignored
+        assert "deployer.py" not in ignored

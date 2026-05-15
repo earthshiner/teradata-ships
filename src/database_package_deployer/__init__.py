@@ -24,7 +24,7 @@ and database existence before any DDL is executed.
 Runs as a standalone CLI or as an MCP Server tool.
 """
 
-__version__ = "2.0.7"
+__version__ = "2.0.8"
 
 from database_package_deployer.models import (
     ObjectType,

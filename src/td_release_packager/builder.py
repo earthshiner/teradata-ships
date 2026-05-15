@@ -88,18 +88,33 @@ logger = logging.getLogger(__name__)
 
 
 def _package_copy_ignore(_directory: str, names: list[str]) -> set[str]:
-    """Ignore transient Python cache files when cloning package trees.
+    """Ignore transient or non-release artefacts when cloning package trees.
 
-    Package directories are cloned during split/finalize operations. On
-    Windows, `.pyc` files under `__pycache__` can disappear while tests or
-    import machinery are running, which makes `shutil.copytree` fail with a
-    transient WinError 3. These files are generated runtime artefacts and must
-    not be shipped in SHIPS packages anyway.
+    Package directories are cloned during split/finalize operations and the
+    embedded deployer is copied into each package. On Windows, `.pyc` files
+    under `__pycache__` can disappear while tests or import machinery are
+    running, which makes `shutil.copytree` fail with a transient WinError 3.
+    Backup/editor artefacts are equally unsafe to ship because they can expose
+    stale code and confuse downstream agents.
     """
+    ignored_names = {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
+    ignored_suffixes = (
+        ".pyc",
+        ".pyo",
+        ".bak",
+        ".tmp",
+        ".old",
+        ".orig",
+        ".rej",
+        ".swp",
+        ".swo",
+    )
     return {
         name
         for name in names
-        if name == "__pycache__" or name.endswith(".pyc") or name.endswith(".pyo")
+        if name in ignored_names
+        or name.startswith("~")
+        or name.lower().endswith(ignored_suffixes)
     }
 
 
@@ -2220,6 +2235,93 @@ PACKAGE_NAME = "{manifest.package_name}"
 ENVIRONMENT = "{manifest.environment}"
 
 
+def _has_package_metadata(path):
+    """Return True when a directory looks like a SHIPS package root."""
+    return os.path.isfile(os.path.join(path, "context", "ships.build.json"))
+
+
+def _normalise_package_dir(path):
+    """Return the actual package root, tolerating double-nested extraction.
+
+    Some unzip workflows create <pkg>/<pkg>/... rather than <pkg>/... .
+    The deployer should still find package metadata and payload in that layout.
+    """
+    if not path:
+        return None
+
+    path = os.path.abspath(path)
+    if _has_package_metadata(path):
+        return path
+
+    nested = os.path.join(path, os.path.basename(path))
+    if _has_package_metadata(nested):
+        return nested
+
+    return None
+
+
+def _release_group_candidates(current_package_dir):
+    """Yield likely release group directories for companion package lookup."""
+    current_package_dir = os.path.abspath(current_package_dir)
+    seen = set()
+
+    candidates = [os.path.dirname(current_package_dir)]
+
+    # Double-nested extraction: <release_group>/<pkg>/<pkg>.
+    parent = os.path.dirname(current_package_dir)
+    if os.path.basename(parent) == os.path.basename(current_package_dir):
+        candidates.append(os.path.dirname(parent))
+
+    # Release-group zip layout: package directory name starts with the group id.
+    build_json = os.path.join(current_package_dir, "context", "ships.build.json")
+    if os.path.exists(build_json):
+        try:
+            with open(build_json, encoding="utf-8") as _f:
+                build_data = json.load(_f)
+            release_group = build_data.get("release_group")
+            if release_group:
+                probe = current_package_dir
+                for _ in range(4):
+                    if os.path.basename(probe) == release_group:
+                        candidates.append(probe)
+                        break
+                    probe = os.path.dirname(probe)
+        except Exception:
+            pass
+
+    for candidate in candidates:
+        candidate = os.path.abspath(candidate)
+        if candidate not in seen:
+            seen.add(candidate)
+            yield candidate
+
+
+def _find_companion_package(current_package_dir, required_archive_name):
+    """Find a required companion package as a release-group sibling.
+
+    Supports extracted package directories, double-nested extracted directories,
+    and a sibling zip file with the required archive name.
+    """
+    required_base = os.path.splitext(os.path.basename(required_archive_name))[0]
+
+    for release_group_dir in _release_group_candidates(current_package_dir):
+        candidates = [
+            os.path.join(release_group_dir, required_base),
+            os.path.join(release_group_dir, required_base, required_base),
+        ]
+
+        for candidate in candidates:
+            package_root = _normalise_package_dir(candidate)
+            if package_root:
+                return package_root
+
+        zip_candidate = os.path.join(release_group_dir, required_archive_name)
+        if os.path.isfile(zip_candidate):
+            return zip_candidate
+
+    return None
+
+
 def main():
     """Main deployment entry point for the DBA."""
     args = parse_args()
@@ -2336,20 +2438,48 @@ def main():
 
     if requires and not args.dry_run:
         _prereqs_zip_name = requires[0]
-        _prereqs_basename = os.path.splitext(_prereqs_zip_name)[0]
-        _prereqs_dir = os.path.join(os.path.dirname(SCRIPT_DIR), _prereqs_basename)
+        _prereqs_basename = os.path.splitext(os.path.basename(_prereqs_zip_name))[0]
+        _prereqs_location = _find_companion_package(SCRIPT_DIR, _prereqs_zip_name)
 
-        if not os.path.isdir(_prereqs_dir):
+        if not _prereqs_location:
+            _searched = []
+            for _rg in _release_group_candidates(SCRIPT_DIR):
+                _searched.extend([
+                    os.path.join(_rg, _prereqs_basename),
+                    os.path.join(_rg, _prereqs_basename, _prereqs_basename),
+                    os.path.join(_rg, _prereqs_zip_name),
+                ])
             logger.error(
-                "Deploy chaining: companion prereqs package not found at: %s\\n"
-                "  Extract '%s' alongside this package directory and retry.",
-                _prereqs_dir, _prereqs_zip_name,
+                "Deploy chaining: companion prereqs package not found.\n"
+                "  Required: %s\n"
+                "  Searched:\n    %s\n"
+                "  Extract '%s' as a sibling under the release group directory and retry.",
+                _prereqs_zip_name,
+                "\n    ".join(_searched),
+                _prereqs_zip_name,
+            )
+            sys.exit(1)
+
+        if os.path.isfile(_prereqs_location) and _prereqs_location.lower().endswith(".zip"):
+            logger.error(
+                "Deploy chaining: companion prereqs package is present only as a zip: %s\n"
+                "  Extract it under the release group directory before deploying this package.",
+                _prereqs_location,
+            )
+            sys.exit(1)
+
+        _prereqs_dir = _normalise_package_dir(_prereqs_location)
+        if not _prereqs_dir:
+            logger.error(
+                "Deploy chaining: companion prereqs package has no context/ships.build.json: %s",
+                _prereqs_location,
             )
             sys.exit(1)
 
         logger.info("=" * 64)
         logger.info("  Deploy chaining — companion prereqs")
         logger.info("  Prereqs: %s", _prereqs_basename)
+        logger.info("  Path:    %s", _prereqs_dir)
         logger.info("  (Deploying prereqs live so parent databases exist)")
         logger.info("=" * 64)
 
