@@ -53,6 +53,20 @@ from database_package_deployer.models import (
 logger = logging.getLogger(__name__)
 
 
+_CREATE_PARENT_RE = re.compile(
+    r"^\s*create\s+(database|user)\s+"
+    r"([\"']?[A-Za-z_]\w*[\"']?)"
+    r"\s+from\s+"
+    r"([\"']?[A-Za-z_]\w*[\"']?)",
+    re.IGNORECASE | re.MULTILINE,
+)
+_PERM_RE = re.compile(
+    r"\bperm\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*([kmgt]?)\b",
+    re.IGNORECASE,
+)
+_KNOWN_EXTERNAL_PARENTS = {"DBC"}
+
+
 def run_preflight(
     cursor,
     ddl_files: List[str],
@@ -165,7 +179,16 @@ def run_preflight(
                 )
             )
 
-    # -- Phase 2: Check databases exist --
+    # -- Phase 2: Check CREATE DATABASE/USER parent dependencies --
+    # CREATE DATABASE/USER child FROM parent fails immediately when the parent
+    # is neither created earlier in this package nor already present on the
+    # target.  Detect that before any DDL executes so the DBA/agent receives a
+    # clear prerequisite failure instead of a mid-deploy Teradata 3802.
+    checks.extend(
+        _check_parent_dependencies(cursor, parsed_ddls, databases_being_created)
+    )
+
+    # -- Phase 3: Check databases exist --
     # Skip databases that will be created by this package.
     for db_name in sorted(databases):
         if not db_name:
@@ -293,6 +316,167 @@ def run_preflight(
     )
 
     return (result, parsed_ddls)
+
+
+# ---------------------------------------------------------------
+# Internal — Parent prerequisite checks
+# ---------------------------------------------------------------
+
+
+def _normalise_identifier(value: str) -> str:
+    """Normalise a Teradata identifier for comparison."""
+    return value.strip().strip("'\"").upper()
+
+
+def _parse_perm_literal(value: str, suffix: str) -> int:
+    """Convert a PERM value with optional K/M/G/T suffix to bytes."""
+    numeric = float(value)
+    multiplier = {
+        "": 1,
+        "K": 1024,
+        "M": 1024**2,
+        "G": 1024**3,
+        "T": 1024**4,
+    }.get(suffix.upper(), 1)
+    return int(numeric * multiplier)
+
+
+def _extract_parent_dependency(
+    parsed: ParsedStatement,
+) -> Optional[tuple[str, str, int]]:
+    """Extract (child, parent, perm_bytes) from CREATE DATABASE/USER DDL."""
+    if parsed.object_type not in (ObjectType.DATABASE, ObjectType.USER):
+        return None
+    match = _CREATE_PARENT_RE.search(parsed.ddl_text)
+    if not match:
+        return None
+    child = _normalise_identifier(match.group(2))
+    parent = _normalise_identifier(match.group(3))
+    perm_bytes = 0
+    perm_match = _PERM_RE.search(parsed.ddl_text)
+    if perm_match:
+        perm_bytes = _parse_perm_literal(perm_match.group(1), perm_match.group(2))
+    return (child, parent, perm_bytes)
+
+
+def _check_parent_dependencies(
+    cursor,
+    parsed_ddls: List[ParsedStatement],
+    containers_being_created: Set[str],
+) -> List[PreflightCheck]:
+    """Validate external parents required by CREATE DATABASE/USER DDL.
+
+    Parents created by this package are accepted because _order.txt deploys
+    them before their children.  Parents outside the package must already exist
+    in the target.  Missing external parents are ERRORs because deployment
+    cannot succeed until a DBA creates or confirms them.
+    """
+    checks: List[PreflightCheck] = []
+    required_perm_by_parent: Dict[str, int] = {}
+
+    for parsed in parsed_ddls:
+        dependency = _extract_parent_dependency(parsed)
+        if not dependency:
+            continue
+        child, parent, perm_bytes = dependency
+        required_perm_by_parent[parent] = (
+            required_perm_by_parent.get(parent, 0) + perm_bytes
+        )
+
+        if parent in containers_being_created:
+            checks.append(
+                PreflightCheck(
+                    check_name="database_parent_dependency",
+                    passed=True,
+                    database=parent,
+                    message=(
+                        f"Parent '{parent}' for '{child}' will be created by "
+                        "this package before the child object."
+                    ),
+                    severity="INFO",
+                )
+            )
+            continue
+
+        if parent in _KNOWN_EXTERNAL_PARENTS:
+            checks.append(
+                PreflightCheck(
+                    check_name="database_parent_dependency",
+                    passed=True,
+                    database=parent,
+                    message=f"Parent '{parent}' for '{child}' is a known platform root.",
+                    severity="INFO",
+                )
+            )
+            continue
+
+        parent_exists = _database_exists(cursor, parent)
+        checks.append(
+            PreflightCheck(
+                check_name="database_parent_dependency",
+                passed=parent_exists,
+                database=parent,
+                message=(
+                    f"Parent '{parent}' for '{child}' exists."
+                    if parent_exists
+                    else f"Parent database/user '{parent}' required by '{child}' does NOT exist. "
+                    "Deploy the _00_environment_prereqs package or have a DBA create "
+                    "the parent with sufficient PERM before running this package."
+                ),
+                severity="ERROR",
+            )
+        )
+
+    for parent, required_perm in sorted(required_perm_by_parent.items()):
+        if parent in containers_being_created or parent in _KNOWN_EXTERNAL_PARENTS:
+            continue
+        if not _database_exists(cursor, parent):
+            continue
+        checks.extend(_check_parent_perm_capacity(cursor, parent, required_perm))
+
+    return checks
+
+
+def _check_parent_perm_capacity(
+    cursor,
+    parent_name: str,
+    required_perm_bytes: int,
+) -> List[PreflightCheck]:
+    """Warn if an external parent may not have enough available PERM."""
+    if required_perm_bytes <= 0:
+        return []
+    try:
+        cursor.execute(
+            "select sum(MaxPerm) as MaxPerm, sum(CurrentPerm) as CurrentPerm "
+            "from DBC.DiskSpaceV where DatabaseName = ?",
+            [parent_name],
+        )
+        row = cursor.fetchone()
+    except Exception as exc:
+        logger.warning("parent perm check failed for '%s': %s", parent_name, exc)
+        return []
+
+    if row is None or row[0] is None:
+        return []
+    max_perm = int(row[0] or 0)
+    current_perm = int(row[1] or 0)
+    available = max_perm - current_perm
+    has_space = available >= required_perm_bytes
+    return [
+        PreflightCheck(
+            check_name="database_parent_perm_capacity",
+            passed=has_space,
+            database=parent_name,
+            message=(
+                f"Parent '{parent_name}' has {_format_bytes(available)} available; "
+                f"package child PERM requires at least {_format_bytes(required_perm_bytes)}."
+                if has_space
+                else f"Parent '{parent_name}' has only {_format_bytes(available)} available; "
+                f"package child PERM requires at least {_format_bytes(required_perm_bytes)}."
+            ),
+            severity="INFO" if has_space else "ERROR",
+        )
+    ]
 
 
 # ---------------------------------------------------------------
@@ -792,19 +976,6 @@ def _check_excess_privilege(cursor) -> List[PreflightCheck]:
     Returns:
         List of PreflightCheck results.
     """
-    elevated_access_rights = frozenset(
-        {
-            "AS",  # ABORT SESSION
-            "CA",  # CREATE AUTHORIZATION
-            "CD",  # CREATE DATABASE
-            "CO",  # CREATE PROFILE
-            "CR",  # CREATE ROLE
-            "CU",  # CREATE USER
-            "UM",  # USER MONITOR
-            "AL",  # ALL
-        }
-    )
-
     try:
         cursor.execute(
             """
