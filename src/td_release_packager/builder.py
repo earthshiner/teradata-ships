@@ -289,10 +289,18 @@ def _build_package_impl(
     build_no = f"{build_int:04d}"
 
     # -- Package naming --
+    # A build may emit one or more package archives (environment prereqs,
+    # application prereqs, main).  Treat the shared release identity as a
+    # first-class output directory so every related archive, checksum, and
+    # group manifest stays together even when the group contains only one
+    # package.
     pkg_name = f"{config.environment}_{config.package_name}_BUILD_{build_no}_{ts_str}"
-    pkg_dir = os.path.join(config.output_dir, pkg_name)
+    release_group_dir = os.path.join(config.output_dir, pkg_name)
+    pkg_dir = os.path.join(release_group_dir, pkg_name)
 
-    logger.info("Building package: %s", pkg_name)
+    os.makedirs(release_group_dir, exist_ok=True)
+
+    logger.info("Building package group: %s", pkg_name)
 
     # -- Validate source directory --
     if not os.path.isdir(config.source_dir):
@@ -584,13 +592,14 @@ def _build_package_impl(
         logger.info("Auto-split: main    → %s", main_archive)
         return (main_pair, prereqs_pair)
 
-    # -- Phase 13 (single-zip path): Integrity fingerprint + archive + checksum --
-    _generate_integrity_file(pkg_dir)
-    archive_path = _archive_package(pkg_dir, config.archive_format)
-    checksum_path = _generate_checksum(archive_path)
+    # -- Phase 13 (single-package path): finalise the release group,
+    # archive the _01_main package, and write release_group.json.
+    archive_path, manifest = _finalize_single_package(
+        pkg_dir, manifest, config.archive_format
+    )
 
     logger.info("Package built: %s", archive_path)
-    logger.info("Checksum:      %s", checksum_path)
+    logger.info("Release group:  %s", os.path.dirname(archive_path))
 
     return ((archive_path, manifest), None)
 
@@ -1069,7 +1078,154 @@ def _split_into_paired_packages(
     main_archive = _archive_package(pkg_dir, archive_format)
     _generate_checksum(main_archive)
 
+    group_archives: list[tuple[str, BuildManifest]] = []
+    if env_prereq_pair is not None:
+        group_archives.append(env_prereq_pair)
+    group_archives.extend(
+        [
+            (prereqs_archive, prereqs_manifest),
+            (main_archive, manifest),
+        ]
+    )
+    _write_release_group_files(
+        group_dir=parent_dir,
+        release_group=release_group,
+        manifests_and_archives=group_archives,
+    )
+
     return ((main_archive, manifest), (prereqs_archive, prereqs_manifest))
+
+
+def _archive_ext(archive_format: str) -> str:
+    """Return the file extension used for an archive format."""
+    return "tar.gz" if archive_format == "tar.gz" else "zip"
+
+
+def _write_manifest_json(pkg_dir: str, manifest: BuildManifest) -> None:
+    """Write the canonical package build manifest under context/."""
+    manifest_path = _context_file(pkg_dir, "ships.build.json")
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(manifest.__dict__, f, indent=2, ensure_ascii=False)
+
+
+def _role_sequence(role: str) -> int:
+    """Return the deploy-order sequence for a package role."""
+    return {
+        "environment_prereqs": 0,
+        "prereqs": 1,
+        "main": 2,
+    }.get(role, 1)
+
+
+def _checksum_filename_for(archive_path: str) -> str:
+    """Return the checksum sidecar basename for an archive path."""
+    return os.path.basename(archive_path) + ".sha256"
+
+
+def _write_release_group_files(
+    *,
+    group_dir: str,
+    release_group: str,
+    manifests_and_archives: list[tuple[str, BuildManifest]],
+) -> None:
+    """Write release-group level manifest and README.
+
+    The package-level context remains inside each archive.  This group-level
+    file is intentionally small: it lets humans, CI/CD, and agents discover
+    all sibling archives and their deploy order without scanning unrelated
+    files in the wider releases directory.
+    """
+    ordered = sorted(
+        manifests_and_archives,
+        key=lambda item: (_role_sequence(item[1].role), os.path.basename(item[0])),
+    )
+    packages = []
+    for archive_path, manifest in ordered:
+        archive_name = os.path.basename(archive_path)
+        packages.append(
+            {
+                "sequence": _role_sequence(manifest.role),
+                "role": manifest.role or "main",
+                "archive": archive_name,
+                "checksum": _checksum_filename_for(archive_path),
+                "context_entrypoint": f"{archive_name}!/context/ships.index.json",
+                "requires": list(manifest.requires),
+            }
+        )
+
+    group_doc = {
+        "schema_version": "1.0",
+        "release_group": release_group,
+        "environment": ordered[0][1].environment if ordered else "",
+        "package_name": ordered[0][1].package_name if ordered else "",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "deploy_order": [pkg["archive"] for pkg in packages],
+        "packages": packages,
+    }
+
+    os.makedirs(group_dir, exist_ok=True)
+    group_manifest_path = os.path.join(group_dir, "release_group.json")
+    with open(group_manifest_path, "w", encoding="utf-8") as f:
+        json.dump(group_doc, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+
+    readme_path = os.path.join(group_dir, "README.txt")
+    with open(readme_path, "w", encoding="utf-8") as f:
+        f.write(f"SHIPS release group: {release_group}\n")
+        f.write("=" * (22 + len(release_group)) + "\n\n")
+        f.write("Deploy packages in this order:\n\n")
+        for pkg in packages:
+            f.write(f"  {pkg['sequence']}. {pkg['archive']} ({pkg['role']})\n")
+        f.write(
+            "\nEach package is self-contained and has its own context/ships.index.json.\n"
+        )
+
+
+def _finalize_single_package(
+    pkg_dir: str,
+    manifest: BuildManifest,
+    archive_format: str,
+) -> Tuple[str, BuildManifest]:
+    """Finalize and archive a one-package release group.
+
+    Even when there is only one package, SHIPS now writes it under a release
+    group directory and uses the explicit ``_01_main`` role suffix.  This keeps
+    the filesystem contract consistent with multi-package release groups.
+    """
+    group_dir = os.path.dirname(pkg_dir)
+    release_group = os.path.basename(pkg_dir)
+    archive_ext = _archive_ext(archive_format)
+    main_basename = f"{release_group}_01_main"
+    main_pkg_dir = os.path.join(group_dir, main_basename)
+    main_archive_filename = f"{main_basename}.{archive_ext}"
+
+    if os.path.exists(main_pkg_dir):
+        _rmtree_robust(main_pkg_dir)
+    shutil.copytree(pkg_dir, main_pkg_dir)
+    _rmtree_robust(pkg_dir)
+
+    manifest.package_filename = main_archive_filename
+    manifest.release_group = release_group
+    manifest.role = "main"
+    manifest.requires = []
+    manifest.phase_inventory = _compute_phase_inventory(main_pkg_dir)
+    manifest.file_count = sum(manifest.phase_inventory.values())
+
+    _write_manifest_json(main_pkg_dir, manifest)
+    write_context_artifacts(main_pkg_dir, manifest)
+
+    from td_release_packager.package_report import generate_package_report
+
+    generate_package_report(main_pkg_dir, manifest.__dict__)
+    _generate_integrity_file(main_pkg_dir)
+    archive_path = _archive_package(main_pkg_dir, archive_format)
+    _generate_checksum(archive_path)
+    _write_release_group_files(
+        group_dir=group_dir,
+        release_group=release_group,
+        manifests_and_archives=[(archive_path, manifest)],
+    )
+    return archive_path, manifest
 
 
 def _find_payload_dir(source_dir: str) -> str:
