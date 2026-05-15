@@ -1333,7 +1333,7 @@ Two or more objects depend on each other — for example, View A references View
 
 **Q: How do I handle objects that must exist before my DDL (e.g. CREATE DATABASE)?**
 
-SHIPS auto-detects objects that create databases/users and the objects that depend on them. It writes related archives into one release-group directory. By default, missing external parent databases/users are reported in the `_01_prereqs` package for DBA action, and SHIPS produces the normal `_01_prereqs` and `_02_main` pair. If you explicitly run package/process with `--generate-environment-prereqs`, the group may also contain a review-gated `_00_environment_prereqs` archive. Deploy archives in the order shown in `release_group.json` and the group-level `README.txt`.
+SHIPS auto-detects objects that create databases/users and the objects that depend on them. It writes all related archives into one release-group directory. Depending on dependencies, the group may contain `_00_environment_prereqs`, `_01_prereqs`, and `_02_main` archives. Deploy them in the order shown in `release_group.json` and the group-level `README.txt`.
 
 **Q: I got a `MULTISET` inject notice — what does that mean?**
 
