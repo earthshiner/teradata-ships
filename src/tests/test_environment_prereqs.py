@@ -54,64 +54,6 @@ def test_analyse_environment_parent_requirements_detects_external_parent(tmp_pat
     assert requirements[0].minimum_required_perm_bytes == 300 * 1024 * 1024
 
 
-def test_external_parent_defaults_to_two_packages_with_review_context(
-    tmp_project, tmp_path
-):
-    """External parents are reported by default without creating _00 package."""
-    payload = tmp_project / "payload" / "database"
-    _write(
-        payload / "pre-requisites" / "databases" / "GDEV1_BASE.db",
-        "create database GDEV1_BASE from GCFR_MAIN as perm = 100M;\n",
-    )
-    _write(
-        payload / "DDL" / "tables" / "GDEV1_BASE.Customer.tbl",
-        "create multiset table GDEV1_BASE.Customer (Id integer) primary index (Id);\n",
-    )
-
-    cfg = BuildConfig(
-        source_dir=str(tmp_project),
-        environment="DEV",
-        package_name="GCFR",
-        env_config_file=str(_properties_for("DEV", tmp_path)),
-        build_number=1,
-        output_dir=str(tmp_path),
-    )
-
-    (main_pair, prereqs_pair) = build_package(cfg)
-    main_archive, main_manifest = main_pair
-    prereqs_archive, prereqs_manifest = prereqs_pair
-    release_group = main_manifest.release_group
-    group_dir = tmp_path / release_group
-
-    assert (group_dir / f"{release_group}_00_environment_prereqs.zip").exists() is False
-    assert os.path.basename(prereqs_archive).endswith("_01_prereqs.zip")
-    assert os.path.basename(main_archive).endswith("_02_main.zip")
-    assert prereqs_manifest.requires == []
-    assert main_manifest.requires == [os.path.basename(prereqs_archive)]
-
-    group_manifest = json.loads(
-        (group_dir / "release_group.json").read_text(encoding="utf-8")
-    )
-    assert group_manifest["deploy_order"] == [
-        os.path.basename(prereqs_archive),
-        os.path.basename(main_archive),
-    ]
-
-    prereqs_requirements = json.loads(
-        _read_zip_member(
-            str(prereqs_archive),
-            "context/prerequisites/database_parent_requirements.json",
-        )
-    )
-    assert prereqs_requirements["missing_parents"][0]["name"] == "GCFR_MAIN"
-    review_sql = _read_zip_member(
-        str(prereqs_archive),
-        "context/prerequisites/create_missing_parents.review.sql",
-    )
-    assert "create database GCFR_MAIN" in review_sql
-    assert "<DBA_SELECTED_PARENT>" in review_sql
-
-
 def test_build_package_emits_environment_prereqs_zip_and_chains_requires(
     tmp_project, tmp_path
 ):
@@ -133,7 +75,6 @@ def test_build_package_emits_environment_prereqs_zip_and_chains_requires(
         env_config_file=str(_properties_for("DEV", tmp_path)),
         build_number=1,
         output_dir=str(tmp_path),
-        generate_environment_prereqs=True,
     )
 
     (main_pair, prereqs_pair) = build_package(cfg)
@@ -207,7 +148,6 @@ def test_environment_prereqs_zip_contains_deployable_payload(tmp_project, tmp_pa
         env_config_file=str(_properties_for("DEV", tmp_path)),
         build_number=1,
         output_dir=str(tmp_path),
-        generate_environment_prereqs=True,
     )
 
     (main_pair, _prereqs_pair) = build_package(cfg)
@@ -257,7 +197,6 @@ def test_repackage_unblocks_reviewed_environment_payload(tmp_project, tmp_path):
         env_config_file=str(_properties_for("DEV", tmp_path)),
         build_number=1,
         output_dir=str(tmp_path),
-        generate_environment_prereqs=True,
     )
 
     (main_pair, _prereqs_pair) = build_package(cfg)
@@ -307,7 +246,6 @@ def test_environment_prereqs_zip_contains_dba_instructions(tmp_project, tmp_path
         env_config_file=str(_properties_for("DEV", tmp_path)),
         build_number=1,
         output_dir=str(tmp_path),
-        generate_environment_prereqs=True,
     )
 
     (main_pair, _prereqs_pair) = build_package(cfg)
