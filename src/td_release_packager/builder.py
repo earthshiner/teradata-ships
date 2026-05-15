@@ -929,6 +929,27 @@ def _create_environment_prereqs_package_if_needed(
         len(requirements),
         total_required_perm,
     )
+    instruction_path = os.path.join(
+        env_pkg_dir,
+        "context",
+        "prerequisites",
+        "DBA_INSTRUCTIONS.md",
+    )
+    payload_summary = (
+        ", ".join(payload_paths) if payload_paths else "payload/01_pre_requisites/"
+    )
+    print(
+        "\n"
+        "================================================================\n"
+        "  Environment prerequisite package created but BLOCKED\n"
+        "================================================================\n"
+        f"  Package: {env_archive_filename}\n"
+        f"  DBA instructions: {instruction_path}\n"
+        f"  DBA must amend: {payload_summary}\n"
+        "  Then run:\n"
+        f'    python -m td_release_packager repackage --package-dir "{env_pkg_dir}" --strict\n'
+        "================================================================\n"
+    )
     return (archive, env_manifest)
 
 
@@ -2784,6 +2805,20 @@ if __name__ == "__main__":
     os.chmod(deploy_path, 0o755)
 
 
+def _environment_prereq_payload_paths(pkg_dir: str) -> list[str]:
+    """Return generated environment prerequisite payload paths relative to package root."""
+    root = os.path.join(pkg_dir, "payload", "01_pre_requisites")
+    if not os.path.isdir(root):
+        return []
+    paths: list[str] = []
+    for current_root, _dirs, files in os.walk(root):
+        for filename in files:
+            if filename.lower().endswith((".db", ".usr")):
+                full_path = os.path.join(current_root, filename)
+                paths.append(os.path.relpath(full_path, pkg_dir).replace(os.sep, "/"))
+    return sorted(paths)
+
+
 def _generate_readme(pkg_dir: str, manifest: BuildManifest):
     """Generate a README.txt with deployment instructions for the DBA."""
     readme = f"""================================================================
@@ -2899,26 +2934,43 @@ def _generate_readme(pkg_dir: str, manifest: BuildManifest):
 """
 
     if manifest.role == "environment_prereqs":
-        readme += """
+        payload_paths = _environment_prereq_payload_paths(pkg_dir)
+        payload_listing = "\n".join(f"    {path}" for path in payload_paths)
+        if not payload_listing:
+            payload_listing = (
+                "    payload/01_pre_requisites/databases/<missing_parent>.db"
+            )
+        readme += f"""
 ================================================================
-  ENVIRONMENT PREREQUISITE DBA ACTION REQUIRED
+  ACTION REQUIRED — DBA REVIEW NEEDED
 ================================================================
 
   This _00_environment_prereqs package is generated for missing
-  platform/environment parent databases or users. It may be BLOCKED
+  platform/environment parent databases or users. It is BLOCKED
   until a DBA reviews and amends generated payload placeholders.
 
-  Read these package-local instructions first:
+  Read the DBA instructions here:
 
     context/prerequisites/DBA_INSTRUCTIONS.md
 
-  DBA-reviewed payload files are under:
+  DBA must amend the generated payload file(s) inside this extracted
+  _00_environment_prereqs package, not the project payload and not
+  the _01_prereqs package:
 
-    payload/01_pre_requisites/
+{payload_listing}
 
-  After editing the generated payload file(s), repackage with:
+  Replace these placeholders with DBA-approved values:
+
+    <DBA_SELECTED_PARENT>
+    <DBA_REVIEWED_PERM>
+
+  Then regenerate integrity, trust metadata, package report, zip,
+  checksum sidecar, and release_group.json with:
 
     python -m td_release_packager repackage --package-dir "<extracted_00_environment_prereqs_dir>" --strict
+
+  Do not deploy this package until the repackage command completes
+  successfully and the regenerated archive is used.
 
 """
 
