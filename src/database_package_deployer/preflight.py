@@ -780,33 +780,46 @@ def _check_jar_alias_coverage(
 def _check_excess_privilege(cursor) -> List[PreflightCheck]:
     """Warn if the deploying user holds elevated rights beyond what is needed.
 
-    Queries ``DBC.UserRightsV`` for rights that the deploy account should
-    not hold: GRANT OPTION (GD), rights on DBC itself, SYSTEM_ADMIN (SA),
-    CREATE ACCESS MACRO (CA), or ALL rights on any database.
+    This check inspects the connected deploy account's rights directly.
 
-    This is a WARNING-level check — it does not block deployment but flags
-    the excess for a security review.
+    The check is advisory only. It warns when the deploy user has grant
+    authority, rights on DBC, ALL rights, or selected system-level rights
+    that are broader than normal package deployment requires.
 
     Args:
         cursor: Active Teradata database cursor.
 
     Returns:
-        List of PreflightCheck results (zero or one entry).
+        List of PreflightCheck results.
     """
-    _ELEVATED = frozenset({"GD", "SA", "CA", "AL"})
+    elevated_access_rights = frozenset(
+        {
+            "AS",  # ABORT SESSION
+            "CA",  # CREATE AUTHORIZATION
+            "CD",  # CREATE DATABASE
+            "CO",  # CREATE PROFILE
+            "CR",  # CREATE ROLE
+            "CU",  # CREATE USER
+            "UM",  # USER MONITOR
+            "AL",  # ALL
+        }
+    )
 
     try:
         cursor.execute(
-            "SELECT"
-            "     TRIM(AccessRight) AS AccessRight"
-            "    ,TRIM(DatabaseName) AS DatabaseName"
-            "    ,TRIM(TableName) AS TableName"
-            " FROM DBC.UserRightsV"
-            " WHERE UserName = USER"
-            "   AND ("
-            "        TRIM(AccessRight) IN ('GD', 'SA', 'CA', 'AL')"
-            "     OR TRIM(DatabaseName) = 'DBC'"
-            "   )"
+            """
+            select
+                 trim(AccessRight) as AccessRight
+                ,trim(DatabaseName) as DatabaseName
+                ,trim(TableName) as TableName
+                ,trim(GrantAuthority) as GrantAuthority
+            from DBC.UserRightsV
+            where
+                   trim(GrantAuthority) = 'Y'
+                or trim(AccessRight) in ('AS', 'CA', 'CD', 'CO', 'CR', 'CU', 'UM', 'AL')
+                or trim(DatabaseName) = 'DBC'
+            ;
+            """
         )
         rows = cursor.fetchall()
     except Exception as exc:
@@ -824,15 +837,24 @@ def _check_excess_privilege(cursor) -> List[PreflightCheck]:
             )
         ]
 
-    findings = [f"{r[0]} ON {r[1]}" for r in rows]
+    findings = [
+        (
+            f"{row[0]} on {row[1]}"
+            + (f".{row[2]}" if row[2] else "")
+            + (" with grant authority" if row[3] == "Y" else "")
+        )
+        for row in rows
+    ]
+
     logger.warning(
         "excess_privilege: deploy user holds elevated rights: %s",
         ", ".join(findings),
     )
+
     return [
         PreflightCheck(
             check_name="excess_privilege",
-            passed=True,  # WARNING — advisory only, does not block
+            passed=True,
             database="(system)",
             message=(
                 "excess_privilege — deploy user holds elevated rights: "
