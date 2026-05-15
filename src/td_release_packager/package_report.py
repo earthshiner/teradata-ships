@@ -628,6 +628,22 @@ function copyCmd(id) {{
 """
 
 
+def _environment_prereq_banner(manifest_dict: dict) -> str:
+    """Return a prominent DBA action banner for environment prereq packages."""
+    if str(manifest_dict.get("role") or "") != "environment_prereqs":
+        return ""
+    return """
+<div class="action-banner">
+  <h2>ACTION REQUIRED — DBA REVIEW NEEDED</h2>
+  <p>This <strong>_00_environment_prereqs</strong> package is blocked until DBA-approved parent and PERM values are supplied.</p>
+  <p><strong>Read:</strong> <code>context/prerequisites/DBA_INSTRUCTIONS.md</code></p>
+  <p><strong>Amend generated payload:</strong> <code>payload/01_pre_requisites/</code></p>
+  <p><strong>Then run:</strong> <code>python -m td_release_packager repackage --package-dir "&lt;extracted_00_environment_prereqs_dir&gt;" --strict</code></p>
+  <p>Do not edit the project payload or the _01_prereqs package for this environment parent prerequisite.</p>
+</div>
+"""
+
+
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
@@ -708,6 +724,11 @@ body {{ font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-
 #obj-tbody tr:hover {{ background: #e8f0fe !important; }}
 #obj-tbody td {{ padding: 7px 12px; border-bottom: 1px solid #f0f0f0; }}
 pre {{ white-space: pre-wrap; word-break: break-all; }}
+.action-banner {{ background: #fff3cd; border: 2px solid #ffca2c; border-left: 8px solid #FF5F02;
+                  border-radius: 8px; padding: 16px 20px; margin-bottom: 16px; }}
+.action-banner h2 {{ color: #7a3b00; font-size: 18px; margin-bottom: 8px; }}
+.action-banner p {{ margin: 6px 0; color: #3b2a00; }}
+.action-banner code {{ background: rgba(255,255,255,.8); padding: 2px 5px; border-radius: 4px; }}
 </style>
 </head>
 <body>
@@ -738,6 +759,8 @@ pre {{ white-space: pre-wrap; word-break: break-all; }}
 </div>
 
 <div class="content">
+
+{_environment_prereq_banner(manifest_dict)}
 
 <div id="tab-objects" class="tab-pane active card">
 {_objects_tab(records)}

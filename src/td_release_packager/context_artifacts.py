@@ -399,6 +399,7 @@ def _entrypoints() -> Dict[str, Dict[str, Any]]:
             "required": False,
             "audience": ["agent", "dba", "governance", "ci_cd"],
             "contains": [
+                _context_path("prerequisites/DBA_INSTRUCTIONS.md"),
                 _context_path("prerequisites/database_parent_requirements.json"),
                 _context_path("prerequisites/create_missing_parents.review.sql"),
                 _context_path("prerequisites/create_missing_parents.manifest.json"),
@@ -441,6 +442,51 @@ def _recommended_read_order() -> list[str]:
         "prompts",
         "package_report",
     ]
+
+
+def _is_environment_prereq(manifest: Dict[str, Any]) -> bool:
+    """Return True when this package is the generated environment prereq package."""
+    return str(manifest.get("role") or "") == "environment_prereqs"
+
+
+def _environment_prereq_payload_paths(manifest: Dict[str, Any]) -> list[str]:
+    """Return deployable prereq payload paths advertised by the manifest/context."""
+    phase_inventory = manifest.get("phase_inventory") or {}
+    # The exact object list is not stored in the manifest, so the generated
+    # context file remains authoritative. Advertise the phase directory and
+    # the common generated database filename shape for agents/humans.
+    if not _is_environment_prereq(manifest):
+        return []
+    if phase_inventory.get("01_pre_requisites", 0) == 0:
+        return ["payload/01_pre_requisites/databases/<missing_parent>.db"]
+    return ["payload/01_pre_requisites/"]
+
+
+def _environment_prereq_human_action(manifest: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the DBA action contract for blocked environment prereq packages."""
+    return {
+        "role": "DBA",
+        "status": "required",
+        "reason": (
+            "Environment prerequisite package contains generated parent "
+            "database/user payload that requires DBA-approved values before deployment."
+        ),
+        "instruction_file": _context_path("prerequisites/DBA_INSTRUCTIONS.md"),
+        "payload_file_to_amend": "payload/01_pre_requisites/",
+        "placeholders_to_replace": [
+            "<DBA_SELECTED_PARENT>",
+            "<DBA_REVIEWED_PERM>",
+        ],
+        "repackage_command": (
+            "python -m td_release_packager repackage "
+            "--package-dir <extracted_00_environment_prereqs_dir> --strict"
+        ),
+        "do_not_edit": [
+            "project payload",
+            "_01_prereqs package",
+            "_02_main package",
+        ],
+    }
 
 
 def _agent_policy(manifest: Dict[str, Any]) -> Dict[str, Any]:
@@ -571,6 +617,11 @@ def _build_index_document(
         },
         "entrypoints": _entrypoints(),
         "recommended_read_order": _recommended_read_order(),
+        "human_actions_required": (
+            [_environment_prereq_human_action(manifest)]
+            if _is_environment_prereq(manifest)
+            else []
+        ),
         "agent_policy": _agent_policy(manifest),
         "agent_instructions": _agent_instructions(),
     }
@@ -703,6 +754,15 @@ def _build_handoff_document(
         )
     if governance["require_tls"]:
         required_actions.insert(2, "Use a TLS/SSL-protected Teradata connection.")
+    if _is_environment_prereq(manifest):
+        required_actions.insert(
+            0,
+            "DBA must read context/prerequisites/DBA_INSTRUCTIONS.md before deployment.",
+        )
+        required_actions.insert(
+            1,
+            "DBA must amend generated payload under payload/01_pre_requisites/ and run the repackage command before deployment.",
+        )
 
     return {
         "$schema": "./schemas/ships.handoff.schema.json",
@@ -729,6 +789,11 @@ def _build_handoff_document(
             "asymmetric_signature_required": governance["require_asymmetric_signature"],
             "approvals_required": governance["require_approvals"],
             "tls_required": governance["require_tls"],
+            "environment_prerequisite_review": (
+                _environment_prereq_human_action(manifest)
+                if _is_environment_prereq(manifest)
+                else None
+            ),
         },
         "blocking_conditions": [
             "Trust label is BLOCKED.",
