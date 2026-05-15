@@ -81,13 +81,31 @@ def test_build_package_emits_environment_prereqs_zip_and_chains_requires(
     main_archive, main_manifest = main_pair
     prereqs_archive, prereqs_manifest = prereqs_pair
     release_group = main_manifest.release_group
-    env_archive = tmp_path / f"{release_group}_00_environment_prereqs.zip"
+    group_dir = tmp_path / release_group
+    env_archive = group_dir / f"{release_group}_00_environment_prereqs.zip"
 
+    assert group_dir.is_dir()
     assert env_archive.is_file()
+    assert Path(prereqs_archive).parent == group_dir
+    assert Path(main_archive).parent == group_dir
     assert os.path.basename(prereqs_archive).endswith("_01_prereqs.zip")
     assert os.path.basename(main_archive).endswith("_02_main.zip")
     assert prereqs_manifest.requires == [env_archive.name]
     assert main_manifest.requires == [os.path.basename(prereqs_archive)]
+
+    group_manifest = json.loads(
+        (group_dir / "release_group.json").read_text(encoding="utf-8")
+    )
+    assert group_manifest["deploy_order"] == [
+        env_archive.name,
+        os.path.basename(prereqs_archive),
+        os.path.basename(main_archive),
+    ]
+    assert [pkg["role"] for pkg in group_manifest["packages"]] == [
+        "environment_prereqs",
+        "prereqs",
+        "main",
+    ]
 
     env_build = json.loads(
         _read_zip_member(str(env_archive), "context/ships.build.json")

@@ -243,9 +243,12 @@ class TestBuildPackageNoSplit:
         assert companion_pair is None
         archive_path, manifest = main_pair
         assert os.path.isfile(archive_path)
-        assert manifest.role == ""
-        assert manifest.release_group == ""
+        assert manifest.role == "main"
+        assert manifest.release_group != ""
         assert manifest.requires == []
+        assert os.path.basename(archive_path).endswith("_01_main.zip")
+        assert Path(archive_path).parent == tmp_path / manifest.release_group
+        assert (tmp_path / manifest.release_group / "release_group.json").is_file()
 
     def test_only_prereqs_returns_single_archive(self, tmp_project, tmp_path):
         """Only CREATE DATABASE, no dependants → single zip (nothing
@@ -325,6 +328,34 @@ class TestBuildPackageAutoSplit:
             "_01_prereqs.zip", ""
         )
         assert sorted([main_name, prereqs_name]) == [prereqs_name, main_name]
+
+    def test_release_group_directory_manifest_for_split(self, split_config):
+        """A multi-package release is grouped under releases/<release_group>/
+        with a group manifest listing deploy order."""
+        ((main_archive, main_manifest), (prereqs_archive, prereqs_manifest)) = (
+            build_package(split_config)
+        )
+        group_dir = Path(main_archive).parent
+        group_manifest_path = group_dir / "release_group.json"
+
+        assert group_dir.name == main_manifest.release_group
+        assert Path(prereqs_archive).parent == group_dir
+        assert group_manifest_path.is_file()
+
+        group_manifest = json.loads(group_manifest_path.read_text(encoding="utf-8"))
+        assert group_manifest["release_group"] == main_manifest.release_group
+        assert group_manifest["deploy_order"] == [
+            os.path.basename(prereqs_archive),
+            os.path.basename(main_archive),
+        ]
+        assert [pkg["role"] for pkg in group_manifest["packages"]] == [
+            "prereqs",
+            "main",
+        ]
+        assert all(
+            "context/ships.index.json" in pkg["context_entrypoint"]
+            for pkg in group_manifest["packages"]
+        )
 
     def test_manifest_role_and_requires_linkage(self, split_config):
         """Main manifest has role='main' and requires=[prereqs zip].

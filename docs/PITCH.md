@@ -83,7 +83,13 @@ A SHIPS package is a **Deployment Product** — the same self-contained, governe
 A Data Product wraps data so consumers can trust it without understanding the ETL. A SHIPS package wraps DDL so DBAs and agents can trust the deployment without understanding the development.
 
 ```
-OMR_DEV_BUILD_0042_20260510.zip
+releases/DEV_OMR_BUILD_0042_20260510/
+    DEV_OMR_BUILD_0042_20260510_01_main.zip
+    DEV_OMR_BUILD_0042_20260510_01_main.zip.sha256
+    release_group.json
+    README.txt
+
+Inside the package archive:
     deploy.py                   ← The only thing anyone runs
     context/ships.build.json                  ← Who built it, when, from what commit
     context/ships.integrity.json      ← SHA-256 tamper detection
@@ -280,7 +286,8 @@ python -m td_release_packager process \
     --name MyProject
 
 # 4. Deploy
-cd releases/ && unzip MyProject_DEV_BUILD_0001_*.zip
+cd releases/DEV_MyProject_BUILD_0001_<timestamp>/
+unzip DEV_MyProject_BUILD_0001_<timestamp>_01_main.zip
 cd MyProject_DEV_BUILD_0001_*/
 python deploy.py --host myserver --user dbc
 ```

@@ -335,10 +335,25 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ships-package
-          path: releases/*.zip
+          path: releases/**
 ```
 
 For packaging from a specific branch, tag, or commit without a local checkout, use `--source-github` (see Scenario 4b below) or the GitHub API tarball pattern documented in the FAQ entry *"Can I package from a GitHub repository directly?"*.
+
+
+### Release-group discovery
+
+Agents should treat `releases/<release_group>/` as the handoff unit. The directory contains all package archives in deploy order plus `release_group.json` and a group-level `README.txt`. Do not assume packages live directly under `releases/`; scan recursively or read the group manifest.
+
+```text
+releases/
+    DEV_GCFR_BUILD_0012_20260515144900/
+        release_group.json
+        README.txt
+        DEV_GCFR_BUILD_0012_20260515144900_00_environment_prereqs.zip
+        DEV_GCFR_BUILD_0012_20260515144900_01_prereqs.zip
+        DEV_GCFR_BUILD_0012_20260515144900_02_main.zip
+```
 
 ### Scenario 4b — Agent-driven packaging from GitHub (no local clone)
 
@@ -432,7 +447,7 @@ directly without downloading and transferring the ZIP file manually:
 ships deploy \
     --from-github org/repo \
     --release-tag v1.2.3 \
-    --asset PRD_Pkg_BUILD_0001.zip \
+    --asset PRD_Pkg_BUILD_0001_20260515120000_01_main.zip \
     --host myhost \
     --user ships_dba
 ```
@@ -450,7 +465,7 @@ result = subprocess.run([
     "python", "-m", "td_release_packager", "deploy",
     "--from-github", "myorg/myrepo",
     "--release-tag", "v1.2.3",
-    "--asset", "PRD_Pkg_BUILD_0001.zip",
+    "--asset", "PRD_Pkg_BUILD_0001_20260515120000_01_main.zip",
     "--host", HOST,
     "--user", USER,
     "--password", os.environ["TD_PASS"],

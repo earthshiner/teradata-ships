@@ -10,7 +10,13 @@ As the operator, you receive a self-contained package `.zip` from the developmen
 **What the package contains:**
 
 ```
-OMR_DEV_BUILD_0005_20260509.zip
+DEV_OMR_BUILD_0005_20260509/
+    DEV_OMR_BUILD_0005_20260509_01_main.zip
+    DEV_OMR_BUILD_0005_20260509_01_main.zip.sha256
+    release_group.json
+    README.txt
+
+Extracted archive contents:
     deploy.py                   ← The only script you run
     context/ships.build.json                  ← Build manifest (provenance, file list, integrity hash)
     context/ships.context.json          ← Durable workflow context for agents, CI/CD, and MCP tools
@@ -179,21 +185,19 @@ After the dry run, open `logs/.deploy_report_<id>.html`. Check:
 
 Address any pre-flight errors before proceeding to live deployment.
 
-### 7. Confirm the companion archive is deployed first (if applicable)
+### 7. Confirm the release-group deploy order
 
-Some packages are auto-split into a `_prereqs_` companion archive and a main archive. If `context/ships.build.json` shows `"role": "main"` and `"requires": ["OMR_prereqs_DEV_BUILD_0005_...zip"]`, deploy the prereqs archive first:
+Every build is delivered as a release-group directory. Read the group-level `README.txt` or `release_group.json` before deploying. A single-package release contains `_01_main`; a multi-package release may contain `_00_environment_prereqs`, `_01_prereqs`, and `_02_main`.
 
-```bash
-# Extract and deploy prereqs first
-cd OMR_prereqs_DEV_BUILD_0005_20260509/
-python deploy.py --host myserver --user dba_user
+Example deploy order:
 
-# Then deploy the main archive
-cd ../OMR_DEV_BUILD_0005_20260509/
-python deploy.py --host myserver --user dba_user
+```text
+1. DEV_GCFR_BUILD_0012_20260515144900_00_environment_prereqs.zip
+2. DEV_GCFR_BUILD_0012_20260515144900_01_prereqs.zip
+3. DEV_GCFR_BUILD_0012_20260515144900_02_main.zip
 ```
 
-The deploy banner prints the explicit deploy order when a companion exists.
+Extract and deploy each archive in order. Each archive contains its own `deploy.py`, `context/ships.index.json`, package report, and integrity metadata.
 
 ---
 
@@ -519,7 +523,7 @@ SHIPS will:
 1. Verify the tag exists in git
 2. Extract the tagged source tree
 3. Build a rollback package from that source with the current environment config
-4. Write the package to `releases/` (or `--output`)
+4. Write the release group to `releases/<release_group>/` (or the supplied `--output` parent directory)
 5. Print the exact deploy command to run next
 
 The rollback package is a normal SHIPS package — it goes through the same integrity check, Trust Report, and pre-flight validation as any other package. The DBA reviews it and deploys it with:
@@ -654,7 +658,7 @@ transfer. SHIPS downloads the ZIP and all available sidecar files (`.sha256`, `.
 python deploy.py \
     --from-github org/repo \
     --release-tag v1.2.3 \
-    --asset PRD_Pkg_BUILD_0001.zip \
+    --asset PRD_Pkg_BUILD_0001_20260515120000_01_main.zip \
     --host myserver \
     --user ships_dba
 ```
@@ -964,8 +968,8 @@ Once rollback completes:
 The most important rule of promotion: **do not rebuild for TST or PRD**. Rebuild from source means the package is different — different token resolution, potentially different DDL. Promote the exact same build.
 
 ```bash
-# The developer produced OMR_DEV_BUILD_0005_20260509.zip
-# You need the TST version
+# The developer produced releases/DEV_OMR_BUILD_0005_20260509/
+# You need the TST release group
 
 # Ask the developer to produce:
 python -m td_release_packager package \
@@ -976,8 +980,9 @@ python -m td_release_packager package \
     --output releases/ \
     --no-increment          ← same build number (0005), different env
 
-# You receive: OMR_TST_BUILD_0005_20260509.zip
-# Deploy as normal
+# You receive: releases/TST_OMR_BUILD_0005_20260509/
+# Follow release_group.json and deploy the archive(s) in order.
+# For a single-package group, extract TST_OMR_BUILD_0005_20260509_01_main.zip and run:
 python deploy.py --host tst-server --user dba_user
 ```
 
@@ -994,7 +999,7 @@ Before deploying to TST or PRD, confirm:
 ```bash
 python -c "
 import json, zipfile
-with zipfile.ZipFile('OMR_TST_BUILD_0005_20260509.zip') as z:
+with zipfile.ZipFile('releases/TST_OMR_BUILD_0005_20260509/TST_OMR_BUILD_0005_20260509_01_main.zip') as z:
     build = json.loads(z.read('context/ships.build.json'))
 print('Build:', build['build_number'])
 print('Env:  ', build['environment'])
@@ -1009,13 +1014,13 @@ print('Hash: ', build['package_hash'])
 Copy this checklist for every deployment.
 
 ```
-[ ] 1. Receive package from developer or artefact store
-[ ] 2. Extract to a working directory
+[ ] 1. Receive release-group directory from developer or artefact store
+[ ] 2. Read release_group.json / README.txt and extract archives in deploy order
 [ ] 3. Run: python deploy.py integrity-check
         → Exit 0: proceed
         → Exit 1: stop, contact developer
-[ ] 4. Deploy companion prereqs archive first (if applicable)
-        Check context/ships.build.json for "requires" field
+[ ] 4. Deploy ordered archives: _00_environment_prereqs, _01_prereqs, then _02_main when present
+        Check release_group.json and each archive's context/ships.build.json "requires" field
 [ ] 5. Dry run: python deploy.py --dry-run --host ... --user ...
         → Review logs/.deploy_report_*.html
         → Fix any pre-flight errors (space, permissions)
@@ -1037,7 +1042,8 @@ Copy this checklist for every deployment.
 ```python
 import subprocess, json, pathlib, zipfile
 
-package_zip = pathlib.Path("OMR_DEV_BUILD_0005_20260509.zip")
+release_group_dir = pathlib.Path("releases/DEV_OMR_BUILD_0005_20260509")
+package_zip = release_group_dir / "DEV_OMR_BUILD_0005_20260509_01_main.zip"
 work_dir = pathlib.Path("deploy_work")
 work_dir.mkdir(exist_ok=True)
 
