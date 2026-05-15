@@ -317,11 +317,13 @@ def write_environment_prereq_context(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "generated_script": "context/prerequisites/create_missing_parents.review.sql",
         "manifest": "context/prerequisites/create_missing_parents.manifest.json",
+        "dba_instructions": "context/prerequisites/DBA_INSTRUCTIONS.md",
         "deployable_payload": payload_paths or [],
         "dba_action_required": [
             "Review context/prerequisites/create_missing_parents.review.sql",
             "Edit the generated payload .db/.usr files under payload/01_pre_requisites",
             "Replace <DBA_SELECTED_PARENT> and <DBA_REVIEWED_PERM>",
+            "Read context/prerequisites/DBA_INSTRUCTIONS.md",
             "Run: python -m td_release_packager repackage --package-dir <extracted_00_environment_prereqs_dir> --strict",
         ],
         "missing_parents": [req.to_dict() for req in requirements],
@@ -368,6 +370,126 @@ def write_environment_prereq_context(
         json.dumps(manifest_payload, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+
+    instructions = _render_dba_instructions(
+        requirements,
+        release_group=release_group,
+        package_filename=package_filename,
+        payload_paths=payload_paths or [],
+    )
+    (prereq_dir / "DBA_INSTRUCTIONS.md").write_text(
+        instructions,
+        encoding="utf-8",
+    )
+
+
+def _render_dba_instructions(
+    requirements: list[EnvironmentParentRequirement],
+    *,
+    release_group: str,
+    package_filename: str,
+    payload_paths: list[str],
+) -> str:
+    """Render package-local DBA instructions for environment prereqs."""
+    package_name = package_filename.rsplit(".", 1)[0]
+    first_payload = (
+        payload_paths[0]
+        if payload_paths
+        else "payload/01_pre_requisites/databases/<missing_parent>.db"
+    )
+    parent_names = ", ".join(req.parent_name for req in requirements) or "none"
+    return f"""# DBA Instructions — Environment Prerequisite Package
+
+This package is blocked because SHIPS detected missing environment parent databases/users required before the application prerequisite package can deploy.
+
+Release group: `{release_group}`
+
+Environment prerequisite package: `{package_name}`
+
+Missing parent object(s): `{parent_names}`
+
+Do **not** edit the project payload and do **not** edit the `_01_prereqs` package. The DBA-reviewed file to amend is inside the extracted `_00_environment_prereqs` package.
+
+Primary file to amend:
+
+`{first_payload}`
+
+## Required DBA action
+
+1. Extract the `_00_environment_prereqs` package.
+2. Edit the generated `.db` / `.usr` payload file(s).
+3. Replace `<DBA_SELECTED_PARENT>` and `<DBA_REVIEWED_PERM>` with approved values.
+4. Repackage the edited package using SHIPS.
+5. Deploy the release group in order: `_00_environment_prereqs`, `_01_prereqs`, `_02_main`.
+
+## PowerShell
+
+```powershell
+$ReleaseGroup = "C:\\path\\to\\releases\\{release_group}"
+$PackageName = "{package_name}"
+$EnvZip = "$ReleaseGroup\\$PackageName.zip"
+$PackageDir = "$ReleaseGroup\\$PackageName"
+
+Expand-Archive -Path $EnvZip -DestinationPath $ReleaseGroup -Force
+
+notepad "$PackageDir\\{first_payload.replace("/", "\\")}"
+
+python -m td_release_packager repackage `
+    --package-dir "$PackageDir" `
+    --strict
+```
+
+## Bash / Git Bash / Linux shell
+
+```bash
+ReleaseGroup="/path/to/releases/{release_group}"
+PackageName="{package_name}"
+EnvZip="$ReleaseGroup/$PackageName.zip"
+PackageDir="$ReleaseGroup/$PackageName"
+
+unzip -o "$EnvZip" -d "$ReleaseGroup"
+
+${{EDITOR:-vi}} "$PackageDir/{first_payload}"
+
+python -m td_release_packager repackage \
+    --package-dir "$PackageDir" \
+    --strict
+```
+
+## Example reviewed payload
+
+Replace generated placeholder DDL like this:
+
+```sql
+create database GCFR_MAIN
+from <DBA_SELECTED_PARENT>
+as perm = <DBA_REVIEWED_PERM>
+;
+```
+
+with DBA-approved values, for example:
+
+```sql
+create database GCFR_MAIN
+from DBC
+as perm = 50G
+;
+```
+
+The parent database and PERM value above are examples only. The DBA must choose values appropriate for the target environment.
+
+## Unblock rule
+
+The package remains blocked while DBA placeholders remain in deployable payload.
+
+The package can be unblocked only after:
+
+- the generated payload file exists inside the extracted `_00_environment_prereqs` package;
+- `<DBA_SELECTED_PARENT>` has been replaced;
+- `<DBA_REVIEWED_PERM>` has been replaced;
+- `python -m td_release_packager repackage --package-dir "<package-dir>" --strict` completes successfully;
+- the regenerated `.zip` and `.sha256` sidecar are used for deployment.
+"""
 
 
 def _render_review_script(
