@@ -170,9 +170,9 @@ class TestInspectRecordsLintIssues:
     with code=INSPECT_LINT_VIOLATION; the rule name is preserved in
     the message so explain can group by rule."""
 
-    def test_lint_error_recorded_as_error_issue(self, tmp_path, capsys):
+    def test_lint_warning_recorded_as_warning_issue(self, tmp_path, capsys):
         project = _make_project(tmp_path)
-        # REPLACE VIEW fires the deploy_intent rule (default ERROR).
+        # REPLACE VIEW fires the deploy_intent rule (default WARNING).
         viw_dir = project / "payload" / "database" / "DDL" / "views"
         viw_dir.mkdir(parents=True)
         (viw_dir / "{{DB}}.V.viw").write_text(
@@ -183,11 +183,33 @@ class TestInspectRecordsLintIssues:
         exit_code = _run_inspect(_make_namespace(project))
         capsys.readouterr()
 
-        assert exit_code == 1  # lint error fails the run
+        # A WARNING-only run does not fail inspect (exit_code 0).
+        stage = _read_decisions(project)["runs"][0]["stages"][0]
+        warning_issues = [i for i in stage["issues"] if i["severity"] == "warning"]
+        assert any(
+            i["code"] == "INSPECT_LINT_VIOLATION" and "[deploy_intent]" in i["message"]
+            for i in warning_issues
+        )
+
+    def test_lint_error_recorded_as_error_issue(self, tmp_path, capsys):
+        project = _make_project(tmp_path)
+        # REPLACE VIEW fires the deploy_intent rule at ERROR when strict mode is on.
+        # Simulate strict mode via a db_qualifier violation (always ERROR).
+        viw_dir = project / "payload" / "database" / "DDL" / "views"
+        viw_dir.mkdir(parents=True)
+        (viw_dir / "V.viw").write_text(
+            "CREATE VIEW V AS SELECT 1;\n",
+            encoding="utf-8",
+        )
+
+        exit_code = _run_inspect(_make_namespace(project))
+        capsys.readouterr()
+
+        assert exit_code == 1  # db_qualifier ERROR fails the run
         stage = _read_decisions(project)["runs"][0]["stages"][0]
         error_issues = [i for i in stage["issues"] if i["severity"] == "error"]
         assert any(
-            i["code"] == "INSPECT_LINT_VIOLATION" and "[deploy_intent]" in i["message"]
+            i["code"] == "INSPECT_LINT_VIOLATION" and "[db_qualifier]" in i["message"]
             for i in error_issues
         )
         assert stage["status"] == "error"

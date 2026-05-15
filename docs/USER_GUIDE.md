@@ -430,9 +430,9 @@ The file body still contains a literal database name. Add an entry to `token_map
 
 **`deploy_intent` — WARNING**
 ```
-OMR/payload/database/DDL/views/{{STD_DATABASE}}.MyView.viw: CREATE VIEW without REPLACE
+OMR/payload/database/DDL/views/{{STD_DATABASE}}.MyView.viw: Uses REPLACE — consider CREATE instead
 ```
-Use `REPLACE VIEW` instead of `CREATE VIEW` for objects you intend to be re-runnable. `CREATE` fails if the object already exists; `REPLACE` does not.
+`REPLACE` is permitted and fully supported by the deployer, which captures a pre-flight rollback snapshot before executing either verb. `CREATE` is the preferred SHIPS convention because it makes deployment intent explicit and lets the deployer own idempotency via DROP+CREATE. This rule is advisory (WARNING) by default. To enforce CREATE-only across your project, set `deploy_intent=ERROR` in `inspect.conf`.
 
 **`eponymous` — WARNING**
 ```

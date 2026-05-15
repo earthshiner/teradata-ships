@@ -28,8 +28,10 @@ import logging
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple
 
@@ -808,11 +810,17 @@ def _split_into_paired_packages(
     # Rename it to the final MAIN package directory before archiving so the
     # folder inside the zip and the zip filename both carry the _02_main role
     # suffix. The release_group itself remains the unsuffixed pair identity.
+    #
+    # os.rename() is not used here because on Windows it raises PermissionError
+    # when the OS, antivirus, or search indexer holds a transient handle on the
+    # directory that was just written.  copytree + _rmtree_robust is equivalent
+    # and survives those transient holds via its retry loop.
     if os.path.exists(main_pkg_dir):
-        shutil.rmtree(main_pkg_dir)
+        _rmtree_robust(main_pkg_dir)
     if os.path.exists(prereqs_pkg_dir):
-        shutil.rmtree(prereqs_pkg_dir)
-    os.rename(pkg_dir, main_pkg_dir)
+        _rmtree_robust(prereqs_pkg_dir)
+    shutil.copytree(pkg_dir, main_pkg_dir)
+    _rmtree_robust(pkg_dir)
     pkg_dir = main_pkg_dir
 
     # 1. Clone the main package wholesale → prereqs sibling. Then we
@@ -2409,6 +2417,51 @@ def _generate_shell_wrappers(pkg_dir: str):
 # ---------------------------------------------------------------
 
 
+def _rmtree_robust(path: str, retries: int = 5, delay: float = 0.2) -> None:
+    """Remove a directory tree reliably on Windows and POSIX.
+
+    On Windows, antivirus scanners, search indexers, and the OS itself
+    can hold transient handles on files or directories that were just
+    written.  A plain ``shutil.rmtree`` raises ``PermissionError`` in
+    these cases.  This helper:
+
+    1. Uses an ``onerror`` callback to clear the read-only flag on any
+       file that resists deletion (a common Windows cause), then retries
+       the remove operation.
+    2. If the tree still exists after the per-file retry, sleeps briefly
+       and retries the whole ``shutil.rmtree`` call up to *retries* times.
+
+    On POSIX the overhead is negligible — the onerror path is never
+    reached in normal operation.
+
+    Args:
+        path:    Path to the directory tree to remove.
+        retries: Maximum number of whole-tree retry attempts.
+        delay:   Seconds to sleep between whole-tree retries.
+    """
+
+    def _on_error(func, error_path, exc_info):
+        """onerror callback: clear read-only flag and retry the remove."""
+        try:
+            os.chmod(error_path, stat.S_IWRITE)
+            func(error_path)
+        except Exception:
+            pass  # Let the outer retry loop handle persistent failures.
+
+    for attempt in range(retries):
+        try:
+            shutil.rmtree(path, onerror=_on_error)
+        except Exception:
+            pass
+        if not os.path.exists(path):
+            return
+        if attempt < retries - 1:
+            time.sleep(delay)
+
+    # Final attempt — allow the exception to propagate if still failing.
+    shutil.rmtree(path, onerror=_on_error)
+
+
 def _archive_package(pkg_dir: str, archive_format: str) -> str:
     """
     Archive the package directory as .zip or .tar.gz.
@@ -2439,8 +2492,9 @@ def _archive_package(pkg_dir: str, archive_format: str) -> str:
             base_dir=os.path.basename(pkg_dir),
         )
 
-    # Remove the unarchived directory
-    shutil.rmtree(pkg_dir)
+    # Remove the unarchived directory robustly — on Windows a bare
+    # shutil.rmtree can race with antivirus or search-index handles.
+    _rmtree_robust(pkg_dir)
     logger.info("Archived and cleaned up: %s", archive_path)
 
     return archive_path
