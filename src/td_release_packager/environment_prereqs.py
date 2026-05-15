@@ -34,6 +34,10 @@ _PERM_RE = re.compile(
 # SHIPS environment-prerequisite package.
 _DEFAULT_KNOWN_EXTERNAL_PARENTS = frozenset({"DBC"})
 
+_DBA_PARENT_PLACEHOLDER = "<DBA_SELECTED_PARENT>"
+_DBA_PERM_PLACEHOLDER = "<DBA_REVIEWED_PERM>"
+_DBA_PLACEHOLDERS = frozenset({_DBA_PARENT_PLACEHOLDER, _DBA_PERM_PLACEHOLDER})
+
 
 def _normalise_identifier(value: str) -> str:
     """Normalise a Teradata identifier for case-insensitive comparison."""
@@ -198,12 +202,108 @@ def analyse_environment_parent_requirements(
     return [by_parent[name] for name in sorted(by_parent)]
 
 
+def _perm_literal_for_requirement(req: EnvironmentParentRequirement) -> str:
+    """Return a PERM literal for generated DBA-review DDL.
+
+    When SHIPS cannot infer child PERM declarations, do not emit ``perm = 0``
+    because that can be mistaken for an approved allocation. Use a clear DBA
+    placeholder instead.
+    """
+    if req.recommended_perm_bytes <= 0:
+        return _DBA_PERM_PLACEHOLDER
+    return str(req.recommended_perm_bytes)
+
+
+def _render_parent_database_ddl(req: EnvironmentParentRequirement) -> str:
+    """Render the deployable payload DDL for one missing parent database."""
+    required_lines = []
+    for dep in req.required_by:
+        required_lines.append(
+            f"--   {dep.child_type} {dep.child_name} "
+            f"({dep.source_file}, PERM={_format_bytes(dep.declared_perm_bytes)})"
+        )
+
+    lines = [
+        "-- SHIPS generated environment prerequisite payload.",
+        "-- DBA review required before deployment.",
+        "--",
+        f"-- Missing parent database: {req.parent_name}",
+        "-- Required by:",
+        *required_lines,
+        f"-- Minimum required PERM: {_format_bytes(req.minimum_required_perm_bytes)}",
+        f"-- Recommended PERM (+{req.recommended_buffer_percent}% buffer): "
+        f"{_format_bytes(req.recommended_perm_bytes)}",
+        "--",
+        "-- Replace placeholders before approving/repackaging this package:",
+        f"--   {_DBA_PARENT_PLACEHOLDER}",
+        f"--   {_DBA_PERM_PLACEHOLDER}",
+        "",
+        f"create database {req.parent_name}",
+        f"from {_DBA_PARENT_PLACEHOLDER}",
+        f"as perm = {_perm_literal_for_requirement(req)}",
+        ";",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def write_environment_prereq_payload(
+    package_dir: str,
+    requirements: list[EnvironmentParentRequirement],
+) -> list[str]:
+    """Write deployable DBA-review payload files for missing parents.
+
+    The context review script is explanatory only. The SHIPS-managed audit path
+    requires deployable payload, so each missing parent database is emitted as a
+    ``.db`` file under ``payload/01_pre_requisites/databases``. Files contain
+    explicit DBA placeholders when platform parent/PERM values are not known.
+
+    Args:
+        package_dir: Root of the generated _00_environment_prereqs package.
+        requirements: Missing external parent requirements.
+
+    Returns:
+        Package-relative payload paths written.
+    """
+    payload_dir = Path(package_dir) / "payload" / "01_pre_requisites" / "databases"
+    payload_dir.mkdir(parents=True, exist_ok=True)
+    written: list[str] = []
+    for req in requirements:
+        filename = f"{req.parent_name}.db"
+        target = payload_dir / filename
+        target.write_text(_render_parent_database_ddl(req), encoding="utf-8")
+        written.append(str(target.relative_to(package_dir)).replace("\\", "/"))
+    return written
+
+
+def has_dba_placeholders(package_dir: str) -> bool:
+    """Return True when generated DBA placeholders remain in package files."""
+    root = Path(package_dir)
+    # Only deployable payload controls the blocked/unblocked package state.
+    # The review script under context/prerequisites may intentionally retain
+    # explanatory placeholder examples.
+    base = root / "payload"
+    if not base.exists():
+        return False
+    for path in base.rglob("*"):
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        if any(marker in text for marker in _DBA_PLACEHOLDERS):
+            return True
+    return False
+
+
 def write_environment_prereq_context(
     package_dir: str,
     requirements: list[EnvironmentParentRequirement],
     *,
     release_group: str,
     package_filename: str,
+    payload_paths: list[str] | None = None,
 ) -> None:
     """Write review script, manifest and requirements JSON into context/."""
     prereq_dir = Path(package_dir) / "context" / "prerequisites"
@@ -217,6 +317,13 @@ def write_environment_prereq_context(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "generated_script": "context/prerequisites/create_missing_parents.review.sql",
         "manifest": "context/prerequisites/create_missing_parents.manifest.json",
+        "deployable_payload": payload_paths or [],
+        "dba_action_required": [
+            "Review context/prerequisites/create_missing_parents.review.sql",
+            "Edit the generated payload .db/.usr files under payload/01_pre_requisites",
+            "Replace <DBA_SELECTED_PARENT> and <DBA_REVIEWED_PERM>",
+            "Run: python -m td_release_packager repackage --package-dir <extracted_00_environment_prereqs_dir> --strict",
+        ],
         "missing_parents": [req.to_dict() for req in requirements],
         "execution_policy": {
             "auto_execute_allowed": False,
@@ -241,6 +348,7 @@ def write_environment_prereq_context(
         "script_sha256": None,
         "missing_parent_count": len(requirements),
         "missing_parents": [req.parent_name for req in requirements],
+        "deployable_payload": payload_paths or [],
     }
     (prereq_dir / "create_missing_parents.manifest.json").write_text(
         json.dumps(manifest_payload, indent=2, ensure_ascii=False) + "\n",
@@ -279,7 +387,7 @@ def _render_review_script(
         "--",
         "-- Review required:",
         "--   YES. SHIPS cannot infer the platform parent or final PERM.",
-        "--   Replace <DBA_SELECTED_PARENT> and adjust PERM before executing.",
+        "--   Replace <DBA_SELECTED_PARENT> and <DBA_REVIEWED_PERM> before packaging.",
         "--",
         "-- Execution policy:",
         "--   Review-only. Do not auto-execute without DBA approval and evidence.",
@@ -304,7 +412,7 @@ def _render_review_script(
                 f"{_format_bytes(req.recommended_perm_bytes)}",
                 f"create database {req.parent_name}",
                 "from <DBA_SELECTED_PARENT>",
-                f"as perm = {req.recommended_perm_bytes}",
+                f"as perm = {_perm_literal_for_requirement(req)}",
                 ";",
                 "",
             ]
