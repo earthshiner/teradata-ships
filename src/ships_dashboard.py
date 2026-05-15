@@ -148,17 +148,25 @@ def check_approval(archive_path: str):
     return False, False, ""
 
 
+def _iter_release_archives(releases_dir: str) -> List[str]:
+    """Return release archives under releases/, including grouped subdirectories."""
+    archives: List[str] = []
+    for root, _, files in os.walk(releases_dir):
+        for fname in files:
+            if fname.endswith((".zip", ".tar.gz")):
+                archives.append(os.path.join(root, fname))
+    return sorted(archives, reverse=True)
+
+
 def scan_project(project_dir: str) -> List[PackageInfo]:
-    """Scan a project's releases/ directory and return PackageInfo for each archive."""
+    """Scan a project's releases/ tree and return PackageInfo for each archive."""
     releases_dir = os.path.join(project_dir, "releases")
     if not os.path.isdir(releases_dir):
         return []
 
     packages: List[PackageInfo] = []
-    for fname in sorted(os.listdir(releases_dir), reverse=True):
-        if not (fname.endswith(".zip") or fname.endswith(".tar.gz")):
-            continue
-        archive_path = os.path.join(releases_dir, fname)
+    for archive_path in _iter_release_archives(releases_dir):
+        fname = os.path.basename(archive_path)
         build = read_build_json_from_zip(archive_path)
         if build is None:
             continue

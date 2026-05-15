@@ -311,7 +311,7 @@ class TestBuilderAbortsOnMalformedTokens:
         assert "Malformed tokens detected" in result.stderr
         assert "{{SEM_DATABASE_V}}.bad.viw" in result.stderr
         # No package was produced
-        assert not list(output.glob("*.zip"))
+        assert not list(output.rglob("*.zip"))
 
     def test_build_succeeds_with_clean_files(self, tmp_path):
         env = os.environ.copy()
@@ -375,7 +375,7 @@ class TestBuilderAbortsOnMalformedTokens:
 
         # Build succeeded
         assert result.returncode == 0
-        assert list(output.glob("*.zip"))
+        assert list(output.rglob("*.zip"))
 
 
 # ---------------------------------------------------------------

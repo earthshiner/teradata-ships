@@ -12,7 +12,7 @@ Covers:
     - write_approval: approve writes .approved; reject writes .rejected;
                       toggle clears the old sidecar
     - scan_project: empty releases/, no releases dir, single archive,
-                    multiple archives, ignores non-archives
+                    grouped archives, multiple archives, ignores non-archives
     - scan_all_projects: missing dir warns and skips; multiple projects
     - generate_dbql_query: contains build number, package name, DBQL tables
     - PackageInfo.approval_status: Awaiting / Approved / Rejected
@@ -93,8 +93,9 @@ def _make_project(tmp_path: Path, archives: list[tuple[str, dict]]) -> Path:
     releases.mkdir(parents=True)
     for filename, build_kwargs in archives:
         bd = _build_json(**build_kwargs)
-        members = {f"{filename.split('.')[0]}/ships.build.json": json.dumps(bd)}
-        archive_path = str(releases / filename)
+        members = {f"{Path(filename).stem}/context/ships.build.json": json.dumps(bd)}
+        archive_path = releases / filename
+        archive_path.parent.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(archive_path, "w") as zf:
             for name, content in members.items():
                 zf.writestr(name, content)
@@ -269,6 +270,24 @@ class TestScanProject:
         )
         results = scan_project(str(project))
         assert len(results) == 2
+
+    def test_grouped_release_archives_are_discovered_recursively(self, tmp_path):
+        project = _make_project(
+            tmp_path,
+            [
+                (
+                    "DEV_GCFR_BUILD_0012_20260515144900/DEV_GCFR_BUILD_0012_20260515144900_01_main.zip",
+                    {"pkg_name": "GCFR", "build_no": "0012", "env": "DEV"},
+                )
+            ],
+        )
+        results = scan_project(str(project))
+        assert len(results) == 1
+        assert (
+            results[0].archive_filename
+            == "DEV_GCFR_BUILD_0012_20260515144900_01_main.zip"
+        )
+        assert results[0].package_name == "GCFR"
 
     def test_approved_sidecar_detected(self, tmp_path):
         project = _make_project(tmp_path, [("pkg.zip", {})])

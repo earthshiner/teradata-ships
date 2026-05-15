@@ -367,6 +367,21 @@ You do not need to fix everything before you can package.
 
 ## Packaging and trust
 
+### Why is my package inside a release-group directory?
+
+SHIPS treats a build as a release group. Even when there is only one package archive, the output is grouped for consistency:
+
+```text
+releases/DEV_OMR_BUILD_0042_20260510/
+    DEV_OMR_BUILD_0042_20260510_01_main.zip
+    DEV_OMR_BUILD_0042_20260510_01_main.zip.sha256
+    release_group.json
+    README.txt
+```
+
+When the build needs environment prerequisites or application prerequisites, the same folder also contains `_00_environment_prereqs` and `_01_prereqs` archives. Use `release_group.json` or the group `README.txt` for deploy order.
+
+
 ### My package says `READY-WITH-CAVEATS`. Should I worry?
 
 `READY-WITH-CAVEATS` means at least one warning-level signal fired but no error-level signals. Common causes:
@@ -587,7 +602,7 @@ The DDL structure is identical. Only the token resolution differs — `{{OMR_STD
 ```bash
 python -c "
 import zipfile, json
-with zipfile.ZipFile('OMR_PRD_BUILD_0042.zip') as z:
+with zipfile.ZipFile('releases/PRD_OMR_BUILD_0042_20260510/PRD_OMR_BUILD_0042_20260510_01_main.zip') as z:
     name = next(n for n in z.namelist() if n.endswith('context/ships.build.json'))
     b = json.loads(z.read(name))
 print('Package: ', b['package_name'])
@@ -988,7 +1003,7 @@ Yes — open `package_report.html` from inside the archive, or use the Python zi
 ```python
 import zipfile, json
 
-with zipfile.ZipFile("OMR_DEV_BUILD_0042.zip") as z:
+with zipfile.ZipFile("releases/DEV_OMR_BUILD_0042_20260510/DEV_OMR_BUILD_0042_20260510_01_main.zip") as z:
     # List all files
     print("\n".join(z.namelist()))
 

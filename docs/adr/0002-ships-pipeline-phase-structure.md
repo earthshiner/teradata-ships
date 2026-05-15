@@ -89,8 +89,7 @@ contract:
    containing the tokenised DDL files, the deploy manifest
    (with wave ordering and per-object intent), a SHA-256 sidecar
    for integrity verification, and the Package Trust Score.
-   Output: `{project}/releases/{name}-{env}-{version}.zip` plus
-   `{name}-{env}-{version}.sha256`.
+   Output: `{project}/releases/{release_group}/` containing one or more package archives, checksum sidecars, `release_group.json`, and a group-level `README.txt`. A single-package build still uses the release-group directory for consistency.
 
 5. **Ship (Deploy).** Reads the release artefact produced by
    Package and executes it against a live Teradata system in

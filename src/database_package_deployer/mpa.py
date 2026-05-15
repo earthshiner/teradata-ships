@@ -17,7 +17,7 @@ and compares with ``hmac.compare_digest()``.
 
 Usage:
     # Second operator generates an approval code:
-    ships approve /releases/PRD_MyPkg_BUILD_0001.zip
+    ships approve /releases/PRD_MyPkg_BUILD_0001_20260515120000/PRD_MyPkg_BUILD_0001_20260515120000_01_main.zip
     # → prints a 64-char hex string to stdout
 
     # Deploying operator passes it to ship:
