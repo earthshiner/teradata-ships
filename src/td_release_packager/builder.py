@@ -85,6 +85,22 @@ def _context_file(pkg_dir: str, filename: str) -> str:
 logger = logging.getLogger(__name__)
 
 
+def _package_copy_ignore(_directory: str, names: list[str]) -> set[str]:
+    """Ignore transient Python cache files when cloning package trees.
+
+    Package directories are cloned during split/finalize operations. On
+    Windows, `.pyc` files under `__pycache__` can disappear while tests or
+    import machinery are running, which makes `shutil.copytree` fail with a
+    transient WinError 3. These files are generated runtime artefacts and must
+    not be shipped in SHIPS packages anyway.
+    """
+    return {
+        name
+        for name in names
+        if name == "__pycache__" or name.endswith(".pyc") or name.endswith(".pyo")
+    }
+
+
 def _context_relpath(filename: str) -> str:
     """Return the package-relative path for a SHIPS JSON metadata file."""
     return os.path.join(CONTEXT_DIR, filename).replace(os.sep, "/")
@@ -974,13 +990,13 @@ def _split_into_paired_packages(
         _rmtree_robust(main_pkg_dir)
     if os.path.exists(prereqs_pkg_dir):
         _rmtree_robust(prereqs_pkg_dir)
-    shutil.copytree(pkg_dir, main_pkg_dir)
+    shutil.copytree(pkg_dir, main_pkg_dir, ignore=_package_copy_ignore)
     _rmtree_robust(pkg_dir)
     pkg_dir = main_pkg_dir
 
     # 1. Clone the main package wholesale → prereqs sibling. Then we
     #    selectively empty payload phases on each side.
-    shutil.copytree(pkg_dir, prereqs_pkg_dir)
+    shutil.copytree(pkg_dir, prereqs_pkg_dir, ignore=_package_copy_ignore)
 
     # 2. Main: drop the prereq phases.
     for phase in _PREREQ_PHASES:
@@ -1210,7 +1226,7 @@ def _finalize_single_package(
 
     if os.path.exists(main_pkg_dir):
         _rmtree_robust(main_pkg_dir)
-    shutil.copytree(pkg_dir, main_pkg_dir)
+    shutil.copytree(pkg_dir, main_pkg_dir, ignore=_package_copy_ignore)
     _rmtree_robust(pkg_dir)
 
     manifest.package_filename = main_archive_filename
@@ -1928,7 +1944,7 @@ def _embed_deployer(pkg_dir: str):
     deployer_src = os.path.dirname(database_package_deployer.__file__)
 
     dest = os.path.join(pkg_dir, "lib", "database_package_deployer")
-    shutil.copytree(deployer_src, dest)
+    shutil.copytree(deployer_src, dest, ignore=_package_copy_ignore)
 
     logger.debug("Embedded database_package_deployer from %s", deployer_src)
 

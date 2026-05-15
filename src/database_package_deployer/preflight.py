@@ -1008,14 +1008,20 @@ def _check_excess_privilege(cursor) -> List[PreflightCheck]:
             )
         ]
 
-    findings = [
-        (
-            f"{row[0]} on {row[1]}"
-            + (f".{row[2]}" if row[2] else "")
-            + (" with grant authority" if row[3] == "Y" else "")
+    findings = []
+    for row in rows:
+        access_right = row[0]
+        database_name = row[1]
+        table_name = row[2] if len(row) > 2 else ""
+        grant_authority = row[3] if len(row) > 3 else ""
+        if access_right == "GD" and not grant_authority:
+            grant_authority = "Y"
+
+        findings.append(
+            f"{access_right} on {database_name}"
+            + (f".{table_name}" if table_name else "")
+            + (" with grant authority" if grant_authority == "Y" else "")
         )
-        for row in rows
-    ]
 
     logger.warning(
         "excess_privilege: deploy user holds elevated rights: %s",
