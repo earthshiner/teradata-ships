@@ -890,6 +890,66 @@ class TestIngestDirectory:
         assert "./foo.c" in fnc_text
         assert "./foo.h" in fnc_text
 
+    def test_ingest_harvests_cpp_procedure_companions(self, tmp_path, tmp_project):
+        """A LANGUAGE CPP external procedure should carry the named
+        source, generated helper source, and local quoted header so the
+        target can compile the procedure during deployment."""
+        src = tmp_path / "raw"
+        proc_dir = src / "P_GCFR_UT"
+        proc_dir.mkdir(parents=True)
+        (proc_dir / "raise_exception.ddl").write_text(
+            "CREATE PROCEDURE {{GCFR_P_UT}}.GCFR_XSP_UT_Exception_Raise()\n"
+            "LANGUAGE CPP\n"
+            "NO SQL\n"
+            "PARAMETER STYLE SQL\n"
+            "EXTERNAL NAME "
+            "'CS!RaiseException!../P_GCFR_XSP/RaiseException.cpp!"
+            "F!RaiseException';",
+            encoding="utf-8",
+        )
+
+        xsp_dir = src / "P_GCFR_XSP"
+        xsp_dir.mkdir(parents=True)
+        (xsp_dir / "RaiseException.cpp").write_text(
+            '#include "sqltypes_td.h"\nvoid RaiseException() {}',
+            encoding="utf-8",
+        )
+        (xsp_dir / "RaiseException_j.cpp").write_text(
+            '#include "sqltypes_td.h"\nvoid RaiseException_j() {}',
+            encoding="utf-8",
+        )
+        (xsp_dir / "sqltypes_td.h").write_text(
+            "typedef unsigned char Latin_Text;",
+            encoding="utf-8",
+        )
+
+        result = ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        from pathlib import Path
+
+        staged = next(dest for _, dest, t in result.files_placed if t == "PROCEDURE")
+        assert result.subtypes[staged] == "PROCEDURE_CPP"
+
+        copied = {Path(dest).name: kind for _, dest, kind in result.binaries_placed}
+        assert copied == {
+            "RaiseException.cpp": "CPP_SOURCE",
+            "RaiseException_j.cpp": "CPP_SOURCE",
+            "sqltypes_td.h": "C_HEADER",
+        }
+        for filename in copied:
+            assert (
+                Path(tmp_project)
+                / "payload"
+                / "database"
+                / "DDL"
+                / "procedures"
+                / filename
+            ).exists()
+
+        proc_text = (Path(tmp_project) / staged).read_text(encoding="utf-8")
+        assert "../P_GCFR_XSP/RaiseException.cpp" not in proc_text
+        assert "./RaiseException.cpp" in proc_text
+
     def test_ingest_warns_when_binary_reference_is_missing(self, tmp_path, tmp_project):
         """JAR install script that points at a non-existent binary
         should produce a classification warning so the user knows

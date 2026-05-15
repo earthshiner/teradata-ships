@@ -184,6 +184,7 @@ class TestInspectRecordsLintIssues:
         capsys.readouterr()
 
         # A WARNING-only run does not fail inspect (exit_code 0).
+        assert exit_code == 0
         stage = _read_decisions(project)["runs"][0]["stages"][0]
         warning_issues = [i for i in stage["issues"] if i["severity"] == "warning"]
         assert any(
@@ -215,7 +216,7 @@ class TestInspectRecordsLintIssues:
         assert stage["status"] == "error"
         assert _read_decisions(project)["runs"][0]["final_status"] == "failed"
 
-    def test_lint_warning_recorded_as_warning_issue(self, tmp_path, capsys):
+    def test_set_multiset_warning_recorded_as_warning_issue(self, tmp_path, capsys):
         project = _make_project(tmp_path)
         # CREATE TABLE without SET/MULTISET fires set_multiset (WARNING).
         tbl_dir = project / "payload" / "database" / "DDL" / "tables"

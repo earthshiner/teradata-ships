@@ -5,9 +5,9 @@ Some SQL files reference binary artefacts that aren't themselves SQL:
 
   * **JAR install scripts** (``CALL SQLJ.INSTALL_JAR('CJ!../JAVA/JAR/X.jar', ...)``)
     point at .jar archives that must be deployed alongside.
-  * **C UDFs** (``CREATE FUNCTION ... LANGUAGE C ...
-    EXTERNAL NAME 'CS!alias!../FOO/foo.c!CH!alias_h!../FOO/foo.h'``)
-    point at .c source and .h header files needed at deploy time.
+  * **C/C++ UDFs and external stored procedures** (``CREATE FUNCTION ... LANGUAGE C ...``
+    or ``CREATE PROCEDURE ... LANGUAGE CPP ...`` with ``EXTERNAL NAME``)
+    point at .c/.cpp source and .h header files needed at deploy time.
 
 Without harvesting these binaries, the deployer has nothing to upload
 and the procedure or function is broken on the target. This module
@@ -41,9 +41,10 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 from dataclasses import dataclass
-from typing import List
+from typing import List, Set
 
 
 logger = logging.getLogger(__name__)
@@ -81,6 +82,106 @@ class BinaryDependency:
     new_ref: str
     kind: str
     exists: bool
+
+
+# ---------------------------------------------------------------
+# C/C++ source companion discovery
+# ---------------------------------------------------------------
+
+_QUOTED_INCLUDE_RE = re.compile(
+    r"^\s*#\s*include\s*[\"<]([^\">]+)[\">]",
+    re.MULTILINE,
+)
+_CPP_SOURCE_EXTS = {".c", ".cc", ".cpp", ".cxx"}
+_C_CPP_EXTS = _CPP_SOURCE_EXTS | {".h", ".hh", ".hpp"}
+
+
+def _read_text_if_possible(path: str) -> str:
+    """Return source text for include scanning, or an empty string.
+
+    Native source dependencies are text files, but legacy repositories
+    are not always UTF-8 clean.  Use replacement decoding so a single
+    odd byte does not prevent companion/header discovery.
+    """
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def _normalise_ref(ref: str) -> str:
+    """Normalise a source reference for de-duplication."""
+    return os.path.normpath(ref).replace("\\", "/")
+
+
+def expand_c_cpp_companions(
+    *,
+    related_paths: List[str],
+    source_file_path: str,
+) -> List[str]:
+    """Expand explicit C/C++ references with required companion files.
+
+    Teradata CPP external procedures often name only the primary source
+    file in ``EXTERNAL NAME``.  The compiler still needs local quoted
+    headers such as ``#include "sqltypes_td.h"`` and, in generated legacy
+    codebases, sibling helper sources such as ``RaiseException_j.cpp``.
+
+    The expansion is intentionally conservative:
+      * only local quoted/angled includes that resolve beside the source
+        are added;
+      * only same-directory ``<stem>_j.cpp`` helper sources are added;
+      * discovery recurses through copied companions so headers included
+        by helpers are also captured;
+      * missing candidates are ignored here; the normal resolver will
+        warn for explicitly referenced files only.
+    """
+    src_dir = os.path.dirname(os.path.abspath(source_file_path))
+    out: List[str] = []
+    seen_refs: Set[str] = set()
+    seen_files: Set[str] = set()
+
+    def add_ref(ref: str) -> None:
+        key = _normalise_ref(ref)
+        if key not in seen_refs:
+            seen_refs.add(key)
+            out.append(ref)
+
+    def resolve(ref: str, base_dir: str) -> str:
+        if os.path.isabs(ref):
+            return os.path.normpath(ref)
+        return os.path.normpath(os.path.join(base_dir, ref))
+
+    def walk(ref: str, base_dir: str) -> None:
+        add_ref(ref)
+        abs_path = resolve(ref, base_dir)
+        abs_key = os.path.normcase(os.path.abspath(abs_path))
+        if abs_key in seen_files or not os.path.isfile(abs_path):
+            return
+        seen_files.add(abs_key)
+
+        ext = os.path.splitext(abs_path)[1].lower()
+        if ext not in _C_CPP_EXTS:
+            return
+
+        file_dir = os.path.dirname(abs_path)
+        text = _read_text_if_possible(abs_path)
+
+        for include in _QUOTED_INCLUDE_RE.findall(text):
+            include_path = os.path.normpath(os.path.join(file_dir, include))
+            if os.path.isfile(include_path):
+                walk(os.path.relpath(include_path, src_dir), src_dir)
+
+        if ext in _CPP_SOURCE_EXTS:
+            stem, _ = os.path.splitext(abs_path)
+            generated_helper = f"{stem}_j.cpp"
+            if os.path.isfile(generated_helper):
+                walk(os.path.relpath(generated_helper, src_dir), src_dir)
+
+    for ref in related_paths:
+        walk(ref, src_dir)
+
+    return out
 
 
 # ---------------------------------------------------------------
@@ -290,8 +391,13 @@ def harvest_binaries(
             rewritten_content=content, copied=[], missing=[], warnings=[]
         )
 
-    deps = resolve_dependencies(
+    expanded_related_paths = expand_c_cpp_companions(
         related_paths=related_paths,
+        source_file_path=source_file_path,
+    )
+
+    deps = resolve_dependencies(
+        related_paths=expanded_related_paths,
         source_file_path=source_file_path,
         destination_dir=destination_dir,
     )
