@@ -4,7 +4,7 @@ test_validate.py — Tests for the SHIPS inspector / linter (validate module).
 Covers:
     - Database qualifier check
     - SET/MULTISET check for tables
-    - Deploy intent check (REPLACE prohibited — CREATE required)
+    - Deploy intent check (REPLACE advisory — WARNING by default, ERROR in strict mode)
     - One-object-per-file check
     - Eponymous file naming check
     - File extension check
@@ -120,41 +120,52 @@ class TestCheckMultiset:
 # ---------------------------------------------------------------
 
 
-class TestCheckDeployIntent:
-    """Tests for CREATE-not-REPLACE enforcement."""
+# _check_deploy_intent
+# ---------------------------------------------------------------
 
-    def test_replace_view_rejected(self):
-        """REPLACE VIEW produces ERROR."""
+
+class TestCheckDeployIntent:
+    """Tests for the deploy_intent advisory rule (REPLACE → WARNING, CREATE preferred)."""
+
+    def test_replace_view_produces_warning(self):
+        """REPLACE VIEW produces a WARNING by default (not an error)."""
         ddl = "REPLACE VIEW MyDB.V AS SELECT 1;"
         issues = _check_deploy_intent("v.viw", ddl)
         assert len(issues) == 1
         assert issues[0].rule == "deploy_intent"
+        assert issues[0].severity == "WARNING"
+        assert "CREATE" in issues[0].message
+
+    def test_replace_view_strict_produces_error(self):
+        """REPLACE VIEW produces ERROR when strict=True (i.e. deploy_intent=ERROR in inspect.conf)."""
+        ddl = "REPLACE VIEW MyDB.V AS SELECT 1;"
+        issues = _check_deploy_intent("v.viw", ddl, strict=True)
+        assert len(issues) == 1
         assert issues[0].severity == "ERROR"
-        assert "DROP-and-CREATE" in issues[0].message
 
     def test_create_view_passes(self):
         """CREATE VIEW produces no deploy_intent issue."""
         ddl = "CREATE VIEW MyDB.V AS SELECT 1;"
         assert _check_deploy_intent("v.viw", ddl) == []
 
-    def test_replace_procedure_rejected(self):
-        """REPLACE PROCEDURE produces ERROR."""
+    def test_replace_procedure_produces_warning(self):
+        """REPLACE PROCEDURE produces WARNING by default."""
         ddl = "REPLACE PROCEDURE MyDB.sp_X() BEGIN END;"
         issues = _check_deploy_intent("x.spl", ddl)
         assert len(issues) == 1
-        assert issues[0].severity == "ERROR"
+        assert issues[0].severity == "WARNING"
 
     def test_create_procedure_passes(self):
         """CREATE PROCEDURE produces no deploy_intent issue."""
         ddl = "CREATE PROCEDURE MyDB.sp_X() BEGIN END;"
         assert _check_deploy_intent("x.spl", ddl) == []
 
-    def test_replace_trigger_rejected(self):
-        """REPLACE TRIGGER produces ERROR."""
+    def test_replace_trigger_produces_warning(self):
+        """REPLACE TRIGGER produces WARNING by default."""
         ddl = "REPLACE TRIGGER MyDB.trg_X AFTER INSERT ON MyDB.T FOR EACH ROW (SELECT 1;);"
         issues = _check_deploy_intent("x.trg", ddl)
         assert len(issues) == 1
-        assert issues[0].severity == "ERROR"
+        assert issues[0].severity == "WARNING"
 
     def test_create_trigger_passes(self):
         """CREATE TRIGGER produces no deploy_intent issue."""
@@ -163,36 +174,36 @@ class TestCheckDeployIntent:
         )
         assert _check_deploy_intent("x.trg", ddl) == []
 
-    def test_replace_function_rejected(self):
-        """REPLACE FUNCTION produces ERROR."""
+    def test_replace_function_produces_warning(self):
+        """REPLACE FUNCTION produces WARNING by default."""
         ddl = "REPLACE FUNCTION MyDB.fn_X(p INT) RETURNS INT RETURN p;"
         issues = _check_deploy_intent("x.fnc", ddl)
         assert len(issues) == 1
-        assert issues[0].severity == "ERROR"
+        assert issues[0].severity == "WARNING"
 
     def test_create_function_passes(self):
         """CREATE FUNCTION produces no deploy_intent issue."""
         ddl = "CREATE FUNCTION MyDB.fn_X(p INT) RETURNS INT RETURN p;"
         assert _check_deploy_intent("x.fnc", ddl) == []
 
-    def test_replace_specific_function_rejected(self):
-        """REPLACE SPECIFIC FUNCTION produces ERROR."""
+    def test_replace_specific_function_produces_warning(self):
+        """REPLACE SPECIFIC FUNCTION produces WARNING by default."""
         ddl = "REPLACE SPECIFIC FUNCTION MyDB.fn_X_Int RETURNS INT RETURN 1;"
         issues = _check_deploy_intent("x.fnc", ddl)
         assert len(issues) == 1
-        assert issues[0].severity == "ERROR"
+        assert issues[0].severity == "WARNING"
 
     def test_create_specific_function_passes(self):
         """CREATE SPECIFIC FUNCTION produces no deploy_intent issue."""
         ddl = "CREATE SPECIFIC FUNCTION MyDB.fn_X_Int RETURNS INT RETURN 1;"
         assert _check_deploy_intent("x.fnc", ddl) == []
 
-    def test_replace_macro_rejected(self):
-        """REPLACE MACRO produces ERROR."""
+    def test_replace_macro_produces_warning(self):
+        """REPLACE MACRO produces WARNING by default."""
         ddl = "REPLACE MACRO MyDB.mc_X AS (SELECT 1;);"
         issues = _check_deploy_intent("x.mcr", ddl)
         assert len(issues) == 1
-        assert issues[0].severity == "ERROR"
+        assert issues[0].severity == "WARNING"
 
     def test_create_macro_passes(self):
         """CREATE MACRO produces no deploy_intent issue."""
@@ -928,8 +939,8 @@ class TestValidateDirectory:
         assert result.files_scanned == 1
         assert result.errors == 0
 
-    def test_strict_mode_catches_replace_view(self, tmp_path):
-        """REPLACE VIEW is caught as an error (default severity)."""
+    def test_replace_view_produces_advisory_warning(self, tmp_path):
+        """REPLACE VIEW produces a WARNING by default — not a blocking error."""
         ddl_dir = tmp_path / "DDL" / "views"
         ddl_dir.mkdir(parents=True)
         (ddl_dir / "MyDB.V.viw").write_text(
@@ -939,8 +950,11 @@ class TestValidateDirectory:
 
         result = validate_directory(str(tmp_path))
 
-        assert result.errors > 0
-        assert not result.passed
+        assert result.warnings > 0
+        assert result.errors == 0
+        deploy_issues = [i for i in result.issues if i.rule == "deploy_intent"]
+        assert len(deploy_issues) == 1
+        assert deploy_issues[0].severity == "WARNING"
 
     def test_create_view_passes_all_checks(self, tmp_path):
         """CREATE VIEW produces no deploy_intent issue."""

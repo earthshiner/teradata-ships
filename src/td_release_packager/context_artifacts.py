@@ -539,6 +539,7 @@ def _build_index_document(
 ) -> Dict[str, Any]:
     """Build ships.index.json, the canonical package read-first contract."""
     return {
+        "$schema": "./schemas/ships.index.schema.json",
         "schema": "teradata-ships/package-index/v1",
         "schema_version": INDEX_SCHEMA_VERSION,
         "package_type": "teradata-ships",
@@ -569,6 +570,7 @@ def _build_context_document(
 ) -> Dict[str, Any]:
     """Build ships.context.json."""
     return {
+        "$schema": "./schemas/ships.context.schema.json",
         "schema_version": CONTEXT_SCHEMA_VERSION,
         "context_id": context_id,
         "generated_at": generated_at,
@@ -621,6 +623,7 @@ def _build_agent_manifest_document(
 ) -> Dict[str, Any]:
     """Build ships.manifest.json."""
     return {
+        "$schema": "./schemas/ships.manifest.schema.json",
         "schema_version": CONTEXT_SCHEMA_VERSION,
         "context_id": context_id,
         "generated_at": generated_at,
@@ -687,6 +690,7 @@ def _build_handoff_document(
         required_actions.insert(2, "Use a TLS/SSL-protected Teradata connection.")
 
     return {
+        "$schema": "./schemas/ships.handoff.schema.json",
         "schema_version": CONTEXT_SCHEMA_VERSION,
         "context_id": context_id,
         "generated_at": generated_at,
