@@ -287,58 +287,6 @@ class TestHarvestBinariesEndToEnd:
         assert "./foo.c" in result.rewritten_content
         assert "./foo.h" in result.rewritten_content
 
-    def test_cpp_procedure_harvests_helper_and_local_headers(self, tmp_path):
-        """A Teradata LANGUAGE CPP procedure may name only the primary
-        source in EXTERNAL NAME, but compilation also needs local
-        quoted headers and generated sibling helper sources."""
-        proc_dir = tmp_path / "procedures"
-        proc_dir.mkdir()
-        source_spl = proc_dir / "raise_exception.spl"
-        source_spl.write_text("placeholder", encoding="utf-8")
-
-        xsp_dir = tmp_path / "P_GCFR_XSP"
-        xsp_dir.mkdir()
-        (xsp_dir / "RaiseException.cpp").write_text(
-            '#include "sqltypes_td.h"\nvoid RaiseException() {}',
-            encoding="utf-8",
-        )
-        (xsp_dir / "RaiseException_j.cpp").write_text(
-            '#include "sqltypes_td.h"\nvoid RaiseException_j() {}',
-            encoding="utf-8",
-        )
-        (xsp_dir / "sqltypes_td.h").write_text(
-            "typedef unsigned char Latin_Text;",
-            encoding="utf-8",
-        )
-
-        content = (
-            "CREATE PROCEDURE x.raise_exception()\n"
-            "LANGUAGE CPP NO SQL PARAMETER STYLE SQL\n"
-            "EXTERNAL NAME "
-            "'CS!RaiseException!../P_GCFR_XSP/RaiseException.cpp!F!RaiseException';"
-        )
-        dest_dir = tmp_path / "payload" / "DDL" / "procedures"
-        dest_dir.mkdir(parents=True)
-
-        result = bh.harvest_binaries(
-            content=content,
-            related_paths=["../P_GCFR_XSP/RaiseException.cpp"],
-            source_file_path=str(source_spl),
-            destination_dir=str(dest_dir),
-        )
-
-        assert (dest_dir / "RaiseException.cpp").exists()
-        assert (dest_dir / "RaiseException_j.cpp").exists()
-        assert (dest_dir / "sqltypes_td.h").exists()
-        copied_names = {Path(dep.destination_path).name for dep in result.copied}
-        assert copied_names == {
-            "RaiseException.cpp",
-            "RaiseException_j.cpp",
-            "sqltypes_td.h",
-        }
-        assert "../P_GCFR_XSP/RaiseException.cpp" not in result.rewritten_content
-        assert "./RaiseException.cpp" in result.rewritten_content
-
     def test_missing_binary_warns_and_leaves_path(self, tmp_path):
         """Reference to a non-existent binary produces a warning;
         the original path is NOT rewritten so the broken reference
@@ -386,3 +334,50 @@ class TestHarvestBinariesEndToEnd:
 
 # Used by `os.path.normcase` checks on Windows
 import os  # noqa: E402
+
+
+class TestNativeCompanionHarvest:
+    def test_cpp_source_harvests_local_header_and_j_companion(self, tmp_path):
+        source_dir = tmp_path / "DDL" / "P_GCFR_UT"
+        native_dir = tmp_path / "DDL" / "P_GCFR_XSP"
+        source_dir.mkdir(parents=True)
+        native_dir.mkdir(parents=True)
+
+        source_spl = source_dir / "raise_error.spl"
+        source_spl.write_text("placeholder", encoding="utf-8")
+        (native_dir / "RaiseException.cpp").write_text(
+            '#include "sqltypes_td.h"\nvoid RaiseException() {}\n', encoding="utf-8"
+        )
+        (native_dir / "RaiseException_j.cpp").write_text(
+            '#include "sqltypes_td.h"\nvoid RaiseException_j() {}\n', encoding="utf-8"
+        )
+        (native_dir / "sqltypes_td.h").write_text(
+            "typedef int INTEGER;\n", encoding="utf-8"
+        )
+        dest_dir = tmp_path / "payload" / "DDL" / "procedures"
+        dest_dir.mkdir(parents=True)
+
+        content = (
+            "CREATE PROCEDURE x.raise_error()\n"
+            "LANGUAGE CPP\n"
+            "EXTERNAL NAME 'CS!RaiseException!../P_GCFR_XSP/RaiseException.cpp!F!RaiseException';"
+        )
+
+        result = bh.harvest_binaries(
+            content=content,
+            related_paths=["../P_GCFR_XSP/RaiseException.cpp"],
+            source_file_path=str(source_spl),
+            destination_dir=str(dest_dir),
+        )
+
+        copied_names = {Path(dep.destination_path).name for dep in result.copied}
+        assert copied_names == {
+            "RaiseException.cpp",
+            "RaiseException_j.cpp",
+            "sqltypes_td.h",
+        }
+        assert (dest_dir / "RaiseException.cpp").exists()
+        assert (dest_dir / "RaiseException_j.cpp").exists()
+        assert (dest_dir / "sqltypes_td.h").exists()
+        assert "../P_GCFR_XSP/RaiseException.cpp" not in result.rewritten_content
+        assert "./RaiseException.cpp" in result.rewritten_content

@@ -26,7 +26,7 @@ Three things this module does that the old classifier didn't:
 
   3. **Sub-types** that distinguish dialect:
        ``FUNCTION_C``     vs ``FUNCTION_SQL``
-       ``PROCEDURE_JAVA`` / ``PROCEDURE_CPP`` vs ``PROCEDURE_SPL``
+       ``PROCEDURE_JAVA`` vs ``PROCEDURE_SPL``
      The base type ("FUNCTION", "PROCEDURE") is preserved through
      ``base_type()`` for callers that don't care about dialect.
      Extensions and subdirectories are unchanged from the base.
@@ -362,8 +362,8 @@ _CLASSIFY_PATTERNS: List[Tuple[re.Pattern, str]] = [
 
 
 _LANGUAGE_C_RE = re.compile(r"\bLANGUAGE\s+C\b", re.I)
-_LANGUAGE_CPP_RE = re.compile(r"\bLANGUAGE\s+(?:CPP|C\+\+)\b", re.I)
 _LANGUAGE_JAVA_RE = re.compile(r"\bLANGUAGE\s+JAVA\b", re.I)
+_LANGUAGE_CPP_RE = re.compile(r"\bLANGUAGE\s+(?:CPP|C\+\+)\b", re.I)
 _LANGUAGE_SQL_RE = re.compile(r"\bLANGUAGE\s+SQL\b", re.I)
 
 
@@ -380,7 +380,7 @@ def _refine_function_subtype(content: str) -> str:
 
 
 def _refine_procedure_subtype(content: str) -> str:
-    """Decide the Teradata procedure dialect.
+    """Decide between PROCEDURE_JAVA, PROCEDURE_CPP and PROCEDURE_SPL.
 
     LANGUAGE JAVA explicit → PROCEDURE_JAVA.
     LANGUAGE CPP / C++ explicit → PROCEDURE_CPP.
@@ -510,10 +510,10 @@ def extract_sqlj_jar_paths(content: str) -> List[str]:
 
 
 def extract_externals(content: str, type_hint: str) -> List[str]:
-    """Extract external references for FUNCTION_C / PROCEDURE_CPP / PROCEDURE_JAVA / JAR.
+    """Extract external references for FUNCTION_C / PROCEDURE_JAVA / JAR.
 
     Returns:
-        For FUNCTION_C / PROCEDURE_CPP: list of .c/.cpp/.h paths from EXTERNAL NAME.
+        For FUNCTION_C / PROCEDURE_CPP: list of native source/header paths from EXTERNAL NAME.
         For PROCEDURE_JAVA: single-element list with the JAR alias
                             from EXTERNAL NAME.
         For JAR (SQLJ install script): list of binary paths from
@@ -629,15 +629,10 @@ def classify(path: str, content: str) -> ClassificationResult:
     # Stage 3: extract external references where relevant
     if result.type in ("FUNCTION_C", "PROCEDURE_CPP", "PROCEDURE_JAVA", "JAR"):
         result.related_files = extract_externals(content, result.type)
-        if result.type == "FUNCTION_C" and not result.related_files:
+        if result.type in ("FUNCTION_C", "PROCEDURE_CPP") and not result.related_files:
             result.warnings.append(
-                "FUNCTION_C detected but no .c/.h files referenced "
-                "in EXTERNAL NAME clause — verify the dependency."
-            )
-        if result.type == "PROCEDURE_CPP" and not result.related_files:
-            result.warnings.append(
-                "PROCEDURE_CPP detected but no .c/.cpp/.h files referenced "
-                "in EXTERNAL NAME clause — verify the dependency."
+                f"{result.type} detected but no .c/.h/.cpp native source/header files referenced "
+                "in EXTERNAL NAME clause — no native source/header dependency was resolved; verify the dependency."
             )
         if result.type == "PROCEDURE_JAVA" and not result.related_files:
             result.warnings.append(

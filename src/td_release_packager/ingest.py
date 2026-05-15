@@ -669,8 +669,8 @@ def _ingest_directory_impl(
                         )
 
                 # -- Harvest binary dependencies BEFORE writing --
-                # FUNCTION_C, PROCEDURE_CPP, and JAR install scripts reference
-                # binary files (.c/.cpp/.h, .jar) that the deployer
+                # FUNCTION_C and JAR install scripts reference
+                # binary files (.c/.h, .jar) that the deployer
                 # needs alongside. Resolve, copy, and rewrite the
                 # paths so the deployed script's references are
                 # sibling-relative.
