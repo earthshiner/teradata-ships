@@ -379,7 +379,7 @@ releases/DEV_OMR_BUILD_0042_20260510/
     README.txt
 ```
 
-When the build needs environment prerequisites or application prerequisites, the same folder also contains `_00_environment_prereqs` and `_01_prereqs` archives. Use `release_group.json` or the group `README.txt` for deploy order.
+When the build needs application prerequisites, the same folder contains `_01_prereqs` and `_02_main` archives. Missing external environment parents are reported for DBA action by default. A `_00_environment_prereqs` archive appears only when `--generate-environment-prereqs` is explicitly supplied. Use `release_group.json` or the group `README.txt` for deploy order.
 
 
 ### My package says `READY-WITH-CAVEATS`. Should I worry?

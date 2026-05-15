@@ -82,7 +82,7 @@ releases/
         README.txt
 ```
 
-Multi-package build with environment prerequisites:
+Multi-package build with optional environment prerequisites (`--generate-environment-prereqs`):
 
 ```text
 releases/
@@ -97,7 +97,7 @@ releases/
         README.txt
 ```
 
-`release_group.json` is the group-level index for humans, CI/CD jobs, dashboards, and agents. It records package roles, deploy order, checksums, and `context/ships.index.json` entrypoints inside each archive.
+`release_group.json` is the group-level index for humans, CI/CD jobs, dashboards, and agents. It records package roles, deploy order, checksums, and `context/ships.index.json` entrypoints inside each archive. By default, missing external parent databases/users are reported for DBA action in the `_01_prereqs` package; SHIPS only emits `_00_environment_prereqs` when `--generate-environment-prereqs` is explicitly supplied.
 
 ## Architecture
 
