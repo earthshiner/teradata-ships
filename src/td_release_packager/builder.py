@@ -2450,19 +2450,19 @@ def main():
                     os.path.join(_rg, _prereqs_zip_name),
                 ])
             logger.error(
-                "Deploy chaining: companion prereqs package not found.\n"
-                "  Required: %s\n"
-                "  Searched:\n    %s\n"
+                "Deploy chaining: companion prereqs package not found.\\n"
+                "  Required: %s\\n"
+                "  Searched:\\n    %s\\n"
                 "  Extract '%s' as a sibling under the release group directory and retry.",
                 _prereqs_zip_name,
-                "\n    ".join(_searched),
+                "\\n    ".join(_searched),
                 _prereqs_zip_name,
             )
             sys.exit(1)
 
         if os.path.isfile(_prereqs_location) and _prereqs_location.lower().endswith(".zip"):
             logger.error(
-                "Deploy chaining: companion prereqs package is present only as a zip: %s\n"
+                "Deploy chaining: companion prereqs package is present only as a zip: %s\\n"
                 "  Extract it under the release group directory before deploying this package.",
                 _prereqs_location,
             )
