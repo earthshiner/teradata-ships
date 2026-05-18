@@ -2,24 +2,6 @@
 
 All notable changes to SHIPS are documented in this file.
 
-## [0.5.0] — 2026-05-18
-
-### Added
-
-- **Deploy-time trust resolution for `environment_prereq_requires_dba_review`** — When the sole blocking trust signal on an environment prereqs package is `environment_prereq_requires_dba_review`, `deploy.py` no longer hard-exits before connecting. Instead it defers the block, establishes the database connection, and queries `DBC.DatabasesV` / `DBC.UsersV` for each listed parent object. If all exist, a prominent `TRUST RESOLVED` banner is logged at INFO level and deployment proceeds normally. If any object is absent, deployment is blocked with a clear list of the missing objects. This eliminates unnecessary friction on long-lived environments where parent databases were created in an earlier release cycle. All other BLOCKED signals continue to exit immediately. See ADR 0014.
-
-- **ADR 0014** — Documents the deploy-time trust resolution design decision and its rationale.
-
-### Fixed
-
-- **`\n` escape in deploy chaining error messages** — Two `logger.error()` calls in the deploy chaining block of `_generate_deploy_script()` contained bare `\n` escape sequences inside the outer triple-quoted f-string. Python processes `\n` in f-string body text as a real newline, splitting the generated string literals across lines and producing `SyntaxError: unterminated string literal (detected at line 261)` in the packaged `deploy.py`. Fixed by changing `\n` → `\\n` so the generated source contains the correct escape sequence. Affected the `DEV_GCFR_BUILD_0033` release group; all packages built after this fix are unaffected.
-
-### Documentation
-
-- **OPERATIONS_GUIDE** — Trust label table updated to document the `environment_prereq_requires_dba_review` auto-resolve path with example log output. Troubleshooting quick reference table extended with two new rows covering resolved and still-blocked prereq scenarios.
-- **USER_GUIDE** — Signals table updated to include `environment_prereq_requires_dba_review`. "What to do when BLOCKED" section split into signal-specific guidance with example log output for the auto-resolve path.
-- **FAQ** — "My package is `BLOCKED`" entry restructured to separate the auto-resolving signal from the rebuild-required signals. `--skip-trust-check` guidance clarified.
-
 ## [0.4.0] — 2026-05-03
 
 ### Fixed

@@ -56,7 +56,15 @@ from database_package_deployer.models import (
 # A bare identifier name (no dot) is also captured for objects that
 # do not require a qualifier (DATABASE, USER, etc.) — those use a
 # narrower single-part pattern below.
-_NP = r'(?:"[^"]+"|[A-Za-z_]\w*)'  # one name part
+# One name part. In addition to normal/quoted Teradata identifiers, allow
+# SHIPS token placeholders in object headers, for example:
+#
+#   CREATE PROCEDURE {{GCFR_P_UT}}.GCFR_UT_BKEY_S_K_NextId_Log_CT
+#
+# Deploy classification may run against tokenised payloads before environment
+# substitution. Treat the token as a valid name part so the parser can still
+# recognise that the DDL is explicitly qualified.
+_NP = r'(?:"[^"]+"|\{\{[A-Za-z_][A-Za-z0-9_]*\}\}|[A-Za-z_]\w*)'  # one name part
 
 # Whitespace between name parts and the dot. Teradata accepts any
 # combination of spaces, tabs, and a single newline on either side:
@@ -661,6 +669,11 @@ def _detect_object_type(ddl_text: str) -> Tuple[ObjectType, str]:
         Tuple of (ObjectType, raw_qualified_name_string).
         Returns (UNKNOWN, '') if no pattern matches.
     """
+    # Be defensive for direct unit/internal calls. The public parser already
+    # strips comments before this point, but direct callers should get the same
+    # behaviour.
+    ddl_text = _strip_sql_comments(ddl_text)
+
     # Order matters: test more specific patterns first
     patterns = [
         (_JOIN_INDEX_RE, ObjectType.JOIN_INDEX),
@@ -696,22 +709,32 @@ def _detect_object_type(ddl_text: str) -> Tuple[ObjectType, str]:
         (_DML_RE, ObjectType.DML),
     ]
 
-    for pattern, obj_type in patterns:
+    candidates = []
+    for priority, (pattern, obj_type) in enumerate(patterns):
         match = pattern.search(ddl_text)
         if match:
-            # For secondary indexes, the captured name is the index
-            # name, not qualified. We need special handling.
-            if obj_type == ObjectType.INDEX:
-                return (obj_type, _get_index_qualified_name(ddl_text, match))
-            # GRANT/REVOKE/JAR don't have a standard qualified name
-            if obj_type in (ObjectType.GRANT, ObjectType.REVOKE, ObjectType.JAR):
-                return (obj_type, obj_type.value)
-            try:
-                return (obj_type, match.group(1))
-            except IndexError:
-                return (obj_type, obj_type.value)
+            candidates.append((match.start(), priority, pattern, obj_type, match))
 
-    return (ObjectType.UNKNOWN, "")
+    if not candidates:
+        return (ObjectType.UNKNOWN, "")
+
+    # Prefer the first DDL-like construct in the file, using the pattern
+    # ordering only to break ties at the same character position. This avoids
+    # misclassifying a procedure/function as a table when its body contains
+    # dynamic SQL such as ``SET vSQL = 'CREATE TABLE ...'``.
+    _, _, _, obj_type, match = min(candidates, key=lambda item: (item[0], item[1]))
+
+    # For secondary indexes, the captured name is the index name, not
+    # qualified. We need special handling.
+    if obj_type == ObjectType.INDEX:
+        return (obj_type, _get_index_qualified_name(ddl_text, match))
+    # GRANT/REVOKE/JAR don't have a standard qualified name.
+    if obj_type in (ObjectType.GRANT, ObjectType.REVOKE, ObjectType.JAR):
+        return (obj_type, obj_type.value)
+    try:
+        return (obj_type, match.group(1))
+    except IndexError:
+        return (obj_type, obj_type.value)
 
 
 def _get_index_qualified_name(ddl_text: str, idx_match) -> str:
