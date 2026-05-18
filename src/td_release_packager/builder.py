@@ -166,7 +166,15 @@ _EPONYMOUS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         "TABLE",
         re.compile(
             rf'\bCREATE\s+(?:MULTISET\s+|SET\s+)?'
-            rf'(?:(?:VOLATILE|GLOBAL\s+TEMPORARY)\s+)?TABLE\s+'
+            rf'(?:(?:VOLATILE|GLOBAL\s+TEMPORARY)\s+)?(?:TRACE\s+)?TABLE\s+'
+            rf'(?P<name>{_QUALIFIED_NAME_RE}){_NAME_END_RE}',
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "JOIN_INDEX",
+        re.compile(
+            rf'\bCREATE\s+JOIN\s+INDEX\s+'
             rf'(?P<name>{_QUALIFIED_NAME_RE}){_NAME_END_RE}',
             re.IGNORECASE,
         ),
@@ -269,8 +277,20 @@ def _mask_comments_and_string_literals(sql_text: str) -> str:
 
 
 def _normalise_identifier_spacing(name: str) -> str:
-    """Normalize whitespace around dots in an extracted object name."""
-    return re.sub(r"\s*\.\s*", ".", name.strip())
+    """Normalize whitespace around dots and strip identifier quotes.
+
+    Double-quoted identifiers are legal Teradata names, but package filenames
+    should remain eponymous without carrying the SQL delimiter quotes, matching
+    the historical builder behaviour. SHIPS token placeholders are preserved.
+    """
+    normalized = re.sub(r"\s*\.\s*", ".", name.strip())
+    parts = []
+    for part in normalized.split("."):
+        if len(part) >= 2 and part[0] == '"' and part[-1] == '"':
+            parts.append(part[1:-1].replace('""', '"'))
+        else:
+            parts.append(part)
+    return ".".join(parts)
 
 
 def _extract_eponymous_name(sql_text: str) -> Optional[tuple[str, str, str]]:
