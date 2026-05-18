@@ -140,8 +140,8 @@ _INJECT_MULTISET_RE = re.compile(
 # parser behaviour.
 
 _NAME_PART_RE = r'(?:"[^"]+"|\{\{[A-Za-z_][A-Za-z0-9_]*\}\}|[A-Za-z_][A-Za-z0-9_$#]*)'
-_QUALIFIED_NAME_RE = rf'{_NAME_PART_RE}(?:\s*\.\s*{_NAME_PART_RE})?'
-_NAME_END_RE = r'(?=$|\s|[;(])'
+_QUALIFIED_NAME_RE = rf"{_NAME_PART_RE}(?:\s*\.\s*{_NAME_PART_RE})?"
+_NAME_END_RE = r"(?=$|\s|[;(])"
 
 # Ordered only for deterministic tie-breaking when two patterns start at the
 # same position. The extraction function primarily sorts by match position so
@@ -151,71 +151,71 @@ _EPONYMOUS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "DATABASE",
         re.compile(
-            rf'\bCREATE\s+DATABASE\s+(?P<name>{_NAME_PART_RE}){_NAME_END_RE}',
+            rf"\bCREATE\s+DATABASE\s+(?P<name>{_NAME_PART_RE}){_NAME_END_RE}",
             re.IGNORECASE,
         ),
     ),
     (
         "USER",
         re.compile(
-            rf'\bCREATE\s+USER\s+(?P<name>{_NAME_PART_RE}){_NAME_END_RE}',
+            rf"\bCREATE\s+USER\s+(?P<name>{_NAME_PART_RE}){_NAME_END_RE}",
             re.IGNORECASE,
         ),
     ),
     (
         "TABLE",
         re.compile(
-            rf'\bCREATE\s+(?:MULTISET\s+|SET\s+)?'
-            rf'(?:(?:VOLATILE|GLOBAL\s+TEMPORARY)\s+)?(?:TRACE\s+)?TABLE\s+'
-            rf'(?P<name>{_QUALIFIED_NAME_RE}){_NAME_END_RE}',
+            rf"\bCREATE\s+(?:MULTISET\s+|SET\s+)?"
+            rf"(?:(?:VOLATILE|GLOBAL\s+TEMPORARY)\s+)?(?:TRACE\s+)?TABLE\s+"
+            rf"(?P<name>{_QUALIFIED_NAME_RE}){_NAME_END_RE}",
             re.IGNORECASE,
         ),
     ),
     (
         "JOIN_INDEX",
         re.compile(
-            rf'\bCREATE\s+JOIN\s+INDEX\s+'
-            rf'(?P<name>{_QUALIFIED_NAME_RE}){_NAME_END_RE}',
+            rf"\bCREATE\s+JOIN\s+INDEX\s+"
+            rf"(?P<name>{_QUALIFIED_NAME_RE}){_NAME_END_RE}",
             re.IGNORECASE,
         ),
     ),
     (
         "VIEW",
         re.compile(
-            rf'\b(?:CREATE|REPLACE)\s+VIEW\s+'
-            rf'(?P<name>{_QUALIFIED_NAME_RE}){_NAME_END_RE}',
+            rf"\b(?:CREATE|REPLACE)\s+VIEW\s+"
+            rf"(?P<name>{_QUALIFIED_NAME_RE}){_NAME_END_RE}",
             re.IGNORECASE,
         ),
     ),
     (
         "PROCEDURE",
         re.compile(
-            rf'\b(?:CREATE|REPLACE)\s+PROCEDURE\s+'
-            rf'(?P<name>{_QUALIFIED_NAME_RE}){_NAME_END_RE}',
+            rf"\b(?:CREATE|REPLACE)\s+PROCEDURE\s+"
+            rf"(?P<name>{_QUALIFIED_NAME_RE}){_NAME_END_RE}",
             re.IGNORECASE,
         ),
     ),
     (
         "MACRO",
         re.compile(
-            rf'\b(?:CREATE|REPLACE)\s+MACRO\s+'
-            rf'(?P<name>{_QUALIFIED_NAME_RE}){_NAME_END_RE}',
+            rf"\b(?:CREATE|REPLACE)\s+MACRO\s+"
+            rf"(?P<name>{_QUALIFIED_NAME_RE}){_NAME_END_RE}",
             re.IGNORECASE,
         ),
     ),
     (
         "FUNCTION",
         re.compile(
-            rf'\b(?:CREATE|REPLACE)\s+(?:FUNCTION|SPECIFIC\s+FUNCTION)\s+'
-            rf'(?P<name>{_QUALIFIED_NAME_RE}){_NAME_END_RE}',
+            rf"\b(?:CREATE|REPLACE)\s+(?:FUNCTION|SPECIFIC\s+FUNCTION)\s+"
+            rf"(?P<name>{_QUALIFIED_NAME_RE}){_NAME_END_RE}",
             re.IGNORECASE,
         ),
     ),
     (
         "TRIGGER",
         re.compile(
-            rf'\b(?:CREATE|REPLACE)\s+TRIGGER\s+'
-            rf'(?P<name>{_QUALIFIED_NAME_RE}){_NAME_END_RE}',
+            rf"\b(?:CREATE|REPLACE)\s+TRIGGER\s+"
+            rf"(?P<name>{_QUALIFIED_NAME_RE}){_NAME_END_RE}",
             re.IGNORECASE,
         ),
     ),

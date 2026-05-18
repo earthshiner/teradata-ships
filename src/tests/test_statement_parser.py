@@ -620,9 +620,7 @@ class TestParseDdlText:
         parsed = parse_statement_text(ddl)
         assert parsed.database_name == "{{GCFR_P_UT}}"
         assert parsed.object_name == "GCFR_UT_BKEY_S_K_NextId_Log_CT"
-        assert parsed.qualified_name == (
-            "{{GCFR_P_UT}}.GCFR_UT_BKEY_S_K_NextId_Log_CT"
-        )
+        assert parsed.qualified_name == ("{{GCFR_P_UT}}.GCFR_UT_BKEY_S_K_NextId_Log_CT")
         assert parsed.object_type == ObjectType.PROCEDURE
 
     def test_tokenised_database_qualifier_view(self):

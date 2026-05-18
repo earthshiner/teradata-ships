@@ -57,13 +57,16 @@ def test_jar_install_requires_external_procedure_privileges():
     assert "GDEV1P_UT" in result.missing
     assert "CREATE EXTERNAL PROCEDURE" in result.missing["GDEV1P_UT"]
     assert "ALTER EXTERNAL PROCEDURE" in result.missing["GDEV1P_UT"]
-    assert "GRANT CREATE EXTERNAL PROCEDURE, ALTER EXTERNAL PROCEDURE ON GDEV1P_UT TO DBC;" in result.script
+    assert (
+        "GRANT CREATE EXTERNAL PROCEDURE, ALTER EXTERNAL PROCEDURE ON GDEV1P_UT TO DBC;"
+        in result.script
+    )
 
 
 def test_jar_install_external_procedure_privileges_pass_when_present():
     cursor = SequencedCursor(rights_rows=[("CE",), ("AE",)])
     parsed = _jar_statement(
-        "DATABASE \"GDEV1P_UT\";\n"
+        'DATABASE "GDEV1P_UT";\n'
         "CALL SQLJ.REPLACE_JAR('CJ!GCFR_UT_Install_Jar.jar', 'GCFR_UT');"
     )
 
