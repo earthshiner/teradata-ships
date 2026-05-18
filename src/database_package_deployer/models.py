@@ -8,7 +8,7 @@ results, pre-flight check outcomes, and deployment result records.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional, List
+from typing import Any, Optional, List
 
 
 class DeployScope(Enum):
@@ -562,6 +562,7 @@ class PackageDeployResult:
     num_streams: int = 1
     wave_summaries: List[WaveSummary] = field(default_factory=list)
     prior_completed: list = field(default_factory=list)
+    privilege_result: Optional[Any] = None
 
     @property
     def success(self) -> bool:

@@ -631,6 +631,7 @@ def _deploy_package_impl(
                 failed=len(priv_result.missing),
                 preflight_result=preflight_result,
                 dry_run=dry_run,
+                privilege_result=priv_result,
             )
             try:
                 report_path = generate_report(pkg_result, package_dir)
