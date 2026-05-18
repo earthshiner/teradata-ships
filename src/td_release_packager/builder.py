@@ -2358,11 +2358,19 @@ def main():
     pkg_hash = _verify_integrity(SCRIPT_DIR, logger, args.skip_integrity_check)
 
     # -- Trust Report banner --
-    # Read the trust block computed at build time and surface the
-    # label and per-signal status before any database connection is
-    # opened.  A BLOCKED label means the package should not be
-    # deployed without investigating and resolving the blocking signals.
+    # Read the trust block computed at build time and surface the label and
+    # per-signal status before any database connection is opened.
+    #
+    # BLOCKED packages are normally rejected here.  One signal is handled
+    # differently: ``environment_prereq_requires_dba_review``.  That signal
+    # fires when SHIPS detected parent databases/users that were not in the
+    # package at build time, because it cannot know whether those objects
+    # already exist in the target environment.  If they *do* exist the block
+    # is vacuously satisfied, so the deployer defers the exit, establishes a
+    # connection, and queries DBC to verify existence.  All other BLOCKED
+    # signals are still hard exits.
     _build_json = os.path.join(SCRIPT_DIR, "context", "ships.build.json")
+    _prereq_objects_to_verify: list[str] = []   # populated when deferring
     if os.path.exists(_build_json):
         with open(_build_json, encoding="utf-8") as _f:
             _bdata = json.load(_f)
@@ -2379,12 +2387,35 @@ def main():
                 logger.info("  %s %-28s %s", _sicon, _sname, _sig.get("message", ""))
             logger.info("=" * 64)
             if _label == "BLOCKED":
-                logger.error(
-                    "Package trust is BLOCKED. Fix the failing signals before "
-                    "deploying. Use --skip-trust-check to override (development only)."
+                _signals = _trust.get("signals", {{}})
+                _blocking = [
+                    _sname for _sname, _sig in _signals.items()
+                    if _sig.get("status") == "fail"
+                ]
+                _is_prereq_only = (
+                    _blocking == ["environment_prereq_requires_dba_review"]
                 )
-                if not getattr(args, "skip_trust_check", False):
-                    sys.exit(1)
+                if _is_prereq_only and not args.dry_run:
+                    # Sole blocking signal is the environment prereq check.
+                    # Capture the listed objects and defer the hard exit until
+                    # after the database connection is established.
+                    _prereq_objects_to_verify = list(
+                        _signals["environment_prereq_requires_dba_review"].get("issues", [])
+                    )
+                    logger.info(
+                        "Package is BLOCKED on environment_prereq_requires_dba_review. "
+                        "Will verify %d object(s) exist in the target database before "
+                        "proceeding: %s",
+                        len(_prereq_objects_to_verify),
+                        ", ".join(_prereq_objects_to_verify),
+                    )
+                else:
+                    logger.error(
+                        "Package trust is BLOCKED. Fix the failing signals before "
+                        "deploying. Use --skip-trust-check to override (development only)."
+                    )
+                    if not getattr(args, "skip_trust_check", False):
+                        sys.exit(1)
 
     # -- Connect (skip in dry-run — no database needed) --
     cursor = None
@@ -2393,6 +2424,70 @@ def main():
 
     if not args.dry_run:
         cursor = connect(args)
+
+        # -- Live verification of deferred environment prereq objects --
+        # Performed immediately after the connection is established so that
+        # a clear, prominent outcome is logged before any further work.
+        if _prereq_objects_to_verify:
+            logger.info("=" * 64)
+            logger.info(
+                "  TRUST RESOLUTION — environment_prereq_requires_dba_review"
+            )
+            logger.info(
+                "  Package was BLOCKED at build time because the following"
+            )
+            logger.info(
+                "  parent database(s)/user(s) were not in the package payload."
+            )
+            logger.info(
+                "  Querying %s to verify they exist now.", args.host
+            )
+            logger.info("=" * 64)
+            _missing_prereqs: list[str] = []
+            _verified_prereqs: list[str] = []
+            for _obj_name in _prereq_objects_to_verify:
+                try:
+                    _cur = cursor.cursor() if hasattr(cursor, "cursor") else cursor
+                    _cur.execute(
+                        "SELECT 1 FROM DBC.DatabasesV WHERE DatabaseName = ?"
+                        " UNION ALL "
+                        "SELECT 1 FROM DBC.UsersV WHERE UserName = ?",
+                        [_obj_name, _obj_name],
+                    )
+                    _row = _cur.fetchone()
+                    if _row:
+                        logger.info("  \\u2713 VERIFIED   %s exists in target", _obj_name)
+                        _verified_prereqs.append(_obj_name)
+                    else:
+                        logger.error("  \\u2717 MISSING    %s does not exist in target", _obj_name)
+                        _missing_prereqs.append(_obj_name)
+                except Exception as _ve:
+                    logger.error(
+                        "  \\u2717 ERROR      Could not verify %s: %s", _obj_name, _ve
+                    )
+                    _missing_prereqs.append(_obj_name)
+            logger.info("=" * 64)
+            if _missing_prereqs:
+                logger.error(
+                    "BLOCKED signal NOT resolved: %d of %d prerequisite object(s) "
+                    "do not exist in the target database.\\n"
+                    "  Missing: %s\\n"
+                    "  Deploy the companion _00_environment_prereqs package first, "
+                    "or create the missing objects manually.",
+                    len(_missing_prereqs),
+                    len(_prereq_objects_to_verify),
+                    ", ".join(_missing_prereqs),
+                )
+                sys.exit(1)
+            else:
+                logger.info(
+                    "TRUST RESOLVED — All %d prerequisite object(s) verified present "
+                    "in target database. The build-time BLOCKED signal "
+                    "environment_prereq_requires_dba_review is satisfied by live "
+                    "verification. Deployment authorised.",
+                    len(_verified_prereqs),
+                )
+            logger.info("=" * 64)
 
         # -- Connection factory for parallel streams --
         def make_cursor():
