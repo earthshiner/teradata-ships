@@ -151,9 +151,36 @@ Every SHIPS package carries a Trust Report in `context/ships.build.json`, stampe
 |---|---|
 | **READY** ✓ | Proceed to deployment |
 | **READY-WITH-CAVEATS** ⚠ | Proceed but investigate the warnings |
-| **BLOCKED** ✗ | Do not deploy — fix the failing signals first |
+| **BLOCKED** ✗ | Do not deploy — fix the failing signals first (see exception below) |
 
-If the label is **BLOCKED**, `deploy.py` will exit before making a database connection unless you pass `--skip-trust-check` (development override only).
+If the label is **BLOCKED**, `deploy.py` exits before making a database connection unless one of the following applies.
+
+**Auto-resolved: `environment_prereq_requires_dba_review`**
+
+This signal fires when parent databases/users required by the package were not present in the package at build time — SHIPS cannot know whether they already exist in the target environment. If this is the *only* failing signal, `deploy.py` defers the exit, connects to the database, and queries `DBC.DatabasesV` / `DBC.UsersV` for each listed object.
+
+- If all objects are found → the block is resolved automatically. A `TRUST RESOLVED` banner is logged and deployment proceeds.
+- If any object is missing → deployment is blocked with a clear list of the missing objects. Deploy the `_00_environment_prereqs` package first.
+
+Example resolved output:
+
+```
+================================================================
+  TRUST RESOLUTION — environment_prereq_requires_dba_review
+  Package was BLOCKED at build time because the following
+  parent database(s)/user(s) were not in the package payload.
+  Querying myserver to verify they exist now.
+================================================================
+  ✓ VERIFIED   GCFR_MAIN exists in target
+================================================================
+TRUST RESOLVED — All 1 prerequisite object(s) verified present
+in target database. The build-time BLOCKED signal
+environment_prereq_requires_dba_review is satisfied by live
+verification. Deployment authorised.
+================================================================
+```
+
+**All other BLOCKED signals** require the package to be fixed and rebuilt. `--skip-trust-check` is a development-only escape hatch and must not be used in production.
 
 ### 4. Check what the SHIPS tool says
 
@@ -1160,6 +1187,8 @@ The manifest at `logs/.deploy_manifest_<id>.json` has this structure:
 | `Python 3.10` insufficient | Wrong Python version | Install Python 3.13+ |
 | Deployment extremely slow | Single stream on large package | Add `--streams 4` |
 | Wave graph not showing | Non-wave-parallel deployment | Only appears for packages built with wave analysis |
+| BLOCKED on `environment_prereq_requires_dba_review` — objects already exist | Build-time signal, objects present at deploy time | Deployer auto-verifies via DBC query; if all exist, block resolves and deployment proceeds. No action required |
+| BLOCKED on `environment_prereq_requires_dba_review` — objects missing | Parent database/user genuinely absent | Deploy `_00_environment_prereqs` package first (or create objects manually) |
 
 ---
 

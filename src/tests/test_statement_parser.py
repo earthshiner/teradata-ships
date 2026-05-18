@@ -604,6 +604,49 @@ class TestParseDdlText:
         assert parsed.database_name == "MyDB"
         assert parsed.object_name == "My Table"
 
+    def test_tokenised_database_qualifier_procedure(self):
+        """Tokenised database qualifiers are valid explicit qualifiers.
+
+        SHIPS payloads may contain environment tokens in the database
+        name before package substitution, for example
+        ``{{GCFR_P_UT}}.ProcedureName``. The parser should classify the
+        statement as qualified rather than skipping it as unqualified.
+        """
+        ddl = (
+            "CREATE PROCEDURE {{GCFR_P_UT}}.GCFR_UT_BKEY_S_K_NextId_Log_CT ()\n"
+            "BEGIN\n"
+            "END;\n"
+        )
+        parsed = parse_statement_text(ddl)
+        assert parsed.database_name == "{{GCFR_P_UT}}"
+        assert parsed.object_name == "GCFR_UT_BKEY_S_K_NextId_Log_CT"
+        assert parsed.qualified_name == (
+            "{{GCFR_P_UT}}.GCFR_UT_BKEY_S_K_NextId_Log_CT"
+        )
+        assert parsed.object_type == ObjectType.PROCEDURE
+
+    def test_tokenised_database_qualifier_view(self):
+        """Tokenised database qualifiers are valid for view DDL too."""
+        parsed = parse_statement_text(
+            "REPLACE VIEW {{APP_VIEW_DB}}.v_customer AS SELECT 1 AS customer_id;"
+        )
+        assert parsed.database_name == "{{APP_VIEW_DB}}"
+        assert parsed.object_name == "v_customer"
+        assert parsed.qualified_name == "{{APP_VIEW_DB}}.v_customer"
+
+    def test_tokenised_procedure_with_dynamic_create_table_body(self):
+        """Procedure classification uses the outer DDL, not dynamic SQL inside it."""
+        ddl = (
+            "CREATE PROCEDURE {{GCFR_P_UT}}.GCFR_UT_BKEY_S_K_NextId_Log_CT ()\n"
+            "BEGIN\n"
+            "    SET vSQL_Text = 'CREATE MULTISET TABLE {{UTL_T}}'||'.'||'T (id int);';\n"
+            "END;\n"
+        )
+        parsed = parse_statement_text(ddl)
+        assert parsed.object_type == ObjectType.PROCEDURE
+        assert parsed.database_name == "{{GCFR_P_UT}}"
+        assert parsed.object_name == "GCFR_UT_BKEY_S_K_NextId_Log_CT"
+
     def test_specific_function_name(self):
         """Function overload uses SPECIFIC name as object_name."""
         ddl = (

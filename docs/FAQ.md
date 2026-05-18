@@ -396,15 +396,23 @@ Review the per-signal breakdown in the trust banner or the `context/ships.build.
 
 ### My package is `BLOCKED`. What do I fix?
 
-`BLOCKED` means at least one `ERROR`-level signal fired. The package will not deploy unless you use `--skip-trust-check` (development only). Fix the underlying problem and rebuild.
+`BLOCKED` means at least one `ERROR`-level signal fired. Most signals require you to fix the underlying problem and rebuild.
 
-Common causes:
+**One signal resolves automatically at deploy time:**
+
+| Signal | Behaviour |
+|---|---|
+| `environment_prereq_requires_dba_review` | Build-time only — at deploy time, `deploy.py` queries the target database. If all listed parent objects exist, the block resolves and deployment proceeds. If any are missing, deploy the `_00_environment_prereqs` package first. |
+
+**All other signals require a rebuild:**
 
 | Signal | Fix |
 |---|---|
 | `inspect_token_format` | Malformed `{{TOKEN}}` in payload — find it with `grep -r '{{' payload/` |
 | `inspect_lint` | ERROR-severity lint rule violation — run `ships inspect` for details |
 | `inspect_grants` | Grant drift detected at ERROR level — run `ships inspect --fix-grants` |
+
+`--skip-trust-check` is a development escape hatch for the rebuild-required signals. Do not use it in production, and do not use it as a workaround for `environment_prereq_requires_dba_review` — the auto-resolve path is the correct mechanism.
 
 ---
 
