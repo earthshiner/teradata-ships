@@ -624,11 +624,43 @@ def _deploy_package_impl(
                 len(priv_result.missing),
                 priv_result.script,
             )
+            # Surface privilege failures through the normal per-object result
+            # path as well as privilege_result.  Some existing report/rendering
+            # paths only inspect result.results; without synthetic FAILED rows,
+            # an early privilege-check abort can produce a FAILED report that
+            # still says "No action items" because no deployment objects were
+            # processed yet.
+            privilege_failures = []
+            for database_name, missing_rights in sorted(priv_result.missing.items()):
+                rights = ", ".join(missing_rights) or "required privileges"
+                privilege_failures.append(
+                    ObjectDeployResult(
+                        database_name=database_name,
+                        object_name="deployer_privileges",
+                        object_type=ObjectType.DATABASE,
+                        state=DeployState.FAILED,
+                        message=(
+                            "Deployer privilege check failed before object "
+                            "processing started."
+                        ),
+                        error=(
+                            f"Deploying user '{priv_result.user}' is missing "
+                            f"{rights} on database '{database_name}'."
+                        ),
+                        blockers=[
+                            "Run the generated SYSADMIN prerequisite GRANT "
+                            "script before deploying."
+                        ],
+                        dry_run=dry_run,
+                    )
+                )
+
             pkg_result = PackageDeployResult(
                 deployment_id="privilege_check_failed",
                 manifest_path="",
                 total=len(parsed_ddls),
                 failed=len(priv_result.missing),
+                results=privilege_failures,
                 preflight_result=preflight_result,
                 dry_run=dry_run,
                 privilege_result=priv_result,
