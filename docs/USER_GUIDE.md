@@ -688,7 +688,7 @@ The trust label is also surfaced in the agent-facing context artefacts (`context
 |---|---|
 | **READY ✓** | All signals pass — package is clean |
 | **READY-WITH-CAVEATS ⚠** | Warnings present (lint warnings, provenance missing) — deploy with awareness |
-| **BLOCKED ✗** | At least one critical signal failed — fix before deploying |
+| **BLOCKED ✗** | At least one critical signal failed — see below |
 
 The label is printed in the `ships package` banner and again in `deploy.py` before any database connection is opened.
 
@@ -700,10 +700,31 @@ The label is printed in the `ships package` banner and again in `deploy.py` befo
 | `inspect_lint` | An inspect ERROR-severity lint violation exists |
 | `inspect_grants` | Grant drift is detected at ERROR level |
 | `provenance_complete` | `context/ships.provenance.json` is absent from the payload |
+| `environment_prereq_requires_dba_review` | Parent databases/users required by the package were not present in the payload at build time (see below) |
 
 ### What to do when BLOCKED
 
-Run `ships inspect` to see the specific errors, fix them in source, and re-run the pipeline. The Trust Report reads `decisions.json` — inspect must run before package for the signals to be accurate.
+**Most BLOCKED packages:** Run `ships inspect` to see the specific errors, fix them in source, and re-run the pipeline. The Trust Report reads `decisions.json` — inspect must run before package for the signals to be accurate.
+
+**`environment_prereq_requires_dba_review` only:** This signal fires when SHIPS cannot confirm at build time whether the required parent databases/users already exist in the target. At deploy time, `deploy.py` automatically queries the target database and resolves the block if all listed objects are present — no manual action required. If any are missing, deployment is blocked and you must deploy the `_00_environment_prereqs` companion package first.
+
+The deploy log shows the outcome clearly:
+
+```
+================================================================
+  TRUST RESOLUTION — environment_prereq_requires_dba_review
+  Package was BLOCKED at build time because the following
+  parent database(s)/user(s) were not in the package payload.
+  Querying myserver to verify they exist now.
+================================================================
+  ✓ VERIFIED   GCFR_MAIN exists in target
+================================================================
+TRUST RESOLVED — All 1 prerequisite object(s) verified present
+in target database. The build-time BLOCKED signal
+environment_prereq_requires_dba_review is satisfied by live
+verification. Deployment authorised.
+================================================================
+```
 
 ---
 

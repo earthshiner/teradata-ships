@@ -58,7 +58,6 @@ from td_release_packager.token_engine import (
     substitute_tokens,
     validate_tokens,
 )
-from td_release_packager.eponymous_rename import extract_eponymous_name
 from database_package_deployer.provenance import (
     ProvenanceChain,
     ProvenanceDocument,
@@ -136,10 +135,174 @@ _INJECT_MULTISET_RE = re.compile(
 )
 
 # -- Eponymous filename resolution --
-# Delegates to extract_eponymous_name which handles comment
-# stripping, {{TOKEN}} patterns, and all object types (including
-# DATABASE, USER, and other single-name types that the original
-# regex missed).
+# Uses local DDL-name extraction so the builder can safely derive package
+# filenames from tokenised SHIPS payloads without depending on deploy-time
+# parser behaviour.
+
+_NAME_PART_RE = r'(?:"[^"]+"|\{\{[A-Za-z_][A-Za-z0-9_]*\}\}|[A-Za-z_][A-Za-z0-9_$#]*)'
+_QUALIFIED_NAME_RE = rf'{_NAME_PART_RE}(?:\s*\.\s*{_NAME_PART_RE})?'
+_NAME_END_RE = r'(?=$|\s|[;(])'
+
+# Ordered only for deterministic tie-breaking when two patterns start at the
+# same position. The extraction function primarily sorts by match position so
+# an outer CREATE/REPLACE PROCEDURE is preferred over dynamic DDL strings later
+# in the body.
+_EPONYMOUS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "DATABASE",
+        re.compile(
+            rf'\bCREATE\s+DATABASE\s+(?P<name>{_NAME_PART_RE}){_NAME_END_RE}',
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "USER",
+        re.compile(
+            rf'\bCREATE\s+USER\s+(?P<name>{_NAME_PART_RE}){_NAME_END_RE}',
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "TABLE",
+        re.compile(
+            rf'\bCREATE\s+(?:MULTISET\s+|SET\s+)?'
+            rf'(?:(?:VOLATILE|GLOBAL\s+TEMPORARY)\s+)?TABLE\s+'
+            rf'(?P<name>{_QUALIFIED_NAME_RE}){_NAME_END_RE}',
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "VIEW",
+        re.compile(
+            rf'\b(?:CREATE|REPLACE)\s+VIEW\s+'
+            rf'(?P<name>{_QUALIFIED_NAME_RE}){_NAME_END_RE}',
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "PROCEDURE",
+        re.compile(
+            rf'\b(?:CREATE|REPLACE)\s+PROCEDURE\s+'
+            rf'(?P<name>{_QUALIFIED_NAME_RE}){_NAME_END_RE}',
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "MACRO",
+        re.compile(
+            rf'\b(?:CREATE|REPLACE)\s+MACRO\s+'
+            rf'(?P<name>{_QUALIFIED_NAME_RE}){_NAME_END_RE}',
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "FUNCTION",
+        re.compile(
+            rf'\b(?:CREATE|REPLACE)\s+(?:FUNCTION|SPECIFIC\s+FUNCTION)\s+'
+            rf'(?P<name>{_QUALIFIED_NAME_RE}){_NAME_END_RE}',
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "TRIGGER",
+        re.compile(
+            rf'\b(?:CREATE|REPLACE)\s+TRIGGER\s+'
+            rf'(?P<name>{_QUALIFIED_NAME_RE}){_NAME_END_RE}',
+            re.IGNORECASE,
+        ),
+    ),
+)
+
+
+def _mask_comments_and_string_literals(sql_text: str) -> str:
+    """Return SQL with comments and single-quoted literals blanked out.
+
+    The returned string keeps the original length so regex match positions still
+    map to the original statement. Double-quoted identifiers are preserved.
+    This prevents dynamic SQL inside procedure bodies, such as
+    ``'replace view db.v as ...'``, from being considered an earlier DDL object.
+    """
+    chars = list(sql_text)
+    i = 0
+    length = len(chars)
+    while i < length:
+        ch = chars[i]
+        nxt = chars[i + 1] if i + 1 < length else ""
+
+        if ch == "-" and nxt == "-":
+            start = i
+            i += 2
+            while i < length and chars[i] not in "\r\n":
+                i += 1
+            for j in range(start, i):
+                chars[j] = " "
+            continue
+
+        if ch == "/" and nxt == "*":
+            start = i
+            i += 2
+            while i + 1 < length and not (chars[i] == "*" and chars[i + 1] == "/"):
+                i += 1
+            i = min(i + 2, length)
+            for j in range(start, i):
+                chars[j] = " "
+            continue
+
+        if ch == "'":
+            start = i
+            i += 1
+            while i < length:
+                if chars[i] == "'":
+                    if i + 1 < length and chars[i + 1] == "'":
+                        i += 2
+                        continue
+                    i += 1
+                    break
+                i += 1
+            for j in range(start, i):
+                chars[j] = " "
+            continue
+
+        i += 1
+
+    return "".join(chars)
+
+
+def _normalise_identifier_spacing(name: str) -> str:
+    """Normalize whitespace around dots in an extracted object name."""
+    return re.sub(r"\s*\.\s*", ".", name.strip())
+
+
+def _extract_eponymous_name(sql_text: str) -> Optional[tuple[str, str, str]]:
+    """Extract the first real DDL object name from SQL text.
+
+    Supports SHIPS token placeholders as identifier parts, for example
+    ``{{GCFR_P_UT}}.GCFR_UT_BKEY_S_K_NextId_Log_CT``.
+
+    Returns:
+        ``(object_name, qualified_name, object_type)`` when a DDL object is
+        found, otherwise ``None``.
+    """
+    cleaned = _mask_comments_and_string_literals(sql_text)
+    candidates: list[tuple[int, int, str, str]] = []
+
+    for priority, (obj_type, pattern) in enumerate(_EPONYMOUS_PATTERNS):
+        match = pattern.search(cleaned)
+        if match is None:
+            continue
+        name = _normalise_identifier_spacing(
+            sql_text[match.start("name") : match.end("name")]
+        )
+        candidates.append((match.start(), priority, obj_type, name))
+
+    if not candidates:
+        return None
+
+    _start, _priority, obj_type, qualified = min(
+        candidates, key=lambda item: (item[0], item[1])
+    )
+    object_name = qualified.rsplit(".", 1)[-1]
+    return object_name, qualified, obj_type
 
 
 def _resolve_filename(
@@ -178,19 +341,16 @@ def _resolve_filename(
     if original_filename.startswith(".") or original_filename.startswith("_"):
         return original_filename
 
-    # Extract the qualified name from the resolved content.
-    # extract_eponymous_name strips comments internally, so DDL
-    # keywords in comments won't cause false matches.
-    result = extract_eponymous_name(resolved_content)
+    # Extract the earliest real DDL object name from the resolved content.
+    # Comments and string literals are masked first so dynamic DDL inside
+    # stored procedures does not drive the package filename.
+    result = _extract_eponymous_name(resolved_content)
     if result is None:
         return original_filename
 
     eponymous_name, qualified, obj_type = result
 
-    # Use the extracted name but preserve the original extension
-    # (extract_eponymous_name assigns its own extension based on
-    # object type, but the source file's extension should win in
-    # case of override conventions like .sql).
+    # Use the extracted name but preserve the original extension.
     new_filename = f"{qualified}{ext}"
 
     if new_filename != original_filename:
@@ -2358,11 +2518,19 @@ def main():
     pkg_hash = _verify_integrity(SCRIPT_DIR, logger, args.skip_integrity_check)
 
     # -- Trust Report banner --
-    # Read the trust block computed at build time and surface the
-    # label and per-signal status before any database connection is
-    # opened.  A BLOCKED label means the package should not be
-    # deployed without investigating and resolving the blocking signals.
+    # Read the trust block computed at build time and surface the label and
+    # per-signal status before any database connection is opened.
+    #
+    # BLOCKED packages are normally rejected here.  One signal is handled
+    # differently: ``environment_prereq_requires_dba_review``.  That signal
+    # fires when SHIPS detected parent databases/users that were not in the
+    # package at build time, because it cannot know whether those objects
+    # already exist in the target environment.  If they *do* exist the block
+    # is vacuously satisfied, so the deployer defers the exit, establishes a
+    # connection, and queries DBC to verify existence.  All other BLOCKED
+    # signals are still hard exits.
     _build_json = os.path.join(SCRIPT_DIR, "context", "ships.build.json")
+    _prereq_objects_to_verify: list[str] = []   # populated when deferring
     if os.path.exists(_build_json):
         with open(_build_json, encoding="utf-8") as _f:
             _bdata = json.load(_f)
@@ -2379,12 +2547,35 @@ def main():
                 logger.info("  %s %-28s %s", _sicon, _sname, _sig.get("message", ""))
             logger.info("=" * 64)
             if _label == "BLOCKED":
-                logger.error(
-                    "Package trust is BLOCKED. Fix the failing signals before "
-                    "deploying. Use --skip-trust-check to override (development only)."
+                _signals = _trust.get("signals", {{}})
+                _blocking = [
+                    _sname for _sname, _sig in _signals.items()
+                    if _sig.get("status") == "fail"
+                ]
+                _is_prereq_only = (
+                    _blocking == ["environment_prereq_requires_dba_review"]
                 )
-                if not getattr(args, "skip_trust_check", False):
-                    sys.exit(1)
+                if _is_prereq_only and not args.dry_run:
+                    # Sole blocking signal is the environment prereq check.
+                    # Capture the listed objects and defer the hard exit until
+                    # after the database connection is established.
+                    _prereq_objects_to_verify = list(
+                        _signals["environment_prereq_requires_dba_review"].get("issues", [])
+                    )
+                    logger.info(
+                        "Package is BLOCKED on environment_prereq_requires_dba_review. "
+                        "Will verify %d object(s) exist in the target database before "
+                        "proceeding: %s",
+                        len(_prereq_objects_to_verify),
+                        ", ".join(_prereq_objects_to_verify),
+                    )
+                else:
+                    logger.error(
+                        "Package trust is BLOCKED. Fix the failing signals before "
+                        "deploying. Use --skip-trust-check to override (development only)."
+                    )
+                    if not getattr(args, "skip_trust_check", False):
+                        sys.exit(1)
 
     # -- Connect (skip in dry-run — no database needed) --
     cursor = None
@@ -2393,6 +2584,70 @@ def main():
 
     if not args.dry_run:
         cursor = connect(args)
+
+        # -- Live verification of deferred environment prereq objects --
+        # Performed immediately after the connection is established so that
+        # a clear, prominent outcome is logged before any further work.
+        if _prereq_objects_to_verify:
+            logger.info("=" * 64)
+            logger.info(
+                "  TRUST RESOLUTION — environment_prereq_requires_dba_review"
+            )
+            logger.info(
+                "  Package was BLOCKED at build time because the following"
+            )
+            logger.info(
+                "  parent database(s)/user(s) were not in the package payload."
+            )
+            logger.info(
+                "  Querying %s to verify they exist now.", args.host
+            )
+            logger.info("=" * 64)
+            _missing_prereqs: list[str] = []
+            _verified_prereqs: list[str] = []
+            for _obj_name in _prereq_objects_to_verify:
+                try:
+                    _cur = cursor.cursor() if hasattr(cursor, "cursor") else cursor
+                    _cur.execute(
+                        "SELECT 1 FROM DBC.DatabasesV WHERE DatabaseName = ?"
+                        " UNION ALL "
+                        "SELECT 1 FROM DBC.UsersV WHERE UserName = ?",
+                        [_obj_name, _obj_name],
+                    )
+                    _row = _cur.fetchone()
+                    if _row:
+                        logger.info("  \\u2713 VERIFIED   %s exists in target", _obj_name)
+                        _verified_prereqs.append(_obj_name)
+                    else:
+                        logger.error("  \\u2717 MISSING    %s does not exist in target", _obj_name)
+                        _missing_prereqs.append(_obj_name)
+                except Exception as _ve:
+                    logger.error(
+                        "  \\u2717 ERROR      Could not verify %s: %s", _obj_name, _ve
+                    )
+                    _missing_prereqs.append(_obj_name)
+            logger.info("=" * 64)
+            if _missing_prereqs:
+                logger.error(
+                    "BLOCKED signal NOT resolved: %d of %d prerequisite object(s) "
+                    "do not exist in the target database.\\n"
+                    "  Missing: %s\\n"
+                    "  Deploy the companion _00_environment_prereqs package first, "
+                    "or create the missing objects manually.",
+                    len(_missing_prereqs),
+                    len(_prereq_objects_to_verify),
+                    ", ".join(_missing_prereqs),
+                )
+                sys.exit(1)
+            else:
+                logger.info(
+                    "TRUST RESOLVED — All %d prerequisite object(s) verified present "
+                    "in target database. The build-time BLOCKED signal "
+                    "environment_prereq_requires_dba_review is satisfied by live "
+                    "verification. Deployment authorised.",
+                    len(_verified_prereqs),
+                )
+            logger.info("=" * 64)
 
         # -- Connection factory for parallel streams --
         def make_cursor():
