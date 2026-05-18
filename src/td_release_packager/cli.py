@@ -1703,7 +1703,7 @@ def _cmd_validate(args):
     from td_release_packager.orchestrator import issue_codes
 
     try:
-        with _stage_recording(args.source, "inspect") as stage:
+        with _stage_recording(args.project, "inspect") as stage:
             exit_code = _run_inspect(args, stage, issue_codes)
     except FileNotFoundError as e:
         print(f"\nERROR: {e}", file=sys.stderr)
@@ -1732,7 +1732,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
         # -- Record the resolved CLI configuration (Layer 5) --
         # Future cascade work plugs in additional layers without
         # changing how the call sites read config.
-        stage.set_config_resolved("source", args.source, "layer-5", "cli")
+        stage.set_config_resolved("source", args.project, "layer-5", "cli")
         stage.set_config_resolved(
             "config", getattr(args, "config", None), "layer-5", "cli"
         )
@@ -1762,13 +1762,13 @@ def _run_inspect(args, stage, issue_codes) -> int:
         from td_release_packager.builder import _find_payload_dir
 
         try:
-            payload_dir = _find_payload_dir(args.source)
+            payload_dir = _find_payload_dir(args.project)
         except FileNotFoundError:
-            # No payload dir — fall back to scanning the source root.
+            # No payload dir — fall back to scanning the project root.
             # Hidden/underscore-prefixed files are skipped by the
-            # scanner's own rules, so this is safe even if args.source
+            # scanner's own rules, so this is safe even if args.project
             # is broader than expected.
-            payload_dir = args.source
+            payload_dir = args.project
 
         token_findings = scan_malformed_tokens_in_directory(payload_dir)
         token_ok = not token_findings
@@ -1815,13 +1815,13 @@ def _run_inspect(args, stage, issue_codes) -> int:
         if hasattr(args, "config") and args.config:
             config_path = _resolve_path(
                 args.config,
-                relative_to=args.source,
+                relative_to=args.project,
                 label="--config",
             )
             rules_config = read_inspect_config(config_path)
         else:
             # Auto-detect config in project's config/ directory
-            auto_config = os.path.join(args.source, "config", "inspect.conf")
+            auto_config = os.path.join(args.project, "config", "inspect.conf")
             if os.path.exists(auto_config):
                 rules_config = read_inspect_config(auto_config)
 
@@ -1839,7 +1839,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
             rules_config["leading_commas"] = "OFF"
 
         lint_result = validate_directory(
-            source_dir=args.source,
+            source_dir=args.project,
             rules_config=rules_config,
             strict=args.strict,
         )
@@ -1911,7 +1911,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
         if hasattr(args, "dcl_dir") and args.dcl_dir:
             dcl_dir = Path(args.dcl_dir)
 
-        project_dir = Path(args.source).resolve()
+        project_dir = Path(args.project).resolve()
         grant_result = None
 
         if skip_grants:
@@ -2094,7 +2094,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
                 )
 
         stage.set_inputs(
-            source_dir=args.source,
+            source_dir=args.project,
             payload_dir=payload_dir,
             files_scanned=lint_result.files_scanned,
             grant_validation_skipped=skip_grants,
@@ -2165,11 +2165,14 @@ def _cmd_repackage(args):
 def _cmd_build(args):
     """Build a release package."""
     # -- Materialise remote source if --source-github was given --
+    # _resolve_github_source sets args.source; bridge to args.project for package.
     _gh_tmp: list = []
     _resolve_github_source(args, _gh_tmp)
+    if getattr(args, "source", None) and not args.project:
+        args.project = args.source
 
-    if not args.source:
-        print("ERROR: --source or --source-github is required.", file=sys.stderr)
+    if not args.project:
+        print("ERROR: --project or --source-github is required.", file=sys.stderr)
         sys.exit(1)
 
     try:
@@ -2184,7 +2187,7 @@ def _cmd_build_impl(args):
     # -- Resolve properties file path --
     env_config_path = _resolve_path(
         args.env_config,
-        relative_to=args.source,
+        relative_to=args.project,
         label="--env-config",
     )
     args.env_config = env_config_path
@@ -2222,7 +2225,7 @@ def _cmd_build_impl(args):
     from td_release_packager.orchestrator import issue_codes as _ic
 
     try:
-        with _stage_recording(args.source, "package") as stage:
+        with _stage_recording(args.project, "package") as stage:
             exit_code = _run_build(args, stage, _ic)
     except (FileNotFoundError, ValueError) as e:
         print(f"\nERROR: {e}", file=sys.stderr)
@@ -2239,7 +2242,7 @@ def _run_build(args, stage, issue_codes) -> int:
     Returns:
         Exit code for the shell.
     """
-    stage.set_config_resolved("source", args.source, "layer-5", "cli")
+    stage.set_config_resolved("source", args.project, "layer-5", "cli")
     stage.set_config_resolved("env", args.env.upper(), "layer-5", "cli")
     stage.set_config_resolved("name", args.name, "layer-5", "cli")
     stage.set_config_resolved("env_config", args.env_config, "layer-5", "cli")
@@ -2247,7 +2250,7 @@ def _run_build(args, stage, issue_codes) -> int:
     stage.set_config_resolved(
         "format", getattr(args, "format", "zip"), "layer-5", "cli"
     )
-    stage.set_inputs(source_dir=args.source)
+    stage.set_inputs(source_dir=args.project)
 
     # Resolve build number: explicit, no-increment, or auto-increment
     build_number = args.build_number  # None if not specified
@@ -2257,7 +2260,7 @@ def _run_build(args, stage, issue_codes) -> int:
     elif args.no_increment:
         # Reuse current build number — same source, different env
         try:
-            build_number = read_build_number(args.source)
+            build_number = read_build_number(args.project)
             print(f"  Build number: {build_number} (--no-increment, same source)")
         except FileNotFoundError:
             print(
@@ -2269,7 +2272,7 @@ def _run_build(args, stage, issue_codes) -> int:
     else:
         # Preview what the auto-increment will produce
         try:
-            current = read_build_number(args.source)
+            current = read_build_number(args.project)
             print(f"  Build number: {current + 1} (auto-increment from .build_counter)")
         except FileNotFoundError:
             print(
@@ -2282,7 +2285,7 @@ def _run_build(args, stage, issue_codes) -> int:
             sys.exit(1)
 
     config = BuildConfig(
-        source_dir=args.source,
+        source_dir=args.project,
         environment=args.env.upper(),
         package_name=args.name,
         env_config_file=args.env_config,
@@ -3341,9 +3344,9 @@ def _cmd_generate(args):
     """
     from td_release_packager.orchestrator import issue_codes as _ic
 
-    source_dir = args.source
+    source_dir = args.project
     if not os.path.isdir(source_dir):
-        print(f"ERROR: Source directory not found: {source_dir}", file=sys.stderr)
+        print(f"ERROR: Project directory not found: {source_dir}", file=sys.stderr)
         sys.exit(1)
 
     with _stage_recording(source_dir, "generate") as stage:
@@ -3371,7 +3374,7 @@ def _run_generate(args, stage, issue_codes) -> int:
 
     from td_release_packager.view_layer_generator import run as generate_views
 
-    source_dir = args.source
+    source_dir = args.project
     dry_run = getattr(args, "dry_run", False)
     modules_arg = getattr(args, "modules", None)
     requested_modules = (
@@ -3453,9 +3456,9 @@ def _cmd_scan(args):
 
     from td_release_packager.orchestrator import issue_codes
 
-    source_dir = args.source
+    source_dir = args.project
     if not os.path.isdir(source_dir):
-        print(f"ERROR: Source directory not found: {source_dir}", file=sys.stderr)
+        print(f"ERROR: Project directory not found: {source_dir}", file=sys.stderr)
         sys.exit(1)
 
     if getattr(args, "env_config", None) and getattr(args, "all_envs", False):
@@ -3675,9 +3678,9 @@ def _cmd_analyze(args):
     portable formats (DOT, Mermaid, JSON, CSV, OpenLineage)
     when --graph is specified.
     """
-    source_dir = args.source
+    source_dir = args.project
     if not os.path.isdir(source_dir):
-        print(f"ERROR: Source directory not found: {source_dir}", file=sys.stderr)
+        print(f"ERROR: Project directory not found: {source_dir}", file=sys.stderr)
         sys.exit(1)
 
     from td_release_packager.orchestrator import issue_codes as _ic
@@ -3698,7 +3701,7 @@ def _run_analyze(args, stage, issue_codes) -> int:
     """
     from td_release_packager.analyser import analyse_project, format_summary
 
-    source_dir = args.source
+    source_dir = args.project
 
     stage.set_config_resolved("source", source_dir, "layer-5", "cli")
     stage.set_config_resolved("output", getattr(args, "output", None), "layer-5", "cli")
@@ -4041,7 +4044,7 @@ def _build_parser():
         help="[G] Generate — build view-layer DDL from harvested tables.",
     )
     gn.add_argument(
-        "--source",
+        "--project",
         required=True,
         help="SHIPS project directory containing the harvested payload.",
     )
@@ -4062,7 +4065,7 @@ def _build_parser():
     vl = subs.add_parser(
         "inspect", help="[I] Inspect — check DDL against Coding Discipline."
     )
-    vl.add_argument("--source", required=True, help="Directory to validate.")
+    vl.add_argument("--project", required=True, help="SHIPS project directory to inspect.")
     vl.add_argument(
         "--config",
         help="Path to inspect.conf rules configuration file. "
@@ -4113,10 +4116,10 @@ def _build_parser():
     # -- package --
     bp = subs.add_parser("package", help="[P] Package — build a release package.")
     bp.add_argument(
-        "--source",
+        "--project",
         required=False,
         default=None,
-        help="Source project directory.  Mutually exclusive with --source-github.",
+        help="SHIPS project directory.  Mutually exclusive with --source-github.",
     )
     _add_github_source_args(bp)
     bp.add_argument(
@@ -4257,7 +4260,7 @@ def _build_parser():
         "scan",
         help="Scan source for token references — validate, map, and audit tokens.",
     )
-    sp.add_argument("--source", required=True, help="Source project directory to scan.")
+    sp.add_argument("--project", required=True, help="SHIPS project directory to scan.")
     sp.add_argument(
         "--env-config",
         help="Validate all tokens against this env .conf file.  "
@@ -4301,7 +4304,7 @@ def _build_parser():
         aliases=["analyse"],
         help="Analyse DDL dependencies, generate waves, and export dependency graph.",
     )
-    az.add_argument("--source", required=True, help="Project directory to analyse.")
+    az.add_argument("--project", required=True, help="SHIPS project directory to analyse.")
     az.add_argument(
         "--output", help="Output path for _waves.txt (default: <source>/_waves.txt)."
     )
