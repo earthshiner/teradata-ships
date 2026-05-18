@@ -238,6 +238,8 @@ def _main():
         _cmd_validate(args)
     elif args.command == "package":
         _cmd_build(args)
+    elif args.command == "deploy":
+        sys.exit(_cmd_deploy(args))
     elif args.command == "repackage":
         _cmd_repackage(args)
     elif args.command == "scan":
@@ -313,6 +315,22 @@ def _looks_like_ships_project(path: str) -> bool:
     if os.path.isdir(os.path.join(path, "payload")):
         return True
     return False
+
+
+def _cmd_deploy(args) -> int:
+    """Deploy a SHIPS zip, extracted package, or release-group directory."""
+    from td_release_packager.deploy_launcher import launch_deploy
+
+    try:
+        return launch_deploy(
+            args.target,
+            args.deploy_args,
+            role=args.role,
+            work_dir=args.work_dir,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
 
 
 class _NullStageRecorder:
@@ -4178,6 +4196,44 @@ def _build_parser():
             "(or SHIPS_PRIVATE_KEY_PATH is set), a .sig sidecar is written "
             "alongside the archive. Requires the cryptography package."
         ),
+    )
+
+    # -- deploy --
+    dp = subs.add_parser(
+        "deploy",
+        help="[S] Ship — deploy a package zip, extracted package, or release group.",
+        description=(
+            "Deploy a SHIPS package without manually extracting archives or "
+            "navigating into generated package directories. TARGET may be a "
+            ".zip package, an extracted package directory, or a release-group "
+            "directory containing release_group.json. Arguments after TARGET "
+            "are forwarded unchanged to the generated deploy.py."
+        ),
+    )
+    dp.add_argument(
+        "--role",
+        default="main",
+        help=(
+            "Release-group package role to run (default: main). "
+            "Ignored when TARGET is a single package zip or extracted package."
+        ),
+    )
+    dp.add_argument(
+        "--work-dir",
+        default=None,
+        help=(
+            "Directory used for automatic extraction. Defaults to a short "
+            ".ships-work directory beside TARGET so logs and manifests persist."
+        ),
+    )
+    dp.add_argument(
+        "target",
+        help=("Package .zip, extracted package directory, or release-group directory."),
+    )
+    dp.add_argument(
+        "deploy_args",
+        nargs=argparse.REMAINDER,
+        help="Arguments forwarded to generated deploy.py, e.g. --host srv --user dbc.",
     )
 
     # -- repackage --
