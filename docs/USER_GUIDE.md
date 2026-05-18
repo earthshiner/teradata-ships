@@ -107,7 +107,8 @@ The DBA does not get your SQL files. They get a **package** — a `.zip` that co
 - Fully resolved DDL (tokens replaced, no `{{...}}` remaining)
 - A deployment manifest listing every object, its type, and its deployment strategy
 - A SHA-256 fingerprint that proves the package was not tampered with
-- A `deploy.py` script — the DBA runs `python deploy.py --host myserver --user dbc`
+- A generated `deploy.py` script inside each package
+- A release-group launcher so the DBA can run `python -m td_release_packager deploy <release_group> --host myserver --user dbc` without manually extracting zips
 - Three agent-facing context artefacts (`context/ships.context.json`, `context/ships.manifest.json`, `context/ships.handoff.json`) for autonomous agent and CI/CD handoff
 
 You never touch the deployment. You produce the package; the DBA runs it.
@@ -1053,7 +1054,7 @@ ships approve /path/to/package.zip --signing-key /etc/ships/signing.key
 The printed approval code is passed to the DBA who runs:
 
 ```bash
-ships deploy /path/to/package/ --host myhost --user ships_dba --approval-code CODE
+python -m td_release_packager deploy /path/to/release_group/ --host myhost --user ships_dba --approval-code CODE
 ```
 
 ---
@@ -1318,19 +1319,17 @@ age check. These run before any database connection is opened. See
 Once CI publishes the package as a GitHub Release, DBAs deploy without file transfer:
 
 ```bash
-ships deploy \
-    --from-github org/repo \
-    --release-tag v1.2.3 \
-    --asset PRD_Pkg_BUILD_0001_20260515120000_01_main.zip \
+python -m td_release_packager deploy /path/to/downloaded/release_group/ \
     --host myhost \
     --user ships_dba
 ```
 
-SHIPS downloads the ZIP and all available sidecar files (`.sha256`, `.hmac`, `.sig`)
-from the release, verifies them, and proceeds with normal deployment. Set the
-`GITHUB_TOKEN` environment variable for private repositories.
+SHIPS deploys directly from the release-group directory or from an individual
+package zip. If your CI publishes to GitHub Releases, download the release-group
+directory or the package zip from the release first; no manual extraction is
+required before running the command above.
 
-See `docs/OPERATIONS_GUIDE.md` for the full `--from-github` workflow.
+See `docs/OPERATIONS_GUIDE.md` for the full GitHub Release artifact workflow.
 
 ---
 
@@ -1354,7 +1353,7 @@ Two or more objects depend on each other — for example, View A references View
 
 **Q: How do I handle objects that must exist before my DDL (e.g. CREATE DATABASE)?**
 
-SHIPS auto-detects objects that create databases/users and the objects that depend on them. It writes all related archives into one release-group directory. Depending on dependencies, the group may contain `_00_environment_prereqs`, `_01_prereqs`, and `_02_main` archives. Deploy them in the order shown in `release_group.json` and the group-level `README.txt`.
+SHIPS auto-detects objects that create databases/users and the objects that depend on them. It writes all related archives into one release-group directory. Depending on dependencies, the group may contain `_00_environment_prereqs`, `_01_prereqs`, and `_02_main` archives. Deploy the release-group directory with `python -m td_release_packager deploy <release_group> ...`; SHIPS reads `release_group.json`, extracts the archives into `.ships-work`, and runs the required packages in order.
 
 **Q: I got a `MULTISET` inject notice — what does that mean?**
 

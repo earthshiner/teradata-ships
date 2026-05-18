@@ -173,9 +173,8 @@ The deployer has two CLI-exposed modes plus an EXPLAIN engine and an automatic R
 
 ```bash
 # Recommended workflow
-cd ./releases/DEV_MyProject_BUILD_0001_<timestamp>/DEV_MyProject_BUILD_0001_<timestamp>_01_main/
-python deploy.py --dry-run                  # Pipeline validation
-python deploy.py --host myserver --user dbc # Execute
+python -m td_release_packager deploy ./releases/DEV_MyProject_BUILD_0001_<timestamp>/ --dry-run
+python -m td_release_packager deploy ./releases/DEV_MyProject_BUILD_0001_<timestamp>/ --host myserver --user dbc
 ```
 
 ### Dependency Analysis
@@ -265,7 +264,7 @@ controls, and audit logging:
 | Rollback integrity | SHA-256 of every snapshot; verified before restore | Automatic |
 | Grant drift detection | Compares declared vs live grants | `ships audit-grants <package_dir>` |
 | TLS enforcement | Warns if connection lacks TLS/SSL | `--encryptdata true` on deploy |
-| Deploy from GitHub Release | Download and verify directly from a GitHub Release | `ships deploy --from-github org/repo --release-tag v1.0 --asset PKG.zip` |
+| Deploy from archive or release group | Auto-extracts package zips into `.ships-work` and runs the generated deployer | `python -m td_release_packager deploy <zip-or-release-group> --host srv --user dba` |
 
 See [`docs/security_prerequisites.md`](docs/security_prerequisites.md) and
 [`docs/OPERATIONS_GUIDE.md`](docs/OPERATIONS_GUIDE.md) for the full reference.
