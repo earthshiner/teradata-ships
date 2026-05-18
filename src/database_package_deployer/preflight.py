@@ -288,9 +288,12 @@ def run_preflight(
     checks.extend(jar_checks)
 
     # -- Phase 6: Excess privilege check (GAP-010) --
-    # Warn if the deploy account holds elevated rights beyond what is
-    # needed.  WARNING only — does not block deployment.
-    checks.extend(_check_excess_privilege(cursor))
+    # Deliberately not run by default. Deployment/admin accounts commonly
+    # hold rights beyond the scope of a single package, so surfacing
+    # "excess" rights in every preflight creates noise without improving
+    # package readiness. Keep _check_excess_privilege available for a
+    # targeted audit, but do not add its advisory findings to normal
+    # deploy/preflight reports.
 
     # -- Tally results --
     errors = sum(1 for c in checks if not c.passed and c.severity == "ERROR")
