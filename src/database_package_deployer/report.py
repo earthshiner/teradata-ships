@@ -507,7 +507,6 @@ def _shorten_path(text: str) -> str:
     return _PATH_RE.sub(_replace, text)
 
 
-
 def _escape_html(value: str) -> str:
     """Escape text for safe HTML rendering."""
     return (
@@ -539,10 +538,10 @@ def _html_privilege_failure(priv_result) -> str:
         rights = ", ".join(missing.get(database_name, [])) or "required privileges"
         rows.append(
             '<div class="action-item err">'
-            '<strong>FAILED:</strong> Deployer privilege check — '
+            "<strong>FAILED:</strong> Deployer privilege check — "
             f'deploying user <span class="mono">{user}</span> '
             f'is missing {rights} on <span class="mono">{database_name}</span>.'
-            '</div>'
+            "</div>"
         )
 
     script_html = ""
@@ -551,20 +550,20 @@ def _html_privilege_failure(priv_result) -> str:
             '<details class="action-group" open>'
             '<summary class="err">Required SYSADMIN grant script</summary>'
             f'<pre class="mono">{_escape_html(script)}</pre>'
-            '</details>'
+            "</details>"
         )
 
     count = len(missing)
     noun = "database" if count == 1 else "databases"
     return (
         '<div class="action-items has-errors">'
-        f'<h3>Action Items ({count})</h3>'
+        f"<h3>Action Items ({count})</h3>"
         '<details class="action-group" open>'
         f'<summary class="err">✗ Deployer privilege check failed — {count} {noun} require grants</summary>'
         + "\n".join(rows)
-        + '</details>'
+        + "</details>"
         + script_html
-        + '</div>'
+        + "</div>"
     )
 
 
