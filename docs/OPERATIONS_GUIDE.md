@@ -16,7 +16,11 @@ DEV_OMR_BUILD_0005_20260509/
     release_group.json
     README.txt
 
-Extracted archive contents:
+The normal deploy path does not require manual extraction. SHIPS extracts
+archives into a short `.ships-work` directory automatically. If you inspect that
+work directory, each extracted package contains:
+
+Extracted package contents:
     deploy.py                   ← The only script you run
     context/ships.build.json                  ← Build manifest (provenance, file list, integrity hash)
     context/ships.context.json          ← Durable workflow context for agents, CI/CD, and MCP tools
@@ -38,10 +42,17 @@ Extracted archive contents:
 **What you run:**
 
 ```bash
-python deploy.py --host myserver --user dba_user [options]
+python -m td_release_packager deploy DEV_OMR_BUILD_0005_20260509/ --host myserver --user dba_user [options]
 ```
 
-The engine, dependencies, and DDL are all bundled. No package manager required.
+Or, from inside the release-group directory:
+
+```bash
+python deploy_release.py --host myserver --user dba_user [options]
+```
+
+The launcher extracts the package archive, then runs the bundled deployer. The
+engine, dependencies, and DDL remain bundled inside each package.
 
 ---
 
@@ -125,7 +136,7 @@ Run through this before every live deployment. It takes two minutes and prevents
 ### 1. Verify package integrity
 
 ```bash
-python deploy.py integrity-check
+python -m td_release_packager deploy /path/to/release_group/ integrity-check
 ```
 
 This recomputes the SHA-256 hash of every file in the payload and compares it to the values in `context/ships.integrity.json`. If any file has been modified since the package was built, this command exits with code 1 and lists the affected files.
@@ -197,7 +208,7 @@ This confirms the package was built cleanly with no warnings. Exit 0 = READY. Ex
 Always run a dry run before the first live deployment:
 
 ```bash
-python deploy.py --dry-run --host myserver --user dba_user
+python -m td_release_packager deploy /path/to/release_group/ --dry-run --host myserver --user dba_user
 ```
 
 The dry run connects to the database, runs all pre-flight checks (permissions, space, object existence), and validates the wave ordering — but executes no DDL. The HTML report at `logs/` shows exactly what would happen.
@@ -224,7 +235,10 @@ Example deploy order:
 3. DEV_GCFR_BUILD_0012_20260515144900_02_main.zip
 ```
 
-Extract and deploy each archive in order. Each archive contains its own `deploy.py`, `context/ships.index.json`, package report, and integrity metadata.
+Deploy the release group directly. SHIPS reads `release_group.json`, extracts the
+required archives into `.ships-work`, and invokes the generated package-local
+`deploy.py`. Each archive still contains its own `deploy.py`,
+`context/ships.index.json`, package report, and integrity metadata.
 
 ---
 
@@ -233,26 +247,26 @@ Extract and deploy each archive in order. Each archive contains its own `deploy.
 ### Standard deployment
 
 ```bash
-python deploy.py --host myserver --user dba_user
+python -m td_release_packager deploy /path/to/release_group/ --host myserver --user dba_user
 ```
 
 Password is prompted interactively. To pass it non-interactively (for CI/scripted deployments):
 
 ```bash
-python deploy.py --host myserver --user dba_user --password "$TD_PASS"
+python -m td_release_packager deploy /path/to/release_group/ --host myserver --user dba_user --password "$TD_PASS"
 ```
 
 ### Authentication options
 
 ```bash
 # Teradata 2 (default)
-python deploy.py --host myserver --user dba_user --logmech TD2
+python -m td_release_packager deploy /path/to/release_group/ --host myserver --user dba_user --logmech TD2
 
 # LDAP
-python deploy.py --host myserver --user dba_user --logmech LDAP
+python -m td_release_packager deploy /path/to/release_group/ --host myserver --user dba_user --logmech LDAP
 
 # TD Wallet
-python deploy.py --host myserver --user dba_user --logmech TDNEGO
+python -m td_release_packager deploy /path/to/release_group/ --host myserver --user dba_user --logmech TDNEGO
 ```
 
 ### Wave-parallel deployment
@@ -260,7 +274,7 @@ python deploy.py --host myserver --user dba_user --logmech TDNEGO
 By default the deployer uses 1 stream (serial). For large packages, use multiple streams to deploy independent waves in parallel:
 
 ```bash
-python deploy.py --host myserver --user dba_user --streams 4
+python -m td_release_packager deploy /path/to/release_group/ --host myserver --user dba_user --streams 4
 ```
 
 Use a stream count between 2 and 8. Higher is not always faster — Teradata lock contention increases with streams. For packages under 50 objects, 1–2 streams is typically optimal. For large packages (200+ objects), 4–8 streams can significantly reduce total deployment time.
@@ -272,7 +286,7 @@ Use a stream count between 2 and 8. Higher is not always faster — Teradata loc
 By default, the deployer stops on the first failure. To attempt all objects and collect a full failure list:
 
 ```bash
-python deploy.py --host myserver --user dba_user --continue-on-error
+python -m td_release_packager deploy /path/to/release_group/ --host myserver --user dba_user --continue-on-error
 ```
 
 Use this when you want to see everything that fails in one pass rather than iterating. The manifest records each object's final state, so you can resume or re-deploy after fixing the root causes.
@@ -282,7 +296,7 @@ Use this when you want to see everything that fails in one pass rather than iter
 At any point during or after a deployment, inspect the manifest:
 
 ```bash
-python deploy.py status logs/.deploy_manifest_<id>.json
+python -m td_release_packager deploy /path/to/release_group/ status logs/.deploy_manifest_<id>.json
 ```
 
 This reads the manifest file without connecting to Teradata. Useful for checking status on a deployment machine you cannot connect from.
@@ -500,13 +514,13 @@ The deployment report shows a unified diff for every drifted object:
 
 ```bash
 # Overwrite the out-of-band change — SHIPS wins
-python deploy.py --host myserver --user dba --on-drift continue
+python -m td_release_packager deploy /path/to/release_group/ --host myserver --user dba --on-drift continue
 
 # Skip drifted objects — out-of-band change preserved
-python deploy.py --host myserver --user dba --on-drift skip
+python -m td_release_packager deploy /path/to/release_group/ --host myserver --user dba --on-drift skip
 
 # Stop on first drifted object (default — forces investigation)
-python deploy.py --host myserver --user dba --on-drift abort
+python -m td_release_packager deploy /path/to/release_group/ --host myserver --user dba --on-drift abort
 ```
 
 **Step 4 — After deploy completes,** the baseline is updated automatically for every successfully deployed object. No manual step needed.
@@ -524,7 +538,7 @@ deployment:
 Without this, drift detection is disabled and a warning is printed. To override for a single run:
 
 ```bash
-python deploy.py --host myserver --user dba --baseline-dir /alt/path/
+python -m td_release_packager deploy /path/to/release_group/ --host myserver --user dba --baseline-dir /alt/path/
 ```
 
 ### Drift and the audit trail
@@ -556,7 +570,7 @@ SHIPS will:
 The rollback package is a normal SHIPS package — it goes through the same integrity check, Trust Report, and pre-flight validation as any other package. The DBA reviews it and deploys it with:
 
 ```bash
-python deploy.py --host myserver --user dba --on-drift continue
+python -m td_release_packager deploy /path/to/rollback_release_group/ --host myserver --user dba --on-drift continue
 ```
 
 **Why `--on-drift continue` for rollback?**
@@ -590,7 +604,7 @@ your change management system (not verbally or in plain email).
 **Step 2 — Second operator: deploy with the approval code**
 
 ```bash
-python deploy.py \
+python -m td_release_packager deploy /path/to/release_group/ \
     --host myserver \
     --user ships_dba \
     --approval-code CODE_FROM_STEP_1
@@ -655,13 +669,13 @@ All connections to Teradata should use TLS/SSL encryption. Pass the flag on the 
 command:
 
 ```bash
-python deploy.py --host myserver --user ships_dba --encryptdata true
+python -m td_release_packager deploy /path/to/release_group/ --host myserver --user ships_dba --encryptdata true
 ```
 
 Or set `sslmode`:
 
 ```bash
-python deploy.py --host myserver --user ships_dba --sslmode require
+python -m td_release_packager deploy /path/to/release_group/ --host myserver --user ships_dba --sslmode require
 ```
 
 To enforce TLS for a specific environment and have the `tls_connection` preflight check
@@ -675,37 +689,45 @@ environments:
 
 ---
 
-## Deploying from GitHub Releases (`--from-github`)
+## Deploying packages downloaded from GitHub Releases
 
-Once CI publishes the package as a GitHub Release, DBAs can deploy without a file
-transfer. SHIPS downloads the ZIP and all available sidecar files (`.sha256`, `.hmac`,
-`.sig`) from the release, verifies them, and proceeds with normal deployment.
+Once CI publishes the package as a GitHub Release, DBAs can deploy the downloaded
+release-group directory or package zip without manually extracting it.
 
 ```bash
-python deploy.py \
-    --from-github org/repo \
-    --release-tag v1.2.3 \
-    --asset PRD_Pkg_BUILD_0001_20260515120000_01_main.zip \
+python -m td_release_packager deploy /path/to/downloaded/release_group/ \
     --host myserver \
     --user ships_dba
 ```
 
-**Sidecar verification:** SHIPS automatically downloads and verifies any `.sha256`,
-`.hmac`, or `.sig` files published alongside the named asset. All verification steps
-run before a database connection is opened.
+For repositories that publish a single package asset without a release-group
+directory, download the zip and point the launcher at the zip directly:
+
+```bash
+python -m td_release_packager deploy PRD_Pkg_BUILD_0001_20260515120000_01_main.zip \
+    --host myserver \
+    --user ships_dba
+```
+
+**Sidecar verification:** publish `.sha256`, `.hmac`, or `.sig` files alongside
+the package artifact and keep them beside the downloaded archive. The generated
+deploy flow verifies package integrity before DDL is executed.
 
 **Private repositories:** set `GITHUB_TOKEN` in the environment:
 
 ```bash
 export GITHUB_TOKEN=ghp_...
-python deploy.py --from-github org/repo ...
+# download the release artifact with your approved GitHub or artifact-store tooling,
+# then deploy the downloaded release group or zip:
+python -m td_release_packager deploy PRD_Pkg_BUILD_0001_20260515120000_01_main.zip --host myserver --user ships_dba
 ```
 
 **GitHub Enterprise Server:**
 
 ```bash
 export SHIPS_GITHUB_API_URL=https://github.mycompany.com/api/v3
-python deploy.py --from-github org/repo ...
+# download from GitHub Enterprise, then deploy the downloaded artifact
+python -m td_release_packager deploy /path/to/release_group/ --host myserver --user ships_dba
 ```
 
 This workflow eliminates the file-transfer step from the runbook and ensures the
@@ -748,7 +770,7 @@ Open the HTML report. Every FAILED object has an error message. Match the error 
 **Re-running after fixing space:**
 
 ```bash
-python deploy.py resume logs/.deploy_manifest_<id>.json --host myserver --user dba_user
+python -m td_release_packager deploy /path/to/release_group/ resume logs/.deploy_manifest_<id>.json --host myserver --user dba_user
 ```
 
 `resume` picks up exactly where the deployment left off, skipping all already-completed objects.
@@ -784,7 +806,7 @@ python deploy.py resume logs/.deploy_manifest_<id>.json --host myserver --user d
 
 4. Re-run using `resume`:
    ```bash
-   python deploy.py resume logs/.deploy_manifest_<id>.json --host myserver --user dba_user
+   python -m td_release_packager deploy /path/to/release_group/ resume logs/.deploy_manifest_<id>.json --host myserver --user dba_user
    ```
 
 ---
@@ -871,7 +893,7 @@ If this error occurs during extraction from a shared drive or email transfer, it
 When a deployment fails partway through, use `resume` to continue from where it stopped. Resume skips all objects with `COMPLETED` status in the manifest and re-attempts only the remainder.
 
 ```bash
-python deploy.py resume logs/.deploy_manifest_<id>.json \
+python -m td_release_packager deploy /path/to/release_group/ resume logs/.deploy_manifest_<id>.json \
     --host myserver \
     --user dba_user
 ```
@@ -890,7 +912,7 @@ ls logs/.deploy_manifest_*.json
 Before resuming a live deployment, preview what would be re-attempted:
 
 ```bash
-python deploy.py resume logs/.deploy_manifest_<id>.json --dry-run \
+python -m td_release_packager deploy /path/to/release_group/ resume logs/.deploy_manifest_<id>.json --dry-run \
     --host myserver --user dba_user
 ```
 
@@ -899,7 +921,7 @@ python deploy.py resume logs/.deploy_manifest_<id>.json --dry-run \
 If you want to attempt all remaining objects and collect a complete failure list in one pass:
 
 ```bash
-python deploy.py resume logs/.deploy_manifest_<id>.json \
+python -m td_release_packager deploy /path/to/release_group/ resume logs/.deploy_manifest_<id>.json \
     --continue-on-error --host myserver --user dba_user
 ```
 
@@ -916,7 +938,7 @@ SHIPS captures the pre-deployment state of modified objects before changing them
 ### Running a rollback
 
 ```bash
-python deploy.py rollback logs/.deploy_manifest_<id>.json \
+python -m td_release_packager deploy /path/to/release_group/ rollback logs/.deploy_manifest_<id>.json \
     --host myserver --user dba_user
 ```
 
@@ -948,7 +970,7 @@ Use `--wave N` to roll back only the objects deployed in wave N, leaving earlier
 
 ```bash
 # Roll back only wave-3 objects
-python deploy.py rollback logs/.deploy_manifest_<id>.json \
+python -m td_release_packager deploy /path/to/release_group/ rollback logs/.deploy_manifest_<id>.json \
     --wave 3 \
     --host myserver --user dba_user
 ```
@@ -962,7 +984,7 @@ Wave rollback is the natural complement to wave-parallel deployment. When wave 3
 **Dry-run a wave rollback (offline, no connection needed):**
 
 ```bash
-python deploy.py rollback logs/.deploy_manifest_<id>.json \
+python -m td_release_packager deploy /path/to/release_group/ rollback logs/.deploy_manifest_<id>.json \
     --wave 3 --dry-run
 ```
 
@@ -973,7 +995,7 @@ Describes exactly which objects would be rolled back and by what mechanism. Does
 Inspect the manifest for backup tables and rollback files:
 
 ```bash
-python deploy.py status logs/.deploy_manifest_<id>.json
+python -m td_release_packager deploy /path/to/release_group/ status logs/.deploy_manifest_<id>.json
 ```
 
 Objects with a `backup_table` value have a rename-based rollback available. Objects with a `rollback_file` path have a SHOW-DDL capture available.
@@ -1008,9 +1030,8 @@ python -m td_release_packager package \
     --no-increment          ← same build number (0005), different env
 
 # You receive: releases/TST_OMR_BUILD_0005_20260509/
-# Follow release_group.json and deploy the archive(s) in order.
-# For a single-package group, extract TST_OMR_BUILD_0005_20260509_01_main.zip and run:
-python deploy.py --host tst-server --user dba_user
+# Deploy the release group directly; no manual extraction required.
+python -m td_release_packager deploy releases/TST_OMR_BUILD_0005_20260509/ --host tst-server --user dba_user
 ```
 
 The `--no-increment` flag reuses the build counter without advancing it. The only difference between the DEV and TST packages is the resolved token values — the DDL structure is identical.
@@ -1042,16 +1063,15 @@ Copy this checklist for every deployment.
 
 ```
 [ ] 1. Receive release-group directory from developer or artefact store
-[ ] 2. Read release_group.json / README.txt and extract archives in deploy order
-[ ] 3. Run: python deploy.py integrity-check
+[ ] 2. Read release_group.json / README.txt; no manual extraction is required
+[ ] 3. Run: python -m td_release_packager deploy <release_group> integrity-check
         → Exit 0: proceed
         → Exit 1: stop, contact developer
-[ ] 4. Deploy ordered archives: _00_environment_prereqs, _01_prereqs, then _02_main when present
-        Check release_group.json and each archive's context/ships.build.json "requires" field
-[ ] 5. Dry run: python deploy.py --dry-run --host ... --user ...
+[ ] 4. Let SHIPS read release_group.json and prepare .ships-work automatically
+[ ] 5. Dry run: python -m td_release_packager deploy <release_group> --dry-run --host ... --user ...
         → Review logs/.deploy_report_*.html
         → Fix any pre-flight errors (space, permissions)
-[ ] 6. Live deployment: python deploy.py --host ... --user ... --streams N
+[ ] 6. Live deployment: python -m td_release_packager deploy <release_group> --host ... --user ... --streams N
 [ ] 7. Open deployment report: logs/.deploy_report_*.html
         → FAILED objects: investigate, fix, resume
         → SKIPPED objects: confirm intentional
@@ -1067,31 +1087,26 @@ Copy this checklist for every deployment.
 ### Standard agentic deployment sequence
 
 ```python
-import subprocess, json, pathlib, zipfile
+import pathlib
+import subprocess
 
 release_group_dir = pathlib.Path("releases/DEV_OMR_BUILD_0005_20260509")
-package_zip = release_group_dir / "DEV_OMR_BUILD_0005_20260509_01_main.zip"
-work_dir = pathlib.Path("deploy_work")
-work_dir.mkdir(exist_ok=True)
 
-# 1. Extract
-import zipfile
-with zipfile.ZipFile(package_zip) as z:
-    z.extractall(work_dir)
-
-# 2. Integrity check
+# 1. Integrity check; SHIPS extracts to .ships-work automatically
 r = subprocess.run(
-    ["python", "deploy.py", "integrity-check"],
-    cwd=work_dir, capture_output=True
+    ["python", "-m", "td_release_packager", "deploy", str(release_group_dir), "integrity-check"],
+    capture_output=True,
 )
 if r.returncode != 0:
     raise RuntimeError(f"Integrity check failed:\n{r.stdout.decode()}")
 
-# 3. Dry run
+# 2. Dry run
 r = subprocess.run(
-    ["python", "deploy.py",
-     "--dry-run", "--host", HOST, "--user", USER, "--password", PASS],
-    cwd=work_dir, capture_output=True
+    [
+        "python", "-m", "td_release_packager", "deploy", str(release_group_dir),
+        "--dry-run", "--host", HOST, "--user", USER, "--password", PASS,
+    ],
+    capture_output=True,
 )
 # Parse the manifest for pre-flight failures
 manifests = sorted(work_dir.glob("logs/.deploy_manifest_*.json"))
