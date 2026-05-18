@@ -34,6 +34,7 @@ Usage:
 """
 
 import logging
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -62,6 +63,10 @@ _REQUIRED_RIGHTS: Dict[str, Set[str]] = {
     "PROCEDURE": {"PC", "PD"},  # CREATE PROCEDURE + DROP PROCEDURE
     "FUNCTION": {"CF", "DF"},  # CREATE FUNCTION + DROP FUNCTION
     "TRIGGER": {"CG", "DG"},  # CREATE TRIGGER + DROP TRIGGER
+    # SQLJ.INSTALL_JAR / SQLJ.REPLACE_JAR create or replace Java external
+    # procedure metadata in the target database. Teradata reports missing
+    # access as CREATE/ALTER EXTERNAL PROCEDURE rather than as JAR rights.
+    "JAR": {"CE", "AE"},  # CREATE/ALTER EXTERNAL PROCEDURE
 }
 
 # Maps ObjectType → the compound GRANT keyword that grants the
@@ -76,6 +81,7 @@ _GRANT_KEYWORDS: Dict[str, str] = {
     "PROCEDURE": "PROCEDURE",
     "FUNCTION": "FUNCTION",
     "TRIGGER": "TRIGGER",
+    "JAR": "CREATE EXTERNAL PROCEDURE, ALTER EXTERNAL PROCEDURE",
 }
 
 # Human-readable labels for access right codes (for reporting)
@@ -92,6 +98,8 @@ _RIGHT_LABELS: Dict[str, str] = {
     "DF": "DROP FUNCTION",
     "CG": "CREATE TRIGGER",
     "DG": "DROP TRIGGER",
+    "CE": "CREATE EXTERNAL PROCEDURE",
+    "AE": "ALTER EXTERNAL PROCEDURE",
 }
 
 
@@ -126,6 +134,40 @@ class PrivilegeCheckResult:
 # ---------------------------------------------------------------
 # Core check
 # ---------------------------------------------------------------
+
+
+_DATABASE_STATEMENT_RE = re.compile(
+    r"""
+    (?:^|;)\s*DATABASE\s+
+    ("[^"]+"|\{\{[A-Za-z_][A-Za-z0-9_]*\}\}|[A-Za-z_][A-Za-z0-9_]*)
+    \s*;
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def _strip_identifier_quotes(name: str) -> str:
+    """Return an identifier without surrounding double quotes."""
+    name = (name or "").strip()
+    if len(name) >= 2 and name[0] == '"' and name[-1] == '"':
+        return name[1:-1]
+    return name
+
+
+def _infer_jar_target_database(ddl_text: str) -> str:
+    """Infer the target database for a SQLJ JAR install script.
+
+    SQLJ.INSTALL_JAR / SQLJ.REPLACE_JAR scripts are executed using the
+    current database context, commonly established by a leading
+    ``DATABASE db_name;`` statement.  The generic statement parser classifies
+    the script as ObjectType.JAR but does not give it a normal
+    Database.ObjectName, so the deployer privilege check must infer the
+    target database from that DATABASE statement.
+    """
+    match = _DATABASE_STATEMENT_RE.search(ddl_text or "")
+    if not match:
+        return ""
+    return _strip_identifier_quotes(match.group(1))
 
 
 def check_deployer_privileges(
@@ -183,6 +225,9 @@ def check_deployer_privileges(
             if hasattr(parsed.object_type, "value")
             else str(parsed.object_type)
         )
+
+        if not db_name and obj_type == "JAR":
+            db_name = _infer_jar_target_database(getattr(parsed, "ddl_text", ""))
 
         if not db_name:
             continue
@@ -308,6 +353,9 @@ def generate_full_prerequisite_script(
             else str(parsed.object_type)
         )
 
+        if not db_name and obj_type == "JAR":
+            db_name = _infer_jar_target_database(getattr(parsed, "ddl_text", ""))
+
         if not db_name:
             continue
         if obj_type in ("GRANT", "ROLE", "DATABASE", "USER", "PROFILE", "UNKNOWN"):
@@ -391,6 +439,7 @@ _GRANT_ORDER = [
     "PROCEDURE",
     "FUNCTION",
     "TRIGGER",
+    "CREATE EXTERNAL PROCEDURE, ALTER EXTERNAL PROCEDURE",
 ]
 
 
