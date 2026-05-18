@@ -1101,7 +1101,6 @@ def _split_multi_statement(
     return statements
 
 
-
 def _top_level_semicolon_positions(clean_sql: str) -> List[int]:
     """Return semicolon offsets that terminate top-level statements.
 
@@ -1131,6 +1130,7 @@ def _top_level_semicolon_positions(clean_sql: str) -> List[int]:
             positions.append(idx)
 
     return positions
+
 
 # ---------------------------------------------------------------
 # Internal — Comment stripping (for classification safety)
