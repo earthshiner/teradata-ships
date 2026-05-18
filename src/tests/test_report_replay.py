@@ -217,3 +217,38 @@ class TestObjectResultsOnReplay:
         )
         html = _html_object_results(result)
         assert "No objects were processed" in html
+
+
+class TestPrivilegeFailureReport:
+    """Privilege-check failures should appear as report action items."""
+
+    def test_privilege_failure_has_action_items(self):
+        """A pre-execution privilege failure must not say all objects deployed."""
+
+        class _PrivilegeResult:
+            passed = False
+            user = "DBC"
+            missing = {
+                "GDEV1P_BB": ["CREATE PROCEDURE", "DROP PROCEDURE"],
+                "GDEV1P_UT": ["CREATE PROCEDURE", "DROP PROCEDURE"],
+            }
+            script = (
+                "GRANT PROCEDURE ON GDEV1P_BB TO DBC;\n"
+                "GRANT PROCEDURE ON GDEV1P_UT TO DBC;"
+            )
+
+        result = PackageDeployResult(
+            deployment_id="privilege_check_failed",
+            manifest_path="",
+            total=540,
+            failed=2,
+            results=[],
+            privilege_result=_PrivilegeResult(),
+        )
+
+        html = _html_action_items(result)
+
+        assert "Deployer privilege check failed" in html
+        assert "GDEV1P_BB" in html
+        assert "GRANT PROCEDURE ON GDEV1P_UT TO DBC" in html
+        assert "all objects deployed successfully" not in html

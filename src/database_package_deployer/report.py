@@ -507,6 +507,67 @@ def _shorten_path(text: str) -> str:
     return _PATH_RE.sub(_replace, text)
 
 
+
+def _escape_html(value: str) -> str:
+    """Escape text for safe HTML rendering."""
+    return (
+        str(value)
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def _html_privilege_failure(priv_result) -> str:
+    """Render deployer privilege-check failures as report action items.
+
+    Privilege checks occur after preflight and before object execution.  In that
+    path there are no per-object ObjectDeployResult rows, so the normal action
+    item renderer would otherwise claim there is nothing to do even though the
+    deployment failed.
+    """
+    if priv_result is None or getattr(priv_result, "passed", True):
+        return ""
+
+    missing = getattr(priv_result, "missing", {}) or {}
+    script = getattr(priv_result, "script", "") or ""
+    user = getattr(priv_result, "user", "<deploying_user>") or "<deploying_user>"
+
+    rows = []
+    for database_name in sorted(missing):
+        rights = ", ".join(missing.get(database_name, [])) or "required privileges"
+        rows.append(
+            '<div class="action-item err">'
+            '<strong>FAILED:</strong> Deployer privilege check — '
+            f'deploying user <span class="mono">{user}</span> '
+            f'is missing {rights} on <span class="mono">{database_name}</span>.'
+            '</div>'
+        )
+
+    script_html = ""
+    if script:
+        script_html = (
+            '<details class="action-group" open>'
+            '<summary class="err">Required SYSADMIN grant script</summary>'
+            f'<pre class="mono">{_escape_html(script)}</pre>'
+            '</details>'
+        )
+
+    count = len(missing)
+    noun = "database" if count == 1 else "databases"
+    return (
+        '<div class="action-items has-errors">'
+        f'<h3>Action Items ({count})</h3>'
+        '<details class="action-group" open>'
+        f'<summary class="err">✗ Deployer privilege check failed — {count} {noun} require grants</summary>'
+        + "\n".join(rows)
+        + '</details>'
+        + script_html
+        + '</div>'
+    )
+
+
 def _html_action_items(result, provenance: Optional[ProvenanceDocument] = None):
     """Action items section — SKIPPED and FAILED objects, grouped and collapsible.
 
@@ -515,6 +576,10 @@ def _html_action_items(result, provenance: Optional[ProvenanceDocument] = None):
     to inspect them, but they don't drown the report when there are
     hundreds of expected skips (prereq-exempt, not-applicable, etc.).
     """
+    privilege_html = _html_privilege_failure(getattr(result, "privilege_result", None))
+    if privilege_html:
+        return privilege_html
+
     failed_items = []
     skipped_items = []
 
