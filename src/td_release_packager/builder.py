@@ -1427,6 +1427,40 @@ def _write_release_group_files(
         f.write(
             "\nEach package is self-contained and has its own context/ships.index.json.\n"
         )
+        f.write(
+            "\nConvenience launcher (no manual extraction required):\n"
+            "  python deploy_release.py --host <teradata_host> --user <username>\n"
+        )
+
+    launcher_path = os.path.join(group_dir, "deploy_release.py")
+    launcher = '''#!/usr/bin/env python3
+"""Deploy this SHIPS release group without manual archive extraction."""
+
+import os
+import subprocess
+import sys
+
+
+def main() -> int:
+    group_dir = os.path.dirname(os.path.abspath(__file__))
+    cmd = [
+        sys.executable,
+        "-m",
+        "td_release_packager",
+        "deploy",
+        group_dir,
+        *sys.argv[1:],
+    ]
+    result = subprocess.run(cmd, check=False)
+    return result.returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
+    with open(launcher_path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(launcher)
+    os.chmod(launcher_path, 0o755)
 
 
 def _finalize_single_package(

@@ -59,11 +59,12 @@ python -m td_release_packager package \
     --output releases/
 
 # Ship (deploy)
-# Packages are written under a release-group directory, even when only one archive is produced.
-cd ./releases/DEV_MyProject_BUILD_0001_<timestamp>/DEV_MyProject_BUILD_0001_<timestamp>_01_main/
-python deploy.py --dry-run                       # No database — validates pipeline, parsing, wave ordering
-python deploy.py --host myserver --user dbc      # Connect and execute DDL
-python deploy.py status logs/.deploy_manifest_<id>.json         # Show manifest state
+# No manual extraction or long cd path required.
+python -m td_release_packager deploy ./releases/DEV_MyProject_BUILD_0001_<timestamp>/ --dry-run
+python -m td_release_packager deploy ./releases/DEV_MyProject_BUILD_0001_<timestamp>/ --host myserver --user dbc
+
+# You can also target a single package zip directly.
+python -m td_release_packager deploy ./releases/DEV_MyProject_BUILD_0001_<timestamp>/DEV_MyProject_BUILD_0001_<timestamp>_01_main.zip --dry-run
 ```
 
 
@@ -98,6 +99,8 @@ releases/
 ```
 
 `release_group.json` is the group-level index for humans, CI/CD jobs, dashboards, and agents. It records package roles, deploy order, checksums, and `context/ships.index.json` entrypoints inside each archive.
+
+DBAs do not need to extract package zips manually. `python -m td_release_packager deploy <zip-or-release-group>` automatically extracts packages into a short `.ships-work` directory beside the archive or release group, then invokes the generated `deploy.py`. Logs, manifests, and reports remain under that work directory for review and resume. Release groups also include `deploy_release.py`, so an operator can run `python deploy_release.py --host myserver --user dbc` from the release-group folder.
 
 ## Architecture
 
