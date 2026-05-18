@@ -406,7 +406,7 @@ If you have added a reference to a database that is not yet in `config/token_map
 Run inspect to see what SHIPS's linter found:
 
 ```bash
-python -m td_release_packager inspect --source C:\Projects\OMR
+python -m td_release_packager inspect --project C:\Projects\OMR
 ```
 
 ### Common errors and fixes
@@ -461,7 +461,7 @@ You have a DEV build that has been approved. You want to produce the TST package
 
 ```bash
 python -m td_release_packager package \
-    --source C:\Projects\OMR \
+    --project C:\Projects\OMR \
     --env TST \
     --name OMR \
     --env-config config/env/TST.conf \
@@ -802,13 +802,13 @@ Generate view-layer DDL from harvested tables (SHIPS topology projects).
 
 ```bash
 python -m td_release_packager generate \
-    --source C:\Projects\OMR \
+    --project C:\Projects\OMR \
     --modules DOM,SEM
 ```
 
 | Flag | Required | Description |
 |---|---|---|
-| `--source` | Yes | Project directory containing harvested payload |
+| `--project` | Yes | SHIPS project directory containing the harvested payload |
 | `--modules` | No | Comma-separated modules to generate (default: all) |
 | `--dry-run` | No | Validate without writing files |
 
@@ -819,12 +819,12 @@ python -m td_release_packager generate \
 Lint payload DDL against configurable rules.
 
 ```bash
-python -m td_release_packager inspect --source C:\Projects\OMR
+python -m td_release_packager inspect --project C:\Projects\OMR
 ```
 
 | Flag | Required | Description |
 |---|---|---|
-| `--source` | Yes | Project directory to inspect |
+| `--project` | Yes | SHIPS project directory to inspect |
 | `--config` | No | Path to `inspect.conf` (default: auto-detect in project) |
 | `--strict` | No | Promote all WARNING rules to ERROR |
 | `--skip-grants` | No | Skip grant validation |
@@ -837,13 +837,13 @@ python -m td_release_packager inspect --source C:\Projects\OMR
 Build the dependency graph and wave ordering.
 
 ```bash
-python -m td_release_packager analyze --source C:\Projects\OMR
+python -m td_release_packager analyze --project C:\Projects\OMR
 ```
 
 | Flag | Required | Description |
 |---|---|---|
-| `--source` | Yes | Project directory to analyse |
-| `--output` | No | Output path for `_waves.txt` (default: `<source>/_waves.txt`) |
+| `--project` | Yes | SHIPS project directory to analyse |
+| `--output` | No | Output path for `_waves.txt` (default: `<project>/_waves.txt`) |
 | `--overwrite` | No | Overwrite existing `_waves.txt` |
 
 ---
@@ -854,7 +854,7 @@ Build a release archive for a specific environment.
 
 ```bash
 python -m td_release_packager package \
-    --source C:\Projects\OMR \
+    --project C:\Projects\OMR \
     --env DEV \
     --name OMR \
     --env-config config/env/DEV.conf \
@@ -863,7 +863,7 @@ python -m td_release_packager package \
 
 | Flag | Required | Description |
 |---|---|---|
-| `--source` | Yes | Project directory |
+| `--project` | No | SHIPS project directory |
 | `--env` | Yes | Target environment (DEV / TST / PRD) |
 | `--name` | Yes | Package name |
 | `--env-config` | Yes | Path to environment `.conf` file |
@@ -923,34 +923,34 @@ Scan payload files for token references, validate against environment configs, a
 
 ```bash
 # Basic — list all tokens found in the payload
-python -m td_release_packager scan --source C:\Projects\OMR
+python -m td_release_packager scan --project C:\Projects\OMR
 
 # Validate against a single env config
 python -m td_release_packager scan \
-    --source C:\Projects\OMR \
+    --project C:\Projects\OMR \
     --env-config config/env/DEV.conf
 
 # Sweep all environments in one pass (recommended pre-promotion check)
 python -m td_release_packager scan \
-    --source C:\Projects\OMR \
+    --project C:\Projects\OMR \
     --all-envs
 
 # CI gate: fail if any token is undefined OR orphaned in any environment
 python -m td_release_packager scan \
-    --source C:\Projects\OMR \
+    --project C:\Projects\OMR \
     --all-envs \
     --fail-on-orphan
 
 # Machine-readable output for agents and pipelines
 python -m td_release_packager scan \
-    --source C:\Projects\OMR \
+    --project C:\Projects\OMR \
     --all-envs \
     --format json
 ```
 
 | Flag | Required | Description |
 |---|---|---|
-| `--source` | Yes | Source project directory to scan |
+| `--project` | Yes | SHIPS project directory to scan |
 | `--env-config FILE` | No | Validate tokens against this env `.conf` file. Mutually exclusive with `--all-envs`. |
 | `--all-envs` | No | Discover every `*.conf` in `config/env/` and validate tokens against each. Shows per-environment status. Exits 1 if any env has undefined tokens. |
 | `--show-map` | No | Print the full token → file reverse index: for each token, list every payload file that references it. Useful for blast-radius analysis before renaming a token. |
@@ -960,7 +960,7 @@ python -m td_release_packager scan \
 **Recommended daily-driver pattern** — run this before every `ships package`:
 
 ```bash
-ships scan --source C:\Projects\OMR --all-envs --fail-on-orphan
+ships scan --project C:\Projects\OMR --all-envs --fail-on-orphan
 ```
 
 One command confirms every token resolves in every environment and no dead config entries have accumulated.
@@ -1242,7 +1242,7 @@ Two modes are available, depending on your threat model:
 
 ```bash
 ships package \
-    --source /projects/OMR \
+    --project /projects/OMR \
     --env PRD \
     --env-config config/env/PRD.conf \
     --name OMR \
@@ -1257,7 +1257,7 @@ key storage requirements.
 
 ```bash
 ships package \
-    --source /projects/OMR \
+    --project /projects/OMR \
     --env PRD \
     --env-config config/env/PRD.conf \
     --name OMR \
@@ -1274,7 +1274,7 @@ For environments that require a change ticket before production deployment:
 
 ```bash
 ships package \
-    --source /projects/OMR \
+    --project /projects/OMR \
     --env PRD \
     --env-config config/env/PRD.conf \
     --name OMR \
@@ -1386,7 +1386,7 @@ The token was not resolved. Check:
 2. You passed `--env-config config/env/DEV.conf` to the package command
 3. There is no whitespace inside the braces (`{{ MY_TOKEN }}` is invalid — must be `{{MY_TOKEN}}`)
 
-Run `ships scan --source . --all-envs` to identify all undefined tokens across every environment before packaging. Add `--fail-on-orphan` to also catch dead config entries.
+Run `ships scan --project . --all-envs` to identify all undefined tokens across every environment before packaging. Add `--fail-on-orphan` to also catch dead config entries.
 
 **Build counter keeps resetting to 0**
 

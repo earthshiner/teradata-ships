@@ -1022,7 +1022,7 @@ The most important rule of promotion: **do not rebuild for TST or PRD**. Rebuild
 
 # Ask the developer to produce:
 python -m td_release_packager package \
-    --source /projects/OMR \
+    --project /projects/OMR \
     --env TST \
     --name OMR \
     --env-config config/env/TST.conf \
