@@ -557,3 +557,48 @@ class TestExecuteDdl:
         """Content without a trailing semicolon is still executed."""
         stmts = self._run("INSERT INTO t VALUES (1)")
         assert len(stmts) == 1
+
+
+class TestSqljClientFilePathResolution:
+    """SQLJ JAR install paths resolve relative to the .sjr script."""
+
+    def test_relative_jar_path_resolves_against_script_directory(self, tmp_path):
+        from database_package_deployer.deployer import _resolve_sqlj_client_file_paths
+
+        script = tmp_path / "DDL" / "jar_install" / "install.sjr"
+        script.parent.mkdir(parents=True)
+        script.write_text("", encoding="utf-8")
+
+        sql = "CALL SQLJ.INSTALL_JAR('CJ!./GCFR_QB.jar', 'GCFR_QB', 0);"
+        resolved = _resolve_sqlj_client_file_paths(sql, str(script))
+
+        expected = (script.parent / "GCFR_QB.jar").resolve().as_posix()
+        assert f"'CJ!{expected}'" in resolved
+
+    def test_deploy_direct_execute_rewrites_jar_path_only_for_execution(self, tmp_path):
+        from database_package_deployer.deployer import _deploy_direct_execute
+        from database_package_deployer.models import DeployIntent, ParsedStatement
+
+        script = tmp_path / "DDL" / "jar_install" / "install.sjr"
+        script.parent.mkdir(parents=True)
+        ddl = "CALL SQLJ.INSTALL_JAR('CJ!./ExecLargeSqlJ.jar', 'JAR_EXECUTE_LARGE_SQL', 0);"
+
+        parsed = ParsedStatement(
+            file_path=str(script),
+            ddl_text=ddl,
+            original_text=ddl,
+            database_name="",
+            object_name="JAR",
+            object_type=ObjectType.JAR,
+            strategy=DeployStrategy.DIRECT_EXECUTE,
+            qualified_name="JAR",
+            deploy_intent=DeployIntent.DIRECT_EXECUTE,
+        )
+
+        cur = _RecordingCursor()
+        _deploy_direct_execute(cur, parsed, dry_run=False)
+
+        expected = (script.parent / "ExecLargeSqlJ.jar").resolve().as_posix()
+        assert cur.executed == [
+            f"CALL SQLJ.INSTALL_JAR('CJ!{expected}', 'JAR_EXECUTE_LARGE_SQL', 0)"
+        ]

@@ -124,6 +124,42 @@ def _clean_db_error(raw: str) -> str:
     return cleaned if cleaned else raw
 
 
+_SQLJ_CLIENT_FILE_RE = re.compile(r"'CJ!((?:[^']|'')*)'", re.IGNORECASE)
+
+
+def _resolve_sqlj_client_file_paths(ddl_text: str, ddl_file_path: str) -> str:
+    """
+    Resolve relative SQLJ client file paths against the owning script.
+
+    Teradata's SQLJ.INSTALL_JAR/REPLACE_JAR ``CJ!`` path is opened by the
+    client driver. A path such as ``CJ!./foo.jar`` is therefore relative to
+    the Python process working directory, not to the ``.sjr`` file. Deployment
+    packages place JAR binaries beside their install scripts, so resolve those
+    relative paths before execution without changing the global process cwd.
+    """
+    if not ddl_file_path or ddl_file_path == "<inline>":
+        return ddl_text
+
+    base_dir = os.path.dirname(os.path.abspath(ddl_file_path))
+
+    def repl(match: re.Match) -> str:
+        raw_path = match.group(1).replace("''", "'").strip()
+        if not raw_path:
+            return match.group(0)
+
+        if os.path.isabs(raw_path):
+            resolved = raw_path
+        else:
+            resolved = os.path.abspath(os.path.join(base_dir, raw_path))
+
+        # Forward slashes work on Windows with the client file APIs and avoid
+        # backslash-heavy SQL literals in logs and reports.
+        resolved = resolved.replace("\\", "/").replace("'", "''")
+        return f"'CJ!{resolved}'"
+
+    return _SQLJ_CLIENT_FILE_RE.sub(repl, ddl_text)
+
+
 # ---------------------------------------------------------------
 # Package metadata helpers
 # ---------------------------------------------------------------
@@ -2313,8 +2349,12 @@ def _deploy_direct_execute(
         qn,
     )
 
+    ddl_text = parsed.ddl_text
+    if obj_type == ObjectType.JAR:
+        ddl_text = _resolve_sqlj_client_file_paths(parsed.ddl_text, parsed.file_path)
+
     try:
-        _execute_ddl(cursor, parsed.ddl_text)
+        _execute_ddl(cursor, ddl_text)
     except Exception as e:
         err_str = str(e)
         # Teradata Error 5612: "already exists" — for DATABASE
