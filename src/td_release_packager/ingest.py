@@ -1040,11 +1040,16 @@ def _split_multi_statement(
 
     clean = strip_comments_and_string_literals(content)
 
-    # --- Find semicolon positions in the clean version ---
-    semi_positions = [i for i, c in enumerate(clean) if c == ";"]
+    # --- Find statement-terminating semicolons in the clean version ---
+    # A plain ``;`` scan corrupts Teradata triggers. Trigger bodies are
+    # parenthesised and may contain inner SQL statements such as
+    # ``INSERT ...;`` before the trigger's real terminator ``);``. Split
+    # only on top-level semicolons so the inner statement terminator stays
+    # with the trigger body instead of truncating the final closing ``);``.
+    semi_positions = _top_level_semicolon_positions(clean)
 
     if len(semi_positions) <= 1:
-        # Zero or one semicolons — single statement, return as-is
+        # Zero or one statement terminators — single statement, return as-is
         return [content]
 
     # --- Extract statements using original content + semicolon positions ---
@@ -1095,6 +1100,37 @@ def _split_multi_statement(
     )
     return statements
 
+
+
+def _top_level_semicolon_positions(clean_sql: str) -> List[int]:
+    """Return semicolon offsets that terminate top-level statements.
+
+    ``clean_sql`` must have comments and string literals blanked while
+    preserving character positions. Parentheses are still present, so this
+    helper can avoid splitting on semicolons inside Teradata compound DDL
+    bodies such as triggers::
+
+        create trigger db.trg ... for each row (
+            insert into db.log (...) values (...);
+        );
+
+    The semicolon after the inner ``insert`` is at parenthesis depth > 0
+    and is not a statement boundary. The final semicolon after ``)`` is at
+    depth 0 and is the split point.
+    """
+    positions: List[int] = []
+    depth = 0
+
+    for idx, char in enumerate(clean_sql):
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            if depth > 0:
+                depth -= 1
+        elif char == ";" and depth == 0:
+            positions.append(idx)
+
+    return positions
 
 # ---------------------------------------------------------------
 # Internal — Comment stripping (for classification safety)

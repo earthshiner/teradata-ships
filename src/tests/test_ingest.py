@@ -22,6 +22,7 @@ from td_release_packager.ingest import (
     _inject_replace_view,
     _build_token_candidates,
     _discover_files,
+    _split_multi_statement,
     ingest_directory,
 )
 
@@ -1176,6 +1177,54 @@ class TestIngestDirectory:
 
         types = sorted(t for _, _, t in result.files_placed)
         assert types == ["COMMENT", "TABLE"]
+
+    def test_splitter_preserves_trigger_closing_parenthesis(self):
+        """CREATE TRIGGER bodies can contain inner SQL semicolons.
+
+        The splitter must not cut the trigger at the inner INSERT
+        terminator and discard the final closing ``);``.
+        """
+        ddl = """CREATE TRIGGER {{GCFR_T}}.GCFR_TI_Stream_Id
+AFTER INSERT ON {{GCFR_T}}.GCFR_Stream_Id
+REFERENCING NEW ROW AS n
+FOR EACH ROW  (
+INSERT INTO {{GCFR_T}}.GCFR_Stream_Id_Log (
+      Stream_Key
+    , Stream_Id
+  ) VALUES (
+      n.Stream_Key
+    , n.Stream_Id
+  );
+);
+"""
+
+        statements = _split_multi_statement(ddl, "trigger.bteq")
+
+        assert len(statements) == 1
+        assert statements[0].rstrip().endswith(");")
+        assert "  );\n);" in statements[0]
+
+    def test_splitter_splits_multiple_triggers_at_outer_terminator(self):
+        """Multiple triggers in one BTEQ file still split atomically."""
+        ddl = """CREATE TRIGGER x.trg_one
+AFTER INSERT ON x.t
+FOR EACH ROW (
+INSERT INTO x.log_one (id) VALUES (1);
+);
+CREATE TRIGGER x.trg_two
+AFTER INSERT ON x.t
+FOR EACH ROW (
+INSERT INTO x.log_two (id) VALUES (2);
+);
+"""
+
+        statements = _split_multi_statement(ddl, "triggers.bteq")
+
+        assert len(statements) == 2
+        assert statements[0].rstrip().endswith(");")
+        assert statements[1].rstrip().endswith(");")
+        assert "x.trg_one" in statements[0]
+        assert "x.trg_two" in statements[1]
 
     def test_ingest_does_not_split_procedure_with_begin_end(
         self, tmp_path, tmp_project
