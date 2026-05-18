@@ -379,7 +379,7 @@ releases/DEV_OMR_BUILD_0042_20260510/
     README.txt
 ```
 
-When the build needs environment prerequisites or application prerequisites, the same folder also contains `_00_environment_prereqs` and `_01_prereqs` archives. Use `release_group.json` or the group `README.txt` for deploy order.
+When the build needs environment prerequisites or application prerequisites, the same folder also contains `_00_environment_prereqs` and `_01_prereqs` archives. Deploy the release-group directory directly with `python -m td_release_packager deploy <release_group> ...`; SHIPS reads `release_group.json`, extracts the required archives into `.ships-work`, and runs them in order.
 
 
 ### My package says `READY-WITH-CAVEATS`. Should I worry?
@@ -458,23 +458,23 @@ GRANT CREATE VIEW  ON MyDB TO deploy_user;
 After granting, re-run with `resume`:
 
 ```bash
-python deploy.py resume logs/.deploy_manifest_<id>.json --host srv --user dba
+python -m td_release_packager deploy /path/to/release_group/ resume logs/.deploy_manifest_<id>.json --host srv --user dba
 ```
 
 ---
 
 ### The deployment failed halfway. Do I have to start over?
 
-No. Re-run the same command. The manifest records each object's state, and the deployer skips anything already in `COMPLETED` state:
+No. Re-run the same release-group deploy command. The manifest records each object's state, and the deployer skips anything already in `COMPLETED` state:
 
 ```bash
-python deploy.py --host srv --user dba   ← same command
+python -m td_release_packager deploy /path/to/release_group/ --host srv --user dba   ← same command
 ```
 
 Or explicitly resume from the manifest:
 
 ```bash
-python deploy.py resume logs/.deploy_manifest_<id>.json --host srv --user dba
+python -m td_release_packager deploy /path/to/release_group/ resume logs/.deploy_manifest_<id>.json --host srv --user dba
 ```
 
 ---
@@ -486,7 +486,7 @@ SHIPS's table deployment strategy backs up the table (renames it to `<TableName>
 To check:
 
 ```bash
-python deploy.py status logs/.deploy_manifest_<id>.json
+python -m td_release_packager deploy /path/to/release_group/ status logs/.deploy_manifest_<id>.json
 ```
 
 Look for `backup_table` in the object record. If it is set, you can query `SELECT * FROM <backup_table>` to recover data.
@@ -519,10 +519,10 @@ For rollbacks (`ships rollback --to-tag`), `continue` is the default because the
 
 ```bash
 # Roll back everything
-python deploy.py rollback logs/.deploy_manifest_<id>.json --host srv --user dba
+python -m td_release_packager deploy /path/to/release_group/ rollback logs/.deploy_manifest_<id>.json --host srv --user dba
 
 # Roll back only wave 3
-python deploy.py rollback logs/.deploy_manifest_<id>.json --wave 3 --host srv --user dba
+python -m td_release_packager deploy /path/to/release_group/ rollback logs/.deploy_manifest_<id>.json --wave 3 --host srv --user dba
 ```
 
 **Feature rollback** (re-deploy from a previous git tag):
@@ -642,7 +642,7 @@ This path must be accessible from every machine that deploys this package. After
 If no shared path is available, use a local directory for development:
 
 ```bash
-python deploy.py --host srv --user dba --baseline-dir /tmp/ships-baselines/
+python -m td_release_packager deploy /path/to/release_group/ --host srv --user dba --baseline-dir /tmp/ships-baselines/
 ```
 
 This works per-machine but does not share baselines across operators.
@@ -654,7 +654,7 @@ This works per-machine but does not share baselines across operators.
 The simplest reset is to deploy with `--on-drift continue` — this runs the deployment as normal and writes a new baseline from the post-deploy SHOW output:
 
 ```bash
-python deploy.py --host srv --user dba --on-drift continue
+python -m td_release_packager deploy /path/to/release_group/ --host srv --user dba --on-drift continue
 ```
 
 After this run, the baseline reflects what SHIPS just deployed. Future drift detection will compare against the new baseline.
@@ -900,17 +900,15 @@ share. No certificate authority, HSM, or PKI required.
 Yes. Once CI publishes the package as a GitHub Release, the DBA runs:
 
 ```bash
-ships deploy \
-    --from-github org/repo \
-    --release-tag v1.2.3 \
-    --asset PRD_Pkg_BUILD_0001.zip \
+python -m td_release_packager deploy PRD_Pkg_BUILD_0001.zip \
     --host myhost \
     --user ships_dba
 ```
 
-SHIPS downloads the ZIP and all available sidecar files (`.sha256`, `.hmac`, `.sig`)
-from the release, verifies them, and proceeds with normal deployment. The `GITHUB_TOKEN`
-environment variable is used for private repositories.
+SHIPS extracts the ZIP into `.ships-work`, verifies the package during the generated
+deploy flow, and proceeds with normal deployment. For private repositories, use your
+standard artifact download mechanism with `GITHUB_TOKEN`, then point SHIPS at the
+downloaded ZIP or release-group directory.
 
 ---
 

@@ -38,7 +38,7 @@ teradatasql.connect(host="myhost", user="ships_user", encryptdata="true")
 Or via the CLI:
 
 ```bash
-ships deploy /path/to/package/ --host myhost --user ships_user --encryptdata true
+python -m td_release_packager deploy /path/to/release_group/ --host myhost --user ships_user --encryptdata true
 ```
 
 **Enforce via ships.yaml:**

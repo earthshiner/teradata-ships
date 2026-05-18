@@ -189,8 +189,8 @@ conn.close()
 SHIPS supports all `teradatasql` logon mechanisms via the `--logmech` flag:
 
 ```bash
-python deploy.py --host myserver --user dbc --logmech LDAP
-python deploy.py --host myserver --user dbc --logmech TD2
+python -m td_release_packager deploy /path/to/release_group/ --host myserver --user dbc --logmech LDAP
+python -m td_release_packager deploy /path/to/release_group/ --host myserver --user dbc --logmech TD2
 ```
 
 ## Upgrading
