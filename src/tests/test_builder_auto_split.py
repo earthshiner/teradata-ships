@@ -337,10 +337,13 @@ class TestBuildPackageAutoSplit:
         )
         group_dir = Path(main_archive).parent
         group_manifest_path = group_dir / "release_group.json"
+        group_launcher_path = group_dir / "deploy_release.py"
 
         assert group_dir.name == main_manifest.release_group
         assert Path(prereqs_archive).parent == group_dir
         assert group_manifest_path.is_file()
+        assert group_launcher_path.is_file()
+        assert "td_release_packager" in group_launcher_path.read_text(encoding="utf-8")
 
         group_manifest = json.loads(group_manifest_path.read_text(encoding="utf-8"))
         assert group_manifest["release_group"] == main_manifest.release_group
