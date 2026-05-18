@@ -286,10 +286,10 @@ python -m td_release_packager process \
     --name MyProject
 
 # 4. Deploy
-cd releases/DEV_MyProject_BUILD_0001_<timestamp>/
-unzip DEV_MyProject_BUILD_0001_<timestamp>_01_main.zip
-cd MyProject_DEV_BUILD_0001_*/
-python deploy.py --host myserver --user dbc
+python -m td_release_packager deploy \
+    releases/DEV_MyProject_BUILD_0001_<timestamp>/ \
+    --host myserver \
+    --user dbc
 ```
 
 **For an existing codebase:** use `ships onboard` to get a tailored recommended path.

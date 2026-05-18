@@ -441,20 +441,18 @@ if any(r.drift_detected for r in result.results):
 ## Deploying from GitHub Releases
 
 Once CI has published a package as a GitHub Release, an agent (or DBA) can deploy
-directly without downloading and transferring the ZIP file manually:
+from the downloaded release-group directory or package ZIP without manually
+extracting it:
 
 ```bash
-ships deploy \
-    --from-github org/repo \
-    --release-tag v1.2.3 \
-    --asset PRD_Pkg_BUILD_0001_20260515120000_01_main.zip \
+python -m td_release_packager deploy PRD_Pkg_BUILD_0001_20260515120000_01_main.zip \
     --host myhost \
     --user ships_dba
 ```
 
-SHIPS downloads the ZIP and all available sidecar files (`.sha256`, `.hmac`, `.sig`)
-from the release using the GitHub API, verifies them, and proceeds with normal
-deployment.
+SHIPS extracts the ZIP into `.ships-work`, invokes the generated package-local
+`deploy.py`, verifies the package during that normal deploy flow, and proceeds
+with deployment.
 
 **Agent usage:**
 
@@ -463,22 +461,16 @@ import subprocess
 
 result = subprocess.run([
     "python", "-m", "td_release_packager", "deploy",
-    "--from-github", "myorg/myrepo",
-    "--release-tag", "v1.2.3",
-    "--asset", "PRD_Pkg_BUILD_0001_20260515120000_01_main.zip",
+    "PRD_Pkg_BUILD_0001_20260515120000_01_main.zip",
     "--host", HOST,
     "--user", USER,
     "--password", os.environ["TD_PASS"],
 ], capture_output=True, text=True)
 ```
 
-Environment variables:
-- `GITHUB_TOKEN` — required for private repositories; public repositories work without it
-- `SHIPS_GITHUB_API_URL` — override for GitHub Enterprise Server
-
 An agent referencing release tags gains a clean chain of custody: the tag is immutable,
-the sidecar files are verified, and the package hash is stamped into DBQL via the query
-band.
+the package hash is verified during deploy, and the package hash is stamped into
+DBQL via the query band.
 
 ---
 
