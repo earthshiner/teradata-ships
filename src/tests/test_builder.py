@@ -13,6 +13,7 @@ Covers:
 import json
 import os
 import tempfile
+import zipfile
 from unittest.mock import patch
 
 import pytest
@@ -21,7 +22,9 @@ from td_release_packager.builder import (
     _check_working_tree,
     _generate_integrity_file,
     _resolve_filename,
+    build_package,
 )
+from td_release_packager.models import BuildConfig
 
 
 # ---------------------------------------------------------------
@@ -84,6 +87,70 @@ class TestGenerateIntegrityFile:
             assert hash_before != hash_after, (
                 "package_hash must change when a lib/ file is modified"
             )
+
+
+def test_single_package_archive_uses_context_metadata_only(
+    tmp_path, tmp_project, sample_env_config_file
+):
+    """A normal package archive has context/ships.*.json and no root metadata."""
+    table = tmp_project / "payload" / "database" / "DDL" / "tables" / "MyDB.Customer.tbl"
+    table.write_text(
+        "CREATE MULTISET TABLE MyDB.Customer (Id INTEGER) PRIMARY INDEX (Id);\n",
+        encoding="utf-8",
+    )
+
+    config = BuildConfig(
+        source_dir=str(tmp_project),
+        environment="DEV",
+        package_name="Pkg",
+        env_config_file=str(sample_env_config_file),
+        build_number=1,
+        output_dir=str(tmp_path),
+    )
+
+    ((archive_path, _manifest), companion) = build_package(config)
+    assert companion is None
+
+    with zipfile.ZipFile(archive_path) as archive:
+        names = [name.replace("\\", "/") for name in archive.namelist()]
+        docs = {
+            name.split("/", 1)[1]: json.loads(archive.read(name).decode("utf-8"))
+            for name in names
+            if name.endswith(".json")
+            and "/context/" in name
+            and "/context/schemas/" not in name
+        }
+        schemas = {
+            name.rsplit("/", 1)[1]: json.loads(archive.read(name).decode("utf-8"))
+            for name in names
+            if "/context/schemas/" in name and name.endswith(".schema.json")
+        }
+
+    assert any(name.endswith("/context/ships.index.json") for name in names)
+    assert any(name.endswith("/context/ships.build.json") for name in names)
+    assert any(
+        name.endswith("/context/schemas/ships.index.schema.json") for name in names
+    )
+    assert not any(
+        len(name.split("/")) == 2
+        and name.split("/")[1].startswith("ships.")
+        and name.split("/")[1].endswith(".json")
+        for name in names
+    )
+
+    for document_path, schema_name in {
+        "context/ships.index.json": "ships.index.schema.json",
+        "context/ships.context.json": "ships.context.schema.json",
+        "context/ships.manifest.json": "ships.manifest.schema.json",
+        "context/ships.handoff.json": "ships.handoff.schema.json",
+        "context/ships.build.json": "ships.build.schema.json",
+        "context/ships.provenance.json": "ships.provenance.schema.json",
+        "context/ships.integrity.json": "ships.integrity.schema.json",
+    }.items():
+        assert document_path in docs
+        schema = schemas[schema_name]
+        missing = [field for field in schema["required"] if field not in docs[document_path]]
+        assert missing == []
 
 
 # ---------------------------------------------------------------

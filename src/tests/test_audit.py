@@ -28,10 +28,12 @@ from database_package_deployer.audit import (
 
 
 def _pkg_dir(tmp_path: Path) -> str:
-    """Create a minimal package directory with ships.build.json."""
+    """Create a minimal package directory with context/ships.build.json."""
     pkg = tmp_path / "DEV_Pkg_BUILD_0001"
     pkg.mkdir()
-    (pkg / "ships.build.json").write_text(
+    context_dir = pkg / "context"
+    context_dir.mkdir()
+    (context_dir / "ships.build.json").write_text(
         json.dumps(
             {
                 "package_filename": "DEV_Pkg_BUILD_0001.zip",

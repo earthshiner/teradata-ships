@@ -87,6 +87,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
+from database_package_deployer.package_metadata import read_package_json
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -145,11 +147,11 @@ def _now() -> str:
 
 
 def _read_build_meta(package_dir: str) -> dict:
-    """Read deployment metadata from ships.build.json in ``package_dir``.
+    """Read deployment metadata from context/ships.build.json in ``package_dir``.
 
     Returns a dict with keys ``build_number``, ``environment``,
     ``package_name``, ``package_filename``.  Missing or unreadable
-    ships.build.json → all values are empty strings.
+    context/ships.build.json → all values are empty strings.
     """
     defaults = {
         "build_number": "",
@@ -157,19 +159,15 @@ def _read_build_meta(package_dir: str) -> dict:
         "package_name": "",
         "package_filename": "",
     }
-    build_json = os.path.join(package_dir, "ships.build.json")
-    if not os.path.isfile(build_json):
-        return defaults
-    try:
-        with open(build_json, encoding="utf-8") as f:
-            data = json.load(f)
-        for key in defaults:
-            if isinstance(data.get(key), str):
-                defaults[key] = data[key]
-    except Exception:  # noqa: BLE001
+    data = read_package_json(package_dir, "ships.build.json")
+    if not data:
         logger.debug(
-            "ships_lineage: could not read ships.build.json at %s", package_dir
+            "ships_lineage: could not read context/ships.build.json at %s", package_dir
         )
+        return defaults
+    for key in defaults:
+        if isinstance(data.get(key), str):
+            defaults[key] = data[key]
     return defaults
 
 

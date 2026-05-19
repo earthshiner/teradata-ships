@@ -46,6 +46,7 @@ README_FILENAME = "README.txt"
 
 PROMPTS_DIR = "prompts"
 STAGES_DIR = "stages"
+SCHEMAS_DIR = "schemas"
 PROCESS_RESULT_FILENAME = "process.result.json"
 PROMPT_README_FILENAME = "README.md"
 AGENT_OPERATING_PROMPT_FILENAME = "agent_operating_instructions.prompt.md"
@@ -53,6 +54,177 @@ VERIFICATION_AGENT_PROMPT_FILENAME = "verification_agent.prompt.md"
 DEPLOYMENT_AGENT_PROMPT_FILENAME = "deployment_agent.prompt.md"
 REMEDIATION_AGENT_PROMPT_FILENAME = "remediation_agent.prompt.md"
 EVIDENCE_AGENT_PROMPT_FILENAME = "evidence_agent.prompt.md"
+
+SCHEMA_FILENAMES = {
+    INDEX_FILENAME: "ships.index.schema.json",
+    CONTEXT_FILENAME: "ships.context.schema.json",
+    MANIFEST_FILENAME: "ships.manifest.schema.json",
+    HANDOFF_FILENAME: "ships.handoff.schema.json",
+    BUILD_FILENAME: "ships.build.schema.json",
+    PROVENANCE_FILENAME: "ships.provenance.schema.json",
+    INTEGRITY_FILENAME: "ships.integrity.schema.json",
+}
+
+DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
+    "ships.index.schema.json": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://teradata-ships.local/schemas/ships.index.schema.json",
+        "title": "SHIPS package index",
+        "type": "object",
+        "additionalProperties": True,
+        "required": [
+            "schema",
+            "schema_version",
+            "package_type",
+            "read_first",
+            "entrypoints",
+            "recommended_read_order",
+            "agent_policy",
+        ],
+        "properties": {
+            "schema": {"const": "teradata-ships/package-index/v1"},
+            "schema_version": {"type": "string"},
+            "package_type": {"const": "teradata-ships"},
+            "read_first": {"const": "context/ships.index.json"},
+            "entrypoints": {"type": "object"},
+            "recommended_read_order": {"type": "array", "items": {"type": "string"}},
+            "agent_policy": {"type": "object"},
+        },
+    },
+    "ships.context.schema.json": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://teradata-ships.local/schemas/ships.context.schema.json",
+        "title": "SHIPS durable workflow context",
+        "type": "object",
+        "additionalProperties": True,
+        "required": [
+            "schema_version",
+            "context_id",
+            "current_state",
+            "package",
+            "governance",
+            "trust",
+            "references",
+        ],
+        "properties": {
+            "schema_version": {"type": "string"},
+            "context_id": {"type": "string"},
+            "current_state": {"type": "string"},
+            "package": {"type": "object"},
+            "governance": {"type": "object"},
+            "trust": {"type": "object"},
+            "references": {"type": "object"},
+        },
+    },
+    "ships.manifest.schema.json": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://teradata-ships.local/schemas/ships.manifest.schema.json",
+        "title": "SHIPS agent-safe package manifest",
+        "type": "object",
+        "additionalProperties": True,
+        "required": [
+            "schema_version",
+            "context_id",
+            "package",
+            "inventory",
+            "dependency_contract",
+            "tokens",
+            "governance",
+            "trust",
+            "evidence",
+        ],
+        "properties": {
+            "schema_version": {"type": "string"},
+            "context_id": {"type": "string"},
+            "package": {"type": "object"},
+            "inventory": {"type": "object"},
+            "dependency_contract": {"type": "object"},
+            "tokens": {"type": "object"},
+            "governance": {"type": "object"},
+            "trust": {"type": "object"},
+            "evidence": {"type": "object"},
+        },
+    },
+    "ships.handoff.schema.json": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://teradata-ships.local/schemas/ships.handoff.schema.json",
+        "title": "SHIPS package handoff",
+        "type": "object",
+        "additionalProperties": True,
+        "required": [
+            "schema_version",
+            "context_id",
+            "handoff_type",
+            "current_state",
+            "package",
+            "required_actions",
+            "preconditions",
+            "blocking_conditions",
+            "references",
+        ],
+        "properties": {
+            "schema_version": {"type": "string"},
+            "context_id": {"type": "string"},
+            "handoff_type": {"type": "string"},
+            "current_state": {"type": "string"},
+            "package": {"type": "object"},
+            "required_actions": {"type": "array", "items": {"type": "string"}},
+            "preconditions": {"type": "object"},
+            "blocking_conditions": {"type": "array", "items": {"type": "string"}},
+            "references": {"type": "object"},
+        },
+    },
+    "ships.build.schema.json": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://teradata-ships.local/schemas/ships.build.schema.json",
+        "title": "SHIPS technical build manifest",
+        "type": "object",
+        "additionalProperties": True,
+        "required": [
+            "build_number",
+            "environment",
+            "package_name",
+            "package_filename",
+            "timestamp",
+            "target_env",
+            "trust",
+        ],
+        "properties": {
+            "build_number": {"type": ["string", "integer"]},
+            "environment": {"type": "string"},
+            "package_name": {"type": "string"},
+            "package_filename": {"type": "string"},
+            "timestamp": {"type": "string"},
+            "target_env": {"type": ["string", "null"]},
+            "trust": {"type": "object"},
+        },
+    },
+    "ships.provenance.schema.json": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://teradata-ships.local/schemas/ships.provenance.schema.json",
+        "title": "SHIPS provenance document",
+        "type": "object",
+        "additionalProperties": True,
+        "required": ["version", "entries"],
+        "properties": {
+            "version": {"type": ["integer", "string"]},
+            "generated_at": {"type": "string"},
+            "entries": {"type": "object"},
+        },
+    },
+    "ships.integrity.schema.json": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://teradata-ships.local/schemas/ships.integrity.schema.json",
+        "title": "SHIPS package integrity manifest",
+        "type": "object",
+        "additionalProperties": True,
+        "required": ["package_hash", "files"],
+        "properties": {
+            "package_hash": {"type": "string"},
+            "files": {"type": "object"},
+        },
+    },
+}
 
 DEFAULT_PROMPTS: Dict[str, str] = {
     PROMPT_README_FILENAME: """# SHIPS Package Prompts
@@ -268,6 +440,15 @@ def write_context_artifacts(
             f.write("\n")
         written[f"{PROMPTS_DIR}/{filename}"] = path
 
+    schemas_dir = os.path.join(context_dir, SCHEMAS_DIR)
+    os.makedirs(schemas_dir, exist_ok=True)
+    for filename, schema in DEFAULT_SCHEMAS.items():
+        path = os.path.join(schemas_dir, filename)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(schema, f, indent=2, ensure_ascii=False, sort_keys=True)
+            f.write("\n")
+        written[f"{SCHEMAS_DIR}/{filename}"] = path
+
     return written
 
 
@@ -418,6 +599,16 @@ def _entrypoints() -> Dict[str, Dict[str, Any]]:
                 _context_path(f"{PROMPTS_DIR}/{EVIDENCE_AGENT_PROMPT_FILENAME}"),
             ],
         },
+        "schemas": {
+            "path": _context_path(f"{SCHEMAS_DIR}/"),
+            "description": "JSON Schemas for the SHIPS package context contract files.",
+            "required": True,
+            "audience": ["agent", "ci_cd", "mcp", "governance"],
+            "contains": [
+                _context_path(f"{SCHEMAS_DIR}/{name}")
+                for name in sorted(DEFAULT_SCHEMAS)
+            ],
+        },
         "readme": {
             "path": README_FILENAME,
             "description": "Human quick-start instructions for inspecting, verifying, and deploying the package.",
@@ -440,6 +631,7 @@ def _recommended_read_order() -> list[str]:
         "stage_results",
         "prerequisites",
         "prompts",
+        "schemas",
         "package_report",
     ]
 

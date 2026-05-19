@@ -29,7 +29,9 @@ def _make_zip(tmp_path: Path, zip_name: str = "DEV_TestPkg_BUILD_0001.zip") -> P
     """Create a minimal, real ZIP archive and return its path."""
     zip_path = tmp_path / zip_name
     with zipfile.ZipFile(zip_path, "w") as zf:
-        zf.writestr("ships.build.json", json.dumps({"package_filename": zip_name}))
+        zf.writestr(
+            "context/ships.build.json", json.dumps({"package_filename": zip_name})
+        )
         zf.writestr("payload/table.tbl", "CREATE MULTISET TABLE D.T (id INT);")
     return zip_path
 
@@ -44,13 +46,17 @@ def _sha256(path: Path) -> str:
 
 
 def _make_build_json(pkg_dir: Path, zip_name: str) -> None:
-    """Write a ships.build.json referencing the given ZIP filename."""
+    """Write a context/ships.build.json referencing the given ZIP filename."""
     manifest = {
         "package_filename": zip_name,
         "environment": "DEV",
         "package_name": "TestPkg",
     }
-    (pkg_dir / "ships.build.json").write_text(json.dumps(manifest), encoding="utf-8")
+    context_dir = pkg_dir / "context"
+    context_dir.mkdir(exist_ok=True)
+    (context_dir / "ships.build.json").write_text(
+        json.dumps(manifest), encoding="utf-8"
+    )
 
 
 # ---------------------------------------------------------------
