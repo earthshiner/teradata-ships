@@ -172,11 +172,10 @@ class TestInspectRecordsLintIssues:
 
     def test_lint_warning_recorded_as_warning_issue(self, tmp_path, capsys):
         project = _make_project(tmp_path)
-        # REPLACE VIEW fires the deploy_intent rule (default WARNING).
-        viw_dir = project / "payload" / "database" / "DDL" / "views"
-        viw_dir.mkdir(parents=True)
-        (viw_dir / "{{DB}}.V.viw").write_text(
-            "REPLACE VIEW {{DB}}.V AS SELECT 1;\n",
+        # CREATE TABLE without SET/MULTISET fires set_multiset (WARNING).
+        tbl_dir = project / "payload" / "database" / "DDL" / "tables"
+        (tbl_dir / "{{DB}}.T.tbl").write_text(
+            "CREATE TABLE {{DB}}.T (Id INT) PRIMARY INDEX (Id);",
             encoding="utf-8",
         )
 
@@ -188,14 +187,13 @@ class TestInspectRecordsLintIssues:
         stage = _read_decisions(project)["runs"][0]["stages"][0]
         warning_issues = [i for i in stage["issues"] if i["severity"] == "warning"]
         assert any(
-            i["code"] == "INSPECT_LINT_VIOLATION" and "[deploy_intent]" in i["message"]
+            i["code"] == "INSPECT_LINT_VIOLATION" and "[set_multiset]" in i["message"]
             for i in warning_issues
         )
 
     def test_lint_error_recorded_as_error_issue(self, tmp_path, capsys):
         project = _make_project(tmp_path)
-        # REPLACE VIEW fires the deploy_intent rule at ERROR when strict mode is on.
-        # Simulate strict mode via a db_qualifier violation (always ERROR).
+        # Simulate a lint error via a db_qualifier violation (always ERROR).
         viw_dir = project / "payload" / "database" / "DDL" / "views"
         viw_dir.mkdir(parents=True)
         (viw_dir / "V.viw").write_text(
@@ -240,10 +238,9 @@ class TestInspectRecordsLintIssues:
 
     def test_lint_issue_location_carries_file_and_line(self, tmp_path, capsys):
         project = _make_project(tmp_path)
-        viw_dir = project / "payload" / "database" / "DDL" / "views"
-        viw_dir.mkdir(parents=True)
-        (viw_dir / "{{DB}}.V.viw").write_text(
-            "REPLACE VIEW {{DB}}.V AS SELECT 1;\n",
+        tbl_dir = project / "payload" / "database" / "DDL" / "tables"
+        (tbl_dir / "{{DB}}.T.tbl").write_text(
+            "CREATE TABLE {{DB}}.T (Id INT) PRIMARY INDEX (Id);",
             encoding="utf-8",
         )
 
@@ -251,12 +248,12 @@ class TestInspectRecordsLintIssues:
         capsys.readouterr()
 
         stage = _read_decisions(project)["runs"][0]["stages"][0]
-        deploy_intent_issues = [
-            i for i in stage["issues"] if "[deploy_intent]" in i.get("message", "")
+        lint_issues = [
+            i for i in stage["issues"] if "[set_multiset]" in i.get("message", "")
         ]
-        assert deploy_intent_issues
+        assert lint_issues
         # Location should at least name the file (line is optional).
-        assert ".viw" in deploy_intent_issues[0]["location"]
+        assert ".tbl" in lint_issues[0]["location"]
 
 
 # ---------------------------------------------------------------

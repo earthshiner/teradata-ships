@@ -11,7 +11,7 @@ Rules are configured via `inspect.conf` in the project root.
 |----------------------------|------------------|------------------------------------------------------------------------------|
 | `db_qualifier`             | ERROR            | Object must use `Database.ObjectName` syntax.                                |
 | `set_multiset`             | WARNING          | `CREATE TABLE` must specify `SET` or `MULTISET`.                             |
-| `deploy_intent`            | WARNING          | `REPLACE` detected — `CREATE` is the preferred SHIPS convention. The deployer captures a rollback snapshot before executing either verb. Raise to `ERROR` in `inspect.conf` to enforce CREATE-only. |
+| `deploy_intent`            | OFF              | Retired compatibility rule. `REPLACE` and `CREATE` are both supported for replaceable Teradata objects; the deployer records the source verb and captures rollback snapshots before executing either path. |
 | `one_object`               | WARNING          | Each file must contain exactly one DDL statement.                            |
 | `eponymous`                | WARNING          | Filename must match the DDL object name.                                     |
 | `extension`                | ERROR            | File extension must match the object type.                                   |

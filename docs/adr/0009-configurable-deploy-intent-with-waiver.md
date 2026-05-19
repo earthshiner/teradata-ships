@@ -1,11 +1,13 @@
-# ADR 0009: `deploy_intent` Rule — WARNING Default, REPLACE Permitted
+# ADR 0009: `deploy_intent` Rule — Retired, REPLACE Permitted
 
 ## Status
 
-Accepted | 2026-05-15
+Superseded | 2026-05-19
 
-_Supersedes the earlier "Proposed" draft of this ADR, which described
-a waiver-machinery approach that was not implemented._
+Superseded by the 2026-05-19 decision to retire the `deploy_intent`
+inspect rule entirely. `REPLACE` is common Teradata source style and is
+fully supported by SHIPS rollback snapshotting, so inspect no longer
+advises or blocks on `REPLACE`.
 
 ## Context
 
@@ -45,26 +47,24 @@ safety for both verbs.
 ## Decision
 
 The `deploy_intent` rule default is changed from **ERROR** to
-**WARNING**.
+**WARNING**. This decision was later superseded: the rule is now **OFF**
+by default and `_check_deploy_intent` no longer emits issues for `REPLACE`.
 
 1. **REPLACE is permitted.**  A DDL source file may use either
    `CREATE` or `REPLACE` for replaceable object types (views,
    procedures, macros, functions, triggers).  Both are handled safely
    by the deployer.
 
-2. **CREATE remains the preferred convention.**  The WARNING nudges
-   authors toward `CREATE` without blocking packaging.  New
-   development under the SHIPS Coding Discipline should use `CREATE`.
+2. **CREATE was treated as the preferred convention.**  The original
+   WARNING nudged authors toward `CREATE` without blocking packaging.
+   This preference is now retired; `CREATE` and `REPLACE` are both
+   accepted source styles.
 
-3. **Projects may escalate to ERROR.**  Teams that want to enforce
-   strict `CREATE`-only (e.g. for uniformity in new greenfield
-   projects) may set `deploy_intent=ERROR` in `inspect.conf`.  The
-   default for projects that do not configure the rule is WARNING.
+3. **Projects could previously escalate to ERROR.**  That option is no
+   longer active because the rule no longer emits issues.
 
-4. **Projects may silence it entirely.**  Teams migrating large
-   codebases with pervasive `REPLACE` usage may set
-   `deploy_intent=OFF` to suppress the advisory entirely until
-   remediation is complete.
+4. **Projects no longer need to silence it.**  The default is OFF and
+   old `deploy_intent` config entries are ignored in practice.
 
 5. **Deployer behaviour is unchanged.**  `REPLACE` source files
    continue to route via the existing `REPLACE_IN_PLACE` strategy.
@@ -80,8 +80,8 @@ The `deploy_intent` rule default is changed from **ERROR** to
 - Rollback safety is unchanged — the deployer captures a pre-flight
   snapshot for both `CREATE` (DROP+CREATE path) and `REPLACE`
   (REPLACE_IN_PLACE path).
-- New development is still nudged toward `CREATE` via the WARNING.
-- Projects that want strict enforcement retain the `ERROR` option.
+- New and legacy development can keep idiomatic Teradata `REPLACE`
+  statements without inspect noise.
 
 **Negative**
 
@@ -95,8 +95,8 @@ The `deploy_intent` rule default is changed from **ERROR** to
 
 **Neutral**
 
-- The `deploy_intent` rule remains in the rule set; its default
-  severity changes.  No rule is removed or renamed.
+- The `deploy_intent` hook remains in code for compatibility, but it is
+  silent and defaulted OFF.
 - The earlier waiver-machinery proposal (discipline_waiver log,
   ships normalise CLI, ships.yaml discipline section) is deferred
   indefinitely.  It may be revisited if a finer-grained audit

@@ -70,25 +70,18 @@ scripts. It was rejected for the following reasons:
 
 ## Decision
 
-**Position B: The deployer owns idempotency.** DDL source files
-prefer `CREATE`. The deployer is responsible for making
-execution idempotent on the target environment. `REPLACE` is
-also permitted (the deployer handles it safely via the
-`REPLACE_IN_PLACE` strategy with pre-flight snapshot), but
-`CREATE` is the opinionated convention and the Inspect
-`deploy_intent` rule surfaces `REPLACE` usage as an advisory
-WARNING. Projects may raise this to ERROR via `inspect.conf` if
-they wish to enforce strict `CREATE`-only. This is implemented
-as follows:
+**Position B: The deployer owns idempotency.** The deployer is
+responsible for making execution restartable and recoverable on
+the target environment. DDL source files may use either `CREATE`
+or `REPLACE` for replaceable Teradata object types. The deployer
+records the verb as deployment intent, captures a pre-flight
+snapshot with `SHOW`, and routes the object through the appropriate
+execution strategy.
 
-1. **Source prefers `CREATE`.** `REPLACE` in a DDL source file
-   triggers an advisory WARNING at Inspect time (rule
-   `deploy_intent` — see ADR 0009 for the full rule history).
-   `REPLACE` is not blocked: the deployer handles it safely.
-   The WARNING nudges new development toward `CREATE` without
-   forcing mass remediation of existing codebases. Projects that
-   wish to enforce strict `CREATE`-only may set
-   `deploy_intent=ERROR` in `inspect.conf`.
+1. **Source may use `CREATE` or `REPLACE`.** `REPLACE` is normal
+   Teradata DDL style for views, macros, procedures, functions, and
+   triggers. Inspect no longer flags it via `deploy_intent`; see
+   ADR 0009 for the rule retirement history.
 
 2. **Strategy map by object type.** The deployer maintains a
    `STRATEGY_MAP` that assigns an execution strategy to each
@@ -179,16 +172,11 @@ as follows:
 
 **Neutral**
 
-- The decision to use `CREATE` in source and rewrite to
-  `REPLACE` in the staged payload for `REPLACE_IN_PLACE` types
-  (ADR 0009, decision 5) is a consequence of this ADR. If the
-  deployer owns idempotency, the deployer (via Harvest) is the
-  correct place for the `CREATE` → `REPLACE` transformation —
-  not the source file.
-- This ADR establishes the principle. ADR 0009 operationalises
-  the `deploy_intent` Discipline rule that enforces the
-  `CREATE`-in-source convention and provides the configurable
-  relaxation path for projects with `REPLACE` muscle memory.
+- The source verb is preserved as deployment intent. The deployer
+  owns rollback and restartability through snapshots and manifest
+  state rather than by forcing a single source verb convention.
+- This ADR establishes the principle. ADR 0009 records the history
+  of the retired `deploy_intent` rule.
 
 ## Alternatives considered
 

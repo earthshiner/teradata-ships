@@ -342,7 +342,6 @@ Edit `config/inspect.conf` in your project:
 # Values: ERROR | WARNING | OFF
 keyword_case=OFF
 leading_commas=OFF
-deploy_intent=WARNING
 db_qualifier=ERROR        # keep this one — it matters
 ```
 
@@ -359,7 +358,6 @@ A common pattern for onboarding a legacy codebase:
 1. Turn `hardcoded_name` to `WARNING` (not `OFF`) so you see what needs tokenising but it does not block you
 2. Fix `db_qualifier` errors (all objects must be qualified)
 3. Fix `type_suffix` warnings at your own pace
-4. Fix `deploy_intent` warnings (prefer `REPLACE VIEW` over `CREATE VIEW`)
 
 You do not need to fix everything before you can package.
 
