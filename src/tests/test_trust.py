@@ -260,6 +260,39 @@ class TestComputeTrustReport:
         assert report.label == LABEL_CAVEATS
         assert report.signals["inspect_lint"].status == TRUST_WARN
 
+    def test_lint_issues_keep_file_location(self, tmp_path):
+        _write_decisions(
+            tmp_path / "ships.decisions.json",
+            [
+                {
+                    "command": "inspect",
+                    "stages": [
+                        {
+                            "stage": "inspect",
+                            "status": "error",
+                            "issues": [
+                                {
+                                    "code": INSPECT_LINT_VIOLATION,
+                                    "severity": "error",
+                                    "message": (
+                                        "[db_qualifier] Object 'GDEV1P_BB' "
+                                        "missing database qualifier."
+                                    ),
+                                    "location": "payload/database/DDL/views/V.viw:1",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        )
+
+        report = compute_trust_report(str(tmp_path), str(tmp_path))
+
+        issue = report.signals["inspect_lint"].issues[0]
+        assert issue.startswith("payload/database/DDL/views/V.viw:1:")
+        assert "[db_qualifier]" in issue
+
     def test_caveats_when_no_decisions_json(self, tmp_path):
         """No ships.decisions.json means inspect never ran — signals are UNKNOWN."""
         report = compute_trust_report(str(tmp_path), str(tmp_path))

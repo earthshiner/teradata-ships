@@ -195,20 +195,29 @@ def _inspect_signal(
     warnings = [i for i in matching if i.get("severity") == "warning"]
 
     if errors:
-        messages = [i.get("message", "") for i in errors]
+        messages = [_format_issue_for_trust(i) for i in errors]
         return TrustSignal(
             status=TRUST_FAIL,
             message=f"{fail_message_prefix}: {len(errors)} error(s)",
             issues=messages[:10],  # cap to keep ships.build.json small
         )
     if warnings:
-        messages = [i.get("message", "") for i in warnings]
+        messages = [_format_issue_for_trust(i) for i in warnings]
         return TrustSignal(
             status=TRUST_WARN,
             message=f"{fail_message_prefix}: {len(warnings)} warning(s)",
             issues=messages[:10],
         )
     return TrustSignal(status=TRUST_PASS, message=pass_message)
+
+
+def _format_issue_for_trust(issue: dict) -> str:
+    """Render a decisions issue with its location kept in the trust report."""
+    message = issue.get("message", "")
+    location = issue.get("location", "")
+    if location:
+        return f"{location}: {message}"
+    return message
 
 
 def _provenance_signal(pkg_dir: str) -> TrustSignal:
