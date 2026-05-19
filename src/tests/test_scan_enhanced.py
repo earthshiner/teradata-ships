@@ -93,7 +93,7 @@ class TestShowMap:
             tokens=["MY_DB", "OTHER_DB"],
             env_configs={},
         )
-        result = _ships(["scan", "--source", str(project), "--show-map"])
+        result = _ships(["scan", "--project", str(project), "--show-map"])
         assert "MY_DB" in result.stdout
         assert "OTHER_DB" in result.stdout
         # With --show-map, files should be listed (not just count)
@@ -101,7 +101,7 @@ class TestShowMap:
 
     def test_without_show_map_only_shows_count(self, tmp_path):
         project = _make_project(tmp_path, tokens=["MY_DB"], env_configs={})
-        result = _ships(["scan", "--source", str(project)])
+        result = _ships(["scan", "--project", str(project)])
         assert "MY_DB" in result.stdout
         # Without --show-map, files should NOT be listed individually
         assert "file(s)" in result.stdout
@@ -122,7 +122,7 @@ class TestAllEnvs:
                 "PRD": {"MY_DB": "P_PRD_DB"},
             },
         )
-        result = _ships(["scan", "--source", str(project), "--all-envs"])
+        result = _ships(["scan", "--project", str(project), "--all-envs"])
         assert "DEV" in result.stdout
         assert "PRD" in result.stdout
 
@@ -135,7 +135,7 @@ class TestAllEnvs:
                 "TST": {"MY_DB": "T_TST_DB"},
             },
         )
-        result = _ships(["scan", "--source", str(project), "--all-envs"])
+        result = _ships(["scan", "--project", str(project), "--all-envs"])
         assert result.returncode == 0
 
     def test_undefined_in_one_env_exits_1(self, tmp_path):
@@ -147,7 +147,7 @@ class TestAllEnvs:
                 "PRD": {},  # MY_DB not defined in PRD
             },
         )
-        result = _ships(["scan", "--source", str(project), "--all-envs"])
+        result = _ships(["scan", "--project", str(project), "--all-envs"])
         assert result.returncode == 1
         assert "MY_DB" in result.stdout
 
@@ -160,7 +160,7 @@ class TestAllEnvs:
                 "PRD": {},
             },
         )
-        result = _ships(["scan", "--source", str(project), "--all-envs"])
+        result = _ships(["scan", "--project", str(project), "--all-envs"])
         # One env passes, one fails — both names appear in output
         assert "DEV" in result.stdout
         assert "PRD" in result.stdout
@@ -170,7 +170,7 @@ class TestAllEnvs:
         result = _ships(
             [
                 "scan",
-                "--source",
+                "--project",
                 str(project),
                 "--all-envs",
                 "--env-config",
@@ -192,14 +192,14 @@ class TestAllEnvs:
 class TestFormatJson:
     def test_output_is_valid_json(self, tmp_path):
         project = _make_project(tmp_path, tokens=["MY_DB"], env_configs={})
-        result = _ships(["scan", "--source", str(project), "--format", "json"])
+        result = _ships(["scan", "--project", str(project), "--format", "json"])
         assert result.returncode == 0
         data = json.loads(result.stdout)
         assert isinstance(data, dict)
 
     def test_json_contains_required_keys(self, tmp_path):
         project = _make_project(tmp_path, tokens=["MY_DB"], env_configs={})
-        result = _ships(["scan", "--source", str(project), "--format", "json"])
+        result = _ships(["scan", "--project", str(project), "--format", "json"])
         data = json.loads(result.stdout)
         assert "unique_tokens" in data
         assert "token_map" in data
@@ -208,7 +208,7 @@ class TestFormatJson:
 
     def test_json_token_map_has_count_and_files(self, tmp_path):
         project = _make_project(tmp_path, tokens=["MY_DB"], env_configs={})
-        result = _ships(["scan", "--source", str(project), "--format", "json"])
+        result = _ships(["scan", "--project", str(project), "--format", "json"])
         data = json.loads(result.stdout)
         assert "MY_DB" in data["token_map"]
         entry = data["token_map"]["MY_DB"]
@@ -226,7 +226,7 @@ class TestFormatJson:
         result = _ships(
             [
                 "scan",
-                "--source",
+                "--project",
                 str(project),
                 "--env-config",
                 env_conf,
@@ -247,7 +247,7 @@ class TestFormatJson:
         result = _ships(
             [
                 "scan",
-                "--source",
+                "--project",
                 str(project),
                 "--env-config",
                 env_conf,
@@ -277,7 +277,7 @@ class TestFailOnOrphan:
         result = _ships(
             [
                 "scan",
-                "--source",
+                "--project",
                 str(project),
                 "--env-config",
                 env_conf,
@@ -296,7 +296,7 @@ class TestFailOnOrphan:
         result = _ships(
             [
                 "scan",
-                "--source",
+                "--project",
                 str(project),
                 "--env-config",
                 env_conf,
@@ -316,7 +316,7 @@ class TestFailOnOrphan:
         result = _ships(
             [
                 "scan",
-                "--source",
+                "--project",
                 str(project),
                 "--env-config",
                 env_conf,
@@ -334,7 +334,7 @@ class TestFailOnOrphan:
         result = _ships(
             [
                 "scan",
-                "--source",
+                "--project",
                 str(project),
                 "--env-config",
                 env_conf,
@@ -356,7 +356,7 @@ class TestCleanRun:
             env_configs={"DEV": {"MY_DB": "A_DEV_DB"}},
         )
         env_conf = str(project / "config" / "env" / "DEV.conf")
-        result = _ships(["scan", "--source", str(project), "--env-config", env_conf])
+        result = _ships(["scan", "--project", str(project), "--env-config", env_conf])
         assert result.returncode == 0
 
     def test_no_tokens_exits_0(self, tmp_path):
@@ -367,5 +367,5 @@ class TestCleanRun:
             encoding="utf-8",
         )
         (project / ".build_counter").write_text("0\n", encoding="utf-8")
-        result = _ships(["scan", "--source", str(project)])
+        result = _ships(["scan", "--project", str(project)])
         assert result.returncode == 0
