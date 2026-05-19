@@ -58,6 +58,13 @@ class TestPlainTypes:
         )
         assert r.type == "JAR"
 
+    def test_jar_create_script(self):
+        r = cls.classify(
+            "create.sjr",
+            "CALL SQLJ.CREATE_JAR('CJ!../foo.jar', 'jar_alias', 0);",
+        )
+        assert r.type == "JAR"
+
     def test_unclassified_returns_none(self):
         r = cls.classify("random.sql", "SELECT 1 AS dummy;")
         assert r.type is None

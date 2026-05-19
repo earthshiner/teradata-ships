@@ -231,10 +231,10 @@ _SCRIPT_TABLE_OPERATOR_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
-# JAR installation via SQLJ.INSTALL_JAR / SQLJ.REPLACE_JAR
+# JAR installation via SQLJ.INSTALL_JAR / SQLJ.CREATE_JAR / SQLJ.REPLACE_JAR
 _JAR_INSTALL_RE = re.compile(
     r"""
-    CALL\s+SQLJ\s*\.\s*(?:INSTALL_JAR|REPLACE_JAR)\s*\(
+    CALL\s+SQLJ\s*\.\s*(?:INSTALL_JAR|CREATE_JAR|REPLACE_JAR)\s*\(
     """,
     re.IGNORECASE | re.VERBOSE,
 )
