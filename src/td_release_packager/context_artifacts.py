@@ -70,6 +70,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "https://teradata-ships.local/schemas/ships.index.schema.json",
         "title": "SHIPS package index",
+        "description": "Read-first index for every package-local SHIPS context document, prompt, schema, and evidence artefact.",
         "type": "object",
         "additionalProperties": True,
         "required": [
@@ -90,11 +91,23 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "recommended_read_order": {"type": "array", "items": {"type": "string"}},
             "agent_policy": {"type": "object"},
         },
+        "examples": [
+            {
+                "schema": "teradata-ships/package-index/v1",
+                "schema_version": "1.0",
+                "package_type": "teradata-ships",
+                "read_first": "context/ships.index.json",
+                "entrypoints": {},
+                "recommended_read_order": ["index", "handoff", "context", "build"],
+                "agent_policy": {},
+            }
+        ],
     },
     "ships.context.schema.json": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "https://teradata-ships.local/schemas/ships.context.schema.json",
         "title": "SHIPS durable workflow context",
+        "description": "Durable package handoff context for humans, CI/CD systems, MCP tools, and deployment agents.",
         "type": "object",
         "additionalProperties": True,
         "required": [
@@ -115,11 +128,23 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "trust": {"type": "object"},
             "references": {"type": "object"},
         },
+        "examples": [
+            {
+                "schema_version": "1.0",
+                "context_id": "DEV_pkg_BUILD_0001.zip",
+                "current_state": "package-built-awaiting-deployment",
+                "package": {},
+                "governance": {},
+                "trust": {},
+                "references": {},
+            }
+        ],
     },
     "ships.manifest.schema.json": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "https://teradata-ships.local/schemas/ships.manifest.schema.json",
         "title": "SHIPS agent-safe package manifest",
+        "description": "Compact package inventory, dependency contract, governance summary, and evidence map for agent consumption.",
         "type": "object",
         "additionalProperties": True,
         "required": [
@@ -144,11 +169,25 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "trust": {"type": "object"},
             "evidence": {"type": "object"},
         },
+        "examples": [
+            {
+                "schema_version": "1.0",
+                "context_id": "DEV_pkg_BUILD_0001.zip",
+                "package": {},
+                "inventory": {},
+                "dependency_contract": {},
+                "tokens": {},
+                "governance": {},
+                "trust": {},
+                "evidence": {},
+            }
+        ],
     },
     "ships.handoff.schema.json": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "https://teradata-ships.local/schemas/ships.handoff.schema.json",
         "title": "SHIPS package handoff",
+        "description": "Next-actor instructions, preconditions, blockers, references, and evidence expectations for package deployment.",
         "type": "object",
         "additionalProperties": True,
         "required": [
@@ -173,14 +212,29 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "blocking_conditions": {"type": "array", "items": {"type": "string"}},
             "references": {"type": "object"},
         },
+        "examples": [
+            {
+                "schema_version": "1.0",
+                "context_id": "DEV_pkg_BUILD_0001.zip",
+                "handoff_type": "package-to-deployment",
+                "current_state": "package-built-awaiting-deployment",
+                "package": {},
+                "required_actions": ["Read context/ships.index.json first."],
+                "preconditions": {},
+                "blocking_conditions": [],
+                "references": {},
+            }
+        ],
     },
     "ships.build.schema.json": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "https://teradata-ships.local/schemas/ships.build.schema.json",
         "title": "SHIPS technical build manifest",
+        "description": "Authoritative technical build manifest stamped by the packager and consumed by deploy-time controls.",
         "type": "object",
         "additionalProperties": True,
         "required": [
+            "schema_version",
             "build_number",
             "environment",
             "package_name",
@@ -190,6 +244,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "trust",
         ],
         "properties": {
+            "schema_version": {"type": "string"},
             "build_number": {"type": ["string", "integer"]},
             "environment": {"type": "string"},
             "package_name": {"type": "string"},
@@ -198,31 +253,62 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "target_env": {"type": ["string", "null"]},
             "trust": {"type": "object"},
         },
+        "examples": [
+            {
+                "schema_version": "1.0",
+                "build_number": "0001",
+                "environment": "DEV",
+                "package_name": "customer_risk",
+                "package_filename": "DEV_customer_risk_BUILD_0001.zip",
+                "timestamp": "2026-05-19T00:00:00+00:00",
+                "target_env": "DEV",
+                "trust": {"label": "READY"},
+            }
+        ],
     },
     "ships.provenance.schema.json": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "https://teradata-ships.local/schemas/ships.provenance.schema.json",
         "title": "SHIPS provenance document",
+        "description": "File-level source-to-package transformation chain for every packaged payload artefact.",
         "type": "object",
         "additionalProperties": True,
-        "required": ["version", "entries"],
+        "required": ["schema_version", "version", "entries"],
         "properties": {
+            "schema_version": {"type": "string"},
             "version": {"type": ["integer", "string"]},
             "generated_at": {"type": "string"},
             "entries": {"type": "object"},
         },
+        "examples": [
+            {
+                "schema_version": "2.0",
+                "version": 2,
+                "generated_at": "2026-05-19T00:00:00+00:00",
+                "entries": {},
+            }
+        ],
     },
     "ships.integrity.schema.json": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "https://teradata-ships.local/schemas/ships.integrity.schema.json",
         "title": "SHIPS package integrity manifest",
+        "description": "Package tamper-evidence manifest containing file hashes and the combined package fingerprint.",
         "type": "object",
         "additionalProperties": True,
-        "required": ["package_hash", "files"],
+        "required": ["schema_version", "package_hash", "files"],
         "properties": {
+            "schema_version": {"type": "string"},
             "package_hash": {"type": "string"},
             "files": {"type": "object"},
         },
+        "examples": [
+            {
+                "schema_version": "1.0",
+                "package_hash": "0" * 64,
+                "files": {"payload/database/DDL/tables/example.tbl": "0" * 64},
+            }
+        ],
     },
 }
 

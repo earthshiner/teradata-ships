@@ -237,6 +237,7 @@ class BuildManifest:
                           (post-deploy SHOW captures).  Configured via
                           ``ships.yaml``'s ``deployment.baseline_dir``.
                           Empty string means drift detection is disabled.
+        schema_version:   JSON schema version for context/ships.build.json.
     """
 
     build_number: str
@@ -300,6 +301,7 @@ class BuildManifest:
     # Stamped from ships.yaml signing.public_key (if present) at Package time.
     # Allows DBAs to verify without needing a separate --public-key flag.
     ships_public_key: str = ""
+    schema_version: str = "1.0"
 
 
 @dataclass
