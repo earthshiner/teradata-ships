@@ -3475,7 +3475,9 @@ def _execute_ddl(cursor, ddl_text: str, *, split_statements: bool = True):
     }
 
     for stmt in statements:
-        clean = stmt.strip().rstrip(";").strip()
+        clean = stmt.strip()
+        if split_statements:
+            clean = clean.rstrip(";").strip()
         if not clean:
             continue
 

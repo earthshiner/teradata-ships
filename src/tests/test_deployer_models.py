@@ -580,6 +580,7 @@ class TestExecuteDdl:
         assert "DECLARE vSQL_Text" in cur.executed[0]
         assert "CALL DBC.SYSEXECSQL(vSQL_Text);" in cur.executed[0]
         assert "'UPDATE MyDB.T SET c = 1;'" in cur.executed[0]
+        assert cur.executed[0].endswith("END;")
 
     def test_execute_parsed_ddl_keeps_procedure_body_as_one_request(self):
         """Procedure deployment uses object metadata to avoid semicolon splitting."""
@@ -607,7 +608,7 @@ class TestExecuteDdl:
         cur = _RecordingCursor()
         _execute_parsed_ddl(cur, parsed)
 
-        assert cur.executed == [sql.rstrip(";")]
+        assert cur.executed == [sql]
 
 
 class TestSqljClientFilePathResolution:
