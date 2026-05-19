@@ -856,7 +856,7 @@ def _format_bytes(num_bytes: int) -> str:
 # CALL SQLJ.INSTALL_JAR('CJ!path/to/X.jar', 'jar_alias', 0);
 #                        ^arg1: binary path  ^arg2: alias
 _INSTALL_JAR_RE = re.compile(
-    r"CALL\s+SQLJ\s*\.\s*(?:INSTALL_JAR|REPLACE_JAR)\s*\(\s*"
+    r"CALL\s+SQLJ\s*\.\s*(?:INSTALL_JAR|CREATE_JAR|REPLACE_JAR)\s*\(\s*"
     r"'[^']*'\s*,\s*'([^']+)'",
     re.IGNORECASE,
 )

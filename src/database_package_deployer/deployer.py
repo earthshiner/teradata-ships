@@ -124,6 +124,72 @@ def _clean_db_error(raw: str) -> str:
 
 
 _SQLJ_CLIENT_FILE_RE = re.compile(r"'CJ!((?:[^']|'')*)'", re.IGNORECASE)
+_SQLJ_JAR_CALL_RE = re.compile(
+    r"""
+    (?P<prefix>\bCALL\s+SQLJ\s*\.\s*)
+    (?P<proc>INSTALL_JAR|CREATE_JAR|REPLACE_JAR)
+    (?P<suffix>\s*\((?P<args>.*?)\)\s*;?)
+    """,
+    re.IGNORECASE | re.DOTALL | re.VERBOSE,
+)
+
+
+def _split_sqlj_args(args_text: str) -> list[str]:
+    """Split a simple SQLJ argument list without breaking quoted strings."""
+    args: list[str] = []
+    start = 0
+    in_quote = False
+    i = 0
+    while i < len(args_text):
+        ch = args_text[i]
+        if ch == "'":
+            if in_quote and i + 1 < len(args_text) and args_text[i + 1] == "'":
+                i += 2
+                continue
+            in_quote = not in_quote
+        elif ch == "," and not in_quote:
+            args.append(args_text[start:i].strip())
+            start = i + 1
+        i += 1
+    args.append(args_text[start:].strip())
+    return [arg for arg in args if arg]
+
+
+def _is_sqlj_replace_jar(ddl_text: str) -> bool:
+    match = _SQLJ_JAR_CALL_RE.search(ddl_text)
+    return bool(match and match.group("proc").upper() == "REPLACE_JAR")
+
+
+def _is_jar_missing_error(error_text: str) -> bool:
+    lowered = error_text.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "does not exist",
+            "doesn't exist",
+            "not exist",
+            "not found",
+            "does not currently exist",
+        )
+    )
+
+
+def _build_sqlj_create_jar_fallback(ddl_text: str) -> Optional[str]:
+    """Convert CALL SQLJ.REPLACE_JAR(...) to the create/install equivalent."""
+    match = _SQLJ_JAR_CALL_RE.search(ddl_text)
+    if not match or match.group("proc").upper() != "REPLACE_JAR":
+        return None
+
+    args_text = match.group("args").strip()
+    args = _split_sqlj_args(args_text)
+    if len(args) == 2:
+        args_text = f"{args_text}, 0"
+
+    create_call = (
+        f"{match.group('prefix')}INSTALL_JAR"
+        f"{match.group('suffix').replace(match.group('args'), args_text, 1)}"
+    )
+    return ddl_text[: match.start()] + create_call + ddl_text[match.end() :]
 
 
 def _resolve_sqlj_client_file_paths(ddl_text: str, ddl_file_path: str) -> str:
@@ -2339,6 +2405,30 @@ def _deploy_direct_execute(
         _execute_parsed_ddl(cursor, parsed, ddl_text=ddl_text)
     except Exception as e:
         err_str = str(e)
+        if (
+            obj_type == ObjectType.JAR
+            and _is_sqlj_replace_jar(ddl_text)
+            and _is_jar_missing_error(err_str)
+        ):
+            create_ddl = _build_sqlj_create_jar_fallback(ddl_text)
+            if create_ddl:
+                logger.info(
+                    "DIRECT_EXECUTE: SQLJ.REPLACE_JAR target is missing; "
+                    "falling back to SQLJ.INSTALL_JAR for %s.",
+                    qn,
+                )
+                _execute_parsed_ddl(cursor, parsed, ddl_text=create_ddl)
+                return ObjectDeployResult(
+                    database_name=db,
+                    object_name=obj,
+                    object_type=obj_type,
+                    state=DeployState.COMPLETED,
+                    prior_existed=False,
+                    message=(
+                        "JAR was missing; executed SQLJ.INSTALL_JAR fallback "
+                        "for source SQLJ.REPLACE_JAR."
+                    ),
+                )
         # Teradata Error 5612: "already exists" — for DATABASE
         # and USER, treat as a successful skip on re-deploy.
         if "5612" in err_str and obj_type in (

@@ -11,6 +11,8 @@ Covers:
     - PackageDeployResult properties
 """
 
+import pytest
+
 from database_package_deployer.models import (
     ObjectType,
     DeployIntent,
@@ -493,6 +495,33 @@ class _RecordingCursor:
         self.executed.append(sql)
 
 
+class _FailOnceCursor(_RecordingCursor):
+    """Recording cursor that raises once, then succeeds."""
+
+    def __init__(self, error_text: str):
+        super().__init__()
+        self.error_text = error_text
+        self._failed = False
+
+    def execute(self, sql):
+        super().execute(sql)
+        if not self._failed:
+            self._failed = True
+            raise Exception(self.error_text)
+
+
+class _FailAlwaysCursor(_RecordingCursor):
+    """Recording cursor that always raises."""
+
+    def __init__(self, error_text: str):
+        super().__init__()
+        self.error_text = error_text
+
+    def execute(self, sql):
+        super().execute(sql)
+        raise Exception(self.error_text)
+
+
 class TestExecuteDdl:
     """Unit tests for _execute_ddl's statement-splitting logic.
 
@@ -654,3 +683,57 @@ class TestSqljClientFilePathResolution:
         assert cur.executed == [
             f"CALL SQLJ.INSTALL_JAR('CJ!{expected}', 'JAR_EXECUTE_LARGE_SQL', 0)"
         ]
+
+    def test_replace_jar_missing_falls_back_to_install_jar(self, tmp_path):
+        from database_package_deployer.deployer import _deploy_direct_execute
+        from database_package_deployer.models import DeployIntent, ParsedStatement
+
+        script = tmp_path / "DDL" / "jar_install" / "replace.sjr"
+        script.parent.mkdir(parents=True)
+        ddl = "CALL SQLJ.REPLACE_JAR('CJ!./GCFR_QB.jar', 'GCFR_QB');"
+        parsed = ParsedStatement(
+            file_path=str(script),
+            ddl_text=ddl,
+            original_text=ddl,
+            database_name="",
+            object_name="JAR",
+            object_type=ObjectType.JAR,
+            strategy=DeployStrategy.DIRECT_EXECUTE,
+            qualified_name="JAR",
+            deploy_intent=DeployIntent.DIRECT_EXECUTE,
+        )
+
+        cur = _FailOnceCursor("[Error 9999] Jar 'GCFR_QB' does not exist")
+        result = _deploy_direct_execute(cur, parsed, dry_run=False)
+
+        expected = (script.parent / "GCFR_QB.jar").resolve().as_posix()
+        assert result.state == DeployState.COMPLETED
+        assert result.prior_existed is False
+        assert cur.executed == [
+            f"CALL SQLJ.REPLACE_JAR('CJ!{expected}', 'GCFR_QB')",
+            f"CALL SQLJ.INSTALL_JAR('CJ!{expected}', 'GCFR_QB', 0)",
+        ]
+
+    def test_install_jar_already_exists_still_fails(self, tmp_path):
+        from database_package_deployer.deployer import _deploy_direct_execute
+        from database_package_deployer.models import DeployIntent, ParsedStatement
+
+        script = tmp_path / "DDL" / "jar_install" / "install.sjr"
+        script.parent.mkdir(parents=True)
+        ddl = "CALL SQLJ.INSTALL_JAR('CJ!./GCFR_QB.jar', 'GCFR_QB', 0);"
+        parsed = ParsedStatement(
+            file_path=str(script),
+            ddl_text=ddl,
+            original_text=ddl,
+            database_name="",
+            object_name="JAR",
+            object_type=ObjectType.JAR,
+            strategy=DeployStrategy.DIRECT_EXECUTE,
+            qualified_name="JAR",
+            deploy_intent=DeployIntent.DIRECT_EXECUTE,
+        )
+
+        cur = _FailAlwaysCursor("[Error 7971] Jar 'GCFR_QB' already exists")
+
+        with pytest.raises(Exception, match="already exists"):
+            _deploy_direct_execute(cur, parsed, dry_run=False)

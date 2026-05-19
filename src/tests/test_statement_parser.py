@@ -207,6 +207,13 @@ class TestDetectObjectType:
         )
         assert obj_type == ObjectType.JAR
 
+    def test_jar_create(self):
+        """CALL SQLJ.CREATE_JAR → JAR."""
+        obj_type, _ = _detect_object_type(
+            "CALL SQLJ.CREATE_JAR('CJ!my.jar', 'MyJar', 0);"
+        )
+        assert obj_type == ObjectType.JAR
+
 
 # ---------------------------------------------------------------
 # Deploy intent detection

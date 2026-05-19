@@ -304,7 +304,7 @@ _CLASSIFY_PATTERNS: List[Tuple[re.Pattern, str]] = [
     # JAR install scripts
     (
         re.compile(
-            r"^\s*CALL\s+SQLJ\s*\.\s*(?:INSTALL_JAR|REPLACE_JAR)\s*\(",
+            r"^\s*CALL\s+SQLJ\s*\.\s*(?:INSTALL_JAR|CREATE_JAR|REPLACE_JAR)\s*\(",
             _STMT_FLAGS,
         ),
         "JAR",
@@ -477,11 +477,11 @@ def extract_jar_alias(external_body: str) -> Optional[str]:
     return external_body.split(":", 1)[0].strip()
 
 
-#: Match the path portion of CALL SQLJ.INSTALL_JAR/REPLACE_JAR.
+#: Match the path portion of CALL SQLJ.INSTALL_JAR/CREATE_JAR/REPLACE_JAR.
 #: Captures the full quoted argument so we can extract the path
 #: from inside the ``CJ!path`` form.
 _SQLJ_INSTALL_RE = re.compile(
-    r"CALL\s+SQLJ\s*\.\s*(?:INSTALL_JAR|REPLACE_JAR)\s*\(\s*"
+    r"CALL\s+SQLJ\s*\.\s*(?:INSTALL_JAR|CREATE_JAR|REPLACE_JAR)\s*\(\s*"
     r"'([^']+)'",
     re.I,
 )
