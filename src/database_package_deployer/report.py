@@ -480,6 +480,45 @@ def _lookup_provenance(
     return chain.source_path()
 
 
+def _payload_href(chain: ProvenanceChain) -> str:
+    """Return report-relative href to the packaged payload file.
+
+    Deployment reports are written under ``logs/`` while payload files live
+    under the package root's ``payload/`` directory. Provenance final paths are
+    payload-relative phase paths such as ``03_ddl/views/X.viw``.
+    """
+    final_path = chain.final_path().replace("\\", "/").lstrip("/")
+    return f"../payload/{final_path}"
+
+
+def _linked_source_path(
+    ddl_file: Optional[str],
+    provenance: Optional[ProvenanceDocument],
+    *,
+    label: Optional[str] = None,
+    css: str = "",
+) -> str:
+    """Render a source/path label as a hyperlink when provenance is available."""
+    chain = _lookup_chain(ddl_file, provenance)
+    display = label or ddl_file or ""
+    if not display:
+        return ""
+    if chain is None:
+        return _escape_html(display)
+
+    final_path = chain.final_path().replace("\\", "/")
+    packaged_path = f"payload/{final_path}"
+    title = (
+        f"Open packaged code: {packaged_path} "
+        f"(original source: {chain.source_path()})"
+    )
+    style = f' style="{css}"' if css else ""
+    return (
+        f'<a href="{_escape_html(_payload_href(chain))}" '
+        f'title="{_escape_html(title)}"{style}>{_escape_html(display)}</a>'
+    )
+
+
 def _shorten_path(text: str) -> str:
     """Replace full absolute paths in a string with just the filename.
 
@@ -593,9 +632,15 @@ def _html_action_items(result, provenance: Optional[ProvenanceDocument] = None):
             origin = _lookup_provenance(getattr(obj, "ddl_file", None), provenance)
             provenance_html = ""
             if origin:
+                origin_link = _linked_source_path(
+                    getattr(obj, "ddl_file", None),
+                    provenance,
+                    label=origin,
+                    css="color:#0D6EFD;text-decoration:none",
+                )
                 provenance_html = (
                     f'<div style="font-size:11px;color:#6C757D;margin-top:4px">'
-                    f'✎ Edit source: <span class="mono">{origin}</span>'
+                    f'✎ Open code: <span class="mono">{origin_link}</span>'
                     f"</div>"
                 )
             failed_items.append(
@@ -905,11 +950,26 @@ def _html_object_results(result, provenance: Optional[ProvenanceDocument] = None
         # Provenance — show original source path for failed/skipped
         # items so the DBA knows which project file to edit.
         origin = _lookup_provenance(getattr(obj, "ddl_file", None), provenance)
-        source_cell = f'<span class="mono" style="font-size:11px;color:#6C757D">{source_file}</span>'
+        source_display = _linked_source_path(
+            getattr(obj, "ddl_file", None),
+            provenance,
+            label=source_file,
+            css="color:#0D6EFD;text-decoration:none",
+        )
+        source_cell = (
+            f'<span class="mono" style="font-size:11px;color:#6C757D">'
+            f"{source_display}</span>"
+        )
         if origin and obj.state in (DeployState.FAILED, DeployState.SKIPPED):
+            origin_link = _linked_source_path(
+                getattr(obj, "ddl_file", None),
+                provenance,
+                label=origin,
+                css="color:#0D6EFD;text-decoration:none",
+            )
             source_cell += (
                 f'<div style="font-size:10px;color:#F47B20;margin-top:2px">'
-                f"✎ {origin}</div>"
+                f"✎ {origin_link}</div>"
             )
 
         rows.append(

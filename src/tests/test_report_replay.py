@@ -21,6 +21,12 @@ from database_package_deployer.models import (
     ObjectType,
     PackageDeployResult,
 )
+from database_package_deployer.provenance import (
+    ProvenanceChain,
+    ProvenanceDocument,
+    Stage,
+    Status,
+)
 from database_package_deployer.report import (
     _build_html,
     _html_action_items,
@@ -71,6 +77,58 @@ def _normal_deploy_result():
         ],
         prior_completed=[],
     )
+
+
+def _failed_result_with_source():
+    """A failed object with a shortened ddl_file as recorded by the deployer."""
+    return PackageDeployResult(
+        deployment_id="deploy_20260503_140000",
+        manifest_path="/pkg/logs/.deploy_manifest.json",
+        total=1,
+        failed=1,
+        results=[
+            ObjectDeployResult(
+                database_name="DEV01_DB",
+                object_name="BadView",
+                object_type=ObjectType.VIEW,
+                state=DeployState.FAILED,
+                ddl_file="views/DEV01_DB.BadView.viw",
+                error="Syntax error",
+                message="Deployment failed",
+            )
+        ],
+        prior_completed=[],
+    )
+
+
+def _source_provenance():
+    """Provenance linking deployed file back to project source."""
+    chain = ProvenanceChain()
+    chain.add(Stage("source", "domain/views/BadView.viw", Status.APPLIED))
+    chain.add(
+        Stage(
+            "eponymous",
+            "domain/views/{{DOM_DATABASE_V}}.BadView.viw",
+            Status.APPLIED,
+        )
+    )
+    chain.add(
+        Stage(
+            "token_resolved",
+            "domain/views/DEV01_DB.BadView.viw",
+            Status.APPLIED,
+        )
+    )
+    chain.add(
+        Stage(
+            "package",
+            "03_ddl/views/DEV01_DB.BadView.viw",
+            Status.APPLIED,
+        )
+    )
+    doc = ProvenanceDocument()
+    doc.add_chain(chain)
+    return doc
 
 
 # ---------------------------------------------------------------
@@ -252,3 +310,21 @@ class TestPrivilegeFailureReport:
         assert "GDEV1P_BB" in html
         assert "GRANT PROCEDURE ON GDEV1P_UT TO DBC" in html
         assert "all objects deployed successfully" not in html
+
+
+class TestDeploymentReportSourceLinks:
+    """Failed deployment rows link directly to packaged source code."""
+
+    def test_failed_object_source_column_links_to_packaged_code(self):
+        html = _html_object_results(_failed_result_with_source(), _source_provenance())
+
+        assert 'href="../payload/03_ddl/views/DEV01_DB.BadView.viw"' in html
+        assert "views/DEV01_DB.BadView.viw" in html
+        assert "domain/views/BadView.viw" in html
+
+    def test_failed_action_item_source_hint_links_to_packaged_code(self):
+        html = _html_action_items(_failed_result_with_source(), _source_provenance())
+
+        assert "Open code" in html
+        assert 'href="../payload/03_ddl/views/DEV01_DB.BadView.viw"' in html
+        assert "domain/views/BadView.viw" in html
