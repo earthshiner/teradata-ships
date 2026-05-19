@@ -291,6 +291,7 @@ history or hidden agent state.
 
 - **[Installation Guide](docs/INSTALLATION.md)** — Prerequisites, setup, verification
 - **[User Guide](docs/USER_GUIDE.md)** — Complete workflow walkthrough
+- **[Runsheet Examples](docs/RUNSHEET_EXAMPLES.md)** — Step-by-step deployment examples for legacy, GitHub, generated, DDL, DCL, and DML source flows
 - **[Agent Integration](docs/AGENT_INTEGRATION.md)** — Autonomous agent and MCP tool usage
 - **[Operations Guide](docs/OPERATIONS_GUIDE.md)** — DBA deployment reference, preflight checks, rollback
 - **[Security Prerequisites](docs/security_prerequisites.md)** — Network controls, signing, key management
