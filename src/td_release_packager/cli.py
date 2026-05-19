@@ -1149,6 +1149,54 @@ def _resolve_path(
     sys.exit(1)
 
 
+def _load_project_legacy_migration_rules(project_dir: str, stage=None):
+    """Load project-local legacy migration rules when present.
+
+    ``import-legacy`` writes ``config/legacy_migration.sed``. Harvest and
+    process should honour that project contract automatically so legacy
+    ``$VAR`` / ``&&VAR&&`` markers are normalised to ``{{TOKEN}}`` form
+    before classification and packaging.
+    """
+    migration_path = os.path.join(project_dir, "config", "legacy_migration.sed")
+    if stage is not None:
+        stage.set_config_resolved(
+            "legacy_migration",
+            migration_path if os.path.isfile(migration_path) else None,
+            "layer-3",
+            "project config",
+        )
+
+    if not os.path.isfile(migration_path):
+        return []
+
+    from td_release_packager.source_migrator import parse_migration_sed
+
+    with open(migration_path, encoding="utf-8") as f:
+        content = f.read()
+    rules, skipped = parse_migration_sed(content)
+    if skipped:
+        for line in skipped:
+            message = f"Skipped unparseable legacy migration rule: {line}"
+            if stage is not None:
+                from td_release_packager.orchestrator import issue_codes
+
+                stage.add_issue(
+                    "warning",
+                    issue_codes.HARVEST_CLASSIFICATION_WARNING,
+                    message,
+                )
+            print(f"  WARN: {message}")
+
+    if not rules:
+        print(
+            f"  WARN: legacy migration file exists but has no parseable rules: "
+            f"{migration_path}"
+        )
+        return []
+
+    return rules
+
+
 # ---------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------
@@ -1287,6 +1335,8 @@ def _run_ingest(args, stage, issue_codes, apply_tokens) -> int:
         the recorder context closes — for the same reason as inspect
         (calling sys.exit inside trips the BaseException handler).
     """
+    legacy_migration_rules = _load_project_legacy_migration_rules(args.project, stage)
+
     # -- Auto-tokenise: detect, derive, and apply in one pass --
     # When --auto-tokenise is set (item 9), skip the manual two-step
     # (harvest → review token_map.conf → re-harvest) by automatically
@@ -1301,6 +1351,7 @@ def _run_ingest(args, stage, issue_codes, apply_tokens) -> int:
             apply_tokens=None,
             force=args.force,
             clean_payload=not getattr(args, "keep_existing", False),
+            legacy_migration_rules=legacy_migration_rules,
         )
         if detection.token_candidates:
             env_prefix = getattr(args, "env_prefix", None)
@@ -1340,6 +1391,12 @@ def _run_ingest(args, stage, issue_codes, apply_tokens) -> int:
     stage.set_config_resolved(
         "clean_payload", not getattr(args, "keep_existing", False), "layer-5", "cli"
     )
+    stage.set_config_resolved(
+        "legacy_migration_rules",
+        len(legacy_migration_rules),
+        "layer-3" if legacy_migration_rules else "default",
+        "project config" if legacy_migration_rules else "none",
+    )
 
     result = ingest_directory(
         source_dir=args.source,
@@ -1348,6 +1405,7 @@ def _run_ingest(args, stage, issue_codes, apply_tokens) -> int:
         apply_tokens=apply_tokens,
         force=args.force,
         clean_payload=not args.keep_existing,
+        legacy_migration_rules=legacy_migration_rules,
     )
 
     # -- Record inputs and outputs --
@@ -1363,6 +1421,8 @@ def _run_ingest(args, stage, issue_codes, apply_tokens) -> int:
         token_candidates=len(result.token_candidates),
         cleaned=result.cleaned,
         binaries_placed=len(result.binaries_placed),
+        legacy_migration_files=result.legacy_migration_files,
+        legacy_migration_substitutions=result.legacy_migration_substitutions,
     )
 
     # -- Record issues --
@@ -1390,6 +1450,8 @@ def _run_ingest(args, stage, issue_codes, apply_tokens) -> int:
         print("  Mode:             CLEAN (default — payload wiped first)")
     if result.cleaned:
         print(f"  Cleaned:          {result.cleaned} stale file(s)")
+    if legacy_migration_rules:
+        print(f"  Legacy rules:     {len(legacy_migration_rules)}")
     print(f"  Files scanned:    {result.total_files}")
     print(f"  Classified:       {result.classified}")
     if result.overwritten:
@@ -1400,6 +1462,12 @@ def _run_ingest(args, stage, issue_codes, apply_tokens) -> int:
     print(f"  MULTISET inject:  {result.multiset_injected}")
     if result.multi_table_targets:
         print(f"  Multi-table DML:  {len(result.multi_table_targets)} file(s)")
+    if result.legacy_migration_substitutions:
+        print(
+            "  Legacy migrated: "
+            f"{result.legacy_migration_substitutions} substitution(s) "
+            f"in {result.legacy_migration_files} file(s)"
+        )
 
     if apply_tokens:
         print(f"  Tokens applied:   {len(apply_tokens)} mappings")
