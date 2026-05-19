@@ -62,7 +62,7 @@ except ImportError:
 DEFAULT_RULES: Dict[str, str] = {
     "db_qualifier": "ERROR",
     "set_multiset": "WARNING",
-    "deploy_intent": "WARNING",
+    "deploy_intent": "OFF",
     "one_object": "WARNING",
     "eponymous": "WARNING",
     # Security rules (GAP-003, GAP-008).
@@ -284,9 +284,9 @@ def generate_default_config() -> str:
         "# Structural rules",
         f"db_qualifier={DEFAULT_RULES['db_qualifier']}",
         f"set_multiset={DEFAULT_RULES['set_multiset']}",
-        "# deploy_intent: REPLACE is permitted; CREATE is the preferred convention.",
+        "# deploy_intent: retired. REPLACE is permitted and fully supported.",
         "# The deployer captures a pre-flight snapshot before executing either verb,",
-        "# so rollback coverage is equivalent. Set to ERROR to enforce CREATE-only.",
+        "# so rollback coverage is equivalent. Older values are ignored in practice.",
         f"deploy_intent={DEFAULT_RULES['deploy_intent']}",
         f"one_object={DEFAULT_RULES['one_object']}",
         f"eponymous={DEFAULT_RULES['eponymous']}",
@@ -1135,20 +1135,14 @@ def _check_deploy_intent(
     rel_path: str, content: str, strict: bool = False
 ) -> List[ValidationIssue]:
     """
-    Advise on CREATE vs REPLACE usage in DDL source files.
+    Preserve the retired deploy_intent rule hook without flagging REPLACE.
 
-    REPLACE is a valid Teradata DDL verb for views, procedures,
-    macros, functions, and triggers.  It is *not* valid for tables —
-    there is no risk of accidental data loss from this rule.
-
-    The deployer captures the existing object definition via SHOW
-    before executing either CREATE (via DROP+CREATE) or REPLACE
-    (via REPLACE_IN_PLACE).  Rollback coverage is therefore
-    equivalent for both verbs.
-
-    The default posture is WARNING rather than ERROR.  Projects may
-    raise this to ERROR via inspect.conf (``deploy_intent=ERROR``)
-    if they wish to enforce a strict CREATE-only convention.
+    REPLACE is normal Teradata DDL style and is fully supported by SHIPS:
+    the deployer records the verb as deployment intent, captures rollback
+    snapshots with SHOW, and routes REPLACE-capable objects through the
+    replace-in-place strategy. The old CREATE-preferred advisory made large
+    legacy codebases look broken despite being deployable, so the rule now
+    stays silent even if older inspect.conf files still mention it.
 
     Args:
         rel_path: Relative path of the DDL file being checked.
@@ -1156,27 +1150,8 @@ def _check_deploy_intent(
         strict:   When True, promotes WARNING issues to ERROR.
 
     Returns:
-        List of ValidationIssue — one advisory issue if REPLACE is
-        detected, empty list otherwise.
+        Empty list. Kept for API compatibility with older tests/extensions.
     """
-    if _LEADING_REPLACE_RE.search(content):
-        severity = "ERROR" if strict else "WARNING"
-        return [
-            ValidationIssue(
-                file=rel_path,
-                rule="deploy_intent",
-                severity=severity,
-                message=(
-                    "Uses REPLACE — consider CREATE instead. "
-                    "CREATE is the preferred SHIPS convention: "
-                    "it makes deployment intent explicit and lets "
-                    "the deployer own idempotency via pre-flight "
-                    "snapshot and DROP+CREATE. "
-                    "REPLACE is fully supported and the deployer "
-                    "captures a rollback snapshot before executing it."
-                ),
-            )
-        ]
     return []
 
 

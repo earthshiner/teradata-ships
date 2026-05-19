@@ -429,11 +429,9 @@ OMR/payload/database/DDL/tables/{{STD_DATABASE}}.Customer.tbl: hardcoded referen
 ```
 The file body still contains a literal database name. Add an entry to `token_map.conf` and re-run harvest with `--token-map`. This warning becomes an error if you use `--strict`.
 
-**`deploy_intent` — WARNING**
-```
-OMR/payload/database/DDL/views/{{STD_DATABASE}}.MyView.viw: Uses REPLACE — consider CREATE instead
-```
-`REPLACE` is permitted and fully supported by the deployer, which captures a pre-flight rollback snapshot before executing either verb. `CREATE` is the preferred SHIPS convention because it makes deployment intent explicit and lets the deployer own idempotency via DROP+CREATE. This rule is advisory (WARNING) by default. To enforce CREATE-only across your project, set `deploy_intent=ERROR` in `inspect.conf`.
+**`deploy_intent` — OFF**
+
+This rule is retired. SHIPS permits both `CREATE` and `REPLACE` for replaceable Teradata objects such as views, macros, procedures, functions, and triggers. The deployer records the source verb as deployment intent and captures rollback snapshots before executing either path, so common `REPLACE VIEW` / `REPLACE PROCEDURE` source does not need to be rewritten just to pass inspect.
 
 **`eponymous` — WARNING**
 ```
@@ -449,7 +447,6 @@ Edit `config/inspect.conf` in your project:
 # Set to OFF to silence, WARNING for advisory, ERROR to block packaging
 keyword_case=OFF
 leading_commas=OFF
-deploy_intent=WARNING
 db_qualifier=ERROR
 ```
 
