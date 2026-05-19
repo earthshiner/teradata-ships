@@ -36,6 +36,10 @@ from td_release_packager.legacy_placeholders import (
     LegacyPlaceholderFinding,
     find_legacy_placeholders,
 )
+from td_release_packager.source_migrator import (
+    MigrationRule,
+    apply_migration_rules_to_text,
+)
 from td_release_packager.token_engine import _TOKEN_RE, find_malformed_tokens
 
 logger = logging.getLogger(__name__)
@@ -247,6 +251,11 @@ class IngestResult:
     #: list when the source uses only SHIPS {{TOKEN}} form (or no
     #: substitution at all).
     legacy_placeholders: List["LegacyPlaceholderFinding"] = field(default_factory=list)
+    #: Legacy placeholder substitutions applied in memory before
+    #: classification, via config/legacy_migration.sed or an explicit
+    #: caller-supplied migration rule set.
+    legacy_migration_files: int = 0
+    legacy_migration_substitutions: int = 0
 
 
 def ingest_directory(
@@ -257,6 +266,7 @@ def ingest_directory(
     file_patterns: List[str] = None,
     force: bool = False,
     clean_payload: bool = True,
+    legacy_migration_rules: Optional[List[MigrationRule]] = None,
 ) -> IngestResult:
     """
     Ingest raw DDL files from a source directory into a project.
@@ -279,6 +289,7 @@ def ingest_directory(
             file_patterns=file_patterns,
             force=force,
             clean_payload=clean_payload,
+            legacy_migration_rules=legacy_migration_rules,
         )
         _span.set_attribute("ships.files_total", result.total_files)
         _span.set_attribute("ships.files_classified", result.classified)
@@ -296,6 +307,7 @@ def _ingest_directory_impl(
     file_patterns: List[str] = None,
     force: bool = False,
     clean_payload: bool = True,
+    legacy_migration_rules: Optional[List[MigrationRule]] = None,
 ) -> IngestResult:
     """
     Ingest raw DDL files from a source directory into a project.
@@ -333,6 +345,13 @@ def _ingest_directory_impl(
                         legacy overlay behaviour where existing
                         files are kept and collisions are governed
                         by ``force``.
+        legacy_migration_rules:
+                        Optional parsed rules from
+                        ``legacy_migration.sed``. When supplied,
+                        legacy placeholders are converted to SHIPS
+                        ``{{TOKEN}}`` form in memory before
+                        classification, naming, token scanning, and
+                        payload writing.
 
     Returns:
         IngestResult with per-file outcomes and token candidates.
@@ -398,6 +417,16 @@ def _ingest_directory_impl(
             raw_content = _read_file(src_path)
             if raw_content is None:
                 continue  # Binary file
+
+            if legacy_migration_rules:
+                migrated_content, hits = apply_migration_rules_to_text(
+                    raw_content,
+                    legacy_migration_rules,
+                )
+                if hits:
+                    result.legacy_migration_files += 1
+                    result.legacy_migration_substitutions += sum(hits.values())
+                    raw_content = migrated_content
 
             # -- Detect non-SHIPS placeholders ($VAR, &&VAR&&, etc.)
             # Recorded into the result so the harvest banner can

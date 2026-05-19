@@ -23,6 +23,7 @@ import pytest
 
 from td_release_packager.source_migrator import (
     MigrationRule,
+    apply_migration_rules_to_text,
     migrate_source_directory,
     parse_migration_sed,
 )
@@ -174,6 +175,19 @@ class TestMigrateSourceDirectory:
         migrate_source_directory(str(tmp_path), rules)
         content = (tmp_path / "x.db").read_text(encoding="utf-8")
         assert content == "{{A}} {{B}} {{C}}"
+
+    def test_apply_rules_to_text_does_not_touch_files(self, tmp_path):
+        """Harvest can normalise legacy markers in memory."""
+        source = tmp_path / "x.db"
+        original = "CREATE DATABASE $OPR_M FROM $OPR_NODE;\n"
+        source.write_text(original, encoding="utf-8")
+        rules = _make_rules(("$OPR_M", "{{OPR_M}}"), ("$OPR_NODE", "{{OPR_NODE}}"))
+
+        migrated, hits = apply_migration_rules_to_text(original, rules)
+
+        assert migrated == "CREATE DATABASE {{OPR_M}} FROM {{OPR_NODE}};\n"
+        assert hits == {"$OPR_M": 1, "$OPR_NODE": 1}
+        assert source.read_text(encoding="utf-8") == original
 
 
 # ---------------------------------------------------------------

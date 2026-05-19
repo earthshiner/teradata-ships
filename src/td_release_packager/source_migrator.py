@@ -185,6 +185,20 @@ def _apply_rules_to_text(content: str, rules: List[MigrationRule]) -> Tuple[str,
     return (result, hits)
 
 
+def apply_migration_rules_to_text(
+    content: str,
+    rules: List[MigrationRule],
+) -> Tuple[str, dict]:
+    """Apply parsed legacy migration rules to one SQL text buffer.
+
+    This is the in-memory counterpart to ``migrate_source_directory``.
+    Harvest/process use it to normalise legacy ``$VAR`` / ``&&VAR&&``
+    markers before classification without rewriting the user's source
+    checkout.
+    """
+    return _apply_rules_to_text(content, rules)
+
+
 def migrate_source_directory(
     source_dir: str,
     rules: List[MigrationRule],

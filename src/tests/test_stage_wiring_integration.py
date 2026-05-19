@@ -265,6 +265,46 @@ class TestHarvestStageRecording:
         assert info_issues, "expected HARVEST_TOKEN_CANDIDATE info issue"
         assert info_issues[0]["severity"] == "info"
 
+    def test_harvest_auto_applies_project_legacy_migration(self, tmp_path):
+        project = _make_project(tmp_path)
+        source = tmp_path / "src"
+        source.mkdir()
+        (source / "Step_01_CreateDatabases_v0.1.db").write_text(
+            "CREATE DATABASE $BASE_NODE FROM $PARENT_NODE\n"
+            "AS PERM=100e6/2*(HASHAMP()+1)\n"
+            ";\n",
+            encoding="utf-8",
+        )
+        (project / "config" / "legacy_migration.sed").write_text(
+            "s/$BASE_NODE/{{BASE_NODE}}/g\n"
+            "s/$PARENT_NODE/{{PARENT_NODE}}/g\n",
+            encoding="utf-8",
+        )
+
+        args = _make_harvest_args(source, project)
+        _run(_cmd_ingest, args)
+
+        harvested = (
+            project
+            / "payload"
+            / "database"
+            / "pre-requisites"
+            / "databases"
+            / "{{BASE_NODE}}.db"
+        )
+        assert harvested.exists()
+        assert "{{PARENT_NODE}}" in harvested.read_text(encoding="utf-8")
+        assert "$BASE_NODE" in (
+            source / "Step_01_CreateDatabases_v0.1.db"
+        ).read_text(encoding="utf-8")
+
+        d = _read_decisions(project)
+        harvest_run = next(r for r in d["runs"] if r["stages"][0]["stage"] == "harvest")
+        stage = harvest_run["stages"][0]
+        assert stage["outputs"]["legacy_migration_files"] == 1
+        assert stage["outputs"]["legacy_migration_substitutions"] == 2
+        assert stage["config_resolved"]["legacy_migration_rules"]["value"] == 2
+
 
 # ---------------------------------------------------------------
 # Analyse stage
