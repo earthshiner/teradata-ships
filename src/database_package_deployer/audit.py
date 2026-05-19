@@ -22,13 +22,13 @@ Audit event schema (minimum fields):
 
     event            "ships.deploy"
     timestamp        ISO 8601 UTC
-    package_name     From ships.build.json
+    package_name     From context/ships.build.json
     package_hash     SHA-256 hex digest of the ZIP (if available)
-    target_env       From ships.build.json
-    change_ref       From ships.build.json (null if not set)
+    target_env       From context/ships.build.json
+    change_ref       From context/ships.build.json (null if not set)
     operator         os.getlogin() or SHIPS_OPERATOR env var
     hostname         socket.gethostname()
-    trust_label      From ships.build.json trust.label
+    trust_label      From context/ships.build.json trust.label
     outcome          "SUCCESS" or "FAILURE"
     objects_deployed Count of COMPLETED objects
     objects_failed   Count of FAILED objects
@@ -39,7 +39,7 @@ import json
 import logging
 import os
 
-from database_package_deployer.package_metadata import package_file, read_package_json
+from database_package_deployer.package_metadata import read_package_json
 import socket
 import sys
 from datetime import datetime, timezone
@@ -237,15 +237,8 @@ def emit_audit_event(
         sink_uri = os.environ.get(_ENV_AUDIT_SINK, "").strip()
 
     if not sink_uri:
-        # Try ships.yaml
-        build_json = package_file(package_dir, "ships.build.json")
-        if os.path.isfile(build_json):
-            try:
-                with open(build_json, encoding="utf-8") as fh:
-                    manifest = json.load(fh)
-                sink_uri = manifest.get("audit_sink", "").strip()
-            except Exception:
-                pass
+        manifest = read_package_json(package_dir, "ships.build.json")
+        sink_uri = manifest.get("audit_sink", "").strip()
 
     # Always emit to stderr as fallback (and as the primary record when no sink)
     event_json = json.dumps(event, ensure_ascii=False)
