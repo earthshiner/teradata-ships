@@ -175,7 +175,7 @@ def _is_jar_missing_error(error_text: str) -> bool:
 
 
 def _build_sqlj_create_jar_fallback(ddl_text: str) -> Optional[str]:
-    """Convert CALL SQLJ.REPLACE_JAR(...) to the create/install equivalent."""
+    """Convert CALL SQLJ.REPLACE_JAR(...) to the create equivalent."""
     match = _SQLJ_JAR_CALL_RE.search(ddl_text)
     if not match or match.group("proc").upper() != "REPLACE_JAR":
         return None
@@ -186,7 +186,7 @@ def _build_sqlj_create_jar_fallback(ddl_text: str) -> Optional[str]:
         args_text = f"{args_text}, 0"
 
     create_call = (
-        f"{match.group('prefix')}INSTALL_JAR"
+        f"{match.group('prefix')}CREATE_JAR"
         f"{match.group('suffix').replace(match.group('args'), args_text, 1)}"
     )
     return ddl_text[: match.start()] + create_call + ddl_text[match.end() :]
@@ -2414,7 +2414,7 @@ def _deploy_direct_execute(
             if create_ddl:
                 logger.info(
                     "DIRECT_EXECUTE: SQLJ.REPLACE_JAR target is missing; "
-                    "falling back to SQLJ.INSTALL_JAR for %s.",
+                    "falling back to SQLJ.CREATE_JAR for %s.",
                     qn,
                 )
                 _execute_parsed_ddl(cursor, parsed, ddl_text=create_ddl)
@@ -2425,7 +2425,7 @@ def _deploy_direct_execute(
                     state=DeployState.COMPLETED,
                     prior_existed=False,
                     message=(
-                        "JAR was missing; executed SQLJ.INSTALL_JAR fallback "
+                        "JAR was missing; executed SQLJ.CREATE_JAR fallback "
                         "for source SQLJ.REPLACE_JAR."
                     ),
                 )

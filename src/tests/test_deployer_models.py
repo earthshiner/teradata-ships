@@ -684,7 +684,7 @@ class TestSqljClientFilePathResolution:
             f"CALL SQLJ.INSTALL_JAR('CJ!{expected}', 'JAR_EXECUTE_LARGE_SQL', 0)"
         ]
 
-    def test_replace_jar_missing_falls_back_to_install_jar(self, tmp_path):
+    def test_replace_jar_missing_falls_back_to_create_jar(self, tmp_path):
         from database_package_deployer.deployer import _deploy_direct_execute
         from database_package_deployer.models import DeployIntent, ParsedStatement
 
@@ -711,7 +711,7 @@ class TestSqljClientFilePathResolution:
         assert result.prior_existed is False
         assert cur.executed == [
             f"CALL SQLJ.REPLACE_JAR('CJ!{expected}', 'GCFR_QB')",
-            f"CALL SQLJ.INSTALL_JAR('CJ!{expected}', 'GCFR_QB', 0)",
+            f"CALL SQLJ.CREATE_JAR('CJ!{expected}', 'GCFR_QB', 0)",
         ]
 
     def test_install_jar_already_exists_still_fails(self, tmp_path):

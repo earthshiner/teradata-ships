@@ -91,6 +91,7 @@ class WaveExecutor:
 
         self._cursors: List[Any] = []
         self._cursor_locks: List[threading.Lock] = []
+        self._driver_lock = threading.Lock()
         self._pool_created = False
 
     def create_pool(self):
@@ -464,7 +465,7 @@ class WaveExecutor:
         Returns:
             Result dict from deploy_fn.
         """
-        with cursor_lock:
+        with self._driver_lock, cursor_lock:
             self._update_stream_query_band(cursor, stream_id, wave_num, file_path)
             return deploy_fn(cursor, file_path)
 
