@@ -17,6 +17,7 @@ import zipfile
 from unittest.mock import patch
 
 import pytest
+from jsonschema import Draft202012Validator
 
 from td_release_packager.builder import (
     _check_working_tree,
@@ -149,8 +150,10 @@ def test_single_package_archive_uses_context_metadata_only(
     }.items():
         assert document_path in docs
         schema = schemas[schema_name]
-        missing = [field for field in schema["required"] if field not in docs[document_path]]
-        assert missing == []
+        Draft202012Validator.check_schema(schema)
+        Draft202012Validator(schema).validate(docs[document_path])
+        assert schema["description"]
+        assert schema["examples"]
 
 
 # ---------------------------------------------------------------

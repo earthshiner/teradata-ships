@@ -623,6 +623,35 @@ Every package built by `ships package` or `ships process` includes three compact
 
 When SHIPS emits a paired pre-requisite + main package (auto-split), each package gets its own set of context artefacts. The main package's `context/ships.manifest.json` lists the pre-requisite package filename in `dependency_contract.requires`. Deploy the pre-requisite package first.
 
+### JSON schema contract
+
+Every package includes JSON Schema documents under `context/schemas/`. The package index advertises the schema entrypoint and every context file carries a schema version field so humans, CI jobs, MCP tools, and agents can validate package metadata before acting.
+
+| Context file | Schema file | Version field |
+|---|---|---|
+| `context/ships.index.json` | `context/schemas/ships.index.schema.json` | `schema_version` |
+| `context/ships.context.json` | `context/schemas/ships.context.schema.json` | `schema_version` |
+| `context/ships.manifest.json` | `context/schemas/ships.manifest.schema.json` | `schema_version` |
+| `context/ships.handoff.json` | `context/schemas/ships.handoff.schema.json` | `schema_version` |
+| `context/ships.build.json` | `context/schemas/ships.build.schema.json` | `schema_version` |
+| `context/ships.provenance.json` | `context/schemas/ships.provenance.schema.json` | `schema_version` and provenance `version` |
+| `context/ships.integrity.json` | `context/schemas/ships.integrity.schema.json` | `schema_version` |
+
+Example validation flow:
+
+```python
+import json
+import zipfile
+from jsonschema import Draft202012Validator
+
+with zipfile.ZipFile("DEV_customer_risk_BUILD_0001.zip") as package:
+    document = json.loads(package.read("context/ships.handoff.json"))
+    schema = json.loads(package.read("context/schemas/ships.handoff.schema.json"))
+
+Draft202012Validator.check_schema(schema)
+Draft202012Validator(schema).validate(document)
+```
+
 ---
 
 ## Structured artefacts for agent consumption
