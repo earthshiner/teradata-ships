@@ -2546,14 +2546,16 @@ def main():
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     log_file = os.path.join(log_dir, f"deploy_{{ts}}.log")
 
+    log_level = logging.DEBUG if args.verbose else logging.INFO
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    file_handler.setLevel(log_level)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.WARNING if args.quiet else log_level)
     logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
+        level=log_level,
         format="%(asctime)s [%(levelname)-8s] %(name)s — %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[
-            logging.FileHandler(log_file, encoding="utf-8"),
-            logging.StreamHandler(sys.stdout),
-        ],
+        handlers=[file_handler, console_handler],
     )
     logger = logging.getLogger("deploy")
 
@@ -2928,6 +2930,16 @@ def main():
                 logger.info("  Report:     %s", result.report_path)
             logger.info("  Log:        %s", log_file)
             logger.info("=" * 64)
+            if args.quiet:
+                print("✓ EXPLAIN validation %s" % status.lower())
+                print("  %d passed · %d failed · %d not applicable" % (
+                    result.completed,
+                    result.failed,
+                    result.skipped,
+                ))
+                if result.report_path:
+                    print("  Report: %s" % result.report_path)
+                print("  Log:    %s" % log_file)
 
             sys.exit(0 if result.failed == 0 else 1)
 
@@ -2963,6 +2975,18 @@ def main():
             logger.info("  Report:     %s", result.report_path)
         logger.info("  Log:        %s", log_file)
         logger.info("=" * 64)
+        if args.quiet:
+            icon = "✓" if result.success else "✗"
+            print("%s Deployment %s" % (icon, status.lower()))
+            print("  %d total · %d deployed · %d skipped · %d failed" % (
+                result.total,
+                result.completed,
+                result.skipped,
+                result.failed,
+            ))
+            if result.report_path:
+                print("  Report: %s" % result.report_path)
+            print("  Log:    %s" % log_file)
 
         sys.exit(0 if result.success else 1)
 
@@ -3209,6 +3233,8 @@ def parse_args():
                    help="Continue past failures.")
     p.add_argument("-v", "--verbose", action="store_true",
                    help="Debug logging.")
+    p.add_argument("-q", "--quiet", action="store_true",
+                   help="Show a compact console summary; full logs are still written to logs/.")
     p.add_argument("-V", "--version", action="version",
                    version="deploy.py {manifest.build_number}",
                    help="Show version and exit.")
@@ -3228,6 +3254,9 @@ def parse_args():
     if args.dry_run and args.explain:
         p.error("--dry-run and --explain are mutually exclusive "
                 "(--explain requires a database connection)")
+
+    if args.verbose and args.quiet:
+        p.error("--verbose and --quiet are mutually exclusive")
 
     return args
 

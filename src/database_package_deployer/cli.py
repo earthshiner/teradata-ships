@@ -24,6 +24,7 @@ import logging
 import os
 import sys
 import tempfile
+from datetime import datetime, timezone
 
 from database_package_deployer import __version__ as DEPLOYER_VERSION
 from database_package_deployer.deployer import (
@@ -46,17 +47,59 @@ _ALL_FORMATS = ",".join(_GRAPH_FORMATS.keys())
 logger = logging.getLogger(__name__)
 
 
+def _configure_logging(args) -> None:
+    """Configure console logging without letting quiet mode hide backend logs."""
+    verbose = bool(getattr(args, "verbose", False))
+    quiet = bool(getattr(args, "quiet", False))
+    log_level = logging.DEBUG if verbose else logging.INFO
+
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.WARNING if quiet else log_level)
+    handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s [%(levelname)-8s] %(name)s — %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    )
+
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.setLevel(log_level)
+    root.addHandler(handler)
+
+
+def _attach_deploy_file_logger(args) -> str:
+    """Write full deploy logs under the package while keeping console compact."""
+    package_dir = getattr(args, "package_dir", None)
+    if not package_dir:
+        return ""
+
+    log_dir = os.path.join(package_dir, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    log_file = os.path.join(log_dir, f"deploy_{timestamp}.log")
+
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    file_handler.setLevel(logging.DEBUG if args.verbose else logging.INFO)
+    file_handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s [%(levelname)-8s] %(name)s — %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    )
+    logging.getLogger().addHandler(file_handler)
+    return log_file
+
+
 def main():
     """CLI entry point."""
     parser = _build_arg_parser()
     args = parser.parse_args()
 
-    log_level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(
-        level=log_level,
-        format="%(asctime)s [%(levelname)-8s] %(name)s \u2014 %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+    if args.verbose and getattr(args, "quiet", False):
+        parser.error("--verbose and --quiet cannot be used together.")
+
+    _configure_logging(args)
 
     if args.command == "deploy":
         _cmd_deploy(args)
@@ -97,6 +140,10 @@ def _cmd_deploy(args):
         )
         sys.exit(1)
 
+    log_file = _attach_deploy_file_logger(args)
+    if log_file:
+        logger.info("Full deploy log: %s", log_file)
+
     # Build connection params before connecting so they can be passed to the TLS check.
     _conn_params = _build_connection_params(args)
     cursor = _connect(args)
@@ -133,8 +180,8 @@ def _cmd_deploy(args):
             otel_span.set_attribute("ships.deploy.failed", result.failed)
             otel_span.set_attribute("ships.deploy.skipped", result.skipped)
             otel_span.set_attribute("ships.deploy.success", result.success)
-        _print_preflight_result(result.preflight_result)
-        _print_package_result(result)
+        _print_preflight_result(result.preflight_result, quiet=args.quiet)
+        _print_package_result(result, quiet=args.quiet, log_file=log_file)
         sys.exit(0 if result.success else 1)
 
     except FileNotFoundError as e:
@@ -528,13 +575,29 @@ def _cmd_approve(args):
 # ---------------------------------------------------------------
 
 
-def _print_preflight_result(preflight_result):
+def _print_preflight_result(preflight_result, quiet: bool = False):
     """Display pre-flight validation results."""
     if preflight_result is None:
         return
 
     pf = preflight_result
     status_icon = "\u2713" if pf.passed else "\u2717"
+
+    if quiet:
+        total_objects = sum(pf.object_count.values()) if pf.object_count else 0
+        db_count = len(pf.databases or [])
+        status = "ready" if pf.passed else "blocked"
+        print(
+            f"{status_icon} Pre-flight {status}: "
+            f"{total_objects} objects, {db_count} databases, "
+            f"{pf.errors} errors, {pf.warnings} warnings"
+        )
+        for check in pf.checks:
+            if not check.passed and check.severity == "ERROR":
+                print(f"  \u2717 {check.message}")
+            elif check.severity == "WARNING":
+                print(f"  \u26a0 {check.message}")
+        return
 
     print(f"\n{'\u2500' * 64}")
     print(f"  {status_icon} Pre-flight Validation")
@@ -560,10 +623,36 @@ def _print_preflight_result(preflight_result):
     print(f"{'\u2500' * 64}")
 
 
-def _print_package_result(result):
+def _print_package_result(result, quiet: bool = False, log_file: str = ""):
     """Display deployment results."""
     status_icon = "\u2713" if result.success else "\u2717"
     mode = " (DRY RUN)" if result.dry_run else ""
+
+    if quiet:
+        status = "passed" if result.success else "failed"
+        print(f"{status_icon} Deployment {status}{mode}")
+        print(
+            f"  {result.total} total · {result.completed} deployed · "
+            f"{result.skipped} skipped · {result.failed} failed"
+        )
+        if result.report_path:
+            print(f"  Report:   {result.report_path}")
+        if result.manifest_path:
+            print(f"  Manifest: {result.manifest_path}")
+        if log_file:
+            print(f"  Log:      {log_file}")
+
+        failed = [r for r in result.results if r.state == DeployState.FAILED]
+        if failed:
+            print("  Failed objects:")
+            for obj_result in failed[:10]:
+                name = f"{obj_result.database_name}.{obj_result.object_name}"
+                print(f"    \u2717 {name}: {obj_result.error or obj_result.message}")
+            remaining = len(failed) - 10
+            if remaining > 0:
+                print(f"    ... {remaining} more in the deployment report")
+        print()
+        return
 
     print(f"\n{'=' * 64}")
     print(f"  {status_icon} Deployment{mode}: {result.deployment_id}")
@@ -571,6 +660,8 @@ def _print_package_result(result):
         print(f"  Manifest:   {result.manifest_path}")
     if result.report_path:
         print(f"  Report:     {result.report_path}")
+    if log_file:
+        print(f"  Log:        {log_file}")
     print(f"{'=' * 64}")
     print(f"  Total:       {result.total}")
     print(f"  Completed:   {result.completed}")
@@ -789,6 +880,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Enable debug logging.",
     )
     parser.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        help="Show a compact console summary; detailed logs and reports remain available.",
+    )
+    parser.add_argument(
         "-V",
         "--version",
         action="version",
@@ -863,6 +960,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Simulate deployment without executing any DDL.",
+    )
+    dp.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Show a compact console summary; detailed logs and reports remain available.",
     )
     dp.add_argument(
         "--continue-on-error",
