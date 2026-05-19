@@ -3598,6 +3598,7 @@ def _generate_integrity_file(pkg_dir: str) -> str:
     package_hash = hashlib.sha256(combined.encode()).hexdigest()
 
     integrity = {
+        "schema_version": "1.0",
         "algorithm": "SHA-256",
         "package_hash": package_hash,
         "file_count": len(file_hashes),

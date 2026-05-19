@@ -319,6 +319,7 @@ class ProvenanceDocument:
     def to_dict(self) -> Dict[str, Any]:
         """Serialise to a plain dict suitable for JSON output."""
         return {
+            "schema_version": f"{self.version}.0",
             "version": self.version,
             "generated_at": self.generated_at,
             "entries": {k: v.to_dict() for k, v in self.entries.items()},

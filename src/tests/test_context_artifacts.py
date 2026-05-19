@@ -1,5 +1,7 @@
 import json
 
+from jsonschema import Draft202012Validator
+
 from td_release_packager.context_artifacts import write_context_artifacts
 from td_release_packager.models import BuildConfig, BuildManifest
 
@@ -139,5 +141,7 @@ def test_write_context_artifacts_emits_agent_context_contract(tmp_path):
     }.items():
         schema_file = schemas_dir / f"{document_name}.schema.json"
         schema = json.loads(schema_file.read_text())
-        missing = [field for field in schema["required"] if field not in document]
-        assert missing == []
+        Draft202012Validator.check_schema(schema)
+        Draft202012Validator(schema).validate(document)
+        assert schema["description"]
+        assert schema["examples"]
