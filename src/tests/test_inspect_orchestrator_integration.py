@@ -40,12 +40,12 @@ def _make_namespace(source: Path, **overrides) -> Namespace:
 
     All inspect CLI flags get a default so individual tests only have
     to override the ones they care about. The defaults match a
-    minimal ``td_release_packager inspect --source X --skip-grants``
+    minimal ``td_release_packager inspect --project X --skip-grants``
     invocation (skip_grants=True keeps Step 2 out of the way for
     tests that don't set up .grt files).
     """
     args = Namespace(
-        source=str(source),
+        project=str(source),
         config=None,
         strict=False,
         skip_tokens=False,

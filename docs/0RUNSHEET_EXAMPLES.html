@@ -1,0 +1,2301 @@
+<!doctype html>
+<html id="mdhtml">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, minimal-ui">
+    <meta http-equiv="X-UA-Compatible" content="IE=9">
+    <title>Markdown preview</title>
+    <style>body {
+  box-sizing: border-box;
+  min-width: 200px;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 45px;
+  background-color: #313131;
+  color: #c3c5c7;
+}
+
+@font-face {
+  font-family: octicons-link;
+  src: url(data:font/woff;charset=utf-8;base64,d09GRgABAAAAAAZwABAAAAAACFQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABEU0lHAAAGaAAAAAgAAAAIAAAAAUdTVUIAAAZcAAAACgAAAAoAAQAAT1MvMgAAAyQAAABJAAAAYFYEU3RjbWFwAAADcAAAAEUAAACAAJThvmN2dCAAAATkAAAABAAAAAQAAAAAZnBnbQAAA7gAAACyAAABCUM+8IhnYXNwAAAGTAAAABAAAAAQABoAI2dseWYAAAFsAAABPAAAAZwcEq9taGVhZAAAAsgAAAA0AAAANgh4a91oaGVhAAADCAAAABoAAAAkCA8DRGhtdHgAAAL8AAAADAAAAAwGAACfbG9jYQAAAsAAAAAIAAAACABiATBtYXhwAAACqAAAABgAAAAgAA8ASm5hbWUAAAToAAABQgAAAlXu73sOcG9zdAAABiwAAAAeAAAAME3QpOBwcmVwAAAEbAAAAHYAAAB/aFGpk3jaTY6xa8JAGMW/O62BDi0tJLYQincXEypYIiGJjSgHniQ6umTsUEyLm5BV6NDBP8Tpts6F0v+k/0an2i+itHDw3v2+9+DBKTzsJNnWJNTgHEy4BgG3EMI9DCEDOGEXzDADU5hBKMIgNPZqoD3SilVaXZCER3/I7AtxEJLtzzuZfI+VVkprxTlXShWKb3TBecG11rwoNlmmn1P2WYcJczl32etSpKnziC7lQyWe1smVPy/Lt7Kc+0vWY/gAgIIEqAN9we0pwKXreiMasxvabDQMM4riO+qxM2ogwDGOZTXxwxDiycQIcoYFBLj5K3EIaSctAq2kTYiw+ymhce7vwM9jSqO8JyVd5RH9gyTt2+J/yUmYlIR0s04n6+7Vm1ozezUeLEaUjhaDSuXHwVRgvLJn1tQ7xiuVv/ocTRF42mNgZGBgYGbwZOBiAAFGJBIMAAizAFoAAABiAGIAznjaY2BkYGAA4in8zwXi+W2+MjCzMIDApSwvXzC97Z4Ig8N/BxYGZgcgl52BCSQKAA3jCV8CAABfAAAAAAQAAEB42mNgZGBg4f3vACQZQABIMjKgAmYAKEgBXgAAeNpjYGY6wTiBgZWBg2kmUxoDA4MPhGZMYzBi1AHygVLYQUCaawqDA4PChxhmh/8ODDEsvAwHgMKMIDnGL0x7gJQCAwMAJd4MFwAAAHjaY2BgYGaA4DAGRgYQkAHyGMF8NgYrIM3JIAGVYYDT+AEjAwuDFpBmA9KMDEwMCh9i/v8H8sH0/4dQc1iAmAkALaUKLgAAAHjaTY9LDsIgEIbtgqHUPpDi3gPoBVyRTmTddOmqTXThEXqrob2gQ1FjwpDvfwCBdmdXC5AVKFu3e5MfNFJ29KTQT48Ob9/lqYwOGZxeUelN2U2R6+cArgtCJpauW7UQBqnFkUsjAY/kOU1cP+DAgvxwn1chZDwUbd6CFimGXwzwF6tPbFIcjEl+vvmM/byA48e6tWrKArm4ZJlCbdsrxksL1AwWn/yBSJKpYbq8AXaaTb8AAHja28jAwOC00ZrBeQNDQOWO//sdBBgYGRiYWYAEELEwMTE4uzo5Zzo5b2BxdnFOcALxNjA6b2ByTswC8jYwg0VlNuoCTWAMqNzMzsoK1rEhNqByEyerg5PMJlYuVueETKcd/89uBpnpvIEVomeHLoMsAAe1Id4AAAAAAAB42oWQT07CQBTGv0JBhagk7HQzKxca2sJCE1hDt4QF+9JOS0nbaaYDCQfwCJ7Au3AHj+LO13FMmm6cl7785vven0kBjHCBhfpYuNa5Ph1c0e2Xu3jEvWG7UdPDLZ4N92nOm+EBXuAbHmIMSRMs+4aUEd4Nd3CHD8NdvOLTsA2GL8M9PODbcL+hD7C1xoaHeLJSEao0FEW14ckxC+TU8TxvsY6X0eLPmRhry2WVioLpkrbp84LLQPGI7c6sOiUzpWIWS5GzlSgUzzLBSikOPFTOXqly7rqx0Z1Q5BAIoZBSFihQYQOOBEdkCOgXTOHA07HAGjGWiIjaPZNW13/+lm6S9FT7rLHFJ6fQbkATOG1j2OFMucKJJsxIVfQORl+9Jyda6Sl1dUYhSCm1dyClfoeDve4qMYdLEbfqHf3O/AdDumsjAAB42mNgYoAAZQYjBmyAGYQZmdhL8zLdDEydARfoAqIAAAABAAMABwAKABMAB///AA8AAQAAAAAAAAAAAAAAAAABAAAAAA==) format('woff');
+}
+
+.markdown-body {
+  -ms-text-size-adjust: 100%;
+  -webkit-text-size-adjust: 100%;
+  line-height: 1.5;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+  font-size: 16px;
+  line-height: 1.5;
+  word-wrap: break-word;
+}
+
+.markdown-body .pl-c {
+  color: #6a737d;
+}
+
+.markdown-body .pl-c1,
+.markdown-body .pl-s .pl-v {
+  color: #005cc5;
+}
+
+.markdown-body .pl-e,
+.markdown-body .pl-en {
+  color: #6f42c1;
+}
+
+.markdown-body .pl-smi,
+.markdown-body .pl-s .pl-s1 {
+  color: #24292e;
+}
+
+.markdown-body .pl-ent {
+  color: #22863a;
+}
+
+.markdown-body .pl-k {
+  color: #d73a49;
+}
+
+.markdown-body .pl-s,
+.markdown-body .pl-pds,
+.markdown-body .pl-s .pl-pse .pl-s1,
+.markdown-body .pl-sr,
+.markdown-body .pl-sr .pl-cce,
+.markdown-body .pl-sr .pl-sre,
+.markdown-body .pl-sr .pl-sra {
+  color: #032f62;
+}
+
+.markdown-body .pl-v,
+.markdown-body .pl-smw {
+  color: #e36209;
+}
+
+.markdown-body .pl-bu {
+  color: #b31d28;
+}
+
+.markdown-body .pl-ii {
+  color: #fafbfc;
+  background-color: #b31d28;
+}
+
+.markdown-body .pl-c2 {
+  color: #fafbfc;
+  background-color: #d73a49;
+}
+
+.markdown-body .pl-c2::before {
+  content: "^M";
+}
+
+.markdown-body .pl-sr .pl-cce {
+  font-weight: bold;
+  color: #22863a;
+}
+
+.markdown-body .pl-ml {
+  color: #735c0f;
+}
+
+.markdown-body .pl-mh,
+.markdown-body .pl-mh .pl-en,
+.markdown-body .pl-ms {
+  font-weight: bold;
+  color: #005cc5;
+}
+
+.markdown-body .pl-mi {
+  font-style: italic;
+  color: #24292e;
+}
+
+.markdown-body .pl-mb {
+  font-weight: bold;
+  color: #24292e;
+}
+
+.markdown-body .pl-md {
+  color: #b31d28;
+  background-color: #ffeef0;
+}
+
+.markdown-body .pl-mi1 {
+  color: #22863a;
+  background-color: #f0fff4;
+}
+
+.markdown-body .pl-mc {
+  color: #e36209;
+  background-color: #ffebda;
+}
+
+.markdown-body .pl-mi2 {
+  color: #f6f8fa;
+  background-color: #005cc5;
+}
+
+.markdown-body .pl-mdr {
+  font-weight: bold;
+  color: #6f42c1;
+}
+
+.markdown-body .pl-ba {
+  color: #586069;
+}
+
+.markdown-body .pl-sg {
+  color: #959da5;
+}
+
+.markdown-body .pl-corl {
+  text-decoration: underline;
+  color: #032f62;
+}
+
+.markdown-body .octicon {
+  display: inline-block;
+  vertical-align: text-top;
+  fill: currentColor;
+}
+
+.markdown-body a {
+  background-color: transparent;
+}
+
+.markdown-body a:active,
+.markdown-body a:hover {
+  outline-width: 0;
+}
+
+.markdown-body h1 {
+  font-size: 2em;
+  margin: 0.67em 0;
+}
+
+.markdown-body img {
+  border-style: none;
+}
+
+.markdown-body code,
+.markdown-body kbd,
+.markdown-body pre {
+  font-family: monospace, monospace;
+  font-size: 1em;
+}
+
+.markdown-body hr {
+  box-sizing: content-box;
+  height: 0;
+  overflow: visible;
+}
+
+.markdown-body input {
+  font: inherit;
+  margin: 0;
+}
+
+.markdown-body input {
+  overflow: visible;
+}
+
+.markdown-body [type="checkbox"] {
+  box-sizing: border-box;
+  padding: 0;
+}
+
+.markdown-body * {
+  box-sizing: border-box;
+}
+
+.markdown-body input {
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.markdown-body a {
+  color: rgba(167, 234, 140, 0.94);
+  font-weight: bold;
+  text-decoration: none;
+}
+
+.markdown-body a:hover {
+  text-decoration: underline;
+}
+
+.markdown-body strong {
+  font-weight: 700;
+}
+
+.markdown-body hr {
+  height: 0;
+  margin: 15px 0;
+  overflow: hidden;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid #dfe2e5;
+}
+
+.markdown-body hr::before {
+  display: table;
+  content: "";
+}
+
+.markdown-body hr::after {
+  display: table;
+  clear: both;
+  content: "";
+}
+
+.markdown-body table {
+  border-spacing: 0;
+  border-collapse: collapse;
+}
+
+.markdown-body td,
+.markdown-body th {
+  padding: 0;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.markdown-body h1 {
+  font-size: 32px;
+  font-weight: 600;
+}
+
+.markdown-body h2 {
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.markdown-body h3 {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.markdown-body h4 {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.markdown-body h5 {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.markdown-body h6 {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.markdown-body p {
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+
+.markdown-body blockquote {
+  margin: 0;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 0;
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.markdown-body ol ol,
+.markdown-body ul ol {
+  list-style-type: lower-roman;
+}
+
+.markdown-body ul ul ol,
+.markdown-body ul ol ol,
+.markdown-body ol ul ol,
+.markdown-body ol ol ol {
+  list-style-type: lower-alpha;
+}
+
+.markdown-body dd {
+  margin-left: 0;
+}
+
+.markdown-body code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+  font-size: 12px;
+}
+
+.markdown-body pre {
+  margin-top: 0;
+  margin-bottom: 0;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+  font-size: 12px;
+}
+
+.markdown-body .octicon {
+  vertical-align: text-bottom;
+}
+
+.markdown-body .pl-0 {
+  padding-left: 0 !important;
+}
+
+.markdown-body .pl-1 {
+  padding-left: 4px !important;
+}
+
+.markdown-body .pl-2 {
+  padding-left: 8px !important;
+}
+
+.markdown-body .pl-3 {
+  padding-left: 16px !important;
+}
+
+.markdown-body .pl-4 {
+  padding-left: 24px !important;
+}
+
+.markdown-body .pl-5 {
+  padding-left: 32px !important;
+}
+
+.markdown-body .pl-6 {
+  padding-left: 40px !important;
+}
+
+.markdown-body::before {
+  display: table;
+  content: "";
+}
+
+.markdown-body::after {
+  display: table;
+  clear: both;
+  content: "";
+}
+
+.markdown-body>*:first-child {
+  margin-top: 0 !important;
+}
+
+.markdown-body>*:last-child {
+  margin-bottom: 0 !important;
+}
+
+.markdown-body a:not([href]) {
+  color: inherit;
+  text-decoration: none;
+}
+
+.markdown-body .anchor {
+  float: left;
+  padding-right: 4px;
+  margin-left: -20px;
+  line-height: 1;
+}
+
+.markdown-body .anchor:focus {
+  outline: none;
+}
+
+.markdown-body p,
+.markdown-body blockquote,
+.markdown-body ul,
+.markdown-body ol,
+.markdown-body dl,
+.markdown-body table,
+.markdown-body pre {
+  margin-top: 0;
+  margin-bottom: 16px;
+}
+
+.markdown-body hr {
+  height:1px;
+  padding: 0;
+  margin: 24px 0;
+  background-color: #828282;
+  border: 0;
+}
+
+.markdown-body blockquote {
+  padding: 0 1em;
+  color: #9fa0a0;
+  border-left: 0.25em solid #292929;
+  font-style: italic;
+}
+
+.markdown-body blockquote>:first-child {
+  margin-top: 0;
+}
+
+.markdown-body blockquote>:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body kbd {
+  display: inline-block;
+  padding: 3px 5px;
+  font-size: 11px;
+  line-height: 10px;
+  color: #444d56;
+  vertical-align: middle;
+  background-color: #fafbfc;
+  border: solid 1px #c6cbd1;
+  border-bottom-color: #959da5;
+  border-radius: 3px;
+  box-shadow: inset 0 -1px 0 #959da5;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+  margin-top: 24px;
+  margin-bottom: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.markdown-body h1 .octicon-link,
+.markdown-body h2 .octicon-link,
+.markdown-body h3 .octicon-link,
+.markdown-body h4 .octicon-link,
+.markdown-body h5 .octicon-link,
+.markdown-body h6 .octicon-link {
+  color: #1b1f23;
+  vertical-align: middle;
+  visibility: hidden;
+}
+
+.markdown-body h1:hover .anchor,
+.markdown-body h2:hover .anchor,
+.markdown-body h3:hover .anchor,
+.markdown-body h4:hover .anchor,
+.markdown-body h5:hover .anchor,
+.markdown-body h6:hover .anchor {
+  text-decoration: none;
+}
+
+.markdown-body h1:hover .anchor .octicon-link,
+.markdown-body h2:hover .anchor .octicon-link,
+.markdown-body h3:hover .anchor .octicon-link,
+.markdown-body h4:hover .anchor .octicon-link,
+.markdown-body h5:hover .anchor .octicon-link,
+.markdown-body h6:hover .anchor .octicon-link {
+  visibility: visible;
+}
+
+.markdown-body h1 {
+  padding-bottom: 0.3em;
+  font-size: 2em;
+  border-bottom: 1px solid #484848;
+}
+
+.markdown-body h2 {
+  padding-bottom: 0.3em;
+  font-size: 1.5em;
+  border-bottom: 1px solid #484848;
+}
+
+.markdown-body h3 {
+  font-size: 1.25em;
+}
+
+.markdown-body h4 {
+  font-size: 1em;
+}
+
+.markdown-body h5 {
+  font-size: 0.875em;
+}
+
+.markdown-body h6 {
+  font-size: 0.85em;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 2em;
+}
+
+.markdown-body ul ul,
+.markdown-body ul ol,
+.markdown-body ol ol,
+.markdown-body ol ul {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.markdown-body li {
+  word-wrap: break-all;
+}
+
+.markdown-body li>p {
+  margin-top: 16px;
+}
+
+.markdown-body li+li {
+  margin-top: 0.25em;
+}
+
+.markdown-body dl {
+  padding: 0;
+}
+
+.markdown-body dl dt {
+  padding: 0;
+  margin-top: 16px;
+  font-size: 1em;
+  font-style: italic;
+  font-weight: 600;
+}
+
+.markdown-body dl dd {
+  padding: 0 16px;
+  margin-bottom: 16px;
+}
+
+.markdown-body table {
+  display: block;
+  overflow: auto;
+}
+
+.markdown-body table th {
+  font-weight: 600;
+  background-color: #292929;
+}
+
+.markdown-body table th,
+.markdown-body table td {
+  padding: 6px 13px;
+  border: 1px solid #636363;
+}
+
+.markdown-body table tr {
+  border-top: 1px solid #636363;
+}
+
+
+.markdown-body img {
+  max-width: 100%;
+  box-sizing: content-box;
+}
+
+.markdown-body img[align=right] {
+  padding-left: 20px;
+}
+
+.markdown-body img[align=left] {
+  padding-right: 20px;
+}
+
+.markdown-body code {
+  padding: 0.2em 0.4em;
+  margin: 0;
+  font-size: 85%;
+  background-color: #292929;
+  border: 1px solid #676767;
+  border-radius: 3px;
+}
+
+.markdown-body pre {
+  word-wrap: normal;
+}
+
+.markdown-body pre>code {
+  padding: 0;
+  margin: 0;
+  font-size: 100%;
+  word-break: normal;
+  white-space: pre;
+  background: transparent;
+  border: 0;
+}
+
+.markdown-body .highlight {
+  margin-bottom: 16px;
+}
+
+.markdown-body .highlight pre {
+  margin-bottom: 0;
+  word-break: normal;
+}
+
+.markdown-body .highlight pre,
+.markdown-body pre {
+  padding: 16px;
+  overflow: auto;
+  font-size: 85%;
+  line-height: 1.45;
+  background-color: #292929;
+  border-radius: 3px;
+}
+
+.markdown-body pre code {
+  display: inline;
+  max-width: auto;
+  padding: 0;
+  margin: 0;
+  overflow: visible;
+  line-height: inherit;
+  word-wrap: normal;
+  background-color: transparent;
+  border: 0;
+}
+
+.markdown-body .full-commit .btn-outline:not(:disabled):hover {
+  color: #005cc5;
+  border-color: #005cc5;
+}
+
+.markdown-body kbd {
+  display: inline-block;
+  padding: 3px 5px;
+  font: 11px "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+  line-height: 10px;
+  color: #444d56;
+  vertical-align: middle;
+  background-color: #fafbfc;
+  border: solid 1px #d1d5da;
+  border-bottom-color: #c6cbd1;
+  border-radius: 3px;
+  box-shadow: inset 0 -1px 0 #c6cbd1;
+}
+
+.markdown-body :checked+.radio-label {
+  position: relative;
+  z-index: 1;
+  border-color: #0366d6;
+}
+
+.markdown-body .task-list-item {
+  list-style-type: none;
+}
+
+.markdown-body .task-list-item+.task-list-item {
+  margin-top: 3px;
+}
+
+.markdown-body .task-list-item input {
+  margin: 0 0.2em 0.25em -1.6em;
+  vertical-align: middle;
+}
+
+.markdown-body hr {
+  border-bottom-color: #eee;
+}</style>
+  </head>
+  <body>
+    <article class="markdown-body">
+      <h1 data-sourcepos="1:1-1:25">SHIPS Runsheet Examples</h1>
+<p data-sourcepos="3:1-5:60">This document gives step-by-step examples for turning Teradata DDL, DCL, and DML
+from different source shapes into SHIPS release packages, then deploying those
+packages with the current release-group/zip deploy launcher.</p>
+<p data-sourcepos="7:1-9:8">The examples use <code>python -m td_release_packager</code> explicitly. If your site has a
+<code>ships</code> wrapper on <code>PATH</code>, you can replace <code>python -m td_release_packager</code> with
+<code>ships</code>.</p>
+<h2 data-sourcepos="11:1-11:21">Command Vocabulary</h2>
+<p data-sourcepos="13:1-13:53">Use these argument meanings throughout the runsheets:</p>
+<table data-sourcepos="15:1-37:107">
+<thead>
+<tr data-sourcepos="15:1-15:35">
+<th data-sourcepos="15:2-15:11">Argument</th>
+<th data-sourcepos="15:13-15:24">Applies to</th>
+<th data-sourcepos="15:26-15:34">Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="17:1-17:172">
+<td data-sourcepos="17:2-17:14"><code>--project</code></td>
+<td data-sourcepos="17:16-17:38">Most project commands</td>
+<td data-sourcepos="17:40-17:171">Existing SHIPS project directory. This is where <code>ships.yaml</code>, <code>config/</code>, <code>payload/</code>, <code>releases/</code>, and <code>ships.decisions.json</code> live.</td>
+</tr>
+<tr data-sourcepos="18:1-18:199">
+<td data-sourcepos="18:2-18:13"><code>--source</code></td>
+<td data-sourcepos="18:15-18:65"><code>harvest</code>, <code>process</code>, <code>onboard</code>, <code>migrate-source</code></td>
+<td data-sourcepos="18:67-18:198">Raw SQL/DDL/DCL/DML source directory to ingest. It is not the SHIPS project unless your raw files already live inside the project.</td>
+</tr>
+<tr data-sourcepos="19:1-19:179">
+<td data-sourcepos="19:2-19:31"><code>--source-github OWNER/REPO</code></td>
+<td data-sourcepos="19:33-19:54"><code>process</code>, <code>package</code></td>
+<td data-sourcepos="19:56-19:178">Fetch source from GitHub by repository name. Mutually exclusive with <code>--source</code> or <code>--project</code>, depending on the command.</td>
+</tr>
+<tr data-sourcepos="20:1-20:127">
+<td data-sourcepos="20:2-20:21"><code>--source-ref REF</code></td>
+<td data-sourcepos="20:23-20:67"><code>process</code>, <code>package</code> with <code>--source-github</code></td>
+<td data-sourcepos="20:69-20:126">Branch, tag, or commit SHA to fetch. Defaults to <code>main</code>.</td>
+</tr>
+<tr data-sourcepos="21:1-21:152">
+<td data-sourcepos="21:2-21:25"><code>--github-token TOKEN</code></td>
+<td data-sourcepos="21:27-21:71"><code>process</code>, <code>package</code> with <code>--source-github</code></td>
+<td data-sourcepos="21:73-21:151">Token for private GitHub repositories. If omitted, SHIPS uses <code>GITHUB_TOKEN</code>.</td>
+</tr>
+<tr data-sourcepos="22:1-22:136">
+<td data-sourcepos="22:2-22:16"><code>--token-map</code></td>
+<td data-sourcepos="22:18-22:39"><code>harvest</code>, <code>process</code></td>
+<td data-sourcepos="22:41-22:135">File mapping literal database names to SHIPS tokens, for example <code>A_D01_OMR_STD={{OMR_STD}}</code>.</td>
+</tr>
+<tr data-sourcepos="23:1-23:151">
+<td data-sourcepos="23:2-23:20"><code>--auto-tokenise</code></td>
+<td data-sourcepos="23:22-23:43"><code>harvest</code>, <code>process</code></td>
+<td data-sourcepos="23:45-23:150">Detect hardcoded database names and apply tokens in one pass. Faster, but skips manual token map review.</td>
+</tr>
+<tr data-sourcepos="24:1-24:171">
+<td data-sourcepos="24:2-24:17"><code>--env-prefix</code></td>
+<td data-sourcepos="24:19-24:40"><code>harvest</code>, <code>process</code></td>
+<td data-sourcepos="24:42-24:170">Prefix to strip when deriving token names, for example <code>A_D01_OMR_STD</code> becomes <code>{{OMR_STD}}</code> when <code>--env-prefix A_D01</code> is used.</td>
+</tr>
+<tr data-sourcepos="25:1-25:135">
+<td data-sourcepos="25:2-25:10"><code>--env</code></td>
+<td data-sourcepos="25:12-25:45"><code>process</code>, <code>package</code>, <code>rollback</code></td>
+<td data-sourcepos="25:47-25:134">Target environment label stamped into the package, for example <code>DEV</code>, <code>TST</code>, or <code>PRD</code>.</td>
+</tr>
+<tr data-sourcepos="26:1-26:143">
+<td data-sourcepos="26:2-26:17"><code>--env-config</code></td>
+<td data-sourcepos="26:19-26:60"><code>process</code>, <code>package</code>, <code>scan</code>, <code>rollback</code></td>
+<td data-sourcepos="26:62-26:142">Environment config that resolves <code>{{TOKEN}}</code> values for one target environment.</td>
+</tr>
+<tr data-sourcepos="27:1-27:103">
+<td data-sourcepos="27:2-27:11"><code>--name</code></td>
+<td data-sourcepos="27:13-27:34"><code>process</code>, <code>package</code></td>
+<td data-sourcepos="27:36-27:102">Logical package name used in release artifact names and metadata.</td>
+</tr>
+<tr data-sourcepos="28:1-28:117">
+<td data-sourcepos="28:2-28:13"><code>--output</code></td>
+<td data-sourcepos="28:15-28:48"><code>process</code>, <code>package</code>, <code>scaffold</code></td>
+<td data-sourcepos="28:50-28:116">Parent output directory for generated projects or release groups.</td>
+</tr>
+<tr data-sourcepos="29:1-29:140">
+<td data-sourcepos="29:2-29:20"><code>--skip-generate</code></td>
+<td data-sourcepos="29:22-29:32"><code>process</code></td>
+<td data-sourcepos="29:34-29:139">Skip generated view-layer DDL. Use this for hand-written projects that do not use SHIPS view generation.</td>
+</tr>
+<tr data-sourcepos="30:1-30:124">
+<td data-sourcepos="30:2-30:13"><code>--strict</code></td>
+<td data-sourcepos="30:15-30:36"><code>process</code>, <code>inspect</code></td>
+<td data-sourcepos="30:38-30:123">Treat validation failures as blocking. In <code>process</code>, abort on the first error stage.</td>
+</tr>
+<tr data-sourcepos="31:1-31:121">
+<td data-sourcepos="31:2-31:18"><code>--allow-dirty</code></td>
+<td data-sourcepos="31:20-31:30"><code>package</code></td>
+<td data-sourcepos="31:32-31:120">Permit packaging from an uncommitted working tree. The Trust Report records the caveat.</td>
+</tr>
+<tr data-sourcepos="32:1-32:124">
+<td data-sourcepos="32:2-32:17"><code>--change-ref</code></td>
+<td data-sourcepos="32:19-32:29"><code>package</code></td>
+<td data-sourcepos="32:31-32:123">Change ticket reference stamped into the package. Required when configured in <code>ships.yaml</code>.</td>
+</tr>
+<tr data-sourcepos="33:1-33:84">
+<td data-sourcepos="33:2-33:18"><code>--signing-key</code></td>
+<td data-sourcepos="33:20-33:30"><code>package</code></td>
+<td data-sourcepos="33:32-33:83">HMAC signing key file. Produces a <code>.hmac</code> sidecar.</td>
+</tr>
+<tr data-sourcepos="34:1-34:84">
+<td data-sourcepos="34:2-34:21"><code>--asymmetric-key</code></td>
+<td data-sourcepos="34:23-34:33"><code>package</code></td>
+<td data-sourcepos="34:35-34:83">Ed25519 private key. Produces a <code>.sig</code> sidecar.</td>
+</tr>
+<tr data-sourcepos="35:1-35:127">
+<td data-sourcepos="35:2-35:20"><code>deploy &lt;target&gt;</code></td>
+<td data-sourcepos="35:22-35:31"><code>deploy</code></td>
+<td data-sourcepos="35:33-35:126">Target can be a release-group directory, one package zip, or an extracted package directory.</td>
+</tr>
+<tr data-sourcepos="36:1-36:105">
+<td data-sourcepos="36:2-36:15"><code>--work-dir</code></td>
+<td data-sourcepos="36:17-36:26"><code>deploy</code></td>
+<td data-sourcepos="36:28-36:104">Optional extraction directory. Defaults to <code>.ships-work</code> beside the target.</td>
+</tr>
+<tr data-sourcepos="37:1-37:107">
+<td data-sourcepos="37:2-37:11"><code>--role</code></td>
+<td data-sourcepos="37:13-37:22"><code>deploy</code></td>
+<td data-sourcepos="37:24-37:106">Release-group package role to run. Defaults to <code>main</code>. Normally leave this alone.</td>
+</tr>
+</tbody>
+</table>
+<p data-sourcepos="39:1-40:52">Arguments after <code>deploy &lt;target&gt;</code> are passed unchanged to the generated package
+deployer. Common forwarded deploy arguments include:</p>
+<table data-sourcepos="42:1-56:82">
+<thead>
+<tr data-sourcepos="42:1-42:39">
+<th data-sourcepos="42:2-42:28">Forwarded deploy argument</th>
+<th data-sourcepos="42:30-42:38">Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="44:1-44:99">
+<td data-sourcepos="44:2-44:14"><code>--dry-run</code></td>
+<td data-sourcepos="44:16-44:98">Run parse, integrity, trust, and pre-flight checks without executing DDL/DCL/DML.</td>
+</tr>
+<tr data-sourcepos="45:1-45:29">
+<td data-sourcepos="45:2-45:11"><code>--host</code></td>
+<td data-sourcepos="45:13-45:28">Teradata host.</td>
+</tr>
+<tr data-sourcepos="46:1-46:39">
+<td data-sourcepos="46:2-46:11"><code>--user</code></td>
+<td data-sourcepos="46:13-46:38">Teradata deploying user.</td>
+</tr>
+<tr data-sourcepos="47:1-47:102">
+<td data-sourcepos="47:2-47:15"><code>--password</code></td>
+<td data-sourcepos="47:17-47:101">Password for non-interactive runs. Prefer a secret manager or environment variable.</td>
+</tr>
+<tr data-sourcepos="48:1-48:83">
+<td data-sourcepos="48:2-48:14"><code>--logmech</code></td>
+<td data-sourcepos="48:16-48:82">Teradata logon mechanism, for example <code>TD2</code>, <code>LDAP</code>, or <code>TDNEGO</code>.</td>
+</tr>
+<tr data-sourcepos="49:1-49:78">
+<td data-sourcepos="49:2-49:14"><code>--streams</code></td>
+<td data-sourcepos="49:16-49:77">Number of parallel streams for wave-parallel DDL deployment.</td>
+</tr>
+<tr data-sourcepos="50:1-50:94">
+<td data-sourcepos="50:2-50:24"><code>--continue-on-error</code></td>
+<td data-sourcepos="50:26-50:93">Attempt remaining objects after a failure and report all failures.</td>
+</tr>
+<tr data-sourcepos="51:1-51:94">
+<td data-sourcepos="51:2-51:19">`--on-drift abort</td>
+<td data-sourcepos="51:21-51:24">skip</td>
+</tr>
+<tr data-sourcepos="52:1-52:83">
+<td data-sourcepos="52:2-52:19"><code>--baseline-dir</code></td>
+<td data-sourcepos="52:21-52:82">Override drift baseline storage location for one deployment.</td>
+</tr>
+<tr data-sourcepos="53:1-53:88">
+<td data-sourcepos="53:2-53:45"><code>--encryptdata true</code> / <code>--sslmode require</code></td>
+<td data-sourcepos="53:47-53:87">Request encrypted Teradata connections.</td>
+</tr>
+<tr data-sourcepos="54:1-54:69">
+<td data-sourcepos="54:2-54:22"><code>resume &lt;manifest&gt;</code></td>
+<td data-sourcepos="54:24-54:68">Resume a failed deployment from a manifest.</td>
+</tr>
+<tr data-sourcepos="55:1-55:76">
+<td data-sourcepos="55:2-55:22"><code>status &lt;manifest&gt;</code></td>
+<td data-sourcepos="55:24-55:75">Show manifest state without a database connection.</td>
+</tr>
+<tr data-sourcepos="56:1-56:82">
+<td data-sourcepos="56:2-56:24"><code>rollback &lt;manifest&gt;</code></td>
+<td data-sourcepos="56:26-56:81">Technical rollback using pre-deploy rollback captures.</td>
+</tr>
+</tbody>
+</table>
+<h2 data-sourcepos="58:1-58:25">Standard Project Shape</h2>
+<p data-sourcepos="60:1-60:43">Most runsheets end with this project shape:</p>
+<pre data-sourcepos="62:1-78:3"><code class="language-text">C:\Projects\OMR\
+  ships.yaml
+  config\
+    inspect.conf
+    token_map.conf
+    env\
+      DEV.conf
+      TST.conf
+      PRD.conf
+  payload\
+    database\
+      DDL\
+      DCL\
+      DML\
+  releases\
+</code></pre>
+<p data-sourcepos="80:1-83:50">DDL files are object definitions such as tables, views, macros, procedures,
+functions, triggers, databases, users, roles, profiles, and SQLJ JAR installs.
+DCL files are grants and revokes. DML files are seed or reference data changes
+such as <code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code>, and <code>MERGE</code>.</p>
+<h2 data-sourcepos="85:1-85:64">Runsheet 1: Legacy Codebase With Existing Substitution Script</h2>
+<p data-sourcepos="87:1-89:13">Use this when the current deployment process already has a sed-style
+substitution file or similar marker map, for example <code>$STD_DB</code>, <code>${SEM_DB}</code>, or
+<code>&amp;&amp;APP_DB&amp;&amp;</code>.</p>
+<h3 data-sourcepos="91:1-91:9">Steps</h3>
+<ol data-sourcepos="93:1-94:0">
+<li data-sourcepos="93:1-94:0">Create the SHIPS project.</li>
+</ol>
+<pre data-sourcepos="95:1-99:3"><code class="language-powershell">python -m td_release_packager scaffold `
+  --name OMR `
+  --output C:\Projects
+</code></pre>
+<p data-sourcepos="101:1-101:10">Arguments:</p>
+<table data-sourcepos="103:1-106:66">
+<thead>
+<tr data-sourcepos="103:1-103:26">
+<th data-sourcepos="103:2-103:11">Argument</th>
+<th data-sourcepos="103:13-103:25">Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="105:1-105:80">
+<td data-sourcepos="105:2-105:15"><code>--name OMR</code></td>
+<td data-sourcepos="105:17-105:79">Creates <code>C:\Projects\OMR</code> and uses <code>OMR</code> as the project name.</td>
+</tr>
+<tr data-sourcepos="106:1-106:66">
+<td data-sourcepos="106:2-106:25"><code>--output C:\Projects</code></td>
+<td data-sourcepos="106:27-106:65">Parent directory for the new project.</td>
+</tr>
+</tbody>
+</table>
+<ol start="2" data-sourcepos="108:1-109:0">
+<li data-sourcepos="108:1-109:0">Convert the legacy substitution script into SHIPS config.</li>
+</ol>
+<pre data-sourcepos="110:1-115:3"><code class="language-powershell">python -m td_release_packager import-legacy `
+  --script C:\Legacy\deploy\substitutions.sed `
+  --env DEV `
+  --output-dir C:\Projects\OMR\config
+</code></pre>
+<p data-sourcepos="117:1-117:10">Arguments:</p>
+<table data-sourcepos="119:1-123:91">
+<thead>
+<tr data-sourcepos="119:1-119:26">
+<th data-sourcepos="119:2-119:11">Argument</th>
+<th data-sourcepos="119:13-119:25">Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="121:1-121:95">
+<td data-sourcepos="121:2-121:13"><code>--script</code></td>
+<td data-sourcepos="121:15-121:94">Existing substitution script. SHIPS reads the legacy marker to value mappings.</td>
+</tr>
+<tr data-sourcepos="122:1-122:60">
+<td data-sourcepos="122:2-122:14"><code>--env DEV</code></td>
+<td data-sourcepos="122:16-122:59">Environment name for the generated config.</td>
+</tr>
+<tr data-sourcepos="123:1-123:91">
+<td data-sourcepos="123:2-123:17"><code>--output-dir</code></td>
+<td data-sourcepos="123:19-123:90">Writes <code>env\DEV.conf</code> and <code>legacy_migration.sed</code> under this directory.</td>
+</tr>
+</tbody>
+</table>
+<ol start="3" data-sourcepos="125:1-126:0">
+<li data-sourcepos="125:1-126:0">Preview migration from legacy markers to SHIPS <code>{{TOKEN}}</code> markers.</li>
+</ol>
+<pre data-sourcepos="127:1-133:3"><code class="language-powershell">python -m td_release_packager migrate-source `
+  --sed C:\Projects\OMR\config\legacy_migration.sed `
+  --source C:\Legacy\sql `
+  --project C:\Projects\OMR `
+  --dry-run
+</code></pre>
+<p data-sourcepos="135:1-135:10">Arguments:</p>
+<table data-sourcepos="137:1-142:64">
+<thead>
+<tr data-sourcepos="137:1-137:26">
+<th data-sourcepos="137:2-137:11">Argument</th>
+<th data-sourcepos="137:13-137:25">Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="139:1-139:60">
+<td data-sourcepos="139:2-139:10"><code>--sed</code></td>
+<td data-sourcepos="139:12-139:59">Migration script generated by <code>import-legacy</code>.</td>
+</tr>
+<tr data-sourcepos="140:1-140:52">
+<td data-sourcepos="140:2-140:13"><code>--source</code></td>
+<td data-sourcepos="140:15-140:51">Raw legacy SQL directory to update.</td>
+</tr>
+<tr data-sourcepos="141:1-141:92">
+<td data-sourcepos="141:2-141:14"><code>--project</code></td>
+<td data-sourcepos="141:16-141:91">Lets SHIPS honour any project-specific extension settings in <code>ships.yaml</code>.</td>
+</tr>
+<tr data-sourcepos="142:1-142:64">
+<td data-sourcepos="142:2-142:14"><code>--dry-run</code></td>
+<td data-sourcepos="142:16-142:63">Shows what would change without editing files.</td>
+</tr>
+</tbody>
+</table>
+<ol start="4" data-sourcepos="144:1-145:0">
+<li data-sourcepos="144:1-145:0">Apply the migration after review.</li>
+</ol>
+<pre data-sourcepos="146:1-151:3"><code class="language-powershell">python -m td_release_packager migrate-source `
+  --sed C:\Projects\OMR\config\legacy_migration.sed `
+  --source C:\Legacy\sql `
+  --project C:\Projects\OMR
+</code></pre>
+<ol start="5" data-sourcepos="153:1-154:0">
+<li data-sourcepos="153:1-154:0">Harvest the migrated SQL into the SHIPS project.</li>
+</ol>
+<pre data-sourcepos="155:1-160:3"><code class="language-powershell">python -m td_release_packager harvest `
+  --source C:\Legacy\sql `
+  --project C:\Projects\OMR `
+  --token-map C:\Projects\OMR\config\token_map.conf
+</code></pre>
+<p data-sourcepos="162:1-162:10">Arguments:</p>
+<table data-sourcepos="164:1-168:82">
+<thead>
+<tr data-sourcepos="164:1-164:26">
+<th data-sourcepos="164:2-164:11">Argument</th>
+<th data-sourcepos="164:13-164:25">Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="166:1-166:51">
+<td data-sourcepos="166:2-166:13"><code>--source</code></td>
+<td data-sourcepos="166:15-166:50">Directory containing migrated SQL.</td>
+</tr>
+<tr data-sourcepos="167:1-167:68">
+<td data-sourcepos="167:2-167:14"><code>--project</code></td>
+<td data-sourcepos="167:16-167:67">SHIPS project to receive classified payload files.</td>
+</tr>
+<tr data-sourcepos="168:1-168:82">
+<td data-sourcepos="168:2-168:16"><code>--token-map</code></td>
+<td data-sourcepos="168:18-168:81">Applies any remaining literal database to token substitutions.</td>
+</tr>
+</tbody>
+</table>
+<ol start="6" data-sourcepos="170:1-171:0">
+<li data-sourcepos="170:1-171:0">Validate tokens across environments.</li>
+</ol>
+<pre data-sourcepos="172:1-177:3"><code class="language-powershell">python -m td_release_packager scan `
+  --project C:\Projects\OMR `
+  --all-envs `
+  --fail-on-orphan
+</code></pre>
+<p data-sourcepos="179:1-179:10">Arguments:</p>
+<table data-sourcepos="181:1-184:68">
+<thead>
+<tr data-sourcepos="181:1-181:26">
+<th data-sourcepos="181:2-181:11">Argument</th>
+<th data-sourcepos="181:13-181:25">Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="183:1-183:60">
+<td data-sourcepos="183:2-183:15"><code>--all-envs</code></td>
+<td data-sourcepos="183:17-183:59">Validates every <code>config\env\*.conf</code> file.</td>
+</tr>
+<tr data-sourcepos="184:1-184:68">
+<td data-sourcepos="184:2-184:21"><code>--fail-on-orphan</code></td>
+<td data-sourcepos="184:23-184:67">Fails if a token is defined but never used.</td>
+</tr>
+</tbody>
+</table>
+<ol start="7" data-sourcepos="186:1-187:0">
+<li data-sourcepos="186:1-187:0">Build the release package.</li>
+</ol>
+<pre data-sourcepos="188:1-198:3"><code class="language-powershell">python -m td_release_packager process `
+  --project C:\Projects\OMR `
+  --skip-generate `
+  --env DEV `
+  --env-config C:\Projects\OMR\config\env\DEV.conf `
+  --name OMR `
+  --output C:\Projects\OMR\releases `
+  --author &quot;Data Engineering&quot; `
+  --description &quot;Legacy SQL migrated to SHIPS&quot;
+</code></pre>
+<p data-sourcepos="200:1-200:10">Arguments:</p>
+<table data-sourcepos="202:1-209:82">
+<thead>
+<tr data-sourcepos="202:1-202:26">
+<th data-sourcepos="202:2-202:11">Argument</th>
+<th data-sourcepos="202:13-202:25">Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="204:1-204:96">
+<td data-sourcepos="204:2-204:20"><code>--skip-generate</code></td>
+<td data-sourcepos="204:22-204:95">Use when all DDL is hand-authored and no generated view layer is needed.</td>
+</tr>
+<tr data-sourcepos="205:1-205:58">
+<td data-sourcepos="205:2-205:10"><code>--env</code></td>
+<td data-sourcepos="205:12-205:57">Target environment stamped into the package.</td>
+</tr>
+<tr data-sourcepos="206:1-206:66">
+<td data-sourcepos="206:2-206:17"><code>--env-config</code></td>
+<td data-sourcepos="206:19-206:65">Resolves <code>{{TOKEN}}</code> values for this package.</td>
+</tr>
+<tr data-sourcepos="207:1-207:59">
+<td data-sourcepos="207:2-207:11"><code>--name</code></td>
+<td data-sourcepos="207:13-207:58">Logical package name used in artifact names.</td>
+</tr>
+<tr data-sourcepos="208:1-208:62">
+<td data-sourcepos="208:2-208:13"><code>--output</code></td>
+<td data-sourcepos="208:15-208:61">Where the release-group directory is written.</td>
+</tr>
+<tr data-sourcepos="209:1-209:82">
+<td data-sourcepos="209:2-209:30"><code>--author</code>, <code>--description</code></td>
+<td data-sourcepos="209:32-209:81">Metadata visible in package context and reports.</td>
+</tr>
+</tbody>
+</table>
+<ol start="8" data-sourcepos="211:1-212:0">
+<li data-sourcepos="211:1-212:0">Verify and deploy.</li>
+</ol>
+<pre data-sourcepos="213:1-227:3"><code class="language-powershell">python -m td_release_packager verify --project C:\Projects\OMR
+
+python -m td_release_packager deploy `
+  C:\Projects\OMR\releases\DEV_OMR_BUILD_0001_20260519 `
+  --dry-run `
+  --host td-dev.company.net `
+  --user ships_dba
+
+python -m td_release_packager deploy `
+  C:\Projects\OMR\releases\DEV_OMR_BUILD_0001_20260519 `
+  --host td-dev.company.net `
+  --user ships_dba `
+  --streams 4
+</code></pre>
+<h2 data-sourcepos="229:1-229:58">Runsheet 2: Legacy Codebase With No Substitution Script</h2>
+<p data-sourcepos="231:1-232:62">Use this when the source has legacy placeholders but no reliable substitution
+script, or when you are not sure what kind of source you have.</p>
+<h3 data-sourcepos="234:1-234:9">Steps</h3>
+<ol data-sourcepos="236:1-237:0">
+<li data-sourcepos="236:1-237:0">Ask SHIPS to classify the onboarding path.</li>
+</ol>
+<pre data-sourcepos="238:1-242:3"><code class="language-powershell">python -m td_release_packager onboard `
+  --source C:\Legacy\sql `
+  --env DEV
+</code></pre>
+<p data-sourcepos="244:1-244:10">Arguments:</p>
+<table data-sourcepos="246:1-249:64">
+<thead>
+<tr data-sourcepos="246:1-246:26">
+<th data-sourcepos="246:2-246:11">Argument</th>
+<th data-sourcepos="246:13-246:25">Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="248:1-248:60">
+<td data-sourcepos="248:2-248:13"><code>--source</code></td>
+<td data-sourcepos="248:15-248:59">Raw legacy SQL source directory to inspect.</td>
+</tr>
+<tr data-sourcepos="249:1-249:64">
+<td data-sourcepos="249:2-249:10"><code>--env</code></td>
+<td data-sourcepos="249:12-249:63">Environment name used in the recommended commands.</td>
+</tr>
+</tbody>
+</table>
+<ol start="2" data-sourcepos="251:1-252:0">
+<li data-sourcepos="251:1-252:0">If SHIPS reports legacy placeholders, auto-discover them.</li>
+</ol>
+<pre data-sourcepos="253:1-258:3"><code class="language-powershell">python -m td_release_packager import-legacy `
+  --scan-source C:\Legacy\sql `
+  --env DEV `
+  --output-dir C:\Projects\OMR\config
+</code></pre>
+<p data-sourcepos="260:1-260:10">Arguments:</p>
+<table data-sourcepos="262:1-266:66">
+<thead>
+<tr data-sourcepos="262:1-262:26">
+<th data-sourcepos="262:2-262:11">Argument</th>
+<th data-sourcepos="262:13-262:25">Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="264:1-264:103">
+<td data-sourcepos="264:2-264:18"><code>--scan-source</code></td>
+<td data-sourcepos="264:20-264:102">Walks the source tree and discovers <code>$VAR</code>, <code>${VAR}</code>, and <code>&amp;&amp;VAR&amp;&amp;</code> placeholders.</td>
+</tr>
+<tr data-sourcepos="265:1-265:64">
+<td data-sourcepos="265:2-265:10"><code>--env</code></td>
+<td data-sourcepos="265:12-265:63">Environment name for the generated <code>env\DEV.conf</code>.</td>
+</tr>
+<tr data-sourcepos="266:1-266:66">
+<td data-sourcepos="266:2-266:17"><code>--output-dir</code></td>
+<td data-sourcepos="266:19-266:65">Writes generated config and <code>scan_report.md</code>.</td>
+</tr>
+</tbody>
+</table>
+<ol start="3" data-sourcepos="268:1-271:0">
+<li data-sourcepos="268:1-269:0">
+<p data-sourcepos="268:4-268:69">Fill in generated values in <code>C:\Projects\OMR\config\env\DEV.conf</code>.</p>
+</li>
+<li data-sourcepos="270:1-271:0">
+<p data-sourcepos="270:4-270:45">Preview and apply the generated migration.</p>
+</li>
+</ol>
+<pre data-sourcepos="272:1-281:3"><code class="language-powershell">python -m td_release_packager migrate-source `
+  --sed C:\Projects\OMR\config\legacy_migration.sed `
+  --source C:\Legacy\sql `
+  --dry-run
+
+python -m td_release_packager migrate-source `
+  --sed C:\Projects\OMR\config\legacy_migration.sed `
+  --source C:\Legacy\sql
+</code></pre>
+<ol start="5" data-sourcepos="283:1-284:0">
+<li data-sourcepos="283:1-284:0">Harvest, validate, package, and deploy using Runsheet 1 steps 5 through 8.</li>
+</ol>
+<h2 data-sourcepos="285:1-285:49">Runsheet 3: Hand-Coded Untokenised DDL/DCL/DML</h2>
+<p data-sourcepos="287:1-288:80">Use this when developers wrote SQL with literal database names such as
+<code>A_D01_OMR_STD.Customer</code>, and you want SHIPS to convert those names into tokens.</p>
+<h3 data-sourcepos="290:1-290:9">Steps</h3>
+<ol data-sourcepos="292:1-293:0">
+<li data-sourcepos="292:1-293:0">Create the project.</li>
+</ol>
+<pre data-sourcepos="294:1-298:3"><code class="language-powershell">python -m td_release_packager scaffold `
+  --name OMR `
+  --output C:\Projects
+</code></pre>
+<ol start="2" data-sourcepos="300:1-301:0">
+<li data-sourcepos="300:1-301:0">Generate a token map for review.</li>
+</ol>
+<pre data-sourcepos="302:1-308:3"><code class="language-powershell">python -m td_release_packager harvest `
+  --source C:\Work\omr-sql `
+  --project C:\Projects\OMR `
+  --generate-token-map `
+  --env-prefix A_D01
+</code></pre>
+<p data-sourcepos="310:1-310:10">Arguments:</p>
+<table data-sourcepos="312:1-315:126">
+<thead>
+<tr data-sourcepos="312:1-312:26">
+<th data-sourcepos="312:2-312:11">Argument</th>
+<th data-sourcepos="312:13-312:25">Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="314:1-314:104">
+<td data-sourcepos="314:2-314:25"><code>--generate-token-map</code></td>
+<td data-sourcepos="314:27-314:103">Scans source for literal database names and writes <code>config\token_map.conf</code>.</td>
+</tr>
+<tr data-sourcepos="315:1-315:126">
+<td data-sourcepos="315:2-315:23"><code>--env-prefix A_D01</code></td>
+<td data-sourcepos="315:25-315:125">Strips the DEV prefix when deriving token names. For example <code>A_D01_OMR_STD</code> becomes <code>{{OMR_STD}}</code>.</td>
+</tr>
+</tbody>
+</table>
+<ol start="3" data-sourcepos="317:1-318:0">
+<li data-sourcepos="317:1-318:0">Review and edit <code>C:\Projects\OMR\config\token_map.conf</code>.</li>
+</ol>
+<p data-sourcepos="319:1-319:8">Example:</p>
+<pre data-sourcepos="321:1-325:3"><code class="language-text">A_D01_OMR_STD={{OMR_STD}}
+A_D01_OMR_SEM={{OMR_SEM}}
+A_D01_OMR_APP={{OMR_APP}}
+</code></pre>
+<ol start="4" data-sourcepos="327:1-328:0">
+<li data-sourcepos="327:1-328:0">Fill in environment configs.</li>
+</ol>
+<p data-sourcepos="329:1-329:30">Example <code>config\env\DEV.conf</code>:</p>
+<pre data-sourcepos="331:1-338:3"><code class="language-text">SHIPS_ENV=DEV
+ENV_PREFIX=A_D01
+SHIPS_PROJECT=OMR
+OMR_STD={{ENV_PREFIX}}_{{SHIPS_PROJECT}}_STD
+OMR_SEM={{ENV_PREFIX}}_{{SHIPS_PROJECT}}_SEM
+OMR_APP={{ENV_PREFIX}}_{{SHIPS_PROJECT}}_APP
+</code></pre>
+<p data-sourcepos="340:1-340:30">Example <code>config\env\PRD.conf</code>:</p>
+<pre data-sourcepos="342:1-349:3"><code class="language-text">SHIPS_ENV=PRD
+ENV_PREFIX=P
+SHIPS_PROJECT=OMR
+OMR_STD={{ENV_PREFIX}}_{{SHIPS_PROJECT}}_STD
+OMR_SEM={{ENV_PREFIX}}_{{SHIPS_PROJECT}}_SEM
+OMR_APP={{ENV_PREFIX}}_{{SHIPS_PROJECT}}_APP
+</code></pre>
+<ol start="5" data-sourcepos="351:1-352:0">
+<li data-sourcepos="351:1-352:0">Re-harvest with the reviewed token map.</li>
+</ol>
+<pre data-sourcepos="353:1-358:3"><code class="language-powershell">python -m td_release_packager harvest `
+  --source C:\Work\omr-sql `
+  --project C:\Projects\OMR `
+  --token-map C:\Projects\OMR\config\token_map.conf
+</code></pre>
+<ol start="6" data-sourcepos="360:1-361:0">
+<li data-sourcepos="360:1-361:0">Inspect, generate missing grant files if desired, and analyse dependencies.</li>
+</ol>
+<pre data-sourcepos="362:1-371:3"><code class="language-powershell">python -m td_release_packager inspect `
+  --project C:\Projects\OMR `
+  --fix-grants
+
+python -m td_release_packager analyze `
+  --project C:\Projects\OMR `
+  --graph C:\Projects\OMR\reports\graph `
+  --formats dot,json,mermaid
+</code></pre>
+<p data-sourcepos="373:1-373:10">Arguments:</p>
+<table data-sourcepos="375:1-379:39">
+<thead>
+<tr data-sourcepos="375:1-375:26">
+<th data-sourcepos="375:2-375:11">Argument</th>
+<th data-sourcepos="375:13-375:25">Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="377:1-377:89">
+<td data-sourcepos="377:2-377:17"><code>--fix-grants</code></td>
+<td data-sourcepos="377:19-377:88">Writes inferred <code>.grt</code> files under <code>payload\database\DCL\inter_db\</code>.</td>
+</tr>
+<tr data-sourcepos="378:1-378:55">
+<td data-sourcepos="378:2-378:12"><code>--graph</code></td>
+<td data-sourcepos="378:14-378:54">Directory for dependency graph exports.</td>
+</tr>
+<tr data-sourcepos="379:1-379:39">
+<td data-sourcepos="379:2-379:14"><code>--formats</code></td>
+<td data-sourcepos="379:16-379:38">Graph export formats.</td>
+</tr>
+</tbody>
+</table>
+<ol start="7" data-sourcepos="381:1-382:0">
+<li data-sourcepos="381:1-382:0">Package for DEV.</li>
+</ol>
+<pre data-sourcepos="383:1-392:3"><code class="language-powershell">python -m td_release_packager package `
+  --project C:\Projects\OMR `
+  --env DEV `
+  --env-config C:\Projects\OMR\config\env\DEV.conf `
+  --name OMR `
+  --output C:\Projects\OMR\releases `
+  --author &quot;Data Engineering&quot; `
+  --description &quot;Hand-coded DDL/DCL/DML tokenised for DEV&quot;
+</code></pre>
+<ol start="8" data-sourcepos="394:1-395:0">
+<li data-sourcepos="394:1-395:0">Deploy the release group.</li>
+</ol>
+<pre data-sourcepos="396:1-407:3"><code class="language-powershell">python -m td_release_packager deploy `
+  C:\Projects\OMR\releases\DEV_OMR_BUILD_0001_20260519 `
+  --dry-run `
+  --host td-dev.company.net `
+  --user ships_dba
+
+python -m td_release_packager deploy `
+  C:\Projects\OMR\releases\DEV_OMR_BUILD_0001_20260519 `
+  --host td-dev.company.net `
+  --user ships_dba
+</code></pre>
+<h2 data-sourcepos="409:1-409:57">Runsheet 4: Fast Developer Path For Untokenised Source</h2>
+<p data-sourcepos="411:1-412:58">Use this for a development sandbox where you want a quick package and are
+comfortable reviewing the generated payload after the run.</p>
+<pre data-sourcepos="414:1-426:3"><code class="language-powershell">python -m td_release_packager process `
+  --project C:\Projects\OMR `
+  --source C:\Work\omr-sql `
+  --auto-tokenise `
+  --env-prefix A_D01 `
+  --skip-generate `
+  --env DEV `
+  --env-config C:\Projects\OMR\config\env\DEV.conf `
+  --name OMR `
+  --output C:\Projects\OMR\releases `
+  --description &quot;Developer sandbox package&quot;
+</code></pre>
+<p data-sourcepos="428:1-428:10">Arguments:</p>
+<table data-sourcepos="430:1-434:83">
+<thead>
+<tr data-sourcepos="430:1-430:26">
+<th data-sourcepos="430:2-430:11">Argument</th>
+<th data-sourcepos="430:13-430:25">Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="432:1-432:94">
+<td data-sourcepos="432:2-432:20"><code>--auto-tokenise</code></td>
+<td data-sourcepos="432:22-432:93">Detects literal database names and applies derived tokens immediately.</td>
+</tr>
+<tr data-sourcepos="433:1-433:43">
+<td data-sourcepos="433:2-433:17"><code>--env-prefix</code></td>
+<td data-sourcepos="433:19-433:42">Controls token naming.</td>
+</tr>
+<tr data-sourcepos="434:1-434:83">
+<td data-sourcepos="434:2-434:20"><code>--skip-generate</code></td>
+<td data-sourcepos="434:22-434:82">Avoids generated view-layer steps for plain hand-coded SQL.</td>
+</tr>
+</tbody>
+</table>
+<p data-sourcepos="436:1-437:46">After this run, inspect <code>payload\database\</code> and <code>ships.decisions.json</code> before
+promoting the approach to shared environments.</p>
+<h2 data-sourcepos="439:1-439:70">Runsheet 5: Generated Tokenised Codebase With Different Token Style</h2>
+<p data-sourcepos="441:1-443:56">Use this when a generator already emits tokens, but they do not match your SHIPS
+environment config naming convention. For example, the generator emits
+<code>{{STD_DB}}</code> and your SHIPS project wants <code>{{OMR_STD}}</code>.</p>
+<h3 data-sourcepos="445:1-445:43">Option A: Keep the Existing Token Names</h3>
+<p data-sourcepos="447:1-448:19">Use this when the generated token names are acceptable and you only need a SHIPS
+environment config.</p>
+<ol data-sourcepos="450:1-451:0">
+<li data-sourcepos="450:1-451:0">Scaffold and harvest without a token map.</li>
+</ol>
+<pre data-sourcepos="452:1-460:3"><code class="language-powershell">python -m td_release_packager scaffold `
+  --name OMR `
+  --output C:\Projects
+
+python -m td_release_packager harvest `
+  --source C:\Generated\omr `
+  --project C:\Projects\OMR
+</code></pre>
+<ol start="2" data-sourcepos="462:1-463:0">
+<li data-sourcepos="462:1-463:0">Bootstrap the environment config from referenced tokens.</li>
+</ol>
+<pre data-sourcepos="464:1-470:3"><code class="language-powershell">python -m td_release_packager bootstrap-env-config `
+  --source C:\Projects\OMR `
+  --env DEV `
+  --output-dir C:\Projects\OMR\config `
+  --force
+</code></pre>
+<p data-sourcepos="472:1-472:10">Arguments:</p>
+<table data-sourcepos="474:1-479:68">
+<thead>
+<tr data-sourcepos="474:1-474:26">
+<th data-sourcepos="474:2-474:11">Argument</th>
+<th data-sourcepos="474:13-474:25">Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="476:1-476:84">
+<td data-sourcepos="476:2-476:13"><code>--source</code></td>
+<td data-sourcepos="476:15-476:83">Already-harvested SHIPS project to scan for <code>{{TOKEN}}</code> references.</td>
+</tr>
+<tr data-sourcepos="477:1-477:43">
+<td data-sourcepos="477:2-477:10"><code>--env</code></td>
+<td data-sourcepos="477:12-477:42">Environment config to create.</td>
+</tr>
+<tr data-sourcepos="478:1-478:68">
+<td data-sourcepos="478:2-478:17"><code>--output-dir</code></td>
+<td data-sourcepos="478:19-478:67">Config root. SHIPS writes under <code>env\DEV.conf</code>.</td>
+</tr>
+<tr data-sourcepos="479:1-479:68">
+<td data-sourcepos="479:2-479:12"><code>--force</code></td>
+<td data-sourcepos="479:14-479:67">Overwrite the generated config if it already exists.</td>
+</tr>
+</tbody>
+</table>
+<ol start="3" data-sourcepos="481:1-482:0">
+<li data-sourcepos="481:1-482:0">Fill in the generated <code>DEV.conf</code>, then run:</li>
+</ol>
+<pre data-sourcepos="483:1-491:3"><code class="language-powershell">python -m td_release_packager process `
+  --project C:\Projects\OMR `
+  --skip-generate `
+  --env DEV `
+  --env-config C:\Projects\OMR\config\env\DEV.conf `
+  --name OMR `
+  --output C:\Projects\OMR\releases
+</code></pre>
+<h3 data-sourcepos="493:1-493:47">Option B: Rename Tokens To SHIPS Convention</h3>
+<p data-sourcepos="495:1-497:44">Use this when the token names need to be converted before harvest. Existing
+<code>{{TOKEN}}</code> markers are protected during normal token-map harvest, so use a
+deliberate migration step for token renames.</p>
+<ol data-sourcepos="499:1-501:0">
+<li data-sourcepos="499:1-501:0">Create a small migration script that maps the generator token style to the
+SHIPS token style.</li>
+</ol>
+<p data-sourcepos="502:1-502:63">Example <code>C:\Projects\OMR\config\generated_token_migration.sed</code>:</p>
+<pre data-sourcepos="504:1-508:3"><code class="language-text">s/{{STD_DB}}/{{OMR_STD}}/g
+s/{{SEM_DB}}/{{OMR_SEM}}/g
+s/{{APP_DB}}/{{OMR_APP}}/g
+</code></pre>
+<ol start="2" data-sourcepos="510:1-511:0">
+<li data-sourcepos="510:1-511:0">Preview and apply the rename against the generated source.</li>
+</ol>
+<pre data-sourcepos="512:1-521:3"><code class="language-powershell">python -m td_release_packager migrate-source `
+  --sed C:\Projects\OMR\config\generated_token_migration.sed `
+  --source C:\Generated\omr `
+  --dry-run
+
+python -m td_release_packager migrate-source `
+  --sed C:\Projects\OMR\config\generated_token_migration.sed `
+  --source C:\Generated\omr
+</code></pre>
+<p data-sourcepos="523:1-523:10">Arguments:</p>
+<table data-sourcepos="525:1-529:65">
+<thead>
+<tr data-sourcepos="525:1-525:26">
+<th data-sourcepos="525:2-525:11">Argument</th>
+<th data-sourcepos="525:13-525:25">Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="527:1-527:100">
+<td data-sourcepos="527:2-527:10"><code>--sed</code></td>
+<td data-sourcepos="527:12-527:99">Any <code>s/LHS/RHS/g</code> substitution script, including one you hand-write for token renames.</td>
+</tr>
+<tr data-sourcepos="528:1-528:63">
+<td data-sourcepos="528:2-528:13"><code>--source</code></td>
+<td data-sourcepos="528:15-528:62">Generated source directory to update in place.</td>
+</tr>
+<tr data-sourcepos="529:1-529:65">
+<td data-sourcepos="529:2-529:14"><code>--dry-run</code></td>
+<td data-sourcepos="529:16-529:64">Preview first so the token rename is auditable.</td>
+</tr>
+</tbody>
+</table>
+<ol start="3" data-sourcepos="531:1-532:0">
+<li data-sourcepos="531:1-532:0">Harvest the renamed generated source.</li>
+</ol>
+<pre data-sourcepos="533:1-537:3"><code class="language-powershell">python -m td_release_packager harvest `
+  --source C:\Generated\omr `
+  --project C:\Projects\OMR
+</code></pre>
+<ol start="4" data-sourcepos="539:1-540:0">
+<li data-sourcepos="539:1-540:0">Bootstrap or maintain environment configs using the SHIPS token names.</li>
+</ol>
+<pre data-sourcepos="541:1-547:3"><code class="language-powershell">python -m td_release_packager bootstrap-env-config `
+  --source C:\Projects\OMR `
+  --env DEV `
+  --output-dir C:\Projects\OMR\config `
+  --force
+</code></pre>
+<ol start="5" data-sourcepos="549:1-550:0">
+<li data-sourcepos="549:1-550:0">Scan all environments before packaging.</li>
+</ol>
+<pre data-sourcepos="551:1-557:3"><code class="language-powershell">python -m td_release_packager scan `
+  --project C:\Projects\OMR `
+  --all-envs `
+  --show-map `
+  --fail-on-orphan
+</code></pre>
+<ol start="6" data-sourcepos="559:1-560:0">
+<li data-sourcepos="559:1-560:0">Package and deploy as in Runsheet 3.</li>
+</ol>
+<h2 data-sourcepos="561:1-561:48">Runsheet 6: Build Directly From GitHub Source</h2>
+<p data-sourcepos="563:1-565:47">Use this when CI or an operator should fetch source from GitHub without a local
+clone. This packages from repository source. It is different from deploying a
+package asset downloaded from a GitHub Release.</p>
+<h3 data-sourcepos="567:1-567:35">One-Command Process From GitHub</h3>
+<pre data-sourcepos="569:1-583:3"><code class="language-powershell">$env:GITHUB_TOKEN = &quot;&lt;token-for-private-repos&gt;&quot;
+
+python -m td_release_packager process `
+  --project C:\Projects\OMR `
+  --source-github myorg/omr-ddl `
+  --source-ref release/2026.05 `
+  --token-map C:\Projects\OMR\config\token_map.conf `
+  --skip-generate `
+  --env TST `
+  --env-config C:\Projects\OMR\config\env\TST.conf `
+  --name OMR `
+  --output C:\Projects\OMR\releases `
+  --strict
+</code></pre>
+<p data-sourcepos="585:1-585:10">Arguments:</p>
+<table data-sourcepos="587:1-593:74">
+<thead>
+<tr data-sourcepos="587:1-587:26">
+<th data-sourcepos="587:2-587:11">Argument</th>
+<th data-sourcepos="587:13-587:25">Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="589:1-589:73">
+<td data-sourcepos="589:2-589:34"><code>--source-github myorg/omr-ddl</code></td>
+<td data-sourcepos="589:36-589:72">Fetches source tarball from GitHub.</td>
+</tr>
+<tr data-sourcepos="590:1-590:74">
+<td data-sourcepos="590:2-590:33"><code>--source-ref release/2026.05</code></td>
+<td data-sourcepos="590:35-590:73">Fetches a branch, tag, or commit SHA.</td>
+</tr>
+<tr data-sourcepos="591:1-591:75">
+<td data-sourcepos="591:2-591:37"><code>--github-token</code> or <code>GITHUB_TOKEN</code></td>
+<td data-sourcepos="591:39-591:74">Required for private repositories.</td>
+</tr>
+<tr data-sourcepos="592:1-592:70">
+<td data-sourcepos="592:2-592:16"><code>--token-map</code></td>
+<td data-sourcepos="592:18-592:69">Applies your project token mapping during harvest.</td>
+</tr>
+<tr data-sourcepos="593:1-593:74">
+<td data-sourcepos="593:2-593:13"><code>--strict</code></td>
+<td data-sourcepos="593:15-593:73">Fails the run as soon as a stage has errors. Best for CI.</td>
+</tr>
+</tbody>
+</table>
+<p data-sourcepos="595:1-596:20">The resolved GitHub commit SHA is stamped into package metadata unless you pass
+<code>--commit</code> yourself.</p>
+<h3 data-sourcepos="598:1-598:52">Package Existing GitHub-Compatible SHIPS Project</h3>
+<p data-sourcepos="600:1-601:20">Use this when the repository is already a SHIPS project with <code>payload/</code> and
+<code>config/</code> committed.</p>
+<pre data-sourcepos="603:1-613:3"><code class="language-powershell">python -m td_release_packager package `
+  --source-github myorg/omr-ships-project `
+  --source-ref v2.4.0 `
+  --env PRD `
+  --env-config C:\SecureConfig\OMR\PRD.conf `
+  --name OMR `
+  --output C:\Artifacts\OMR `
+  --change-ref CHG0012345 `
+  --asymmetric-key C:\Secrets\ships_signing_private.pem
+</code></pre>
+<p data-sourcepos="615:1-615:10">Arguments:</p>
+<table data-sourcepos="617:1-622:71">
+<thead>
+<tr data-sourcepos="617:1-617:26">
+<th data-sourcepos="617:2-617:11">Argument</th>
+<th data-sourcepos="617:13-617:25">Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="619:1-619:57">
+<td data-sourcepos="619:2-619:20"><code>--source-github</code></td>
+<td data-sourcepos="619:22-619:56">Fetches the SHIPS project source.</td>
+</tr>
+<tr data-sourcepos="620:1-620:79">
+<td data-sourcepos="620:2-620:17"><code>--env-config</code></td>
+<td data-sourcepos="620:19-620:78">Can point to a local secure config outside the repository.</td>
+</tr>
+<tr data-sourcepos="621:1-621:75">
+<td data-sourcepos="621:2-621:17"><code>--change-ref</code></td>
+<td data-sourcepos="621:19-621:74">Change ticket stamped into <code>context/ships.build.json</code>.</td>
+</tr>
+<tr data-sourcepos="622:1-622:71">
+<td data-sourcepos="622:2-622:21"><code>--asymmetric-key</code></td>
+<td data-sourcepos="622:23-622:70">Signs the package with an Ed25519 private key.</td>
+</tr>
+</tbody>
+</table>
+<h2 data-sourcepos="624:1-624:64">Runsheet 7: Deploy A Package Downloaded From A GitHub Release</h2>
+<p data-sourcepos="626:1-627:30">Use this after CI has already built and published a SHIPS release group or
+package zip as release assets.</p>
+<h3 data-sourcepos="629:1-629:9">Steps</h3>
+<ol data-sourcepos="631:1-635:0">
+<li data-sourcepos="631:1-633:0">
+<p data-sourcepos="631:4-632:17">Download the release-group directory or package zip using your approved
+artifact tooling.</p>
+</li>
+<li data-sourcepos="634:1-635:0">
+<p data-sourcepos="634:4-634:26">Deploy a release group.</p>
+</li>
+</ol>
+<pre data-sourcepos="636:1-650:3"><code class="language-powershell">python -m td_release_packager deploy `
+  C:\Downloads\DEV_OMR_BUILD_0042_20260519 `
+  --dry-run `
+  --host td-dev.company.net `
+  --user ships_dba `
+  --logmech LDAP
+
+python -m td_release_packager deploy `
+  C:\Downloads\DEV_OMR_BUILD_0042_20260519 `
+  --host td-dev.company.net `
+  --user ships_dba `
+  --logmech LDAP `
+  --streams 4
+</code></pre>
+<ol start="3" data-sourcepos="652:1-653:0">
+<li data-sourcepos="652:1-653:0">Or deploy a single package zip.</li>
+</ol>
+<pre data-sourcepos="654:1-659:3"><code class="language-powershell">python -m td_release_packager deploy `
+  C:\Downloads\DEV_OMR_BUILD_0042_20260519_01_main.zip `
+  --host td-dev.company.net `
+  --user ships_dba
+</code></pre>
+<p data-sourcepos="661:1-661:10">Arguments:</p>
+<table data-sourcepos="663:1-668:84">
+<thead>
+<tr data-sourcepos="663:1-663:26">
+<th data-sourcepos="663:2-663:11">Argument</th>
+<th data-sourcepos="663:13-663:25">Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="665:1-665:105">
+<td data-sourcepos="665:2-665:20"><code>deploy &lt;target&gt;</code></td>
+<td data-sourcepos="665:22-665:104">Points SHIPS at a release-group directory or zip. No manual extraction is needed.</td>
+</tr>
+<tr data-sourcepos="666:1-666:103">
+<td data-sourcepos="666:2-666:14"><code>--dry-run</code></td>
+<td data-sourcepos="666:16-666:102">Confirms trust, integrity, parseability, and pre-flight checks without executing SQL.</td>
+</tr>
+<tr data-sourcepos="667:1-667:82">
+<td data-sourcepos="667:2-667:34"><code>--host</code>, <code>--user</code>, <code>--logmech</code></td>
+<td data-sourcepos="667:36-667:81">Forwarded to the generated package deployer.</td>
+</tr>
+<tr data-sourcepos="668:1-668:84">
+<td data-sourcepos="668:2-668:14"><code>--streams</code></td>
+<td data-sourcepos="668:16-668:83">Runs independent wave members in parallel. DCL remains serialised.</td>
+</tr>
+</tbody>
+</table>
+<h2 data-sourcepos="670:1-670:49">Runsheet 8: Explicit DDL, DCL, And DML Project</h2>
+<p data-sourcepos="672:1-672:81">Use this when a release intentionally contains schema DDL, grants, and seed data.</p>
+<h3 data-sourcepos="674:1-674:17">Source Layout</h3>
+<pre data-sourcepos="676:1-685:3"><code class="language-text">C:\Work\customer-release\
+  ddl\
+    Customer.tbl
+    CustomerStatus.viw
+  dcl\
+    app_role.grt
+  dml\
+    seed_customer_status.dml
+</code></pre>
+<p data-sourcepos="687:1-688:75">The raw layout can be simple. Harvest classifies files into SHIPS payload
+folders. If you curate files directly in a SHIPS project, place them under:</p>
+<pre data-sourcepos="690:1-694:3"><code class="language-text">payload\database\DDL\
+payload\database\DCL\inter_db\
+payload\database\DML\
+</code></pre>
+<h3 data-sourcepos="696:1-696:9">Steps</h3>
+<ol data-sourcepos="698:1-699:0">
+<li data-sourcepos="698:1-699:0">Harvest and tokenise.</li>
+</ol>
+<pre data-sourcepos="700:1-705:3"><code class="language-powershell">python -m td_release_packager harvest `
+  --source C:\Work\customer-release `
+  --project C:\Projects\Customer `
+  --token-map C:\Projects\Customer\config\token_map.conf
+</code></pre>
+<ol start="2" data-sourcepos="707:1-708:0">
+<li data-sourcepos="707:1-708:0">Inspect with grant validation.</li>
+</ol>
+<pre data-sourcepos="709:1-713:3"><code class="language-powershell">python -m td_release_packager inspect `
+  --project C:\Projects\Customer `
+  --dcl-dir C:\Projects\Customer\payload\database\DCL\inter_db
+</code></pre>
+<p data-sourcepos="715:1-715:10">Arguments:</p>
+<table data-sourcepos="717:1-719:107">
+<thead>
+<tr data-sourcepos="717:1-717:26">
+<th data-sourcepos="717:2-717:11">Argument</th>
+<th data-sourcepos="717:13-717:25">Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="719:1-719:107">
+<td data-sourcepos="719:2-719:14"><code>--dcl-dir</code></td>
+<td data-sourcepos="719:16-719:106">Directory containing <code>.grt</code> inter-database grant files. Defaults to the project DCL path.</td>
+</tr>
+</tbody>
+</table>
+<ol start="3" data-sourcepos="721:1-722:0">
+<li data-sourcepos="721:1-722:0">Analyse deployment order and package.</li>
+</ol>
+<pre data-sourcepos="723:1-734:3"><code class="language-powershell">python -m td_release_packager analyze `
+  --project C:\Projects\Customer `
+  --overwrite
+
+python -m td_release_packager package `
+  --project C:\Projects\Customer `
+  --env UAT `
+  --env-config C:\Projects\Customer\config\env\UAT.conf `
+  --name Customer `
+  --output C:\Projects\Customer\releases
+</code></pre>
+<p data-sourcepos="736:1-736:24">Ordering at deploy time:</p>
+<table data-sourcepos="738:1-743:113">
+<thead>
+<tr data-sourcepos="738:1-738:38">
+<th data-sourcepos="738:2-738:13">Asset type</th>
+<th data-sourcepos="738:15-738:29">Typical phase</th>
+<th data-sourcepos="738:31-738:37">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="740:1-740:146">
+<td data-sourcepos="740:2-740:26">Environment DCL/prereqs</td>
+<td data-sourcepos="740:28-740:47">Early serial phase</td>
+<td data-sourcepos="740:49-740:145">Databases/users/roles/profiles and required grants are serialised to avoid catalogue deadlocks.</td>
+</tr>
+<tr data-sourcepos="741:1-741:114">
+<td data-sourcepos="741:2-741:6">DDL</td>
+<td data-sourcepos="741:8-741:27">Wave-ordered phase</td>
+<td data-sourcepos="741:29-741:113">Tables before dependent views/procedures/functions where dependencies are detected.</td>
+</tr>
+<tr data-sourcepos="742:1-742:92">
+<td data-sourcepos="742:2-742:13">DCL grants</td>
+<td data-sourcepos="742:15-742:32">Serial DCL phase</td>
+<td data-sourcepos="742:34-742:91">Grants/revokes are applied after required objects exist.</td>
+</tr>
+<tr data-sourcepos="743:1-743:113">
+<td data-sourcepos="743:2-743:6">DML</td>
+<td data-sourcepos="743:8-743:19">Late phase</td>
+<td data-sourcepos="743:21-743:112">Seed/reference data runs after target tables exist. DML is not automatically rollbackable.</td>
+</tr>
+</tbody>
+</table>
+<ol start="4" data-sourcepos="745:1-746:0">
+<li data-sourcepos="745:1-746:0">Dry-run and live deploy.</li>
+</ol>
+<pre data-sourcepos="747:1-760:3"><code class="language-powershell">python -m td_release_packager deploy `
+  C:\Projects\Customer\releases\UAT_Customer_BUILD_0007_20260519 `
+  --dry-run `
+  --host td-uat.company.net `
+  --user ships_dba `
+  --continue-on-error
+
+python -m td_release_packager deploy `
+  C:\Projects\Customer\releases\UAT_Customer_BUILD_0007_20260519 `
+  --host td-uat.company.net `
+  --user ships_dba `
+  --streams 4
+</code></pre>
+<h2 data-sourcepos="762:1-762:60">Runsheet 9: Promote The Same Build To Another Environment</h2>
+<p data-sourcepos="764:1-765:52">Use this when you built and tested a package in DEV and want equivalent source
+deployed to TST or PRD using different token values.</p>
+<h3 data-sourcepos="767:1-767:9">Steps</h3>
+<ol data-sourcepos="769:1-770:0">
+<li data-sourcepos="769:1-770:0">Build for DEV normally.</li>
+</ol>
+<pre data-sourcepos="771:1-778:3"><code class="language-powershell">python -m td_release_packager package `
+  --project C:\Projects\OMR `
+  --env DEV `
+  --env-config C:\Projects\OMR\config\env\DEV.conf `
+  --name OMR `
+  --output C:\Projects\OMR\releases
+</code></pre>
+<ol start="2" data-sourcepos="780:1-781:0">
+<li data-sourcepos="780:1-781:0">Build for TST with the same build number.</li>
+</ol>
+<pre data-sourcepos="782:1-790:3"><code class="language-powershell">python -m td_release_packager package `
+  --project C:\Projects\OMR `
+  --env TST `
+  --env-config C:\Projects\OMR\config\env\TST.conf `
+  --name OMR `
+  --output C:\Projects\OMR\releases `
+  --no-increment
+</code></pre>
+<p data-sourcepos="792:1-792:10">Arguments:</p>
+<table data-sourcepos="794:1-797:77">
+<thead>
+<tr data-sourcepos="794:1-794:26">
+<th data-sourcepos="794:2-794:11">Argument</th>
+<th data-sourcepos="794:13-794:25">Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="796:1-796:114">
+<td data-sourcepos="796:2-796:19"><code>--no-increment</code></td>
+<td data-sourcepos="796:21-796:113">Reuses the current build number for another environment package from the same source state.</td>
+</tr>
+<tr data-sourcepos="797:1-797:77">
+<td data-sourcepos="797:2-797:17"><code>--env-config</code></td>
+<td data-sourcepos="797:19-797:76">Changes only token resolution, not source DDL structure.</td>
+</tr>
+</tbody>
+</table>
+<ol start="3" data-sourcepos="799:1-800:0">
+<li data-sourcepos="799:1-800:0">Deploy the target environment package.</li>
+</ol>
+<pre data-sourcepos="801:1-807:3"><code class="language-powershell">python -m td_release_packager deploy `
+  C:\Projects\OMR\releases\TST_OMR_BUILD_0001_20260519 `
+  --host td-tst.company.net `
+  --user ships_dba `
+  --encryptdata true
+</code></pre>
+<h2 data-sourcepos="809:1-809:62">Runsheet 10: Failed Deployment Resume, Status, And Rollback</h2>
+<p data-sourcepos="811:1-811:71">Use this during operations after a live deploy fails or is interrupted.</p>
+<h3 data-sourcepos="813:1-813:16">Check Status</h3>
+<pre data-sourcepos="815:1-820:3"><code class="language-powershell">python -m td_release_packager deploy `
+  C:\Projects\OMR\releases\PRD_OMR_BUILD_0012_20260519 `
+  status `
+  logs\.deploy_manifest_&lt;id&gt;.json
+</code></pre>
+<p data-sourcepos="822:1-822:10">Arguments:</p>
+<table data-sourcepos="824:1-827:108">
+<thead>
+<tr data-sourcepos="824:1-824:26">
+<th data-sourcepos="824:2-824:11">Argument</th>
+<th data-sourcepos="824:13-824:25">Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="826:1-826:67">
+<td data-sourcepos="826:2-826:11"><code>status</code></td>
+<td data-sourcepos="826:13-826:66">Reads manifest state without connecting to Teradata.</td>
+</tr>
+<tr data-sourcepos="827:1-827:108">
+<td data-sourcepos="827:2-827:36"><code>logs\.deploy_manifest_&lt;id&gt;.json</code></td>
+<td data-sourcepos="827:38-827:107">Manifest written by the deploy run under the package work directory.</td>
+</tr>
+</tbody>
+</table>
+<h3 data-sourcepos="829:1-829:38">Resume After Fixing The Root Cause</h3>
+<pre data-sourcepos="831:1-838:3"><code class="language-powershell">python -m td_release_packager deploy `
+  C:\Projects\OMR\releases\PRD_OMR_BUILD_0012_20260519 `
+  resume `
+  logs\.deploy_manifest_&lt;id&gt;.json `
+  --host td-prd.company.net `
+  --user ships_dba
+</code></pre>
+<p data-sourcepos="840:1-840:10">Arguments:</p>
+<table data-sourcepos="842:1-845:70">
+<thead>
+<tr data-sourcepos="842:1-842:26">
+<th data-sourcepos="842:2-842:11">Argument</th>
+<th data-sourcepos="842:13-842:25">Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="844:1-844:82">
+<td data-sourcepos="844:2-844:11"><code>resume</code></td>
+<td data-sourcepos="844:13-844:81">Skips objects already marked <code>COMPLETED</code> and retries the remainder.</td>
+</tr>
+<tr data-sourcepos="845:1-845:70">
+<td data-sourcepos="845:2-845:21"><code>--host</code>, <code>--user</code></td>
+<td data-sourcepos="845:23-845:69">Required because resume connects to Teradata.</td>
+</tr>
+</tbody>
+</table>
+<h3 data-sourcepos="847:1-847:22">Technical Rollback</h3>
+<pre data-sourcepos="849:1-856:3"><code class="language-powershell">python -m td_release_packager deploy `
+  C:\Projects\OMR\releases\PRD_OMR_BUILD_0012_20260519 `
+  rollback `
+  logs\.deploy_manifest_&lt;id&gt;.json `
+  --host td-prd.company.net `
+  --user ships_dba
+</code></pre>
+<p data-sourcepos="858:1-858:27">For a wave-scoped rollback:</p>
+<pre data-sourcepos="860:1-868:3"><code class="language-powershell">python -m td_release_packager deploy `
+  C:\Projects\OMR\releases\PRD_OMR_BUILD_0012_20260519 `
+  rollback `
+  logs\.deploy_manifest_&lt;id&gt;.json `
+  --wave 3 `
+  --host td-prd.company.net `
+  --user ships_dba
+</code></pre>
+<p data-sourcepos="870:1-870:6">Notes:</p>
+<table data-sourcepos="872:1-876:120">
+<thead>
+<tr data-sourcepos="872:1-872:22">
+<th data-sourcepos="872:2-872:7">Item</th>
+<th data-sourcepos="872:9-872:21">Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="874:1-874:77">
+<td data-sourcepos="874:2-874:21">Technical rollback</td>
+<td data-sourcepos="874:23-874:76">Uses pre-deploy captures from the failed deployment.</td>
+</tr>
+<tr data-sourcepos="875:1-875:114">
+<td data-sourcepos="875:2-875:6">DML</td>
+<td data-sourcepos="875:8-875:113">Row-level DML is not automatically rollbackable. Restore data using application-specific recovery steps.</td>
+</tr>
+<tr data-sourcepos="876:1-876:120">
+<td data-sourcepos="876:2-876:33">SQLJ JAR / C external routines</td>
+<td data-sourcepos="876:35-876:119">Use feature rollback from a known-good tag when compiled binaries must be restored.</td>
+</tr>
+</tbody>
+</table>
+<h2 data-sourcepos="878:1-878:59">Runsheet 11: Package Rollback From A Deployment Manifest</h2>
+<p data-sourcepos="880:1-883:67">Use this when you need to undo a package deployment using the rollback captures
+created during that deployment. This is a package-level technical rollback: it
+uses the manifest and the package's <code>_rollback</code> files to restore objects to
+their pre-deploy state where SHIPS has enough information to do so.</p>
+<p data-sourcepos="885:1-887:22">This is different from feature rollback from a git tag. Package rollback undoes
+the current deployment. Feature rollback builds and deploys an older known-good
+version of the source.</p>
+<h3 data-sourcepos="889:1-889:31">Step 1: Locate The Manifest</h3>
+<p data-sourcepos="891:1-893:14">The manifest is written under the extracted package work area, usually below
+<code>.ships-work</code>. If the deploy target was a release group, check beside that
+release group.</p>
+<pre data-sourcepos="895:1-900:3"><code class="language-powershell">Get-ChildItem `
+  C:\Projects\OMR\releases\PRD_OMR_BUILD_0012_20260519\.ships-work `
+  -Recurse `
+  -Filter &quot;.deploy_manifest_*.json&quot;
+</code></pre>
+<p data-sourcepos="902:1-902:39">The manifest path will look similar to:</p>
+<pre data-sourcepos="904:1-906:3"><code class="language-text">C:\Projects\OMR\releases\PRD_OMR_BUILD_0012_20260519\.ships-work\PRD_OMR_BUILD_0012_20260519_01_main\logs\.deploy_manifest_20260519_101530.json
+</code></pre>
+<h3 data-sourcepos="908:1-908:40">Step 2: Inspect Rollback Eligibility</h3>
+<pre data-sourcepos="910:1-915:3"><code class="language-powershell">python -m td_release_packager deploy `
+  C:\Projects\OMR\releases\PRD_OMR_BUILD_0012_20260519 `
+  status `
+  C:\Projects\OMR\releases\PRD_OMR_BUILD_0012_20260519\.ships-work\PRD_OMR_BUILD_0012_20260519_01_main\logs\.deploy_manifest_20260519_101530.json
+</code></pre>
+<p data-sourcepos="917:1-917:10">Arguments:</p>
+<table data-sourcepos="919:1-923:96">
+<thead>
+<tr data-sourcepos="919:1-919:26">
+<th data-sourcepos="919:2-919:11">Argument</th>
+<th data-sourcepos="919:13-919:25">Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="921:1-921:88">
+<td data-sourcepos="921:2-921:27"><code>deploy &lt;release_group&gt;</code></td>
+<td data-sourcepos="921:29-921:87">Points SHIPS at the same release group that was deployed.</td>
+</tr>
+<tr data-sourcepos="922:1-922:65">
+<td data-sourcepos="922:2-922:11"><code>status</code></td>
+<td data-sourcepos="922:13-922:64">Reads the manifest without connecting to Teradata.</td>
+</tr>
+<tr data-sourcepos="923:1-923:96">
+<td data-sourcepos="923:2-923:16">Manifest path</td>
+<td data-sourcepos="923:18-923:95">The exact <code>.deploy_manifest_*.json</code> from the failed or completed deployment.</td>
+</tr>
+</tbody>
+</table>
+<p data-sourcepos="925:1-925:44">Check the status output before rolling back:</p>
+<table data-sourcepos="927:1-932:96">
+<thead>
+<tr data-sourcepos="927:1-927:28">
+<th data-sourcepos="927:2-927:17">Manifest field</th>
+<th data-sourcepos="927:19-927:27">Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="929:1-929:80">
+<td data-sourcepos="929:2-929:17"><code>backup_table</code></td>
+<td data-sourcepos="929:19-929:79">Table rollback can rename the backup table back into place.</td>
+</tr>
+<tr data-sourcepos="930:1-930:89">
+<td data-sourcepos="930:2-930:18"><code>rollback_file</code></td>
+<td data-sourcepos="930:20-930:88">SHOW DDL capture exists for restoring a previous object definition.</td>
+</tr>
+<tr data-sourcepos="931:1-931:67">
+<td data-sourcepos="931:2-931:14"><code>COMPLETED</code></td>
+<td data-sourcepos="931:16-931:66">Object was deployed and may be rollback-eligible.</td>
+</tr>
+<tr data-sourcepos="932:1-932:96">
+<td data-sourcepos="932:2-932:23"><code>FAILED</code> / <code>SKIPPED</code></td>
+<td data-sourcepos="932:25-932:95">Object may not need rollback, but inspect the report before deciding.</td>
+</tr>
+</tbody>
+</table>
+<h3 data-sourcepos="934:1-934:40">Step 3: Dry-Run The Package Rollback</h3>
+<pre data-sourcepos="936:1-942:3"><code class="language-powershell">python -m td_release_packager deploy `
+  C:\Projects\OMR\releases\PRD_OMR_BUILD_0012_20260519 `
+  rollback `
+  C:\Projects\OMR\releases\PRD_OMR_BUILD_0012_20260519\.ships-work\PRD_OMR_BUILD_0012_20260519_01_main\logs\.deploy_manifest_20260519_101530.json `
+  --dry-run
+</code></pre>
+<p data-sourcepos="944:1-944:10">Arguments:</p>
+<table data-sourcepos="946:1-949:121">
+<thead>
+<tr data-sourcepos="946:1-946:26">
+<th data-sourcepos="946:2-946:11">Argument</th>
+<th data-sourcepos="946:13-946:25">Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="948:1-948:71">
+<td data-sourcepos="948:2-948:13"><code>rollback</code></td>
+<td data-sourcepos="948:15-948:70">Runs the generated deployer's technical rollback mode.</td>
+</tr>
+<tr data-sourcepos="949:1-949:121">
+<td data-sourcepos="949:2-949:14"><code>--dry-run</code></td>
+<td data-sourcepos="949:16-949:120">Shows which objects would be rolled back and by what mechanism without connecting or changing Teradata.</td>
+</tr>
+</tbody>
+</table>
+<p data-sourcepos="951:1-952:20">Review the output and the deployment report. Pay particular attention to DML and
+binary object notes.</p>
+<h3 data-sourcepos="954:1-954:41">Step 4: Run The Full Package Rollback</h3>
+<pre data-sourcepos="956:1-963:3"><code class="language-powershell">python -m td_release_packager deploy `
+  C:\Projects\OMR\releases\PRD_OMR_BUILD_0012_20260519 `
+  rollback `
+  C:\Projects\OMR\releases\PRD_OMR_BUILD_0012_20260519\.ships-work\PRD_OMR_BUILD_0012_20260519_01_main\logs\.deploy_manifest_20260519_101530.json `
+  --host td-prd.company.net `
+  --user ships_dba
+</code></pre>
+<p data-sourcepos="965:1-965:10">Arguments:</p>
+<table data-sourcepos="967:1-970:123">
+<thead>
+<tr data-sourcepos="967:1-967:26">
+<th data-sourcepos="967:2-967:11">Argument</th>
+<th data-sourcepos="967:13-967:25">Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="969:1-969:66">
+<td data-sourcepos="969:2-969:11"><code>--host</code></td>
+<td data-sourcepos="969:13-969:65">Teradata host to connect to for rollback execution.</td>
+</tr>
+<tr data-sourcepos="970:1-970:123">
+<td data-sourcepos="970:2-970:11"><code>--user</code></td>
+<td data-sourcepos="970:13-970:122">Deploying user. It must have rights to drop, recreate, rename, or grant as required by the rollback actions.</td>
+</tr>
+</tbody>
+</table>
+<h3 data-sourcepos="972:1-972:42">Step 5: Roll Back One Failed Wave Only</h3>
+<p data-sourcepos="974:1-975:26">Use this if waves 1 and 2 succeeded, wave 3 failed, and you want to undo only
+objects changed in wave 3.</p>
+<pre data-sourcepos="977:1-985:3"><code class="language-powershell">python -m td_release_packager deploy `
+  C:\Projects\OMR\releases\PRD_OMR_BUILD_0012_20260519 `
+  rollback `
+  C:\Projects\OMR\releases\PRD_OMR_BUILD_0012_20260519\.ships-work\PRD_OMR_BUILD_0012_20260519_01_main\logs\.deploy_manifest_20260519_101530.json `
+  --wave 3 `
+  --host td-prd.company.net `
+  --user ships_dba
+</code></pre>
+<p data-sourcepos="987:1-987:10">Arguments:</p>
+<table data-sourcepos="989:1-991:106">
+<thead>
+<tr data-sourcepos="989:1-989:26">
+<th data-sourcepos="989:2-989:11">Argument</th>
+<th data-sourcepos="989:13-989:25">Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="991:1-991:106">
+<td data-sourcepos="991:2-991:13"><code>--wave 3</code></td>
+<td data-sourcepos="991:15-991:105">Restricts rollback to objects assigned to wave 3. Earlier and later waves are left alone.</td>
+</tr>
+</tbody>
+</table>
+<h3 data-sourcepos="993:1-993:31">Step 6: Confirm Final State</h3>
+<pre data-sourcepos="995:1-1000:3"><code class="language-powershell">python -m td_release_packager deploy `
+  C:\Projects\OMR\releases\PRD_OMR_BUILD_0012_20260519 `
+  status `
+  C:\Projects\OMR\releases\PRD_OMR_BUILD_0012_20260519\.ships-work\PRD_OMR_BUILD_0012_20260519_01_main\logs\.deploy_manifest_20260519_101530.json
+</code></pre>
+<p data-sourcepos="1002:1-1002:27">Expected rollback outcomes:</p>
+<table data-sourcepos="1004:1-1012:138">
+<thead>
+<tr data-sourcepos="1004:1-1004:35">
+<th data-sourcepos="1004:2-1004:14">Object type</th>
+<th data-sourcepos="1004:16-1004:34">Rollback behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="1006:1-1006:102">
+<td data-sourcepos="1006:2-1006:17">Existing table</td>
+<td data-sourcepos="1006:19-1006:101">New table is dropped and backup table is renamed back when a backup was captured.</td>
+</tr>
+<tr data-sourcepos="1007:1-1007:41">
+<td data-sourcepos="1007:2-1007:12">New table</td>
+<td data-sourcepos="1007:14-1007:40">Created table is dropped.</td>
+</tr>
+<tr data-sourcepos="1008:1-1008:118">
+<td data-sourcepos="1008:2-1008:52">Existing view, macro, SQL procedure, SQL function</td>
+<td data-sourcepos="1008:54-1008:117">Current object is dropped or replaced using captured SHOW DDL.</td>
+</tr>
+<tr data-sourcepos="1009:1-1009:77">
+<td data-sourcepos="1009:2-1009:47">New view, macro, SQL procedure, SQL function</td>
+<td data-sourcepos="1009:49-1009:76">Created object is removed.</td>
+</tr>
+<tr data-sourcepos="1010:1-1010:110">
+<td data-sourcepos="1010:2-1010:6">DCL</td>
+<td data-sourcepos="1010:8-1010:109">Rollback support depends on captured deploy intent and generated rollback action. Review the report.</td>
+</tr>
+<tr data-sourcepos="1011:1-1011:98">
+<td data-sourcepos="1011:2-1011:6">DML</td>
+<td data-sourcepos="1011:8-1011:97">Not row-level rollbackable. Use application-specific undo scripts or restore procedures.</td>
+</tr>
+<tr data-sourcepos="1012:1-1012:138">
+<td data-sourcepos="1012:2-1012:32">SQLJ JAR / C external routine</td>
+<td data-sourcepos="1012:34-1012:137">Technical rollback cannot reliably restore binary content. Use feature rollback from a known-good tag.</td>
+</tr>
+</tbody>
+</table>
+<h2 data-sourcepos="1014:1-1014:47">Runsheet 12: Feature Rollback From A Git Tag</h2>
+<p data-sourcepos="1016:1-1017:55">Use this when the correct recovery is to redeploy a previous known-good source
+version rather than undoing only the failed deployment.</p>
+<pre data-sourcepos="1019:1-1029:3"><code class="language-powershell">python -m td_release_packager rollback `
+  --to-tag v2.3.1 `
+  --project C:\Projects\OMR `
+  --env PRD `
+  --env-config C:\Projects\OMR\config\env\PRD.conf `
+  --name OMR `
+  --output C:\Projects\OMR\releases `
+  --on-drift continue `
+  --description &quot;Rollback to v2.3.1&quot;
+</code></pre>
+<p data-sourcepos="1031:1-1031:10">Arguments:</p>
+<table data-sourcepos="1033:1-1038:119">
+<thead>
+<tr data-sourcepos="1033:1-1033:26">
+<th data-sourcepos="1033:2-1033:11">Argument</th>
+<th data-sourcepos="1033:13-1033:25">Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="1035:1-1035:58">
+<td data-sourcepos="1035:2-1035:13"><code>--to-tag</code></td>
+<td data-sourcepos="1035:15-1035:57">Git tag containing the known-good source.</td>
+</tr>
+<tr data-sourcepos="1036:1-1036:95">
+<td data-sourcepos="1036:2-1036:14"><code>--project</code></td>
+<td data-sourcepos="1036:16-1036:94">Current project directory containing <code>.build_counter</code> and the git repository.</td>
+</tr>
+<tr data-sourcepos="1037:1-1037:100">
+<td data-sourcepos="1037:2-1037:17"><code>--env-config</code></td>
+<td data-sourcepos="1037:19-1037:99">Current environment values. Token values come from today, not from the old tag.</td>
+</tr>
+<tr data-sourcepos="1038:1-1038:119">
+<td data-sourcepos="1038:2-1038:24"><code>--on-drift continue</code></td>
+<td data-sourcepos="1038:26-1038:118">Recommended for rollback because the goal is to restore the tagged schema as authoritative.</td>
+</tr>
+</tbody>
+</table>
+<p data-sourcepos="1040:1-1040:49">Then deploy the generated rollback release group:</p>
+<pre data-sourcepos="1042:1-1048:3"><code class="language-powershell">python -m td_release_packager deploy `
+  C:\Projects\OMR\releases\PRD_OMR_ROLLBACK_v2.3.1_BUILD_0013_20260519 `
+  --host td-prd.company.net `
+  --user ships_dba `
+  --on-drift continue
+</code></pre>
+<h2 data-sourcepos="1050:1-1050:24">Pre-Handoff Checklist</h2>
+<p data-sourcepos="1052:1-1052:49">Run this before handing a release group to a DBA:</p>
+<pre data-sourcepos="1054:1-1066:3"><code class="language-powershell">python -m td_release_packager scan `
+  --project C:\Projects\OMR `
+  --all-envs `
+  --fail-on-orphan
+
+python -m td_release_packager explain `
+  --project C:\Projects\OMR `
+  --command process
+
+python -m td_release_packager verify `
+  --project C:\Projects\OMR
+</code></pre>
+<p data-sourcepos="1068:1-1068:10">Checklist:</p>
+<table data-sourcepos="1070:1-1077:120">
+<thead>
+<tr data-sourcepos="1070:1-1070:27">
+<th data-sourcepos="1070:2-1070:8">Check</th>
+<th data-sourcepos="1070:10-1070:26">Expected result</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="1072:1-1072:61">
+<td data-sourcepos="1072:2-1072:13">Token scan</td>
+<td data-sourcepos="1072:15-1072:60">No undefined tokens for target environments.</td>
+</tr>
+<tr data-sourcepos="1073:1-1073:102">
+<td data-sourcepos="1073:2-1073:10">Inspect</td>
+<td data-sourcepos="1073:12-1073:101">No ERROR severity lint, grant, hierarchy, or security findings unless explicitly waived.</td>
+</tr>
+<tr data-sourcepos="1074:1-1074:71">
+<td data-sourcepos="1074:2-1074:10">Analyse</td>
+<td data-sourcepos="1074:12-1074:70"><code>_waves.txt</code> exists or type-based fallback is acceptable.</td>
+</tr>
+<tr data-sourcepos="1075:1-1075:53">
+<td data-sourcepos="1075:2-1075:10">Package</td>
+<td data-sourcepos="1075:12-1075:52">Release group exists under <code>releases\</code>.</td>
+</tr>
+<tr data-sourcepos="1076:1-1076:73">
+<td data-sourcepos="1076:2-1076:8">Trust</td>
+<td data-sourcepos="1076:10-1076:72">Package label is <code>READY</code> or an approved <code>READY-WITH-CAVEATS</code>.</td>
+</tr>
+<tr data-sourcepos="1077:1-1077:120">
+<td data-sourcepos="1077:2-1077:14">DBA command</td>
+<td data-sourcepos="1077:16-1077:119">Uses <code>python -m td_release_packager deploy &lt;release-group-or-zip&gt; ...</code>; no manual extraction required.</td>
+</tr>
+</tbody>
+</table>
+<h2 data-sourcepos="1079:1-1079:25">Common Troubleshooting</h2>
+<table data-sourcepos="1081:1-1089:208">
+<thead>
+<tr data-sourcepos="1081:1-1081:35">
+<th data-sourcepos="1081:2-1081:10">Symptom</th>
+<th data-sourcepos="1081:12-1081:25">Likely cause</th>
+<th data-sourcepos="1081:27-1081:34">Action</th>
+</tr>
+</thead>
+<tbody>
+<tr data-sourcepos="1083:1-1083:130">
+<td data-sourcepos="1083:2-1083:56"><code>--source and --source-github are mutually exclusive</code></td>
+<td data-sourcepos="1083:58-1083:102">Both local and GitHub source were supplied.</td>
+<td data-sourcepos="1083:104-1083:129">Choose one source input.</td>
+</tr>
+<tr data-sourcepos="1084:1-1084:165">
+<td data-sourcepos="1084:2-1084:42">Token appears unchanged in deployed DDL</td>
+<td data-sourcepos="1084:44-1084:99">Missing <code>--env-config</code> value or mismatched token name.</td>
+<td data-sourcepos="1084:101-1084:164">Run <code>scan --project &lt;project&gt; --env-config &lt;conf&gt; --show-map</code>.</td>
+</tr>
+<tr data-sourcepos="1085:1-1085:181">
+<td data-sourcepos="1085:2-1085:48">Hardcoded database names remain after harvest</td>
+<td data-sourcepos="1085:50-1085:90">Missing or incomplete <code>token_map.conf</code>.</td>
+<td data-sourcepos="1085:92-1085:180">Re-run harvest with <code>--generate-token-map</code>, review, then re-harvest with <code>--token-map</code>.</td>
+</tr>
+<tr data-sourcepos="1086:1-1086:189">
+<td data-sourcepos="1086:2-1086:39">Package deploys to wrong environment</td>
+<td data-sourcepos="1086:41-1086:94">Wrong package or wrong <code>--env-config</code> at build time.</td>
+<td data-sourcepos="1086:96-1086:188">Check <code>context/ships.build.json</code> inside the package and rebuild for the target environment.</td>
+</tr>
+<tr data-sourcepos="1087:1-1087:159">
+<td data-sourcepos="1087:2-1087:28">Privilege preflight fails</td>
+<td data-sourcepos="1087:30-1087:86">Deploying user lacks required CREATE/DROP/GRANT rights.</td>
+<td data-sourcepos="1087:88-1087:158">Use the generated grant script in the deployment report, then resume.</td>
+</tr>
+<tr data-sourcepos="1088:1-1088:175">
+<td data-sourcepos="1088:2-1088:21">DML needs rollback</td>
+<td data-sourcepos="1088:23-1088:70">SHIPS does not capture row-level undo for DML.</td>
+<td data-sourcepos="1088:72-1088:174">Use application recovery scripts or restore from backup; avoid irreversible DML in high-risk deploys.</td>
+</tr>
+<tr data-sourcepos="1089:1-1089:208">
+<td data-sourcepos="1089:2-1089:34">Release group has multiple zips</td>
+<td data-sourcepos="1089:36-1089:95">Environment prereqs or application prereqs were split out.</td>
+<td data-sourcepos="1089:97-1089:207">Deploy the release-group directory; SHIPS reads <code>release_group.json</code> and runs the required packages in order.</td>
+</tr>
+</tbody>
+</table>
+
+    </article>
+  </body>
+</html>

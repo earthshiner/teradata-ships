@@ -273,7 +273,7 @@ class TestHarvestStageRecording:
 
 def _make_analyse_args(source: Path, **overrides) -> Namespace:
     args = Namespace(
-        source=str(source),
+        project=str(source),
         output=None,
         overwrite=False,
         graph=None,
@@ -362,7 +362,7 @@ class TestAnalyseStageRecording:
 
 def _make_generate_args(source: Path, **overrides) -> Namespace:
     args = Namespace(
-        source=str(source),
+        project=str(source),
         modules=None,
         dry_run=False,
     )
