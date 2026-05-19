@@ -13,6 +13,7 @@ Covers:
 
 from database_package_deployer.models import (
     ObjectType,
+    DeployIntent,
     DeployStrategy,
     DeployState,
     DeployScope,
@@ -557,6 +558,57 @@ class TestExecuteDdl:
         """Content without a trailing semicolon is still executed."""
         stmts = self._run("INSERT INTO t VALUES (1)")
         assert len(stmts) == 1
+
+    def test_split_disabled_keeps_procedure_body_as_one_request(self):
+        """Stored procedure bodies contain semicolons inside one DDL request."""
+        from database_package_deployer.deployer import _execute_ddl
+
+        sql = (
+            "CREATE PROCEDURE MyDB.P (OUT oActivity_Count INTEGER)\n"
+            "BEGIN\n"
+            "    DECLARE vSQL_Text VARCHAR(1000);\n"
+            "    SET vSQL_Text = 'UPDATE MyDB.T SET c = 1;';\n"
+            "    CALL DBC.SYSEXECSQL(vSQL_Text);\n"
+            "    SET oActivity_Count = ACTIVITY_COUNT;\n"
+            "END;"
+        )
+
+        cur = _RecordingCursor()
+        _execute_ddl(cur, sql, split_statements=False)
+
+        assert len(cur.executed) == 1
+        assert "DECLARE vSQL_Text" in cur.executed[0]
+        assert "CALL DBC.SYSEXECSQL(vSQL_Text);" in cur.executed[0]
+        assert "'UPDATE MyDB.T SET c = 1;'" in cur.executed[0]
+        assert cur.executed[0].endswith("END;")
+
+    def test_execute_parsed_ddl_keeps_procedure_body_as_one_request(self):
+        """Procedure deployment uses object metadata to avoid semicolon splitting."""
+        from database_package_deployer.deployer import _execute_parsed_ddl
+        from database_package_deployer.models import ParsedStatement
+
+        sql = (
+            "CREATE PROCEDURE MyDB.P (OUT oActivity_Count INTEGER)\n"
+            "BEGIN\n"
+            "    SET oActivity_Count = 0;\n"
+            "END;"
+        )
+        parsed = ParsedStatement(
+            file_path="03_ddl/procedures/MyDB.P.spl",
+            ddl_text=sql,
+            original_text=sql,
+            database_name="MyDB",
+            object_name="P",
+            object_type=ObjectType.PROCEDURE,
+            strategy=DeployStrategy.REPLACE_IN_PLACE,
+            qualified_name="MyDB.P",
+            deploy_intent=DeployIntent.CREATE_ONLY,
+        )
+
+        cur = _RecordingCursor()
+        _execute_parsed_ddl(cur, parsed)
+
+        assert cur.executed == [sql]
 
 
 class TestSqljClientFilePathResolution:
