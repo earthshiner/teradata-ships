@@ -1082,13 +1082,13 @@ def _ships_context_response(
 
 
 def _find_build_json(archive_path: str) -> Optional[dict]:
-    """Extract ships.build.json from a package zip, or None if not found."""
+    """Extract context/ships.build.json from a package zip, or None if not found."""
     import zipfile
 
     try:
         with zipfile.ZipFile(archive_path) as zf:
             for name in zf.namelist():
-                if name.endswith("ships.build.json"):
+                if name.replace("\\", "/").endswith("context/ships.build.json"):
                     return json.loads(zf.read(name).decode("utf-8"))
     except Exception:
         pass

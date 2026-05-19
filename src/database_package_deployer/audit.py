@@ -39,7 +39,7 @@ import json
 import logging
 import os
 
-from database_package_deployer.package_metadata import package_file
+from database_package_deployer.package_metadata import package_file, read_package_json
 import socket
 import sys
 from datetime import datetime, timezone
@@ -74,15 +74,8 @@ def _resolve_operator() -> str:
 
 
 def _read_build_json(package_dir: str) -> Dict[str, Any]:
-    """Read ships.build.json from package_dir; return empty dict on failure."""
-    path = package_file(package_dir, "ships.build.json")
-    if not os.path.isfile(path):
-        return {}
-    try:
-        with open(path, encoding="utf-8") as fh:
-            return json.load(fh)
-    except (OSError, json.JSONDecodeError):
-        return {}
+    """Read context/ships.build.json from package_dir; return empty dict on failure."""
+    return read_package_json(package_dir, "ships.build.json")
 
 
 def _sha256_of_zip(package_dir: str, manifest: Dict[str, Any]) -> str:

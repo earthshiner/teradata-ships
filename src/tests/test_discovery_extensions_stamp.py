@@ -62,44 +62,41 @@ def _read_zip_build_json(archive_path: str) -> dict:
 class TestLoadBuildExtensions:
     """Unit tests for the ships.build.json extension reader in the deployer."""
 
+    @staticmethod
+    def _write_build_json(pkg_dir, data: dict | str) -> None:
+        context_dir = pkg_dir / "context"
+        context_dir.mkdir(exist_ok=True)
+        text = data if isinstance(data, str) else json.dumps(data)
+        (context_dir / "ships.build.json").write_text(text, encoding="utf-8")
+
     def test_returns_none_when_no_build_json(self, tmp_path):
         result = _load_build_extensions(str(tmp_path))
         assert result is None
 
     def test_returns_none_when_discovery_block_absent(self, tmp_path):
-        (tmp_path / "ships.build.json").write_text(
-            json.dumps({"build_number": "0001"}), encoding="utf-8"
-        )
+        self._write_build_json(tmp_path, {"build_number": "0001"})
         assert _load_build_extensions(str(tmp_path)) is None
 
     def test_returns_none_when_extensions_not_a_list(self, tmp_path):
-        (tmp_path / "ships.build.json").write_text(
-            json.dumps({"discovery": {"extensions": ".sql"}}), encoding="utf-8"
-        )
+        self._write_build_json(tmp_path, {"discovery": {"extensions": ".sql"}})
         assert _load_build_extensions(str(tmp_path)) is None
 
     def test_returns_none_when_extensions_contains_non_string(self, tmp_path):
-        (tmp_path / "ships.build.json").write_text(
-            json.dumps({"discovery": {"extensions": [".sql", 42]}}), encoding="utf-8"
-        )
+        self._write_build_json(tmp_path, {"discovery": {"extensions": [".sql", 42]}})
         assert _load_build_extensions(str(tmp_path)) is None
 
     def test_returns_none_on_malformed_json(self, tmp_path):
-        (tmp_path / "ships.build.json").write_text("{not valid json}", encoding="utf-8")
+        self._write_build_json(tmp_path, "{not valid json}")
         assert _load_build_extensions(str(tmp_path)) is None
 
     def test_returns_extension_list_when_valid(self, tmp_path):
         exts = [".bteq", ".sql", ".tbl"]
-        (tmp_path / "ships.build.json").write_text(
-            json.dumps({"discovery": {"extensions": exts}}), encoding="utf-8"
-        )
+        self._write_build_json(tmp_path, {"discovery": {"extensions": exts}})
         result = _load_build_extensions(str(tmp_path))
         assert result == exts
 
     def test_returns_empty_list_when_extensions_empty(self, tmp_path):
-        (tmp_path / "ships.build.json").write_text(
-            json.dumps({"discovery": {"extensions": []}}), encoding="utf-8"
-        )
+        self._write_build_json(tmp_path, {"discovery": {"extensions": []}})
         result = _load_build_extensions(str(tmp_path))
         assert result == []
 

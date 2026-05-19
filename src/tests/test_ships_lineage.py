@@ -34,6 +34,7 @@ import ships_lineage as sut
 
 
 def _write_build_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data), encoding="utf-8")
 
 
@@ -104,7 +105,7 @@ class TestReadBuildMeta:
 
     def test_reads_all_fields(self, tmp_path):
         _write_build_json(
-            tmp_path / "ships.build.json",
+            tmp_path / "context" / "ships.build.json",
             {
                 "build_number": "0042",
                 "environment": "PRD",
@@ -119,13 +120,17 @@ class TestReadBuildMeta:
         assert meta["package_filename"] == "ships_test_0042.zip"
 
     def test_partial_file_fills_missing_with_defaults(self, tmp_path):
-        _write_build_json(tmp_path / "ships.build.json", {"build_number": "0007"})
+        _write_build_json(
+            tmp_path / "context" / "ships.build.json", {"build_number": "0007"}
+        )
         meta = sut._read_build_meta(str(tmp_path))
         assert meta["build_number"] == "0007"
         assert meta["environment"] == ""
 
     def test_malformed_json_returns_defaults(self, tmp_path):
-        (tmp_path / "ships.build.json").write_text("{bad json", encoding="utf-8")
+        context_dir = tmp_path / "context"
+        context_dir.mkdir()
+        (context_dir / "ships.build.json").write_text("{bad json", encoding="utf-8")
         meta = sut._read_build_meta(str(tmp_path))
         assert meta["build_number"] == ""
 
@@ -199,7 +204,7 @@ class TestStartDeployRun:
         monkeypatch.setenv("OPENLINEAGE_URL", f"file://{target}")
         monkeypatch.delenv("OPENLINEAGE_DISABLED", raising=False)
         _write_build_json(
-            tmp_path / "ships.build.json",
+            tmp_path / "context" / "ships.build.json",
             {"build_number": "0001", "package_name": "my_pkg"},
         )
         run_id = sut.start_deploy_run(str(tmp_path), dry_run=True)

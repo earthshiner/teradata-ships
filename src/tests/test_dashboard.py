@@ -78,9 +78,9 @@ def _build_json(pkg_name="OMR", build_no="0042", env="PRD", label="READY") -> di
 
 
 def _make_package_zip(tmp_path: Path, filename: str, **build_overrides) -> str:
-    """Write a realistic package archive with ships.build.json (and optional report)."""
+    """Write a realistic package archive with context/ships.build.json."""
     bd = _build_json(**build_overrides)
-    members = {f"{filename.split('.')[0]}/ships.build.json": json.dumps(bd)}
+    members = {f"{filename.split('.')[0]}/context/ships.build.json": json.dumps(bd)}
     if build_overrides.get("with_report"):
         members[f"{filename.split('.')[0]}/package_report.html"] = "<html></html>"
     return _make_zip(tmp_path, filename, members)
@@ -111,7 +111,7 @@ class TestReadBuildJsonFromZip:
     def test_reads_build_json(self, tmp_path):
         bd = _build_json()
         archive = _make_zip(
-            tmp_path, "pkg.zip", {"pkg/ships.build.json": json.dumps(bd)}
+            tmp_path, "pkg.zip", {"pkg/context/ships.build.json": json.dumps(bd)}
         )
         result = read_build_json_from_zip(archive)
         assert result is not None
@@ -141,12 +141,15 @@ class TestArchiveHasReport:
         archive = _make_zip(
             tmp_path,
             "pkg.zip",
-            {"pkg/package_report.html": "<html></html>", "pkg/ships.build.json": "{}"},
+            {
+                "pkg/package_report.html": "<html></html>",
+                "pkg/context/ships.build.json": "{}",
+            },
         )
         assert archive_has_report(archive) is True
 
     def test_returns_false_when_no_report(self, tmp_path):
-        archive = _make_zip(tmp_path, "pkg.zip", {"pkg/ships.build.json": "{}"})
+        archive = _make_zip(tmp_path, "pkg.zip", {"pkg/context/ships.build.json": "{}"})
         assert archive_has_report(archive) is False
 
     def test_returns_false_for_nonexistent_file(self, tmp_path):
