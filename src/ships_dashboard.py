@@ -111,11 +111,11 @@ class PackageInfo:
 
 
 def read_build_json_from_zip(archive_path: str) -> Optional[dict]:
-    """Extract and parse ships.build.json from inside a package archive."""
+    """Extract and parse context/ships.build.json from inside a package archive."""
     try:
         with zipfile.ZipFile(archive_path) as zf:
             for name in zf.namelist():
-                if name.endswith("ships.build.json"):
+                if name.replace("\\", "/").endswith("context/ships.build.json"):
                     return json.loads(zf.read(name).decode("utf-8"))
     except Exception as exc:  # noqa: BLE001
         logger.debug(

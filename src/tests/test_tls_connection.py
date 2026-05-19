@@ -28,7 +28,11 @@ def _pkg_dir(tmp_path: Path, require_tls: bool = False) -> str:
         "package_filename": "PRD_Pkg_BUILD_0001.zip",
         "require_tls": require_tls,
     }
-    (tmp_path / "ships.build.json").write_text(json.dumps(manifest), encoding="utf-8")
+    context_dir = tmp_path / "context"
+    context_dir.mkdir(exist_ok=True)
+    (context_dir / "ships.build.json").write_text(
+        json.dumps(manifest), encoding="utf-8"
+    )
     return str(tmp_path)
 
 

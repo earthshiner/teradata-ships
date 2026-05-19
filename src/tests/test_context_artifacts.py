@@ -35,6 +35,13 @@ def test_write_context_artifacts_emits_agent_context_contract(tmp_path):
         "prompts/evidence_agent.prompt.md",
         "prompts/remediation_agent.prompt.md",
         "prompts/verification_agent.prompt.md",
+        "schemas/ships.build.schema.json",
+        "schemas/ships.context.schema.json",
+        "schemas/ships.handoff.schema.json",
+        "schemas/ships.index.schema.json",
+        "schemas/ships.integrity.schema.json",
+        "schemas/ships.manifest.schema.json",
+        "schemas/ships.provenance.schema.json",
         "ships.context.json",
         "ships.handoff.json",
         "ships.index.json",
@@ -69,8 +76,14 @@ def test_write_context_artifacts_emits_agent_context_contract(tmp_path):
         "context/prompts/deployment_agent.prompt.md"
         in index["entrypoints"]["prompts"]["contains"]
     )
+    assert index["entrypoints"]["schemas"]["path"] == "context/schemas/"
+    assert (
+        "context/schemas/ships.index.schema.json"
+        in index["entrypoints"]["schemas"]["contains"]
+    )
     assert "stage_results" in index["recommended_read_order"]
     assert "prompts" in index["recommended_read_order"]
+    assert "schemas" in index["recommended_read_order"]
     assert index["agent_instructions"]["before_action"][0].startswith(
         "Read context/ships.index.json"
     )
@@ -104,3 +117,27 @@ def test_write_context_artifacts_emits_agent_context_contract(tmp_path):
     assert "Do not deploy if package trust is BLOCKED" in agent_prompt.read_text()
     assert "Your task is to deploy a SHIPS package" in deploy_prompt.read_text()
     assert "View column lists must not be invented" in remediation_prompt.read_text()
+
+    schemas_dir = tmp_path / "context" / "schemas"
+    index_schema = json.loads((schemas_dir / "ships.index.schema.json").read_text())
+    assert index_schema["required"] == [
+        "schema",
+        "schema_version",
+        "package_type",
+        "read_first",
+        "entrypoints",
+        "recommended_read_order",
+        "agent_policy",
+    ]
+    assert index["$schema"] == "./schemas/ships.index.schema.json"
+
+    for document_name, document in {
+        "ships.index": index,
+        "ships.context": context,
+        "ships.manifest": agent_manifest,
+        "ships.handoff": handoff,
+    }.items():
+        schema_file = schemas_dir / f"{document_name}.schema.json"
+        schema = json.loads(schema_file.read_text())
+        missing = [field for field in schema["required"] if field not in document]
+        assert missing == []

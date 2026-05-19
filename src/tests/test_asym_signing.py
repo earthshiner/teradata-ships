@@ -38,10 +38,12 @@ def _make_zip(tmp_dir: str, content: bytes = b"fake zip content") -> str:
 
 
 def _make_build_json(tmp_dir: str, package_filename: str = "test_package.zip", **extra):
-    """Write a minimal ships.build.json alongside the fake ZIP."""
+    """Write a minimal context/ships.build.json alongside the fake ZIP."""
     manifest = {"package_filename": package_filename}
     manifest.update(extra)
-    build_json = os.path.join(tmp_dir, "ships.build.json")
+    context_dir = os.path.join(tmp_dir, "context")
+    os.makedirs(context_dir, exist_ok=True)
+    build_json = os.path.join(context_dir, "ships.build.json")
     with open(build_json, "w", encoding="utf-8") as fh:
         json.dump(manifest, fh)
     return build_json
