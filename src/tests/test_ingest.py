@@ -25,6 +25,7 @@ from td_release_packager.ingest import (
     _split_multi_statement,
     ingest_directory,
 )
+from td_release_packager.source_migrator import parse_migration_sed
 
 
 # ---------------------------------------------------------------
@@ -805,6 +806,46 @@ class TestIngestDirectory:
         )
 
         assert result.multiset_injected == 1
+
+    def test_legacy_migration_rules_apply_before_classification(
+        self, tmp_path, tmp_project
+    ):
+        """Raw legacy placeholders are normalised before naming/placement."""
+        src = tmp_path / "source"
+        src.mkdir()
+        original = (
+            "CREATE DATABASE $BASE_NODE FROM $PARENT_NODE\n"
+            "AS PERM=100e6/2*(HASHAMP()+1)\n"
+            "/* Japanese option: AS PERM=400e6/2*(HASHAMP()+1) */\n"
+            ";\n"
+        )
+        (src / "Step_01_CreateDatabases_v0.1.db").write_text(
+            original,
+            encoding="utf-8",
+        )
+        rules, skipped = parse_migration_sed(
+            "s/$BASE_NODE/{{BASE_NODE}}/g\n"
+            "s/$PARENT_NODE/{{PARENT_NODE}}/g\n"
+        )
+
+        result = ingest_directory(
+            str(src),
+            str(tmp_project),
+            detect_tokens=False,
+            legacy_migration_rules=rules,
+        )
+
+        assert skipped == []
+        assert result.classified == 1
+        assert result.legacy_migration_files == 1
+        assert result.legacy_migration_substitutions == 2
+        placed = tmp_project / "payload" / "database" / "pre-requisites" / "databases"
+        harvested = placed / "{{BASE_NODE}}.db"
+        assert harvested.exists()
+        assert "{{BASE_NODE}}" in harvested.read_text(encoding="utf-8")
+        assert "$BASE_NODE" in (src / "Step_01_CreateDatabases_v0.1.db").read_text(
+            encoding="utf-8"
+        )
 
     def test_ingest_harvests_jar_binary_alongside_install_script(
         self, tmp_path, tmp_project

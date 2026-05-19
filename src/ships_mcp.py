@@ -78,6 +78,19 @@ mcp = FastMCP(
 )
 
 
+def _load_legacy_migration_rules(project: str):
+    """Return parsed project-local legacy migration rules, if present."""
+    migration_path = os.path.join(project, "config", "legacy_migration.sed")
+    if not os.path.isfile(migration_path):
+        return []
+
+    from td_release_packager.source_migrator import parse_migration_sed
+
+    with open(migration_path, encoding="utf-8") as f:
+        rules, _skipped = parse_migration_sed(f.read())
+    return rules
+
+
 # ---------------------------------------------------------------
 # [S] Scaffold
 # ---------------------------------------------------------------
@@ -163,12 +176,17 @@ def ships_harvest(
             generate_token_map,
         )
 
+        legacy_migration_rules = _load_legacy_migration_rules(project)
         apply_tokens = None
         if token_map:
             apply_tokens = read_token_map(token_map)
         elif auto_tokenise:
             detect = ingest_directory(
-                source, project, detect_tokens=True, apply_tokens=None
+                source,
+                project,
+                detect_tokens=True,
+                apply_tokens=None,
+                legacy_migration_rules=legacy_migration_rules,
             )
             if detect.token_candidates:
                 apply_tokens = generate_token_map(detect.token_candidates, env_prefix)
@@ -178,6 +196,7 @@ def ships_harvest(
             project_dir=project,
             detect_tokens=True,
             apply_tokens=apply_tokens,
+            legacy_migration_rules=legacy_migration_rules,
         )
         return {
             "success": True,
@@ -186,6 +205,8 @@ def ships_harvest(
             "files_placed": len(result.files_placed),
             "token_candidates": len(result.token_candidates),
             "multiset_injected": result.multiset_injected,
+            "legacy_migration_files": result.legacy_migration_files,
+            "legacy_migration_substitutions": result.legacy_migration_substitutions,
             "warnings": result.warnings,
             "classification_warnings": result.classification_warnings,
             "unclassified_files": result.unclassified_files,
