@@ -2160,7 +2160,7 @@ def _deploy_table(
                 message=f"[DRY RUN] Would CREATE {qn} (does not exist).",
                 dry_run=True,
             )
-        _execute_ddl(cursor, parsed.ddl_text)
+        _execute_parsed_ddl(cursor, parsed)
         return ObjectDeployResult(
             database_name=db,
             object_name=tbl,
@@ -2183,7 +2183,7 @@ def _deploy_table(
                 dry_run=True,
             )
         _drop_object(cursor, db, tbl, ObjectType.TABLE)
-        _execute_ddl(cursor, parsed.ddl_text)
+        _execute_parsed_ddl(cursor, parsed)
         return ObjectDeployResult(
             database_name=db,
             object_name=tbl,
@@ -2220,7 +2220,7 @@ def _deploy_table(
 
     # Create new table
     try:
-        _execute_ddl(cursor, parsed.ddl_text)
+        _execute_parsed_ddl(cursor, parsed)
     except Exception:
         # DDL failed — roll back the rename
         logger.error("DDL creation failed for %s — rolling back.", qn)
@@ -2336,7 +2336,7 @@ def _deploy_direct_execute(
         ddl_text = _resolve_sqlj_client_file_paths(parsed.ddl_text, parsed.file_path)
 
     try:
-        _execute_ddl(cursor, ddl_text)
+        _execute_parsed_ddl(cursor, parsed, ddl_text=ddl_text)
     except Exception as e:
         err_str = str(e)
         # Teradata Error 5612: "already exists" — for DATABASE
@@ -2447,7 +2447,7 @@ def _deploy_skip_if_exists(
         )
 
     # -- Object does not exist — create it --
-    _execute_ddl(cursor, parsed.ddl_text)
+    _execute_parsed_ddl(cursor, parsed)
 
     logger.info(
         "SKIP_IF_EXISTS: Created %s %s.",
@@ -2544,7 +2544,7 @@ def _deploy_create_only(
         )
 
     # -- Create --
-    _execute_ddl(cursor, parsed.ddl_text)
+    _execute_parsed_ddl(cursor, parsed)
 
     msg = f"{'Replaced' if exists else 'Created'} {obj_type.value} {qn}."
     if rollback_file:
@@ -2635,7 +2635,7 @@ def _deploy_drop_and_create(
         )
 
     # -- Create --
-    _execute_ddl(cursor, parsed.ddl_text)
+    _execute_parsed_ddl(cursor, parsed)
 
     msg = f"{'Replaced' if exists else 'Created'} {obj_type.value} {qn}."
     if rollback_file:
@@ -2717,7 +2717,7 @@ def _deploy_replace_in_place(
             )
 
     # -- Execute REPLACE --
-    _execute_ddl(cursor, parsed.ddl_text)
+    _execute_parsed_ddl(cursor, parsed)
 
     msg = f"{'Replaced' if exists else 'Created'} {obj_type.value} {qn}."
     if rollback_file:
@@ -2958,7 +2958,11 @@ def _rollback_single(
                 )
 
             # Re-create from the saved rollback definition
-            _execute_ddl(cursor, rollback_ddl)
+            _execute_ddl(
+                cursor,
+                rollback_ddl,
+                split_statements=obj_type not in _ROUTINE_BODY_OBJECT_TYPES,
+            )
 
             manifest.update_state(qualified_name, DeployState.ROLLED_BACK)
 
@@ -3337,7 +3341,31 @@ def _count_rows(cursor, database_name: str, table_name: str) -> int:
     return row[0] if row else 0
 
 
-def _execute_ddl(cursor, ddl_text: str):
+_ROUTINE_BODY_OBJECT_TYPES = frozenset(
+    {
+        ObjectType.PROCEDURE,
+        ObjectType.FUNCTION,
+        ObjectType.TRIGGER,
+        ObjectType.SCRIPT_TABLE_OPERATOR,
+    }
+)
+
+
+def _execute_parsed_ddl(
+    cursor,
+    parsed: ParsedStatement,
+    *,
+    ddl_text: Optional[str] = None,
+):
+    """Execute parsed DDL with routine bodies kept as one request."""
+    _execute_ddl(
+        cursor,
+        ddl_text if ddl_text is not None else parsed.ddl_text,
+        split_statements=parsed.object_type not in _ROUTINE_BODY_OBJECT_TYPES,
+    )
+
+
+def _execute_ddl(cursor, ddl_text: str, *, split_statements: bool = True):
     """
     Execute one or more DDL statements.
 
@@ -3345,6 +3373,10 @@ def _execute_ddl(cursor, ddl_text: str):
     GRANT statements) by splitting on semicolons -- comment- and
     string-literal-safe, so semicolons inside SQL comments or VALUES
     strings don't cause false splits.
+
+    Routine bodies must be executed with ``split_statements=False`` because
+    Teradata SPL procedures, functions, triggers, and STO definitions contain
+    semicolons inside a single DDL request.
 
     Each statement is executed individually. This avoids Teradata
     Error 3932 ('Only an ET or null statement is legal after a DDL
@@ -3363,62 +3395,65 @@ def _execute_ddl(cursor, ddl_text: str):
     import re
     import time
 
-    # --- Split multi-statement content (comment + string-literal safe) ---
-    # Build a sanitised copy for semicolon detection, preserving character
-    # positions so offsets map back to the original text exactly.
-    stripped = ddl_text
-
-    # Replace block comments with same-length whitespace
-    for match in re.finditer(r"/\*.*?\*/", stripped, flags=re.DOTALL):
-        stripped = (
-            stripped[: match.start()]
-            + " " * len(match.group())
-            + stripped[match.end() :]
-        )
-
-    # Replace single-line comments with same-length whitespace
-    for match in re.finditer(r"--[^\n]*", stripped):
-        stripped = (
-            stripped[: match.start()]
-            + " " * len(match.group())
-            + stripped[match.end() :]
-        )
-
-    # Replace string literals with same-length whitespace so that a
-    # semicolon inside a VALUES string (e.g. 'Fixed rate; stable payments')
-    # is not mistaken for a statement terminator.
-    # Pattern mirrors sql_text._STRING_LITERAL_RE (Teradata single-quoted,
-    # doubled-quote escape). Comments are already blanked above, so any
-    # stray quote inside a comment won't start a spurious literal match.
-    for match in re.finditer(r"'(?:[^']|'')*'", stripped, flags=re.DOTALL):
-        stripped = (
-            stripped[: match.start()]
-            + " " * len(match.group())
-            + stripped[match.end() :]
-        )
-
-    # Find semicolon positions in the sanitised version
-    semi_positions = [i for i, c in enumerate(stripped) if c == ";"]
-
-    # Extract individual statements from original text
-    statements = []
-    start = 0
-    for pos in semi_positions:
-        chunk = ddl_text[start:pos].strip()
-        start = pos + 1
-        if chunk:
-            statements.append(chunk)
-
-    # Trailing content after last semicolon
-    trailing = ddl_text[start:].strip()
-    if trailing:
-        statements.append(trailing)
-
-    # Fallback: if no semicolons found, use the whole text
-    if not statements:
+    if not split_statements:
         statements = [ddl_text.strip()]
+    else:
+        # --- Split multi-statement content (comment + string-literal safe) ---
+        # Build a sanitised copy for semicolon detection, preserving character
+        # positions so offsets map back to the original text exactly.
+        stripped = ddl_text
 
-    # Filter out comment-only or whitespace-only chunks
+        # Replace block comments with same-length whitespace
+        for match in re.finditer(r"/\*.*?\*/", stripped, flags=re.DOTALL):
+            stripped = (
+                stripped[: match.start()]
+                + " " * len(match.group())
+                + stripped[match.end() :]
+            )
+
+        # Replace single-line comments with same-length whitespace
+        for match in re.finditer(r"--[^\n]*", stripped):
+            stripped = (
+                stripped[: match.start()]
+                + " " * len(match.group())
+                + stripped[match.end() :]
+            )
+
+        # Replace string literals with same-length whitespace so that a
+        # semicolon inside a VALUES string (e.g. 'Fixed rate; stable payments')
+        # is not mistaken for a statement terminator.
+        # Pattern mirrors sql_text._STRING_LITERAL_RE (Teradata single-quoted,
+        # doubled-quote escape). Comments are already blanked above, so any
+        # stray quote inside a comment won't start a spurious literal match.
+        for match in re.finditer(r"'(?:[^']|'')*'", stripped, flags=re.DOTALL):
+            stripped = (
+                stripped[: match.start()]
+                + " " * len(match.group())
+                + stripped[match.end() :]
+            )
+
+        # Find semicolon positions in the sanitised version
+        semi_positions = [i for i, c in enumerate(stripped) if c == ";"]
+
+        # Extract individual statements from original text
+        statements = []
+        start = 0
+        for pos in semi_positions:
+            chunk = ddl_text[start:pos].strip()
+            start = pos + 1
+            if chunk:
+                statements.append(chunk)
+
+        # Trailing content after last semicolon
+        trailing = ddl_text[start:].strip()
+        if trailing:
+            statements.append(trailing)
+
+        # Fallback: if no semicolons found, use the whole text
+        if not statements:
+            statements = [ddl_text.strip()]
+
+    # --- Filter out comment-only or whitespace-only chunks ---
     clean_statements = []
     for s in statements:
         # Strip comments and check if anything remains
