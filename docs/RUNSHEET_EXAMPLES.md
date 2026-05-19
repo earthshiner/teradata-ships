@@ -618,7 +618,7 @@ Arguments:
 |---|---|
 | `--source-github` | Fetches the SHIPS project source. |
 | `--env-config` | Can point to a local secure config outside the repository. |
-| `--change-ref` | Change ticket stamped into `ships.build.json`. |
+| `--change-ref` | Change ticket stamped into `context/ships.build.json`. |
 | `--asymmetric-key` | Signs the package with an Ed25519 private key. |
 
 ## Runsheet 7: Deploy A Package Downloaded From A GitHub Release
@@ -1083,7 +1083,7 @@ Checklist:
 | `--source and --source-github are mutually exclusive` | Both local and GitHub source were supplied. | Choose one source input. |
 | Token appears unchanged in deployed DDL | Missing `--env-config` value or mismatched token name. | Run `scan --project <project> --env-config <conf> --show-map`. |
 | Hardcoded database names remain after harvest | Missing or incomplete `token_map.conf`. | Re-run harvest with `--generate-token-map`, review, then re-harvest with `--token-map`. |
-| Package deploys to wrong environment | Wrong package or wrong `--env-config` at build time. | Check `context\ships.build.json` inside the package and rebuild for the target environment. |
+| Package deploys to wrong environment | Wrong package or wrong `--env-config` at build time. | Check `context/ships.build.json` inside the package and rebuild for the target environment. |
 | Privilege preflight fails | Deploying user lacks required CREATE/DROP/GRANT rights. | Use the generated grant script in the deployment report, then resume. |
 | DML needs rollback | SHIPS does not capture row-level undo for DML. | Use application recovery scripts or restore from backup; avoid irreversible DML in high-risk deploys. |
 | Release group has multiple zips | Environment prereqs or application prereqs were split out. | Deploy the release-group directory; SHIPS reads `release_group.json` and runs the required packages in order. |

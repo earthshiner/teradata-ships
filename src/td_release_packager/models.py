@@ -183,7 +183,7 @@ class BuildManifest:
     """
     Metadata stamped into the package at build time.
 
-    Persisted as ships.build.json inside the package root. Provides
+    Persisted as context/ships.build.json inside the package. Provides
     traceability from deployed objects back to the source and
     build process.
 

@@ -56,10 +56,10 @@ Run facet
 ---------
 A custom ``ShipsRunFacet`` is attached to every event and carries:
 
-    build_number    From ships.build.json (empty string if not present)
-    environment     From ships.build.json
-    package_name    From ships.build.json
-    package_filename From ships.build.json
+    build_number    From context/ships.build.json (empty string if not present)
+    environment     From context/ships.build.json
+    package_name    From context/ships.build.json
+    package_filename From context/ships.build.json
     dry_run         True when the deploy ran in dry-run mode
 
 OpenLineage spec
@@ -142,7 +142,7 @@ def _now() -> str:
 
 
 # ---------------------------------------------------------------------------
-# ships.build.json reader
+# context/ships.build.json reader
 # ---------------------------------------------------------------------------
 
 
@@ -332,7 +332,7 @@ def start_deploy_run(
     ``fail_deploy_run`` to close the run.
 
     Args:
-        package_dir: Package directory containing ships.build.json.
+        package_dir: Package directory containing context/ships.build.json.
         dry_run:     Whether this is a dry-run deployment.
         db_host:     Database host string used to derive the dataset
                      namespace.  Falls back to ``OPENLINEAGE_NAMESPACE``
@@ -373,7 +373,7 @@ def complete_deploy_run(
 
     Args:
         run_id:             Run ID returned by ``start_deploy_run``.
-        package_dir:        Package directory containing ships.build.json.
+        package_dir:        Package directory containing context/ships.build.json.
         completed_objects:  List of ``(database_name, object_name)``
                             tuples for objects that reached COMPLETED
                             state.
@@ -412,7 +412,7 @@ def fail_deploy_run(
 
     Args:
         run_id:             Run ID returned by ``start_deploy_run``.
-        package_dir:        Package directory containing ships.build.json.
+        package_dir:        Package directory containing context/ships.build.json.
         db_host:            Database host string (namespace hint).
         error:              Top-level error message (used when the
                             deployer raised an unexpected exception).
