@@ -26,6 +26,7 @@ Limits:
 
 import logging
 import os
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -89,6 +90,8 @@ class WaveExecutor:
         self.environment = environment
 
         self._cursors: List[Any] = []
+        self._cursor_locks: List[threading.Lock] = []
+        self._driver_lock = threading.Lock()
         self._pool_created = False
 
     def create_pool(self):
@@ -120,6 +123,7 @@ class WaveExecutor:
                 )
 
             self._cursors.append(cursor)
+            self._cursor_locks.append(threading.Lock())
 
         self._pool_created = True
         logger.info("Connection pool ready: %d streams", len(self._cursors))
@@ -139,6 +143,7 @@ class WaveExecutor:
             logger.debug("Stream %d: closed", i)
 
         self._cursors.clear()
+        self._cursor_locks.clear()
         self._pool_created = False
         logger.info("Connection pool closed.")
 
@@ -364,6 +369,7 @@ class WaveExecutor:
                 future = executor.submit(
                     self._deploy_on_stream,
                     cursor,
+                    self._cursor_locks[stream_id],
                     stream_id + 1,
                     wave_num,
                     fpath,
@@ -417,6 +423,7 @@ class WaveExecutor:
     def _deploy_on_stream(
         self,
         cursor,
+        cursor_lock: threading.Lock,
         stream_id: int,
         wave_num: int,
         file_path: str,
@@ -430,6 +437,10 @@ class WaveExecutor:
 
         Args:
             cursor:     Stream's database cursor.
+            cursor_lock:
+                        Per-cursor lock. A cursor must never be used by two
+                        threads at once; teradatasql cursor/result handles are
+                        connection-local and not thread-safe.
             stream_id:  Stream number (1-based).
             wave_num:   Wave number (1-based).
             file_path:  File to deploy.
@@ -438,8 +449,9 @@ class WaveExecutor:
         Returns:
             Result dict from deploy_fn.
         """
-        self._update_stream_query_band(cursor, stream_id, wave_num, file_path)
-        return deploy_fn(cursor, file_path)
+        with self._driver_lock, cursor_lock:
+            self._update_stream_query_band(cursor, stream_id, wave_num, file_path)
+            return deploy_fn(cursor, file_path)
 
     def _update_stream_query_band(
         self, cursor, stream_id: int, wave_num: int, file_path: str
