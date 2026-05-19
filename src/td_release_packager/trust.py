@@ -21,7 +21,7 @@ to fix.
 | inspect_token_format | ships.decisions.json inspect stage | Any INSPECT_TOKEN_MALFORMED error   |
 | inspect_lint         | ships.decisions.json inspect stage | Any INSPECT_LINT_VIOLATION error    |
 | inspect_grants       | ships.decisions.json inspect stage | Any INSPECT_GRANT_VIOLATION error   |
-| provenance_complete  | ships.provenance.json existence   | File absent from payload |
+| provenance_complete  | context/ships.provenance.json existence | File absent from payload |
 
 **Label derivation**
 
@@ -241,10 +241,10 @@ def _build_reproducible_signal(pkg_dir: str) -> TrustSignal:
     """
     Trust signal: was the package built from a clean working tree?
 
-    Reads ``source_dirty`` from ships.build.json in ``pkg_dir``.
+    Reads ``source_dirty`` from context/ships.build.json in ``pkg_dir``.
     - ``source_dirty: true``  → WARN (built with --allow-dirty)
     - ``source_dirty: false`` or absent → PASS
-    - ships.build.json not found    → UNKNOWN
+    - context/ships.build.json not found → UNKNOWN
     """
     build_json = os.path.join(pkg_dir, "context", "ships.build.json")
     if not os.path.exists(build_json):

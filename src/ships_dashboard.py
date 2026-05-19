@@ -119,7 +119,9 @@ def read_build_json_from_zip(archive_path: str) -> Optional[dict]:
                     return json.loads(zf.read(name).decode("utf-8"))
     except Exception as exc:  # noqa: BLE001
         logger.debug(
-            "dashboard: could not read ships.build.json from %s: %s", archive_path, exc
+            "dashboard: could not read context/ships.build.json from %s: %s",
+            archive_path,
+            exc,
         )
     return None
 

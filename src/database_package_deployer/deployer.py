@@ -28,11 +28,10 @@ schema checks, but does not execute any DDL/DML.
 """
 
 import glob
-import json
 import logging
 import os
 
-from database_package_deployer.package_metadata import package_file
+from database_package_deployer.package_metadata import read_package_json
 import re
 import threading
 from datetime import datetime, timezone
@@ -166,27 +165,19 @@ def _resolve_sqlj_client_file_paths(ddl_text: str, ddl_file_path: str) -> str:
 
 
 def _load_baseline_dir(package_dir: str) -> str:
-    """Read ``baseline_dir`` from ships.build.json, or return empty string.
+    """Read ``baseline_dir`` from context/ships.build.json, or return empty string.
 
     An empty return means drift detection was not configured in
     ``ships.yaml`` at build time and is therefore disabled.
 
     Args:
-        package_dir: Directory containing ships.build.json.
+        package_dir: Directory containing context/ships.build.json.
 
     Returns:
         Baseline directory path string, or ``""`` if absent.
     """
-    build_json = package_file(package_dir, "ships.build.json")
-    if not os.path.isfile(build_json):
-        return ""
-    try:
-        with open(build_json, encoding="utf-8") as f:
-            data = json.load(f)
-        return data.get("baseline_dir", "") or ""
-    except Exception:  # noqa: BLE001
-        logger.debug("deployer: could not read baseline_dir from ships.build.json")
-    return ""
+    data = read_package_json(package_dir, "ships.build.json")
+    return data.get("baseline_dir", "") or ""
 
 
 def _run_show_text(
@@ -228,33 +219,24 @@ def _run_show_text(
 
 
 def _load_build_extensions(package_dir: str) -> Optional[list]:
-    """Return the ``discovery.extensions`` list from ships.build.json, or ``None``.
+    """Return the ``discovery.extensions`` list from context/ships.build.json.
 
     Reads the ``discovery.extensions`` field stamped by the packager
-    at build time.  Returns ``None`` when ships.build.json is absent, the
+    at build time.  Returns ``None`` when context/ships.build.json is absent, the
     field is missing, or the value is not a list of strings — callers
     should fall back to the hard-coded default set in that case.
 
     Args:
-        package_dir: Directory containing ships.build.json.
+        package_dir: Directory containing context/ships.build.json.
 
     Returns:
         Sorted list of normalised extension strings (e.g.
         ``[".bteq", ".sql", ".tbl", ...]``) or ``None``.
     """
-    build_json = package_file(package_dir, "ships.build.json")
-    if not os.path.isfile(build_json):
-        return None
-    try:
-        with open(build_json, encoding="utf-8") as f:
-            data = json.load(f)
-        exts = data.get("discovery", {}).get("extensions")
-        if isinstance(exts, list) and all(isinstance(e, str) for e in exts):
-            return exts
-    except Exception:  # noqa: BLE001
-        logger.debug(
-            "deployer: could not read discovery.extensions from ships.build.json"
-        )
+    data = read_package_json(package_dir, "ships.build.json")
+    exts = data.get("discovery", {}).get("extensions")
+    if isinstance(exts, list) and all(isinstance(e, str) for e in exts):
+        return exts
     return None
 
 

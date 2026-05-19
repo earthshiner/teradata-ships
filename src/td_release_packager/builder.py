@@ -458,13 +458,13 @@ def _check_working_tree(source_dir: str, allow_dirty: bool) -> bool:
             f"Working tree has uncommitted changes — package not built.\n"
             f"{summary}\n\n"
             f"Commit or stash your changes, or pass --allow-dirty to override.\n"
-            f"Note: --allow-dirty stamps source_dirty=true in ships.build.json so the\n"
+            f"Note: --allow-dirty stamps source_dirty=true in context/ships.build.json so the\n"
             f"Trust Report will flag this package as READY-WITH-CAVEATS."
         )
 
     logger.warning(
         "Building from dirty working tree (--allow-dirty). "
-        "source_dirty=true will be stamped in ships.build.json.\n%s",
+        "source_dirty=true will be stamped in context/ships.build.json.\n%s",
         summary,
     )
     return True
@@ -665,7 +665,7 @@ def _build_package_impl(
     # -- Phase 7: Embed deployment engine --
     _embed_deployer(pkg_dir)
 
-    # -- Phase 8: Generate ships.build.json --
+    # -- Phase 8: Generate context/ships.build.json --
     from td_release_packager.discovery import resolve_harvest_extensions
     from td_release_packager.orchestrator import ships_yaml as _sy
 
@@ -753,7 +753,7 @@ def _build_package_impl(
     )
 
     # Write an initial manifest before trust computation.  The trust
-    # build_reproducible signal reads source_dirty from ships.build.json;
+    # build_reproducible signal reads source_dirty from context/ships.build.json;
     # the manifest is overwritten below after the trust block is stamped.
     manifest_path = _context_file(pkg_dir, "ships.build.json")
     with open(manifest_path, "w", encoding="utf-8") as f:
@@ -773,8 +773,8 @@ def _build_package_impl(
 
     # -- Phase 8c: Write agent-facing context artefacts --
     # These files are a compact handoff contract for humans, CI/CD,
-    # MCP tools, and autonomous agents.  They reference ships.build.json and
-    # ships.provenance.json rather than duplicating detailed evidence.
+    # MCP tools, and autonomous agents.  They reference context/ships.build.json
+    # and context/ships.provenance.json rather than duplicating detailed evidence.
     write_context_artifacts(pkg_dir, manifest, config)
 
     # Print trust banner to CLI
@@ -910,7 +910,7 @@ def _compute_phase_inventory(pkg_dir: str) -> Dict[str, int]:
     The pre-split inventory captured by ``_copy_payload`` covers the
     whole payload, but each half of an auto-split pair only ships a
     subset of phases. Walk the post-split tree and recount so the
-    ships.build.json in each archive reports exactly what that archive
+    context/ships.build.json in each archive reports exactly what that archive
     contains.
     """
     inventory: Dict[str, int] = {}
@@ -1161,7 +1161,7 @@ def _split_into_paired_packages(
     zip keeps ``01_pre_requisites`` and empties every other phase;
     the main zip does the inverse.
 
-    Both ships.build.json manifests are rewritten to:
+    Both context/ships.build.json manifests are rewritten to:
       - share the same ``release_group`` (= the main archive basename)
       - declare their ``role`` ("prereqs" or "main")
       - have the main zip's ``requires`` list name the prereqs zip,
@@ -1229,7 +1229,7 @@ def _split_into_paired_packages(
     for phase in _MAIN_PHASES:
         _empty_phase_subtree(prereqs_pkg_dir, phase)
 
-    # 4. Recompute inventories for each half so ships.build.json reflects
+    # 4. Recompute inventories for each half so context/ships.build.json reflects
     #    what the archive actually ships, not the pre-split union.
     main_inventory = _compute_phase_inventory(pkg_dir)
     prereqs_inventory = _compute_phase_inventory(prereqs_pkg_dir)
@@ -2397,7 +2397,7 @@ def _generate_deploy_script(pkg_dir: str, manifest: BuildManifest):
     Generate deploy.py — the DBA's single entry point.
 
     This script bootstraps the embedded database_package_deployer, reads the
-    ships.build.json for context, and orchestrates the deployment with
+    context/ships.build.json for context, and orchestrates the deployment with
     query banding and logging.
 
     Args:
@@ -2724,7 +2724,7 @@ def main():
 
     # -- Deploy chaining: deploy companion prereqs package first (if any) --
     #
-    # When this package's ships.build.json has a non-empty ``requires`` list, a
+    # When this package's context/ships.build.json has a non-empty ``requires`` list, a
     # companion prereqs package was auto-generated alongside it (Phase 2 of
     # the intra-package dependency trilogy).  The prereqs package contains
     # CREATE DATABASE / CREATE USER statements that must be deployed before
@@ -3704,7 +3704,7 @@ def _read_signing_public_key(source_dir: str) -> str:
     """Read the Ed25519 public key PEM from ships.yaml signing.public_key.
 
     Returns an empty string when ships.yaml is absent or the key is not
-    configured.  The returned value is stamped into ships.build.json so the
+    configured.  The returned value is stamped into context/ships.build.json so the
     deployer can verify signatures without a separate --public-key argument.
 
     Args:

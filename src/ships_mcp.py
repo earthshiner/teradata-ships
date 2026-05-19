@@ -390,7 +390,7 @@ def ships_package(
 
     Resolves all {{TOKEN}} references in the payload using the env config,
     assembles a self-contained archive with the deployment engine, and
-    stamps ships.build.json with provenance, integrity hash, and trust report.
+    stamps context/ships.build.json with provenance, integrity hash, and trust report.
 
     Args:
         project: SHIPS project directory.
@@ -786,7 +786,7 @@ def ships_decisions(project: str, run_id: Optional[str] = None) -> dict:
 def ships_verify(project: str) -> dict:
     """Check whether the last built package is ready to deploy.
 
-    Reads the trust block from ships.build.json in the releases directory
+    Reads the trust block from context/ships.build.json in the releases directory
     and checks: archive exists, no package warnings, package stage
     succeeded. Returns READY / NOT READY with a per-check breakdown.
 
@@ -844,7 +844,7 @@ def ships_verify(project: str) -> dict:
         ]
         ready = all(c["passed"] for c in checks)
 
-        # Read trust label from ships.build.json if available
+        # Read trust label from context/ships.build.json if available
         trust_label = "UNKNOWN"
         if archive_exists:
             build_json = _find_build_json(archive)
