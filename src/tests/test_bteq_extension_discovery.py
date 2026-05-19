@@ -151,18 +151,19 @@ class TestInspectScansBteq:
         assert any(i.rule == "set_multiset" for i in result.issues)
 
     def test_btq_file_scanned(self, tmp_path):
-        ddl_dir = tmp_path / "DDL" / "views"
+        ddl_dir = tmp_path / "DDL" / "tables"
         ddl_dir.mkdir(parents=True)
-        # REPLACE VIEW fires deploy_intent (WARNING by default).
-        (ddl_dir / "MyDB.V.btq").write_text(
-            "REPLACE VIEW MyDB.V AS SELECT 1;",
+        # CREATE TABLE without SET/MULTISET proves .btq files are still scanned now that
+        # REPLACE itself is no longer a lint issue.
+        (ddl_dir / "MyDB.T.btq").write_text(
+            "CREATE TABLE MyDB.T (Id INTEGER) PRIMARY INDEX (Id);",
             encoding="utf-8",
         )
 
         result = validate_directory(str(tmp_path))
 
         assert result.files_scanned == 1
-        assert any(i.rule == "deploy_intent" for i in result.issues)
+        assert any(i.rule == "set_multiset" for i in result.issues)
 
 
 # ---------------------------------------------------------------
