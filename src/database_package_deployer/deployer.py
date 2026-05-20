@@ -429,6 +429,7 @@ def deploy_package(
     approval_code: str = "",
     connection_params: Optional[dict] = None,
     public_key_path: str = "",
+    table_trigger_action: str = "fail",
 ) -> PackageDeployResult:
     """
     Deploy all DDL files in a directory idempotently.
@@ -500,6 +501,7 @@ def deploy_package(
                 approval_code=approval_code,
                 connection_params=connection_params,
                 public_key_path=public_key_path,
+                table_trigger_action=table_trigger_action,
             )
         except Exception as exc:
             fail_deploy_run(
@@ -583,6 +585,7 @@ def _deploy_package_impl(
     approval_code: str = "",
     connection_params: Optional[dict] = None,
     public_key_path: str = "",
+    table_trigger_action: str = "fail",
 ) -> PackageDeployResult:
     """
     Deploy all DDL files in a directory idempotently.
@@ -930,6 +933,7 @@ def _deploy_package_impl(
             stop_on_failure,
             baseline_dir=baseline_dir,
             on_drift=on_drift,
+            table_trigger_action=table_trigger_action,
         )
     elif waves is not None:
         results, wave_summaries = _execute_waves_sequential(
@@ -941,6 +945,7 @@ def _deploy_package_impl(
             dry_run,
             baseline_dir=baseline_dir,
             on_drift=on_drift,
+            table_trigger_action=table_trigger_action,
         )
     else:
         results = _execute_sequential(
@@ -951,6 +956,7 @@ def _deploy_package_impl(
             dry_run,
             baseline_dir=baseline_dir,
             on_drift=on_drift,
+            table_trigger_action=table_trigger_action,
         )
         wave_summaries = []
 
@@ -1004,6 +1010,7 @@ def _execute_sequential(
     dry_run,
     baseline_dir="",
     on_drift="abort",
+    table_trigger_action="fail",
 ):
     """Execute objects sequentially (no waves)."""
     results = []
@@ -1022,6 +1029,7 @@ def _execute_sequential(
             dry_run,
             baseline_dir=baseline_dir,
             on_drift=on_drift,
+            table_trigger_action=table_trigger_action,
         )
         results.append(result)
         if result.state == DeployState.FAILED and stop_on_failure:
@@ -1039,6 +1047,7 @@ def _execute_waves_sequential(
     dry_run,
     baseline_dir="",
     on_drift="abort",
+    table_trigger_action="fail",
 ):
     """Execute waves sequentially (1 stream or dry-run), tracking wave numbers."""
     import time
@@ -1091,6 +1100,7 @@ def _execute_waves_sequential(
                 dry_run,
                 baseline_dir=baseline_dir,
                 on_drift=on_drift,
+                table_trigger_action=table_trigger_action,
             )
             result.wave_number = wave_num
             results.append(result)
@@ -1141,6 +1151,7 @@ def _execute_waves_parallel(
     stop_on_failure,
     baseline_dir="",
     on_drift="abort",
+    table_trigger_action="fail",
 ):
     """
     Execute waves in parallel across multiple streams.
@@ -1202,6 +1213,7 @@ def _execute_waves_parallel(
                     False,
                     baseline_dir=baseline_dir,
                     on_drift=on_drift,
+                    table_trigger_action=table_trigger_action,
                 )
         else:
             result = _dispatch_deploy(
@@ -1211,6 +1223,7 @@ def _execute_waves_parallel(
                 False,
                 baseline_dir=baseline_dir,
                 on_drift=on_drift,
+                table_trigger_action=table_trigger_action,
             )
 
         return {"file": file_path, "state": result.state.value, "result": result}
@@ -2045,6 +2058,7 @@ def _dispatch_deploy(
     dry_run: bool,
     baseline_dir: str = "",
     on_drift: str = "abort",
+    table_trigger_action: str = "fail",
 ) -> ObjectDeployResult:
     """
     Dispatch deployment to the correct strategy and update manifest.
@@ -2159,7 +2173,18 @@ def _dispatch_deploy(
                         logger.warning("  ⚠ DRIFT CONTINUE: %s", _drift_msg)
 
         if parsed.strategy == DeployStrategy.IDEMPOTENT_DEPLOY:
-            result = _deploy_table(cursor, parsed, dry_run)
+            package_dir = (
+                os.path.dirname(manifest.path)
+                if manifest and hasattr(manifest, "path")
+                else ""
+            )
+            result = _deploy_table(
+                cursor,
+                parsed,
+                dry_run,
+                table_trigger_action=table_trigger_action,
+                package_dir=package_dir,
+            )
         elif parsed.strategy == DeployStrategy.CREATE_ONLY:
             result = _deploy_create_only(cursor, parsed, manifest, dry_run)
         elif parsed.strategy == DeployStrategy.DROP_AND_CREATE:
@@ -2314,6 +2339,8 @@ def _deploy_table(
     cursor,
     parsed: ParsedStatement,
     dry_run: bool,
+    table_trigger_action: str = "fail",
+    package_dir: str = "",
 ) -> ObjectDeployResult:
     """
     Deploy a table with full idempotent backup/migrate flow.
@@ -2347,12 +2374,14 @@ def _deploy_table(
             message=f"Created {qn} (did not previously exist).",
         )
 
-    trigger_blockers = _table_trigger_blockers(cursor, db, tbl)
-    if trigger_blockers:
+    trigger_records = _table_triggers(cursor, db, tbl)
+    trigger_blockers = _format_table_trigger_blockers(trigger_records)
+    if trigger_blockers and table_trigger_action != "recreate":
         msg = (
             f"Cannot replace {qn}: table has defined triggers. "
             "Teradata does not allow SHIPS to drop or rename the table "
-            "while triggers exist."
+            "while triggers exist. Re-run with --recreate-table-triggers "
+            "to SHOW, drop, and recreate the triggers around the table change."
         )
         return ObjectDeployResult(
             database_name=db,
@@ -2364,6 +2393,87 @@ def _deploy_table(
             blockers=trigger_blockers,
             dry_run=dry_run,
         )
+
+    if trigger_records and dry_run:
+        return ObjectDeployResult(
+            database_name=db,
+            object_name=tbl,
+            object_type=ObjectType.TABLE,
+            state=DeployState.COMPLETED,
+            message=(
+                f"[DRY RUN] Would SHOW and DROP {len(trigger_records)} trigger(s), "
+                f"replace {qn}, then recreate the trigger(s) from SHOW output."
+            ),
+            warnings=trigger_blockers,
+            dry_run=True,
+        )
+
+    trigger_snapshots = []
+    triggers_dropped = False
+    if trigger_records:
+        trigger_snapshots = _capture_table_trigger_snapshots(
+            cursor, trigger_records, package_dir
+        )
+        _drop_table_triggers(cursor, trigger_snapshots)
+        triggers_dropped = True
+
+    result = None
+    try:
+        result = _deploy_existing_table_body(cursor, parsed, dry_run)
+    except Exception:
+        logger.error(
+            "Table deployment failed after dropping trigger(s) for %s — "
+            "attempting trigger recreation before propagating the failure.",
+            qn,
+        )
+        restore_errors = (
+            _restore_table_triggers(cursor, trigger_snapshots) if triggers_dropped else []
+        )
+        if restore_errors:
+            raise RuntimeError(
+                f"Table deployment failed and trigger recreation also failed: "
+                f"{'; '.join(restore_errors)}"
+            ) from None
+        raise
+
+    restore_errors = (
+        _restore_table_triggers(cursor, trigger_snapshots) if triggers_dropped else []
+    )
+    if restore_errors:
+        msg = (
+            f"Table {qn} was processed but trigger recreation failed: "
+            f"{'; '.join(restore_errors)}"
+        )
+        return ObjectDeployResult(
+            database_name=db,
+            object_name=tbl,
+            object_type=ObjectType.TABLE,
+            state=DeployState.FAILED,
+            backup_table=result.backup_table if result else None,
+            rows_migrated=result.rows_migrated if result else 0,
+            error=msg,
+            message=msg,
+            blockers=restore_errors,
+        )
+
+    if trigger_snapshots:
+        warning = (
+            "Dropped and recreated trigger(s): "
+            + "; ".join(snapshot["blocker"] for snapshot in trigger_snapshots)
+        )
+        result.warnings.append(warning)
+    return result
+
+
+def _deploy_existing_table_body(
+    cursor,
+    parsed: ParsedStatement,
+    dry_run: bool,
+) -> ObjectDeployResult:
+    """Deploy an existing table after trigger handling has been resolved."""
+    db = parsed.database_name
+    tbl = parsed.object_name
+    qn = parsed.qualified_name
 
     # -- Check for data --
     has_data = _table_has_data(cursor, db, tbl)
@@ -3552,8 +3662,8 @@ def _table_has_data(cursor, database_name: str, table_name: str) -> bool:
     return cursor.fetchone() is not None
 
 
-def _table_trigger_blockers(cursor, database_name: str, table_name: str) -> List[str]:
-    """Return human-readable trigger blockers for a table replacement."""
+def _table_triggers(cursor, database_name: str, table_name: str) -> List[dict]:
+    """Return trigger metadata records for a table replacement."""
     if cursor is None:
         return []
 
@@ -3598,7 +3708,7 @@ def _table_trigger_blockers(cursor, database_name: str, table_name: str) -> List
         )
         return []
 
-    blockers = []
+    records = []
     for row in rows or []:
         table_db = row[0] if len(row) > 0 else database_name
         subject = row[1] if len(row) > 1 else table_name
@@ -3606,10 +3716,105 @@ def _table_trigger_blockers(cursor, database_name: str, table_name: str) -> List
         action_time = row[3] if len(row) > 3 else "UNKNOWN"
         event = row[4] if len(row) > 4 else "UNKNOWN"
         status = row[5] if len(row) > 5 else "UNKNOWN"
-        blockers.append(
-            f"{trigger} ({action_time} {event}, {status}) on {table_db}.{subject}"
+        records.append(
+            {
+                "database_name": table_db,
+                "table_name": subject,
+                "trigger_name": trigger,
+                "action_time": action_time,
+                "event": event,
+                "status": status,
+            }
         )
-    return blockers
+    return records
+
+
+def _format_table_trigger_blockers(trigger_records: List[dict]) -> List[str]:
+    """Format trigger metadata records as report-ready blocker messages."""
+    return [
+        f"{record['trigger_name']} ({record['action_time']} {record['event']}, "
+        f"{record['status']}) on {record['database_name']}.{record['table_name']}"
+        for record in trigger_records
+    ]
+
+
+def _table_trigger_blockers(cursor, database_name: str, table_name: str) -> List[str]:
+    """Return human-readable trigger blockers for a table replacement."""
+    return _format_table_trigger_blockers(_table_triggers(cursor, database_name, table_name))
+
+
+def _capture_table_trigger_snapshots(
+    cursor,
+    trigger_records: List[dict],
+    package_dir: str = "",
+) -> List[dict]:
+    """Capture SHOW TRIGGER output before temporarily dropping triggers."""
+    snapshots = []
+    rollback_dir = os.path.join(package_dir, "_rollback") if package_dir else ""
+    if rollback_dir:
+        os.makedirs(rollback_dir, exist_ok=True)
+
+    for record in trigger_records:
+        trigger_db = record["database_name"]
+        trigger_name = record["trigger_name"]
+        ddl_text = _run_show_text(cursor, trigger_db, trigger_name, ObjectType.TRIGGER)
+        blocker = _format_table_trigger_blockers([record])[0]
+        if not ddl_text:
+            raise RuntimeError(
+                f"Cannot recreate trigger {trigger_db}.{trigger_name}: "
+                "SHOW TRIGGER returned no DDL."
+            )
+
+        snapshot = {
+            **record,
+            "ddl_text": ddl_text,
+            "blocker": blocker,
+            "rollback_file": "",
+        }
+        if rollback_dir:
+            rollback_file = os.path.join(rollback_dir, f"{trigger_db}.{trigger_name}.trg")
+            with open(rollback_file, "w", encoding="utf-8") as handle:
+                handle.write(ddl_text)
+            snapshot["rollback_file"] = rollback_file
+            logger.info(
+                "Captured trigger snapshot: %s.%s → %s",
+                trigger_db,
+                trigger_name,
+                rollback_file,
+            )
+        snapshots.append(snapshot)
+
+    return snapshots
+
+
+def _drop_table_triggers(cursor, trigger_snapshots: List[dict]) -> None:
+    """Drop captured table triggers before table replacement."""
+    for snapshot in trigger_snapshots:
+        _drop_object(
+            cursor,
+            snapshot["database_name"],
+            snapshot["trigger_name"],
+            ObjectType.TRIGGER,
+        )
+
+
+def _restore_table_triggers(cursor, trigger_snapshots: List[dict]) -> List[str]:
+    """Recreate previously dropped table triggers from captured SHOW output."""
+    errors = []
+    for snapshot in trigger_snapshots:
+        try:
+            _execute_ddl(cursor, snapshot["ddl_text"], split_statements=False)
+            logger.info(
+                "Recreated trigger %s.%s",
+                snapshot["database_name"],
+                snapshot["trigger_name"],
+            )
+        except Exception as exc:
+            errors.append(
+                f"{snapshot['database_name']}.{snapshot['trigger_name']}: "
+                f"{_clean_db_error(str(exc))}"
+            )
+    return errors
 
 
 def _count_rows(cursor, database_name: str, table_name: str) -> int:

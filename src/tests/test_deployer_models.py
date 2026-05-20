@@ -529,6 +529,12 @@ class _TableTriggerCursor(_RecordingCursor):
         super().__init__()
         self._fetchone = None
         self._fetchall = []
+        self.trigger_ddl = (
+            "REPLACE TRIGGER GDEV1T_GCFR.GCFR_TU_CE_System_Audit\n"
+            "AFTER UPDATE ON GDEV1T_GCFR.GCFR_CE_System\n"
+            "REFERENCING NEW AS n\n"
+            "FOR EACH ROW (INSERT INTO GDEV1T_GCFR.AuditLog VALUES (n.Id));"
+        )
 
     def execute(self, sql, params=None):
         self.executed.append((sql, params))
@@ -547,6 +553,24 @@ class _TableTriggerCursor(_RecordingCursor):
                     "ENABLED",
                 )
             ]
+        elif sql.startswith("SHOW TRIGGER"):
+            self._fetchone = None
+            self._fetchall = [(self.trigger_ddl,)]
+        elif sql.startswith("DROP TRIGGER"):
+            self._fetchone = None
+            self._fetchall = []
+        elif sql.startswith('SELECT TOP 1 1 FROM "GDEV1T_GCFR"."GCFR_CE_System"'):
+            self._fetchone = None
+            self._fetchall = []
+        elif sql.startswith('DROP TABLE "GDEV1T_GCFR"."GCFR_CE_System"'):
+            self._fetchone = None
+            self._fetchall = []
+        elif sql.startswith("CREATE MULTISET TABLE GDEV1T_GCFR.GCFR_CE_System"):
+            self._fetchone = None
+            self._fetchall = []
+        elif sql.startswith("REPLACE TRIGGER GDEV1T_GCFR.GCFR_TU_CE_System_Audit"):
+            self._fetchone = None
+            self._fetchall = []
         else:
             raise AssertionError(f"Unexpected SQL after trigger blocker: {sql}")
 
@@ -601,6 +625,43 @@ class TestTableTriggerBlockers:
         assert "RENAME TABLE" not in executed_sql
         assert "DROP TABLE" not in executed_sql
         assert "SELECT TOP 1" not in executed_sql
+
+    def test_deploy_table_can_recreate_triggers_when_explicitly_enabled(self):
+        from database_package_deployer.deployer import _deploy_table
+        from database_package_deployer.models import ParsedStatement
+
+        ddl = "CREATE MULTISET TABLE GDEV1T_GCFR.GCFR_CE_System (Id INTEGER);"
+        parsed = ParsedStatement(
+            file_path="03_ddl/tables/GDEV1T_GCFR.GCFR_CE_System.tbl",
+            ddl_text=ddl,
+            original_text=ddl,
+            database_name="GDEV1T_GCFR",
+            object_name="GCFR_CE_System",
+            object_type=ObjectType.TABLE,
+            strategy=DeployStrategy.IDEMPOTENT_DEPLOY,
+            qualified_name="GDEV1T_GCFR.GCFR_CE_System",
+            deploy_intent=DeployIntent.IDEMPOTENT_DEPLOY,
+        )
+
+        cur = _TableTriggerCursor()
+        result = _deploy_table(
+            cur,
+            parsed,
+            dry_run=False,
+            table_trigger_action="recreate",
+        )
+
+        assert result.state == DeployState.COMPLETED
+        executed_sql = [sql for sql, _params in cur.executed]
+        assert any(sql.startswith("SHOW TRIGGER") for sql in executed_sql)
+        assert any(sql.startswith("DROP TRIGGER") for sql in executed_sql)
+        assert any(sql.startswith('DROP TABLE "GDEV1T_GCFR"') for sql in executed_sql)
+        assert any(
+            sql.startswith("CREATE MULTISET TABLE GDEV1T_GCFR.GCFR_CE_System")
+            for sql in executed_sql
+        )
+        assert any(sql.startswith("REPLACE TRIGGER") for sql in executed_sql)
+        assert any("Dropped and recreated trigger" in w for w in result.warnings)
 
 
 class TestExecuteDdl:

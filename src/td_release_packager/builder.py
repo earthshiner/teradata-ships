@@ -2953,6 +2953,7 @@ def main():
                 stop_on_failure=not args.continue_on_error,
                 dry_run=args.dry_run,
                 skip_preflight=no_connection,
+                table_trigger_action="recreate" if args.recreate_table_triggers else "fail",
             )
         else:
             result = deploy_package(
@@ -2962,6 +2963,7 @@ def main():
                 stop_on_failure=not args.continue_on_error,
                 dry_run=args.dry_run,
                 skip_preflight=no_connection,
+                table_trigger_action="recreate" if args.recreate_table_triggers else "fail",
             )
 
         # Print summary
@@ -3231,6 +3233,11 @@ def parse_args():
                    help="Parallel deployment streams (1-8, default: 4).")
     p.add_argument("--continue-on-error", action="store_true",
                    help="Continue past failures.")
+    p.add_argument("--recreate-table-triggers", action="store_true",
+                   help="For existing tables with defined triggers, SHOW and "
+                        "DROP the triggers, perform the table replacement, "
+                        "then recreate the triggers from SHOW output. "
+                        "Default is to fail and report the blockers.")
     p.add_argument("-v", "--verbose", action="store_true",
                    help="Debug logging.")
     p.add_argument("-q", "--quiet", action="store_true",
