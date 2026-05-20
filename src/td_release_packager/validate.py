@@ -799,6 +799,23 @@ def _normalise_prereq_name(raw: str) -> str:
     return name.upper()
 
 
+_GENERATED_DIR_NAMES = frozenset(
+    {
+        ".git",
+        ".pytest_cache",
+        ".ships-work",
+        "__pycache__",
+        "_rollback",
+        "releases",
+    }
+)
+
+
+def _prune_generated_dirs(dirs: list[str]) -> None:
+    """Prevent validation from walking SHIPS-generated artefact directories."""
+    dirs[:] = [d for d in dirs if d not in _GENERATED_DIR_NAMES]
+
+
 def _collect_package_prereqs(source_dir: str) -> set:
     """Pre-pass: collect databases / users CREATEd within the package.
 
@@ -830,6 +847,7 @@ def _collect_package_prereqs(source_dir: str) -> set:
 
     for root, dirs, filenames in os.walk(source_dir):
         dirs.sort()
+        _prune_generated_dirs(dirs)
         for f in sorted(filenames):
             if f.startswith(".") or f.startswith("_"):
                 continue
@@ -971,6 +989,7 @@ def _validate_directory_impl(
     files = []
     for root, dirs, filenames in os.walk(source_dir):
         dirs.sort()
+        _prune_generated_dirs(dirs)
         for f in sorted(filenames):
             if f.startswith(".") or f.startswith("_"):
                 continue

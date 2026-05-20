@@ -935,6 +935,19 @@ class TestValidateDirectory:
         deploy_issues = [i for i in result.issues if i.rule == "deploy_intent"]
         assert deploy_issues == []
 
+    def test_generated_releases_directory_is_not_scanned(self, tmp_path):
+        releases_dir = tmp_path / "releases" / "DEV_BUILD_0056" / "_rollback"
+        releases_dir.mkdir(parents=True)
+        (releases_dir / "OldProc.spl").write_text(
+            "CREATE PROCEDURE GDEV1P_BB\nBEGIN\nEND;",
+            encoding="utf-8",
+        )
+
+        result = validate_directory(str(tmp_path))
+
+        assert result.files_scanned == 0
+        assert result.errors == 0
+
     def test_create_view_passes_all_checks(self, tmp_path):
         """CREATE VIEW produces no deploy_intent issue."""
         ddl_dir = tmp_path / "DDL" / "views"

@@ -293,6 +293,49 @@ class TestComputeTrustReport:
         assert issue.startswith("payload/database/DDL/views/V.viw:1:")
         assert "[db_qualifier]" in issue
 
+    def test_generated_release_artifact_issues_do_not_block_new_package(self, tmp_path):
+        releases_file = (
+            tmp_path
+            / "releases"
+            / "DEV_GCFR_BUILD_0056"
+            / ".ships-work"
+            / "payload"
+            / "logs"
+            / "rollback"
+            / "OldProc.spl"
+        )
+        _write_decisions(
+            tmp_path / "ships.decisions.json",
+            [
+                {
+                    "command": "inspect",
+                    "stages": [
+                        {
+                            "stage": "inspect",
+                            "status": "error",
+                            "issues": [
+                                {
+                                    "code": INSPECT_LINT_VIOLATION,
+                                    "severity": "error",
+                                    "message": "[db_qualifier] stale rollback code",
+                                    "location": str(releases_file),
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        )
+        (tmp_path / "context").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "context" / "ships.provenance.json").write_text(
+            "{}", encoding="utf-8"
+        )
+
+        report = compute_trust_report(str(tmp_path), str(tmp_path))
+
+        assert report.label == LABEL_READY
+        assert report.signals["inspect_lint"].status == TRUST_PASS
+
     def test_caveats_when_no_decisions_json(self, tmp_path):
         """No ships.decisions.json means inspect never ran — signals are UNKNOWN."""
         report = compute_trust_report(str(tmp_path), str(tmp_path))

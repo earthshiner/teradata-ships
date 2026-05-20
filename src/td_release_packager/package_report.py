@@ -287,6 +287,70 @@ def _file_link(record: Dict) -> str:
     )
 
 
+def _normalise_issue_path(value: object) -> str:
+    """Normalise a trust issue location or package path for loose matching."""
+    text = str(value or "").replace("\\", "/")
+    if ": [" in text:
+        text = text.split(": [", 1)[0]
+    if ":" in text:
+        head, tail = text.rsplit(":", 1)
+        if tail.isdigit():
+            text = head
+    if "/payload/" in text:
+        text = "payload/" + text.split("/payload/", 1)[1]
+    return text.strip().lstrip("./").lower()
+
+
+def _trust_issue_map(trust: dict) -> Dict[str, List[str]]:
+    """Return package/script path keys that have failing trust issues."""
+    issue_map: Dict[str, List[str]] = {}
+    for signal_name, signal in (trust or {}).get("signals", {}).items():
+        if not isinstance(signal, dict):
+            continue
+        status = signal.get("status")
+        if status in (TRUST_PASS, TRUST_WARN):
+            continue
+        for issue in signal.get("issues", []) or []:
+            path = _normalise_issue_path(issue)
+            if not path:
+                continue
+            issue_map.setdefault(path, []).append(f"{signal_name}: {issue}")
+    return issue_map
+
+
+def _record_trust_issues(record: Dict, issue_map: Dict[str, List[str]]) -> List[str]:
+    """Return failing trust issues that point at a payload record."""
+    if not issue_map:
+        return []
+    candidates = {
+        _normalise_issue_path(record.get("path")),
+        _normalise_issue_path(record.get("file")),
+    }
+    path = _normalise_issue_path(record.get("path"))
+    if path.startswith("payload/"):
+        candidates.add(path.removeprefix("payload/"))
+
+    matches: List[str] = []
+    for issue_path, issues in issue_map.items():
+        issue_name = os.path.basename(issue_path)
+        if issue_path in candidates or issue_name in candidates:
+            matches.extend(issues)
+    return matches
+
+
+def _trust_blocker_badge(issues: List[str]) -> str:
+    """Render a compact blocker badge for an object-table row."""
+    if not issues:
+        return ""
+    title = "\n".join(issues[:5])
+    return (
+        f'<span title="{_a(title)}" '
+        f'style="display:inline-block;background:#DC3545;color:#fff;'
+        f"padding:2px 7px;border-radius:3px;font-size:11px;"
+        f'font-weight:700;margin-left:6px">BLOCKS TRUST</span>'
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tab builders
 # ---------------------------------------------------------------------------
@@ -302,9 +366,10 @@ def _package_report_label(manifest_dict: dict) -> str:
     return "Package Report"
 
 
-def _objects_tab(records: List[Dict]) -> str:
+def _objects_tab(records: List[Dict], trust: Optional[dict] = None) -> str:
     """Filterable object inventory table."""
     type_set = sorted({r["type"] for r in records})
+    issue_map = _trust_issue_map(trust or {})
 
     filter_btns = "\n".join(
         f'<button class="flt-btn" onclick="filterType(\'{t}\')">{t}</button>'
@@ -313,7 +378,8 @@ def _objects_tab(records: List[Dict]) -> str:
 
     rows = "\n".join(
         f'<tr data-type="{_a(r["type"])}">'
-        f"<td style='font-family:monospace' title='{_a(r['name'])}'>{_h(r['name'])}</td>"
+        f"<td style='font-family:monospace' title='{_a(r['name'])}'>"
+        f"{_h(r['name'])}{_trust_blocker_badge(_record_trust_issues(r, issue_map))}</td>"
         f"<td>{_type_badge(r['type'])}</td>"
         f"<td>{_h(r['phase'])}</td>"
         f"<td>{'Wave ' + str(r['wave']) if r['wave'] else '—'}</td>"
@@ -763,7 +829,7 @@ pre {{ white-space: pre-wrap; word-break: break-all; }}
 {_environment_prereq_banner(manifest_dict)}
 
 <div id="tab-objects" class="tab-pane active card">
-{_objects_tab(records)}
+{_objects_tab(records, trust)}
 </div>
 
 <div id="tab-waves" class="tab-pane card">
