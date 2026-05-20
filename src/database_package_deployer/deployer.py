@@ -679,6 +679,9 @@ def _deploy_package_impl(
                     # would be silently dropped, leaving target tables
                     # unpopulated after deploy.
                     "*.dml",
+                    # Ordered mixed SQL scripts preserve source order
+                    # for choreographies such as GRANT -> action -> REVOKE.
+                    "*.osql",
                 ]
         ddl_files = []
         for pattern in file_patterns:

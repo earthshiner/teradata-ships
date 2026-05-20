@@ -1756,6 +1756,32 @@ INSERT INTO x.log_two (id) VALUES (2);
         # No multi_table file expected.
         assert not any("multi_table" in p.name for p in dml_dir.iterdir())
 
+    def test_ingest_mixed_dcl_and_actions_kept_as_ordered_sql(
+        self, tmp_path, tmp_project
+    ):
+        """GRANT/action/REVOKE choreography must stay in source order."""
+        src = tmp_path / "source"
+        src.mkdir()
+        (src / "temporary_access.sql").write_text(
+            "GRANT SELECT ON MyDB TO WorkerRole;\n"
+            "INSERT INTO MyDB.Audit_Log (id) VALUES (1);\n"
+            "REVOKE SELECT ON MyDB FROM WorkerRole;\n",
+            encoding="utf-8",
+        )
+
+        result = ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        ordered = tmp_project / "payload" / "database" / "DML" / (
+            "temporary_access.ordered.osql"
+        )
+        assert ordered.exists()
+        body = ordered.read_text(encoding="utf-8")
+        assert body.index("GRANT SELECT") < body.index("INSERT INTO")
+        assert body.index("INSERT INTO") < body.index("REVOKE SELECT")
+        dcl_dir = tmp_project / "payload" / "database" / "DCL"
+        assert not list(dcl_dir.rglob("*.dcl"))
+        assert any(row[2] == "ORDERED_SQL" for row in result.files_placed)
+
     def test_ingest_clean_preserves_gitkeep_and_control_files(
         self, tmp_path, tmp_project, ddl_create_table
     ):

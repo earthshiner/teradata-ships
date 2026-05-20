@@ -168,6 +168,10 @@ class TestStrategyMap:
         """GRANT → DIRECT_EXECUTE."""
         assert STRATEGY_MAP[ObjectType.GRANT] == DeployStrategy.DIRECT_EXECUTE
 
+    def test_ordered_sql_is_direct_execute(self):
+        """ORDERED_SQL → DIRECT_EXECUTE."""
+        assert STRATEGY_MAP[ObjectType.ORDERED_SQL] == DeployStrategy.DIRECT_EXECUTE
+
     def test_map_is_skip_if_exists(self):
         """MAP → SKIP_IF_EXISTS."""
         assert STRATEGY_MAP[ObjectType.MAP] == DeployStrategy.SKIP_IF_EXISTS
@@ -239,6 +243,7 @@ class TestScopeMap:
             ObjectType.GRANT,
             ObjectType.JAR,
             ObjectType.SCRIPT_TABLE_OPERATOR,
+            ObjectType.ORDERED_SQL,
         ]
         for obj_type in env_types:
             assert SCOPE_MAP[obj_type] == DeployScope.ENVIRONMENT, (
@@ -378,10 +383,12 @@ class TestDeployOrder:
         """DML routes through DIRECT_EXECUTE — _execute_ddl already
         handles the multi-statement case."""
         assert STRATEGY_MAP[ObjectType.DML] == DeployStrategy.DIRECT_EXECUTE
+        assert STRATEGY_MAP[ObjectType.ORDERED_SQL] == DeployStrategy.DIRECT_EXECUTE
 
     def test_dml_is_environment_scoped(self):
         """DML is per-environment (data lives in the target system)."""
         assert SCOPE_MAP[ObjectType.DML] == DeployScope.ENVIRONMENT
+        assert SCOPE_MAP[ObjectType.ORDERED_SQL] == DeployScope.ENVIRONMENT
 
 
 # ---------------------------------------------------------------

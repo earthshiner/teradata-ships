@@ -64,6 +64,7 @@ DEFAULT_HARVEST_EXTENSIONS: frozenset = frozenset(
         ".ddl",
         ".dcl",
         ".dml",
+        ".osql",
         ".map",
         ".rol",
         ".prf",
