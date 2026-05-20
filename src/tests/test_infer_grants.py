@@ -34,6 +34,7 @@ from td_release_packager.infer_grants import (
     grantee_filename,
     PRIV_SELECT,
     PRIV_INSERT,
+    PRIV_UPDATE,
     PRIV_DELETE,
     PRIV_EXEC_PROC,
     PRIV_EXEC,
@@ -376,6 +377,36 @@ class TestAnalyseProcedure:
 
 class TestAnalyseMacro:
     """Tests for analyse_file() with macro DDL."""
+
+    def test_replace_macro_infers_select_and_update_grants(self):
+        """REPLACE MACRO is analysed like CREATE MACRO for grant intent."""
+        content = textwrap.dedent("""
+            REPLACE MACRO {{GCFR_M}}.GCFR_Stream_BusDate_Special
+            (
+                Stream_Key SMALLINT NOT NULL
+            )
+            AS
+            (
+                SELECT Stream_Key
+                FROM {{GCFR_V}}.GCFR_Stream_BusDate
+                WHERE Stream_Key = :Stream_Key;
+
+                UPDATE {{GCFR_V}}.GCFR_Stream_BusDate
+                SET Processing_Flag = 0
+                WHERE Stream_Key = :Stream_Key;
+            );
+        """)
+        path = write_temp_file(content, ".mcr")
+        try:
+            result = analyse_file(path)
+            assert result is not None
+            assert result["obj_type"] == "MACRO"
+            assert result["grantee"] == "{{GCFR_M}}"
+            assert "{{GCFR_V}}" in result["grants"]
+            assert PRIV_SELECT in result["grants"]["{{GCFR_V}}"]
+            assert PRIV_UPDATE in result["grants"]["{{GCFR_V}}"]
+        finally:
+            os.unlink(path)
 
     def test_exec_implies_execute(self):
         """EXEC {{DB}}.Macro implies EXECUTE on that DB."""

@@ -639,6 +639,36 @@ class TestExecuteDdl:
 
         assert cur.executed == [sql]
 
+    def test_execute_parsed_ddl_keeps_macro_body_as_one_request(self):
+        """Macro deployment uses object metadata to avoid semicolon splitting."""
+        from database_package_deployer.deployer import _execute_parsed_ddl
+        from database_package_deployer.models import ParsedStatement
+
+        sql = (
+            "REPLACE MACRO MyDB.M (Id INTEGER)\n"
+            "AS\n"
+            "(\n"
+            "    SELECT * FROM OtherDB.T WHERE Id = :Id;\n"
+            "    UPDATE OtherDB.T SET Updated_Flag = 1 WHERE Id = :Id;\n"
+            ");"
+        )
+        parsed = ParsedStatement(
+            file_path="03_ddl/macros/MyDB.M.mcr",
+            ddl_text=sql,
+            original_text=sql,
+            database_name="MyDB",
+            object_name="M",
+            object_type=ObjectType.MACRO,
+            strategy=DeployStrategy.REPLACE_IN_PLACE,
+            qualified_name="MyDB.M",
+            deploy_intent=DeployIntent.REPLACE_WITH_BACKUP,
+        )
+
+        cur = _RecordingCursor()
+        _execute_parsed_ddl(cur, parsed)
+
+        assert cur.executed == [sql]
+
 
 class TestSqljClientFilePathResolution:
     """SQLJ JAR install paths resolve relative to the .sjr script."""
