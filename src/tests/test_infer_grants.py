@@ -345,7 +345,7 @@ class TestAnalyseProcedure:
             assert result["grantee"] == "{{STG_DATABASE_T}}"
             # DOM_T is a cross-db INSERT target
             assert "{{DOM_DATABASE_T}}" in result["grants"]
-            assert PRIV_INSERT in result["grants"]["{{DOM_DATABASE_T}}"]
+            assert result["grants"]["{{DOM_DATABASE_T}}"] == {PRIV_INSERT}
             # STG_T is self-ref — excluded
             assert "{{STG_DATABASE_T}}" not in result["grants"]
         finally:
@@ -365,7 +365,7 @@ class TestAnalyseProcedure:
             result = analyse_file(path)
             assert result is not None
             assert "{{STG_DATABASE_T}}" in result["grants"]
-            assert PRIV_DELETE in result["grants"]["{{STG_DATABASE_T}}"]
+            assert result["grants"]["{{STG_DATABASE_T}}"] == {PRIV_DELETE}
         finally:
             os.unlink(path)
 
@@ -405,6 +405,45 @@ class TestAnalyseMacro:
             assert "{{GCFR_V}}" in result["grants"]
             assert PRIV_SELECT in result["grants"]["{{GCFR_V}}"]
             assert PRIV_UPDATE in result["grants"]["{{GCFR_V}}"]
+        finally:
+            os.unlink(path)
+
+    def test_replace_macro_infers_literal_delete_database_grant(self):
+        """Literal macro DELETE targets infer database-level grants."""
+        content = textwrap.dedent("""
+            REPLACE MACRO GDEV1M_GCFR.GCFR_Reg_Process_Type_Param
+            AS
+            (
+                DELETE FROM GDEV1T_GCFR.GCFR_Process_Type_Param
+                WHERE Process_Type_Code = :Process_Type_Code;
+            );
+        """)
+        path = write_temp_file(content, ".mcr")
+        try:
+            result = analyse_file(path)
+            assert result is not None
+            assert result["grantee"] == "GDEV1M_GCFR"
+            assert result["grants"]["GDEV1T_GCFR"] == {PRIV_DELETE}
+        finally:
+            os.unlink(path)
+
+    def test_replace_macro_infers_literal_select_database_grant(self):
+        """Literal macro SELECT sources infer database-level grants."""
+        content = textwrap.dedent("""
+            REPLACE MACRO GDEV1M_GCFR.GCFR_Register_Multi_Func_Sup_Columns
+            AS
+            (
+                SELECT Out_DB_Name
+                FROM GDEV1T_GCFR.GCFR_Multi_Func_Columns
+                WHERE Func_Code = :Func_Code;
+            );
+        """)
+        path = write_temp_file(content, ".mcr")
+        try:
+            result = analyse_file(path)
+            assert result is not None
+            assert result["grantee"] == "GDEV1M_GCFR"
+            assert result["grants"]["GDEV1T_GCFR"] == {PRIV_SELECT}
         finally:
             os.unlink(path)
 

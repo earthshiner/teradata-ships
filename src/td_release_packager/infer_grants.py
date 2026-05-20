@@ -232,11 +232,11 @@ def find_all_db_references(sql: str, tokens_only: bool = True) -> Set[str]:
     """
     Find all fully-qualified database references in SQL text.
 
-    In SHIPS projects, all database references are tokenised
-    (e.g. {{DOM_DATABASE_T}}.Loan_H). Literal references like
-    'mx.column' or 'dl.amount' are table aliases, not database
-    names. Setting tokens_only=True (the default) matches only
-    tokenised references, eliminating alias false positives.
+    In generated SHIPS projects, database references are usually
+    tokenised (e.g. {{DOM_DATABASE_T}}.Loan_H). Legacy or hand-coded
+    SQL may still contain literal Database.Object references. Setting
+    tokens_only=True (the default) matches only tokenised references,
+    eliminating alias false positives.
 
     When tokens_only=False, literal references are also matched
     with alias/keyword blacklisting — useful for pre-tokenised
@@ -399,6 +399,29 @@ def find_all_db_references(sql: str, tokens_only: bool = True) -> Set[str]:
     return refs
 
 
+def appears_as_read_source(sql: str, db_ref: str) -> bool:
+    """
+    Return True when a database reference appears in a read-source context.
+
+    DML write targets such as ``DELETE FROM db.table`` should infer DELETE,
+    not SELECT. Read sources are FROM/JOIN/USING references that are not the
+    target side of DELETE.
+    """
+    pattern = re.compile(
+        r"\b(?P<keyword>FROM|JOIN|USING)\s+"
+        + re.escape(db_ref)
+        + r"\s*\.",
+        re.IGNORECASE,
+    )
+    for match in pattern.finditer(sql):
+        if match.group("keyword").upper() == "FROM":
+            prefix = sql[max(0, match.start() - 32) : match.start()]
+            if re.search(r"\bDELETE\s*$", prefix, re.IGNORECASE):
+                continue
+        return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Intent analysis per file
 # ---------------------------------------------------------------------------
@@ -457,7 +480,7 @@ def analyse_file(filepath: Path, verbose: bool = False) -> Optional[Dict]:
         print(f"  Analysing: {filepath.name}")
         print(f"    Object:  {grantee}.{obj_name} ({obj_type})")
 
-    # --- Step 2: Determine intent per referenced database ---
+    # --- Step 2: Determine intent per referenced database/user ---
     # grants_map: {grantor_database: set of privileges}
     grants_map: Dict[str, Set[str]] = defaultdict(set)
 
@@ -468,90 +491,55 @@ def analyse_file(filepath: Path, verbose: bool = False) -> Optional[Dict]:
         as_match = re.search(r"\bAS\b", sql, re.IGNORECASE)
         if as_match:
             body = sql[as_match.end() :]
-            all_refs = find_all_db_references(body)
+            all_refs = find_all_db_references(body, tokens_only=False)
             for db_ref in all_refs:
                 grants_map[db_ref].add(PRIV_SELECT)
 
     # For procedures, macros, triggers, functions — parse DML intent
     elif obj_type in ("PROCEDURE", "MACRO", "TRIGGER", "FUNCTION"):
         # --- Write targets: identify databases being written to ---
-        # In SHIPS DDL, all database references are tokenised.
-        # Skip any literal matches (aliases or missing tokenisation).
+        # Both tokenised and literal Database.Object references infer
+        # container-level grants. SHIPS deliberately never infers
+        # object-level grants.
 
         # INSERT targets
         for match in RE_INSERT_TARGET.finditer(sql):
             db = extract_db_ref(match)
-            if not db.startswith("{{"):
-                continue
             grants_map[db].add(PRIV_INSERT)
 
         # UPDATE targets
         for match in RE_UPDATE_TARGET.finditer(sql):
             db = extract_db_ref(match)
-            if not db.startswith("{{"):
-                continue
             grants_map[db].add(PRIV_UPDATE)
 
         # DELETE targets
         for match in RE_DELETE_TARGET.finditer(sql):
             db = extract_db_ref(match)
-            if not db.startswith("{{"):
-                continue
             grants_map[db].add(PRIV_DELETE)
 
         # MERGE targets — implies both INSERT and UPDATE
         for match in RE_MERGE_TARGET.finditer(sql):
             db = extract_db_ref(match)
-            if not db.startswith("{{"):
-                continue
             grants_map[db].add(PRIV_INSERT)
             grants_map[db].add(PRIV_UPDATE)
 
         # CALL targets — implies EXECUTE PROCEDURE
         for match in RE_CALL_TARGET.finditer(sql):
             db = extract_db_ref(match)
-            if not db.startswith("{{"):
-                continue
             grants_map[db].add(PRIV_EXEC_PROC)
 
         # EXEC/EXECUTE targets — implies EXECUTE (macros)
         for match in RE_EXEC_TARGET.finditer(sql):
             db = extract_db_ref(match)
-            if not db.startswith("{{"):
-                continue
             grants_map[db].add(PRIV_EXEC)
 
         # --- Read sources: all FROM/JOIN references → SELECT ---
         # This covers standalone SELECTs, INSERT...SELECT FROM,
         # UPDATE...FROM, DELETE with subqueries, MERGE...USING
-        all_refs = find_all_db_references(sql)
-        # Exclude the grantee itself and any databases already identified
-        # as write targets — they still get SELECT if they appear in FROM/JOIN
-        # context. Actually, a write target database CAN also be read from
-        # in the same file (e.g. SELECT from the same DB you INSERT into).
-        # So we add SELECT to all referenced databases.
+        all_refs = find_all_db_references(sql, tokens_only=False)
         for db_ref in all_refs:
-            # Every referenced database is at minimum being read from
-            # UNLESS it only appears as a CALL or EXEC target.
-            # Check if this db_ref appears in a FROM/JOIN context
-            # For simplicity, we add SELECT to all non-CALL/non-EXEC refs
-            if db_ref not in grants_map or grants_map[db_ref] - {
-                PRIV_EXEC_PROC,
-                PRIV_EXEC,
-            }:
+            if appears_as_read_source(sql, db_ref):
                 grants_map[db_ref].add(PRIV_SELECT)
-            elif db_ref in grants_map and grants_map[db_ref] & {
-                PRIV_EXEC_PROC,
-                PRIV_EXEC,
-            }:
-                # Only CALL/EXEC — don't add SELECT unless it also appears
-                # in a FROM/JOIN context. Check explicitly.
-                from_join_pattern = re.compile(
-                    r"\b(?:FROM|JOIN)\s+" + re.escape(db_ref) + r"\s*\.\s*\w+",
-                    re.IGNORECASE,
-                )
-                if from_join_pattern.search(sql):
-                    grants_map[db_ref].add(PRIV_SELECT)
 
     # Tables don't typically reference other databases in their DDL
     elif obj_type == "TABLE":
