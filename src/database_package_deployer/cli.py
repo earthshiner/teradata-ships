@@ -175,6 +175,9 @@ def _cmd_deploy(args):
                 approval_code=getattr(args, "approval_code", "") or "",
                 connection_params=_conn_params,
                 public_key_path=getattr(args, "public_key", "") or "",
+                table_trigger_action=(
+                    "recreate" if getattr(args, "recreate_table_triggers", False) else "fail"
+                ),
             )
             otel_span.set_attribute("ships.deploy.completed", result.completed)
             otel_span.set_attribute("ships.deploy.failed", result.failed)
@@ -960,6 +963,15 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Simulate deployment without executing any DDL.",
+    )
+    dp.add_argument(
+        "--recreate-table-triggers",
+        action="store_true",
+        help=(
+            "For existing tables with defined triggers, SHOW and DROP the triggers, "
+            "perform the table replacement, then recreate the triggers from SHOW "
+            "output. Default is to fail and report the trigger blockers."
+        ),
     )
     dp.add_argument(
         "-q",
