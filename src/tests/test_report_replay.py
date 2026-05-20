@@ -29,9 +29,11 @@ from database_package_deployer.provenance import (
 )
 from database_package_deployer.report import (
     _build_html,
+    _highlight_sql,
     _html_action_items,
     _html_object_results,
     _html_summary,
+    _write_source_viewers,
 )
 
 
@@ -327,4 +329,40 @@ class TestDeploymentReportSourceLinks:
 
         assert "Open code" in html
         assert 'href="../payload/03_ddl/views/DEV01_DB.BadView.viw"' in html
+        assert "domain/views/BadView.viw" in html
+
+    def test_sql_keywords_are_highlighted_without_touching_strings(self):
+        html = _highlight_sql("CREATE VIEW DB.V AS SELECT 'create' AS word;")
+
+        assert '<span class="sql-keyword">CREATE</span>' in html
+        assert '<span class="sql-keyword">SELECT</span>' in html
+        assert '<span class="sql-string">&#x27;create&#x27;</span>' in html
+
+    def test_source_viewer_link_is_used_when_available(self):
+        links = {"03_ddl/views/DEV01_DB.BadView.viw": ".code/view.html"}
+        html = _html_action_items(
+            _failed_result_with_source(), _source_provenance(), links
+        )
+
+        assert 'href=".code/view.html"' in html
+
+    def test_writes_highlighted_source_viewer(self, tmp_path):
+        logs = tmp_path / "logs"
+        payload = tmp_path / "payload" / "03_ddl" / "views"
+        logs.mkdir()
+        payload.mkdir(parents=True)
+        (payload / "DEV01_DB.BadView.viw").write_text(
+            "CREATE VIEW DEV01_DB.BadView AS SELECT 1 AS x;",
+            encoding="utf-8",
+        )
+
+        links = _write_source_viewers(
+            str(logs), "deploy_20260503_140000", _source_provenance()
+        )
+
+        href = links["03_ddl/views/DEV01_DB.BadView.viw"]
+        viewer = logs / href
+        html = viewer.read_text(encoding="utf-8")
+        assert viewer.exists()
+        assert '<span class="sql-keyword">CREATE</span>' in html
         assert "domain/views/BadView.viw" in html
