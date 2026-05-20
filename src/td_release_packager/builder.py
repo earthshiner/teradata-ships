@@ -42,6 +42,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 from td_release_packager.models import (
@@ -663,6 +664,18 @@ def _build_package_impl(
     # PACKAGE directory overwrites the copied tokenised version with
     # one that references the filenames the deployer will actually find.
     _refresh_prereq_order_in_package(pkg_dir)
+
+    # -- Phase 6c: Backfill inferred inter-database grants into the package --
+    # Inspect --fix-grants can persist these into the project payload, but a
+    # package must be self-contained even when the source tree has not been
+    # pre-repaired.  Infer against the resolved package SQL and write only
+    # missing generated DCL into the package staging directory.
+    generated_dcl = _backfill_missing_inferred_dcl(pkg_dir)
+    if generated_dcl:
+        file_count += generated_dcl
+        phase_inventory[DeployPhase.DCL.value] = (
+            phase_inventory.get(DeployPhase.DCL.value, 0) + generated_dcl
+        )
 
     # -- Phase 7: Embed deployment engine --
     _embed_deployer(pkg_dir)
@@ -2079,6 +2092,51 @@ def _copy_payload(
                 ) from None
 
     return (total_subs, file_count, phase_inventory, filename_map, provenance_doc)
+
+
+def _backfill_missing_inferred_dcl(pkg_dir: str) -> int:
+    """Write missing inferred inter-database grant DCL into a package.
+
+    This is deliberately package-local. It reads the resolved SQL in the
+    package staging directory and writes only missing generated grants under
+    ``payload/02_dcl/inter_db``. Existing .dcl files are left untouched so
+    hand-authored DCL remains authoritative.
+    """
+    from td_release_packager.infer_grants import (
+        generate_grt_content,
+        grantee_filename,
+    )
+    from td_release_packager.validate_grants import _infer_expected_grants
+
+    package_dir = Path(pkg_dir)
+    dcl_dir = package_dir / "payload" / DeployPhase.DCL.value / "inter_db"
+    consolidated, raw_results, _ddl_count = _infer_expected_grants(package_dir)
+    if not consolidated:
+        return 0
+
+    written = 0
+    for grantee in sorted(consolidated):
+        target = dcl_dir / grantee_filename(grantee)
+        if target.exists():
+            continue
+
+        sources = [result for result in raw_results if result["grantee"] == grantee]
+        content = generate_grt_content(
+            grantee,
+            consolidated[grantee],
+            sources,
+            project_name=package_dir.name,
+        )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        written += 1
+
+    if written:
+        logger.info(
+            "Generated %d inferred DCL grant file(s) into package payload",
+            written,
+        )
+    return written
 
 
 def _inject_multiset_in_file(file_path: str):
