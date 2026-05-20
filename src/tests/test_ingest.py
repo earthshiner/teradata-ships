@@ -483,6 +483,67 @@ class TestExtractQualifiedName:
         assert obj == "Foo"
 
 
+class TestIngestDclAggregation:
+    """Tests for preserving legacy DCL statement sequences."""
+
+    def test_revoke_then_grant_same_database_aggregates_in_one_dcl(
+        self, tmp_path, tmp_project
+    ):
+        src = tmp_path / "source"
+        src.mkdir()
+        (src / "refresh_access.sql").write_text(
+            "REVOKE ALL PRIVILEGES ON GDEV1V_GCFR FROM GDEV1M_GCFR;\n"
+            "GRANT DELETE, INSERT, SELECT ON GDEV1V_GCFR "
+            "TO GDEV1M_GCFR WITH GRANT OPTION;\n",
+            encoding="utf-8",
+        )
+
+        ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        dcl = (
+            tmp_project
+            / "payload"
+            / "database"
+            / "DCL"
+            / "inter_db"
+            / "GDEV1V_GCFR.dcl"
+        )
+        assert dcl.exists()
+        body = dcl.read_text(encoding="utf-8")
+        assert "REVOKE ALL PRIVILEGES ON GDEV1V_GCFR FROM GDEV1M_GCFR;" in body
+        assert (
+            "GRANT DELETE, INSERT, SELECT ON GDEV1V_GCFR "
+            "TO GDEV1M_GCFR WITH GRANT OPTION;"
+        ) in body
+        assert body.index("REVOKE ALL PRIVILEGES") < body.index(
+            "GRANT DELETE, INSERT, SELECT"
+        )
+
+    def test_grant_then_revoke_same_database_preserves_source_order(
+        self, tmp_path, tmp_project
+    ):
+        src = tmp_path / "source"
+        src.mkdir()
+        (src / "tighten_access.sql").write_text(
+            "GRANT SELECT ON GDEV1V_GCFR TO GDEV1M_GCFR WITH GRANT OPTION;\n"
+            "REVOKE DELETE ON GDEV1V_GCFR FROM GDEV1M_GCFR;\n",
+            encoding="utf-8",
+        )
+
+        ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        dcl = (
+            tmp_project
+            / "payload"
+            / "database"
+            / "DCL"
+            / "inter_db"
+            / "GDEV1V_GCFR.dcl"
+        )
+        body = dcl.read_text(encoding="utf-8")
+        assert body.index("GRANT SELECT") < body.index("REVOKE DELETE")
+
+
 # ---------------------------------------------------------------
 # _extract_specific_function_name
 # ---------------------------------------------------------------

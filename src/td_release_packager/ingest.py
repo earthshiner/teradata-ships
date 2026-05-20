@@ -648,18 +648,20 @@ def _ingest_directory_impl(
 
                 dest_path = os.path.join(dest_dir, dest_name)
 
+                aggregating_types = ("COMMENT", "STATISTICS", "DML", "GRANT", "REVOKE")
+
                 # -- Handle existing files --------------------------------
                 if os.path.exists(dest_path):
-                    # COMMENT, STATISTICS, and DML: aggregate by appending
-                    # multiple statements for the same target into one
-                    # .cmt / .stt / .dml file. But: the FIRST touch of
+                    # COMMENT, STATISTICS, DML, and DCL aggregate by
+                    # appending multiple statements for the same target
+                    # into one eponymous file. For DCL this preserves
+                    # legacy scripts that revoke then grant permissions
+                    # back in a deliberate sequence. The FIRST touch of
                     # this file in this harvest run truncates any leftover
-                    # content from a PREVIOUS run when --force is set —
-                    # otherwise re-harvesting with a token-map would leave
-                    # the old untokenised content alongside the new
-                    # tokenised content. Subsequent touches within the
-                    # same run append normally to build the aggregate.
-                    if obj_type in ("COMMENT", "STATISTICS", "DML"):
+                    # content from a PREVIOUS run when --force is set.
+                    # Subsequent touches within the same run append
+                    # normally to build the aggregate.
+                    if obj_type in aggregating_types:
                         if force and dest_path not in first_touch_aggregating:
                             mode = "w"
                             result.overwritten += 1
@@ -755,11 +757,11 @@ def _ingest_directory_impl(
                 with open(dest_path, "w", encoding="utf-8") as f:
                     f.write(content)
 
-                # Aggregating types (COMMENT/STATISTICS/DML) need to know
-                # that this dest_path has already been first-touched in
-                # this run, so a SECOND statement targeting the same file
-                # appends instead of triggering the --force truncate path.
-                if obj_type in ("COMMENT", "STATISTICS", "DML"):
+                # Aggregating types need to know that this dest_path has
+                # already been first-touched in this run, so a SECOND
+                # statement targeting the same file appends instead of
+                # triggering the --force truncate path.
+                if obj_type in aggregating_types:
                     first_touch_aggregating.add(dest_path)
 
                 result.classified += 1
