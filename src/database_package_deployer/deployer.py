@@ -132,6 +132,10 @@ _SQLJ_JAR_CALL_RE = re.compile(
     """,
     re.IGNORECASE | re.DOTALL | re.VERBOSE,
 )
+_SQLJ_MISSING_JAR_RE = re.compile(
+    r"\bJar\s+'(?P<alias>[^']+)'\s+does\s+not\s+exist\b",
+    re.IGNORECASE,
+)
 
 
 def _split_sqlj_args(args_text: str) -> list[str]:
@@ -174,10 +178,49 @@ def _is_jar_missing_error(error_text: str) -> bool:
     )
 
 
-def _build_sqlj_create_jar_fallback(ddl_text: str) -> Optional[str]:
-    """Convert CALL SQLJ.REPLACE_JAR(...) to the install equivalent."""
-    match = _SQLJ_JAR_CALL_RE.search(ddl_text)
-    if not match or match.group("proc").upper() != "REPLACE_JAR":
+def _extract_missing_sqlj_alias(error_text: str) -> Optional[str]:
+    """Extract a missing SQLJ JAR alias from a Teradata error, if present."""
+    match = _SQLJ_MISSING_JAR_RE.search(error_text)
+    if not match:
+        return None
+    alias = match.group("alias").strip()
+    if "." in alias:
+        alias = alias.rsplit(".", 1)[1]
+    return alias.strip('"').upper()
+
+
+def _sqlj_arg_string_value(arg: str) -> Optional[str]:
+    """Return the unescaped value for a simple single-quoted SQLJ argument."""
+    text = arg.strip()
+    if len(text) < 2 or not (text.startswith("'") and text.endswith("'")):
+        return None
+    return text[1:-1].replace("''", "'")
+
+
+def _sqlj_call_alias(match: re.Match) -> Optional[str]:
+    """Return the SQLJ jar alias argument for a matched CALL SQLJ.*_JAR."""
+    args = _split_sqlj_args(match.group("args").strip())
+    if len(args) < 2:
+        return None
+    alias = _sqlj_arg_string_value(args[1])
+    return alias.upper() if alias else None
+
+
+def _build_sqlj_install_jar_fallback(
+    ddl_text: str, *, missing_alias: Optional[str] = None
+) -> Optional[str]:
+    """Convert the matching CALL SQLJ.REPLACE_JAR(...) to INSTALL_JAR(...)."""
+    expected_alias = missing_alias.upper() if missing_alias else None
+    match = None
+    for candidate in _SQLJ_JAR_CALL_RE.finditer(ddl_text):
+        if candidate.group("proc").upper() != "REPLACE_JAR":
+            continue
+        if expected_alias and _sqlj_call_alias(candidate) != expected_alias:
+            continue
+        match = candidate
+        break
+
+    if match is None:
         return None
 
     args_text = match.group("args").strip()
@@ -2410,7 +2453,10 @@ def _deploy_direct_execute(
             and _is_sqlj_replace_jar(ddl_text)
             and _is_jar_missing_error(err_str)
         ):
-            create_ddl = _build_sqlj_create_jar_fallback(ddl_text)
+            missing_alias = _extract_missing_sqlj_alias(err_str)
+            create_ddl = _build_sqlj_install_jar_fallback(
+                ddl_text, missing_alias=missing_alias
+            )
             if create_ddl:
                 logger.info(
                     "DIRECT_EXECUTE: SQLJ.REPLACE_JAR target is missing; "
