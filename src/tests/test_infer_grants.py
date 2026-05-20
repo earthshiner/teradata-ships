@@ -10,7 +10,7 @@ Tests cover:
     - Self-reference exclusion
     - Privilege consolidation (multiple files → one grantee)
     - Grant statement consolidation (multiple privileges → one statement)
-    - .grt file content generation
+    - .dcl file content generation
     - False positive rejection (aliases, table names as correlation names)
 """
 
@@ -599,10 +599,10 @@ class TestFilename:
     """Tests for grantee_filename()."""
 
     def test_tokenised_filename(self):
-        assert grantee_filename("{{DOM_DATABASE_V}}") == "{{DOM_DATABASE_V}}.grt"
+        assert grantee_filename("{{DOM_DATABASE_V}}") == "{{DOM_DATABASE_V}}.dcl"
 
     def test_literal_filename(self):
-        assert grantee_filename("D01_MP_DOM_V") == "D01_MP_DOM_V.grt"
+        assert grantee_filename("D01_MP_DOM_V") == "D01_MP_DOM_V.dcl"
 
 
 # ---------------------------------------------------------------------------
