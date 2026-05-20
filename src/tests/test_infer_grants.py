@@ -447,6 +447,46 @@ class TestAnalyseMacro:
         finally:
             os.unlink(path)
 
+    def test_replace_macro_combines_literal_view_dml_and_select_grants(self):
+        """One literal view used for DELETE, INSERT, and SELECT gets all intents."""
+        content = textwrap.dedent("""
+            REPLACE MACRO GDEV1M_GCFR.GCFR_Reg_Process_Type_Param
+            (
+                Process_Type BYTEINT,
+                Param_Group VARCHAR(240),
+                Param_name VARCHAR(240)
+            )
+            AS
+            (
+                DELETE FROM GDEV1V_GCFR.GCFR_Process_Type_Param
+                WHERE Process_Type = :Process_Type
+                AND Param_Group = :Param_Group
+                AND Param_Name = :Param_Name;
+
+                INSERT INTO GDEV1V_GCFR.GCFR_Process_Type_Param
+                (Process_Type, Param_Group, Param_name)
+                SELECT :Process_Type, :Param_Group, :Param_name;
+
+                SELECT Process_Type, Param_Group, Param_name
+                FROM GDEV1V_GCFR.GCFR_Process_Type_Param
+                WHERE Process_Type = :Process_Type
+                AND Param_Group = :Param_Group
+                AND Param_Name = :Param_Name;
+            );
+        """)
+        path = write_temp_file(content, ".mcr")
+        try:
+            result = analyse_file(path)
+            assert result is not None
+            assert result["grantee"] == "GDEV1M_GCFR"
+            assert result["grants"]["GDEV1V_GCFR"] == {
+                PRIV_DELETE,
+                PRIV_INSERT,
+                PRIV_SELECT,
+            }
+        finally:
+            os.unlink(path)
+
     def test_exec_implies_execute(self):
         """EXEC {{DB}}.Macro implies EXECUTE on that DB."""
         content = textwrap.dedent("""
