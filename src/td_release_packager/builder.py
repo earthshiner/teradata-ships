@@ -339,9 +339,9 @@ def _resolve_filename(
     Comments are stripped before parsing to avoid false matches from
     DDL keywords in comment text (e.g. '-- uses CREATE DATABASE IF').
 
-    For files where a qualified name cannot be extracted, and for DCL
-    or co-artefacts (.dcl, .grt, .c, .h), the original filename is
-    returned unchanged.
+    For files where a qualified name cannot be extracted (grants,
+    revokes, .c/.h co-artefacts), the original filename is returned
+    unchanged.
 
     Args:
         original_filename:  The source filename.
@@ -353,10 +353,8 @@ def _resolve_filename(
     # Preserve extension from the original filename
     ext = os.path.splitext(original_filename)[1]
 
-    # Skip DCL and non-DDL files. DCL filenames are already eponymous
-    # after harvest; re-parsing GRANT/REVOKE text here can mistake
-    # privilege names such as CREATE PROCEDURE for object DDL.
-    if ext.lower() in (".dcl", ".grt", ".c", ".h", ".jar", ".zip", ".gz"):
+    # Skip non-DDL files (.c, .h, .jar, etc.)
+    if ext.lower() in (".c", ".h", ".jar", ".zip", ".gz"):
         return original_filename
 
     # Skip hidden/underscore-prefixed files
