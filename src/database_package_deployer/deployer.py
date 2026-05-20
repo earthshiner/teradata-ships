@@ -2498,13 +2498,11 @@ def _deploy_direct_execute(
         qn,
     )
 
-    ddl_text = parsed.ddl_text
-    ddl_text = _resolve_client_file_paths(parsed.ddl_text, parsed.file_path)
-
     try:
-        _execute_parsed_ddl(cursor, parsed, ddl_text=ddl_text)
+        _execute_parsed_ddl(cursor, parsed)
     except Exception as e:
         err_str = str(e)
+        ddl_text = _resolve_client_file_paths(parsed.ddl_text, parsed.file_path)
         if (
             obj_type == ObjectType.JAR
             and _is_sqlj_replace_jar(ddl_text)
@@ -3551,9 +3549,11 @@ def _execute_parsed_ddl(
     ddl_text: Optional[str] = None,
 ):
     """Execute parsed DDL with routine bodies kept as one request."""
+    executable_ddl = ddl_text if ddl_text is not None else parsed.ddl_text
+    executable_ddl = _resolve_client_file_paths(executable_ddl, parsed.file_path)
     _execute_ddl(
         cursor,
-        ddl_text if ddl_text is not None else parsed.ddl_text,
+        executable_ddl,
         split_statements=parsed.object_type not in _ROUTINE_BODY_OBJECT_TYPES,
     )
 
