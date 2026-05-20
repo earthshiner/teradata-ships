@@ -2256,6 +2256,13 @@ def _dispatch_deploy(
 
     except Exception as e:
         clean_err = _clean_db_error(str(e))
+        blockers = []
+        if parsed.object_type == ObjectType.TABLE and "5428" in str(e):
+            blockers = _table_trigger_blockers(
+                cursor, parsed.database_name, parsed.object_name
+            )
+            if blockers:
+                clean_err = f"{clean_err} Blocking triggers: {'; '.join(blockers)}"
         # Full traceback to the log file for diagnosis
         logger.debug(
             "Deployment failed for %s — full traceback:",
@@ -2279,7 +2286,10 @@ def _dispatch_deploy(
             source_file or "unknown",
         )
         manifest.update_state(
-            parsed.qualified_name, DeployState.FAILED, error=clean_err
+            parsed.qualified_name,
+            DeployState.FAILED,
+            error=clean_err,
+            blockers=blockers,
         )
         result = ObjectDeployResult(
             database_name=parsed.database_name,
@@ -2289,6 +2299,7 @@ def _dispatch_deploy(
             deploy_intent=parsed.deploy_intent,
             error=clean_err,
             message=f"Deployment failed: {clean_err}",
+            blockers=blockers,
         )
         result.ddl_file = source_file
         return result
@@ -2334,6 +2345,24 @@ def _deploy_table(
             object_type=ObjectType.TABLE,
             state=DeployState.COMPLETED,
             message=f"Created {qn} (did not previously exist).",
+        )
+
+    trigger_blockers = _table_trigger_blockers(cursor, db, tbl)
+    if trigger_blockers:
+        msg = (
+            f"Cannot replace {qn}: table has defined triggers. "
+            "Teradata does not allow SHIPS to drop or rename the table "
+            "while triggers exist."
+        )
+        return ObjectDeployResult(
+            database_name=db,
+            object_name=tbl,
+            object_type=ObjectType.TABLE,
+            state=DeployState.FAILED,
+            error=msg,
+            message=msg,
+            blockers=trigger_blockers,
+            dry_run=dry_run,
         )
 
     # -- Check for data --
@@ -3521,6 +3550,66 @@ def _table_has_data(cursor, database_name: str, table_name: str) -> bool:
     """Check if a table contains any rows (TOP 1 for efficiency)."""
     cursor.execute(f'SELECT TOP 1 1 FROM "{database_name}"."{table_name}"')
     return cursor.fetchone() is not None
+
+
+def _table_trigger_blockers(cursor, database_name: str, table_name: str) -> List[str]:
+    """Return human-readable trigger blockers for a table replacement."""
+    if cursor is None:
+        return []
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+                SubjectTableDatabaseName AS TableDatabase,
+                TableName,
+                TriggerName,
+                CASE ActionTime
+                    WHEN 'A' THEN 'AFTER'
+                    WHEN 'B' THEN 'BEFORE'
+                    WHEN 'I' THEN 'INSTEAD OF'
+                    ELSE ActionTime
+                END AS ActionTime,
+                CASE Event
+                    WHEN 'U' THEN 'UPDATE'
+                    WHEN 'I' THEN 'INSERT'
+                    WHEN 'D' THEN 'DELETE'
+                    ELSE Event
+                END AS EventName,
+                CASE EnabledFlag
+                    WHEN 'Y' THEN 'ENABLED'
+                    WHEN 'N' THEN 'DISABLED'
+                    ELSE EnabledFlag
+                END AS Status
+            FROM DBC.TriggersV
+            WHERE SubjectTableDatabaseName = ?
+              AND TableName = ?
+            ORDER BY TriggerName
+            """,
+            [database_name, table_name],
+        )
+        rows = cursor.fetchall()
+    except Exception as exc:
+        logger.debug(
+            "Could not inspect triggers for %s.%s: %s",
+            database_name,
+            table_name,
+            exc,
+        )
+        return []
+
+    blockers = []
+    for row in rows or []:
+        table_db = row[0] if len(row) > 0 else database_name
+        subject = row[1] if len(row) > 1 else table_name
+        trigger = row[2] if len(row) > 2 else "(unknown trigger)"
+        action_time = row[3] if len(row) > 3 else "UNKNOWN"
+        event = row[4] if len(row) > 4 else "UNKNOWN"
+        status = row[5] if len(row) > 5 else "UNKNOWN"
+        blockers.append(
+            f"{trigger} ({action_time} {event}, {status}) on {table_db}.{subject}"
+        )
+    return blockers
 
 
 def _count_rows(cursor, database_name: str, table_name: str) -> int:

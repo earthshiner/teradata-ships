@@ -522,6 +522,87 @@ class _FailAlwaysCursor(_RecordingCursor):
         raise Exception(self.error_text)
 
 
+class _TableTriggerCursor(_RecordingCursor):
+    """Cursor stub for existing-table trigger blocker checks."""
+
+    def __init__(self):
+        super().__init__()
+        self._fetchone = None
+        self._fetchall = []
+
+    def execute(self, sql, params=None):
+        self.executed.append((sql, params))
+        if "FROM DBC.TablesV" in sql:
+            self._fetchone = (1,)
+            self._fetchall = []
+        elif "FROM DBC.TriggersV" in sql:
+            self._fetchone = None
+            self._fetchall = [
+                (
+                    "GDEV1T_GCFR",
+                    "GCFR_CE_System",
+                    "GCFR_TU_CE_System_Audit",
+                    "AFTER",
+                    "UPDATE",
+                    "ENABLED",
+                )
+            ]
+        else:
+            raise AssertionError(f"Unexpected SQL after trigger blocker: {sql}")
+
+    def fetchone(self):
+        return self._fetchone
+
+    def fetchall(self):
+        return self._fetchall
+
+
+class TestTableTriggerBlockers:
+    """Existing tables with triggers should fail with named blockers."""
+
+    def test_table_trigger_blockers_are_described(self):
+        from database_package_deployer.deployer import _table_trigger_blockers
+
+        cur = _TableTriggerCursor()
+        blockers = _table_trigger_blockers(cur, "GDEV1T_GCFR", "GCFR_CE_System")
+
+        assert blockers == [
+            "GCFR_TU_CE_System_Audit (AFTER UPDATE, ENABLED) "
+            "on GDEV1T_GCFR.GCFR_CE_System"
+        ]
+
+    def test_deploy_table_stops_before_drop_or_rename_when_triggers_exist(self):
+        from database_package_deployer.deployer import _deploy_table
+        from database_package_deployer.models import ParsedStatement
+
+        ddl = "CREATE MULTISET TABLE GDEV1T_GCFR.GCFR_CE_System (Id INTEGER);"
+        parsed = ParsedStatement(
+            file_path="03_ddl/tables/GDEV1T_GCFR.GCFR_CE_System.tbl",
+            ddl_text=ddl,
+            original_text=ddl,
+            database_name="GDEV1T_GCFR",
+            object_name="GCFR_CE_System",
+            object_type=ObjectType.TABLE,
+            strategy=DeployStrategy.IDEMPOTENT_DEPLOY,
+            qualified_name="GDEV1T_GCFR.GCFR_CE_System",
+            deploy_intent=DeployIntent.IDEMPOTENT_DEPLOY,
+        )
+
+        cur = _TableTriggerCursor()
+        result = _deploy_table(cur, parsed, dry_run=False)
+
+        assert result.state == DeployState.FAILED
+        assert "table has defined triggers" in result.message
+        assert result.blockers == [
+            "GCFR_TU_CE_System_Audit (AFTER UPDATE, ENABLED) "
+            "on GDEV1T_GCFR.GCFR_CE_System"
+        ]
+        executed_sql = "\n".join(sql for sql, _params in cur.executed)
+        assert "RENAME TABLE" not in executed_sql
+        assert "DROP TABLE" not in executed_sql
+        assert "SELECT TOP 1" not in executed_sql
+
+
 class TestExecuteDdl:
     """Unit tests for _execute_ddl's statement-splitting logic.
 
