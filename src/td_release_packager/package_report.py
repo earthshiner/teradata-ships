@@ -59,6 +59,7 @@ _EXT_TYPE: Dict[str, str] = {
     ".fsvr": "FOREIGN SERVER",
     ".map": "MAP",
     ".dml": "DML",
+    ".osql": "ORDERED SQL",
     ".sql": "SQL",
     ".ddl": "DDL",
     ".c": "C SOURCE",

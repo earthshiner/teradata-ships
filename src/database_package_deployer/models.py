@@ -54,6 +54,9 @@ class ObjectType(Enum):
     # Carried in the package (typically under ``DML/``) and executed
     # after all DDL so the target tables exist before data is loaded.
     DML = "DML"
+    # Ordered mixed SQL scripts preserve source choreography such as
+    # GRANT -> action -> REVOKE and always execute as written.
+    ORDERED_SQL = "ORDERED_SQL"
 
     # Foreign key constraint scripts: ALTER TABLE ... ADD FOREIGN KEY.
     # Carried under ``DDL/alters/`` and executed after all tables and
@@ -169,6 +172,7 @@ STRATEGY_MAP = {
     ObjectType.JAR: DeployStrategy.DIRECT_EXECUTE,
     ObjectType.SCRIPT_TABLE_OPERATOR: DeployStrategy.REPLACE_IN_PLACE,
     ObjectType.DML: DeployStrategy.DIRECT_EXECUTE,
+    ObjectType.ORDERED_SQL: DeployStrategy.DIRECT_EXECUTE,
     # FK alters are executed as-is.
     ObjectType.FOREIGN_KEY: DeployStrategy.DIRECT_EXECUTE,
     # COLLECT / UPDATE STATISTICS execute as-is after tables exist.
@@ -211,6 +215,7 @@ SCOPE_MAP = {
     ObjectType.JAR: DeployScope.ENVIRONMENT,
     ObjectType.SCRIPT_TABLE_OPERATOR: DeployScope.ENVIRONMENT,
     ObjectType.DML: DeployScope.ENVIRONMENT,
+    ObjectType.ORDERED_SQL: DeployScope.ENVIRONMENT,
     ObjectType.FOREIGN_KEY: DeployScope.ENVIRONMENT,
     ObjectType.STATISTICS: DeployScope.ENVIRONMENT,
     ObjectType.COMMENT: DeployScope.ENVIRONMENT,
@@ -257,6 +262,9 @@ DEPLOY_ORDER = {
     # DML runs last so every target table, view, and trigger that
     # the data load depends on has already been deployed.
     ObjectType.DML: 8,
+    # Ordered mixed SQL is explicit source choreography. Keep it with
+    # late direct-execute work so the script controls its own sequence.
+    ObjectType.ORDERED_SQL: 8,
     # C source/header files are not deployed — order is irrelevant but
     # must be present for coverage enforcement. Use 98 so UNKNOWN (99)
     # remains the definitive last entry.
