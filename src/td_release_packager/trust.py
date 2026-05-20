@@ -122,18 +122,21 @@ def compute_trust_report(source_dir: str, pkg_dir: str) -> TrustReport:
         INSPECT_TOKEN_MALFORMED,
         "Malformed {{TOKEN}} markers",
         "No malformed token markers found",
+        source_dir,
     )
     signals["inspect_lint"] = _inspect_signal(
         inspect_stage,
         INSPECT_LINT_VIOLATION,
         "Coding Discipline lint violations",
         "No lint violations found",
+        source_dir,
     )
     signals["inspect_grants"] = _inspect_signal(
         inspect_stage,
         INSPECT_GRANT_VIOLATION,
         "Grant drift detected",
         "Grant validation clean",
+        source_dir,
     )
 
     signals["provenance_complete"] = _provenance_signal(pkg_dir)
@@ -176,6 +179,7 @@ def _inspect_signal(
     issue_code: str,
     fail_message_prefix: str,
     pass_message: str,
+    source_dir: str = "",
 ) -> TrustSignal:
     """
     Derive a trust signal from an inspect stage's issue list.
@@ -189,7 +193,11 @@ def _inspect_signal(
             message="Inspect stage not found in ships.decisions.json — run inspect first",
         )
 
-    matching = [i for i in stage.get("issues", []) if i.get("code") == issue_code]
+    matching = [
+        i
+        for i in stage.get("issues", [])
+        if i.get("code") == issue_code and not _is_generated_artifact_issue(i, source_dir)
+    ]
 
     errors = [i for i in matching if i.get("severity") == "error"]
     warnings = [i for i in matching if i.get("severity") == "warning"]
@@ -209,6 +217,32 @@ def _inspect_signal(
             issues=messages[:10],
         )
     return TrustSignal(status=TRUST_PASS, message=pass_message)
+
+
+def _is_generated_artifact_issue(issue: dict, source_dir: str = "") -> bool:
+    """Return True when a decisions issue points at SHIPS-generated output."""
+    location = str(issue.get("location") or "")
+    if not location:
+        return False
+
+    normalised = location.replace("\\", "/")
+    lowered = normalised.lower()
+    generated_markers = (
+        "/releases/",
+        "/.ships-work/",
+        "/_rollback/",
+        "/logs/rollback/",
+    )
+    if any(marker in lowered for marker in generated_markers):
+        return True
+
+    if source_dir:
+        source_abs = os.path.abspath(source_dir).replace("\\", "/").rstrip("/")
+        release_prefix = f"{source_abs}/releases/".lower()
+        if lowered.startswith(release_prefix):
+            return True
+
+    return False
 
 
 def _format_issue_for_trust(issue: dict) -> str:

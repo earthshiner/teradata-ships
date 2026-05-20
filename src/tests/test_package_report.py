@@ -237,6 +237,27 @@ class TestObjectsTab:
         html = _objects_tab([])
         assert "<table" in html
 
+    def test_blocking_trust_issue_flagged_on_matching_object(self):
+        records = self._sample_records()
+        records[0]["path"] = "payload/03_ddl/tables/DB.Customer.tbl"
+        trust = {
+            "label": "BLOCKED",
+            "signals": {
+                "inspect_lint": {
+                    "status": "fail",
+                    "message": "Coding Discipline lint violations: 1 error(s)",
+                    "issues": [
+                        "payload/03_ddl/tables/DB.Customer.tbl:1: [db_qualifier] bad"
+                    ],
+                }
+            },
+        }
+
+        html = _objects_tab(records, trust)
+
+        assert "BLOCKS TRUST" in html
+        assert "inspect_lint" in html
+
 
 # ---------------------------------------------------------------
 # _waves_tab
