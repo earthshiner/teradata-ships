@@ -141,9 +141,9 @@ RE_EXEC_TARGET = re.compile(
     re.IGNORECASE,
 )
 
-# CREATE statement — extracts the owning database and object type
+# CREATE/REPLACE statement — extracts the owning database and object type
 RE_CREATE_STMT = re.compile(
-    r"\bCREATE\s+"
+    r"\b(?:CREATE|REPLACE)\s+"
     r"(VIEW|PROCEDURE|MACRO|FUNCTION|TRIGGER|(?:MULTISET\s+)?TABLE"
     r"|SET\s+TABLE|VOLATILE\s+TABLE)"
     r"\s+"
