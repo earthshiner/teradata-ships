@@ -445,6 +445,38 @@ class TestScanReferences:
         internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
         assert "{{STD_DB}}.Customer" in internal
 
+    def test_legacy_placeholder_reference_matches_canonical_token(self):
+        """Legacy $TOKEN.Object refs are normalised to {{TOKEN}}.Object."""
+        ddl = "SELECT * FROM $STD_DB.Customer;"
+        known_dbs = {"{{STD_DB}}"}
+        internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
+        assert "{{STD_DB}}.Customer" in internal
+        assert external == set()
+
+    def test_braced_legacy_placeholder_reference_matches_canonical_token(self):
+        """Legacy ${TOKEN}.Object refs are normalised to {{TOKEN}}.Object."""
+        ddl = "SELECT * FROM ${STD_DB}.Customer;"
+        known_dbs = {"{{STD_DB}}"}
+        internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
+        assert "{{STD_DB}}.Customer" in internal
+        assert external == set()
+
+    def test_ampersand_legacy_placeholder_reference_matches_canonical_token(self):
+        """Legacy &&TOKEN&&.Object refs are normalised to {{TOKEN}}.Object."""
+        ddl = "SELECT * FROM &&STD_DB&&.Customer;"
+        known_dbs = {"{{STD_DB}}"}
+        internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
+        assert "{{STD_DB}}.Customer" in internal
+        assert external == set()
+
+    def test_quoted_reference_detected_in_from_clause(self):
+        """Quoted DB.Object refs are included in view dependency scanning."""
+        ddl = 'SELECT * FROM "{{STD_DB}}"."Customer";'
+        known_dbs = {"{{STD_DB}}"}
+        internal, external = _scan_references(ddl, "VIEW", "MyDB.V", known_dbs)
+        assert "{{STD_DB}}.Customer" in internal
+        assert external == set()
+
     # -- Delete vs From interaction -----------------------------
 
     def test_delete_from_not_double_counted(self):
@@ -678,6 +710,48 @@ class TestAnalyseProject:
         # Table in wave 1, view in wave 2
         assert "MyDB.Customer" in result.waves[0]
         assert "MyDB.ActiveCust" in result.waves[1]
+
+    def test_view_chain_with_legacy_tokens_produces_ordered_waves(self, tmp_project):
+        """Mixed legacy/canonical tokens still produce parent-before-child waves."""
+        views_dir = tmp_project / "payload" / "database" / "DDL" / "views"
+
+        (views_dir / "{{GCFR_V}}.GCFR_System_File_Extract.viw").write_text(
+            "REPLACE VIEW {{GCFR_V}}.GCFR_System_File_Extract AS\n"
+            "SELECT 1 AS File_Id;",
+            encoding="utf-8",
+        )
+        (views_dir / "{{OPR_V}}.GCFR_RV_File_Count.viw").write_text(
+            "REPLACE VIEW {{OPR_V}}.GCFR_RV_File_Count AS\n"
+            "SELECT COUNT(*) AS File_Count\n"
+            "FROM $GCFR_V.GCFR_System_File_Extract;",
+            encoding="utf-8",
+        )
+        (views_dir / "{{OPR_V}}.GCFR_RV_Row_Count.viw").write_text(
+            "REPLACE VIEW {{OPR_V}}.GCFR_RV_Row_Count AS\n"
+            "SELECT File_Count\n"
+            "FROM {{OPR_V}}.GCFR_RV_File_Count;",
+            encoding="utf-8",
+        )
+
+        result = analyse_project(str(tmp_project))
+
+        assert result.dependencies["{{OPR_V}}.GCFR_RV_File_Count"] == {
+            "{{GCFR_V}}.GCFR_System_File_Extract"
+        }
+        assert result.dependencies["{{OPR_V}}.GCFR_RV_Row_Count"] == {
+            "{{OPR_V}}.GCFR_RV_File_Count"
+        }
+
+        wave_for = {
+            qn: idx
+            for idx, wave in enumerate(result.waves, start=1)
+            for qn in wave
+        }
+        assert (
+            wave_for["{{GCFR_V}}.GCFR_System_File_Extract"]
+            < wave_for["{{OPR_V}}.GCFR_RV_File_Count"]
+            < wave_for["{{OPR_V}}.GCFR_RV_Row_Count"]
+        )
 
     def test_external_dependency_flagged(self, tmp_project):
         """Reference to an unknown database is flagged as external."""

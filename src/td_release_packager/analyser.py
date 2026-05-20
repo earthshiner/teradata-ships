@@ -216,8 +216,10 @@ def _extract_body(ddl_text: str, object_type: str) -> str:
 
 # -- Name fragments (supports {{TOKEN}} placeholders) -----------
 
-# Single identifier: regular name or {{TOKEN}} with optional suffix
-_IDENT = r"(?:[A-Za-z_]\w*|\{\{[A-Za-z_]\w*\}\}\w*)"
+# Single identifier: regular name, canonical {{TOKEN}}, or a legacy
+# placeholder syntax that may still appear in harvested code.
+_LEGACY_IDENT = r"(?:\$[A-Za-z_]\w*|\$\{[A-Za-z_]\w*\}|&&[A-Za-z_]\w*&&)"
+_IDENT = rf"(?:[A-Za-z_]\w*|\{{\{{[A-Za-z_]\w*\}}\}}\w*|{_LEGACY_IDENT})"
 
 # Qualified name: db.obj  (two identifiers joined by a dot)
 _QNAME = _IDENT + r"\." + _IDENT
@@ -227,7 +229,7 @@ _NAME = rf"(?:{_QNAME}|{_IDENT})"
 
 # Quoted-identifier-aware single part — handles both bare names and
 # double-quoted names (e.g. "Berka_Staging", fin_card).
-_IDENT_Q = r'(?:"[^"]+"|[A-Za-z_]\w*|\{\{[A-Za-z_]\w*\}\}\w*)'
+_IDENT_Q = rf'(?:"[^"]+"|[A-Za-z_]\w*|\{{\{{[A-Za-z_]\w*\}}\}}\w*|{_LEGACY_IDENT})'
 
 # Quoted-identifier-aware qualified name: db.obj (either part may be quoted)
 _QNAME_Q = _IDENT_Q + r"\." + _IDENT_Q
@@ -250,6 +252,28 @@ _SYSTEM_DATABASES = frozenset(
         "DBCMNGR",
     }
 )
+
+
+def _normalise_name_part(part: str) -> str:
+    """Normalise quoted and legacy-token identifier parts for graph matching."""
+    value = part.strip()
+    if value.startswith('"') and value.endswith('"'):
+        value = value[1:-1]
+
+    if value.startswith("${") and value.endswith("}"):
+        return "{{" + value[2:-1] + "}}"
+    if value.startswith("$") and len(value) > 1:
+        return "{{" + value[1:] + "}}"
+    if value.startswith("&&") and value.endswith("&&") and len(value) > 4:
+        return "{{" + value[2:-2] + "}}"
+
+    return value
+
+
+def _normalise_qualified_name(name: str) -> str:
+    """Normalise each identifier part in a one- or two-part SQL name."""
+    return ".".join(_normalise_name_part(part) for part in name.split("."))
+
 
 # -- Guard: exclude function/EXTRACT usage of FROM -------------
 # EXTRACT(YEAR FROM col), TRIM(BOTH ' ' FROM col), etc.
@@ -488,7 +512,7 @@ def _extract_from_refs(body: str) -> List[str]:
         start = m.end()
 
         # Strategy 1: first name directly after FROM
-        first_m = re.match(rf"(?i)\s+({_NAME})", body[start:])
+        first_m = re.match(rf"(?i)\s+({_NAME_Q})", body[start:])
         if first_m:
             refs.append(first_m.group(1).strip())
 
@@ -511,7 +535,7 @@ def _extract_from_refs(body: str) -> List[str]:
         clause_end = start + term_m.start() if term_m else len(body)
         from_clause = body[start:clause_end]
 
-        for qm in re.finditer(rf"(?i){_QNAME}", from_clause):
+        for qm in re.finditer(rf"(?i){_QNAME_Q}", from_clause):
             refs.append(qm.group(0).strip())
 
     return refs
@@ -542,10 +566,8 @@ def _classify_ref(
         obj_part = parts[1].strip()
         # Strip double-quotes from quoted identifiers
         # e.g. "Berka_Staging"."fin_card" → Berka_Staging, fin_card
-        if db_part.startswith('"') and db_part.endswith('"'):
-            db_part = db_part[1:-1]
-        if obj_part.startswith('"') and obj_part.endswith('"'):
-            obj_part = obj_part[1:-1]
+        db_part = _normalise_name_part(db_part)
+        obj_part = _normalise_name_part(obj_part)
     else:
         # Unqualified — no database prefix.
         # Cannot resolve to a dependency without a DATABASE
@@ -732,7 +754,7 @@ def _scan_references(
 # Qualified name extraction
 # A name fragment: either a regular identifier, a quoted identifier,
 # or a {{TOKEN}} placeholder.
-_NAME_FRAG = r'(?:"[^"]+"|[A-Za-z_]\w*|\{\{[A-Za-z_]\w*\}\})'
+_NAME_FRAG = rf'(?:"[^"]+"|[A-Za-z_]\w*|\{{\{{[A-Za-z_]\w*\}}\}}|{_LEGACY_IDENT})'
 _QUAL_NAME = _NAME_FRAG + r"(?:\." + _NAME_FRAG + r")?"
 
 # Anchored — see classifier.py for the GRANT-with-CREATE-PROCEDURE
@@ -782,7 +804,7 @@ def _extract_name(content: str) -> Tuple[Optional[str], Optional[str]]:
     match = _QUALIFIED_NAME_RE.search(content)
     if not match:
         return (None, None)
-    qualified = match.group(1).replace('"', "")
+    qualified = _normalise_qualified_name(match.group(1))
     parts = qualified.split(".")
     if len(parts) == 2:
         return (parts[0].strip(), parts[1].strip())
@@ -800,7 +822,7 @@ def _extract_function_base_name(content: str) -> Optional[str]:
     match = _FUNCTION_HEADER_RE.search(content)
     if not match:
         return None
-    return match.group(1).replace('"', "")
+    return _normalise_qualified_name(match.group(1))
 
 
 # ---------------------------------------------------------------
@@ -873,7 +895,7 @@ def _analyse_project_impl(project_dir: str) -> AnalysisResult:
             base_fn = f"{db_name}.{obj_name}"  # Base function name
             specific_match = _SPECIFIC_RE.search(content)
             if specific_match:
-                specific_qual = specific_match.group(1).replace('"', "")
+                specific_qual = _normalise_qualified_name(specific_match.group(1))
                 parts = specific_qual.split(".")
                 obj_name = parts[-1].strip()
 

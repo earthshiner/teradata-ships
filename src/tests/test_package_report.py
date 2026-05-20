@@ -83,7 +83,10 @@ class TestParseWavesTxt:
         f = tmp_path / "_waves.txt"
         f.write_text("tables/DB.Customer.tbl\ntables/DB.Orders.tbl\n", encoding="utf-8")
         result = _parse_waves_txt(str(f))
-        assert result == {"DB.Customer.tbl": 1, "DB.Orders.tbl": 1}
+        assert result["tables/DB.Customer.tbl"] == 1
+        assert result["tables/DB.Orders.tbl"] == 1
+        assert result["DB.Customer.tbl"] == 1
+        assert result["DB.Orders.tbl"] == 1
 
     def test_multi_wave_with_separator(self, tmp_path):
         f = tmp_path / "_waves.txt"
@@ -92,20 +95,30 @@ class TestParseWavesTxt:
             encoding="utf-8",
         )
         result = _parse_waves_txt(str(f))
-        assert result["DB.Customer.tbl"] == 1
-        assert result["DB.ActiveCustomers.viw"] == 2
+        assert result["tables/DB.Customer.tbl"] == 1
+        assert result["views/DB.ActiveCustomers.viw"] == 2
 
     def test_comments_ignored(self, tmp_path):
         f = tmp_path / "_waves.txt"
         f.write_text("# Wave 1 — tables\ntables/DB.T.tbl\n", encoding="utf-8")
         result = _parse_waves_txt(str(f))
-        assert result == {"DB.T.tbl": 1}
+        assert result["tables/DB.T.tbl"] == 1
+        assert result["DB.T.tbl"] == 1
 
     def test_blank_lines_ignored(self, tmp_path):
         f = tmp_path / "_waves.txt"
         f.write_text("\ntables/DB.T.tbl\n\n", encoding="utf-8")
         result = _parse_waves_txt(str(f))
-        assert result == {"DB.T.tbl": 1}
+        assert result["tables/DB.T.tbl"] == 1
+        assert result["DB.T.tbl"] == 1
+
+    def test_duplicate_basenames_do_not_share_ambiguous_wave_alias(self, tmp_path):
+        f = tmp_path / "_waves.txt"
+        f.write_text("views/DB.Shared.viw\n---\nmacros/DB.Shared.viw\n", encoding="utf-8")
+        result = _parse_waves_txt(str(f))
+        assert result["views/DB.Shared.viw"] == 1
+        assert result["macros/DB.Shared.viw"] == 2
+        assert "DB.Shared.viw" not in result
 
 
 # ---------------------------------------------------------------
@@ -162,6 +175,22 @@ class TestScanPayload:
         waves.write_text("tables/DB.T.tbl\n", encoding="utf-8")
         records = _scan_payload(str(tmp_path))
         assert records[0]["wave"] == 1
+
+    def test_wave_lookup_uses_phase_relative_path_before_filename(self, tmp_path):
+        _make_payload(
+            tmp_path,
+            [
+                ("03_ddl/views/DB.Shared.viw", "REPLACE VIEW"),
+                ("03_ddl/macros/DB.Shared.viw", "REPLACE MACRO"),
+            ],
+        )
+        waves = tmp_path / "payload" / "03_ddl" / "_waves.txt"
+        waves.write_text("views/DB.Shared.viw\n---\nmacros/DB.Shared.viw\n", encoding="utf-8")
+        records = _scan_payload(str(tmp_path))
+
+        by_path = {record["path"]: record["wave"] for record in records}
+        assert by_path["payload/03_ddl/views/DB.Shared.viw"] == 1
+        assert by_path["payload/03_ddl/macros/DB.Shared.viw"] == 2
 
     def test_no_wave_file_gives_none_wave(self, tmp_path):
         _make_payload(tmp_path, [("03_ddl/tables/DB.T.tbl", "CREATE TABLE")])
