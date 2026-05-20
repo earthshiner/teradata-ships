@@ -852,3 +852,34 @@ class TestExternalNameClientFilePathResolution:
 
         expected = (script.parent / "RaiseException.cpp").resolve().as_posix()
         assert f"CS!RaiseException!{expected}!F!RaiseException" in cur.executed[0]
+
+    def test_execute_parsed_ddl_rewrites_cpp_external_path_for_replace_strategy(
+        self, tmp_path
+    ):
+        from database_package_deployer.deployer import _execute_parsed_ddl
+        from database_package_deployer.models import ParsedStatement
+
+        script = tmp_path / "DDL" / "procedures" / "raise.spl"
+        script.parent.mkdir(parents=True)
+        ddl = (
+            "REPLACE PROCEDURE DB.raise_error()\n"
+            "LANGUAGE CPP\n"
+            "EXTERNAL NAME 'CS!RaiseException!./RaiseException.cpp!F!RaiseException';"
+        )
+        parsed = ParsedStatement(
+            file_path=str(script),
+            ddl_text=ddl,
+            original_text=ddl,
+            database_name="DB",
+            object_name="raise_error",
+            object_type=ObjectType.PROCEDURE,
+            strategy=DeployStrategy.REPLACE_IN_PLACE,
+            qualified_name="DB.raise_error",
+            deploy_intent=DeployIntent.REPLACE_WITH_BACKUP,
+        )
+
+        cur = _RecordingCursor()
+        _execute_parsed_ddl(cur, parsed)
+
+        expected = (script.parent / "RaiseException.cpp").resolve().as_posix()
+        assert f"CS!RaiseException!{expected}!F!RaiseException" in cur.executed[0]
