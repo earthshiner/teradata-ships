@@ -372,7 +372,7 @@ def _scan_payload(pkg_dir: str) -> List[Dict]:
             phase_label = _phase_label(os.path.join(payload_dir, phase_dir))
             file_path = os.path.join(root, fname)
             try:
-                with open(file_path, encoding="utf-8") as f:
+                with open(file_path, encoding="utf-8", errors="replace") as f:
                     content = f.read()
             except OSError:
                 content = ""

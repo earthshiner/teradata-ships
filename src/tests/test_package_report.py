@@ -226,6 +226,17 @@ class TestScanPayload:
         assert by_file["DB.P.spl"] == "REPLACE/PROCEDURE"
         assert by_file["seed.dml"] == "INSERT"
 
+    def test_invalid_utf8_payload_does_not_abort_scan(self, tmp_path):
+        file_path = tmp_path / "payload" / "03_ddl" / "procedures" / "DB.Native.spl"
+        file_path.parent.mkdir(parents=True)
+        file_path.write_bytes(b"REPLACE PROCEDURE DB.Native()\xff\xfe")
+
+        records = _scan_payload(str(tmp_path))
+
+        assert len(records) == 1
+        assert records[0]["file"] == "DB.Native.spl"
+        assert records[0]["intent"] == "REPLACE/PROCEDURE"
+
 
 # ---------------------------------------------------------------
 # _summary_tab
@@ -512,6 +523,17 @@ class TestGeneratePackageReport:
         assert "tab-summary" in html
         assert "Summary" in html
         assert "REPLACE/MACRO" in html
+
+    def test_invalid_utf8_payload_still_writes_report(self, tmp_path):
+        file_path = tmp_path / "payload" / "03_ddl" / "procedures" / "DB.Native.spl"
+        file_path.parent.mkdir(parents=True)
+        file_path.write_bytes(b"REPLACE PROCEDURE DB.Native()\xff\xfe")
+
+        path = generate_package_report(str(tmp_path), _minimal_manifest())
+
+        assert os.path.isfile(path)
+        html = (tmp_path / "package_report.html").read_text(encoding="utf-8")
+        assert "DB.Native" in html
 
     def test_html_is_valid_utf8_and_has_doctype(self, tmp_path):
         _make_payload(tmp_path, [])
