@@ -105,6 +105,25 @@ class TestDeployStateTransitions:
             )
 
 
+class TestCleanDbError:
+    """Tests for user-facing Teradata error cleanup."""
+
+    def test_prefers_inner_spl_compile_error(self):
+        from database_package_deployer.deployer import _clean_db_error
+
+        raw = (
+            "REPLACE PROCEDURE Failed.  [5526] SPL1027:E(L29), "
+            "Missing/Invalid SQL statement"
+            "'E(5315):An owner referenced by user does not have SELECT WITH "
+            "GRANT OPTION access to GDEV1T_GCFR.GCFR_File_Process.Process_Name.'."
+        )
+
+        assert _clean_db_error(raw) == (
+            "[Error 5315] An owner referenced by user does not have SELECT WITH "
+            "GRANT OPTION access to GDEV1T_GCFR.GCFR_File_Process.Process_Name."
+        )
+
+
 # ---------------------------------------------------------------
 # STRATEGY_MAP — ObjectType → DeployStrategy
 # ---------------------------------------------------------------

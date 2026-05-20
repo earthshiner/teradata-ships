@@ -120,6 +120,9 @@ def _clean_db_error(raw: str) -> str:
         The Teradata error message without the Go stack trace.
     """
     cleaned = _GO_STACK_RE.sub("", raw).strip()
+    inner = re.search(r"\bE\((\d+)\)\s*:\s*([^']+)", cleaned)
+    if inner and inner.group(1) not in {"5526"}:
+        return f"[Error {inner.group(1)}] {inner.group(2).strip()}"
     return cleaned if cleaned else raw
 
 
