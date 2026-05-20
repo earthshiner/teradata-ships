@@ -209,6 +209,7 @@ EXTENSION_TO_EXPECTED: Dict[str, Optional[Set[str]]] = {
     ".stt": {"STATISTICS"},
     ".sto": {"SCRIPT_TABLE_OPERATOR"},
     ".dcl": {"GRANT", "REVOKE"},
+    ".grt": {"GRANT", "REVOKE"},
     ".map": {"MAP"},
     ".rol": {"ROLE"},
     ".prf": {"PROFILE"},

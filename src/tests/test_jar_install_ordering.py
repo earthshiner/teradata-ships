@@ -64,10 +64,12 @@ class TestDDLSubdirOrder:
 # ---------------------------------------------------------------
 
 
-class TestDefaultFilePatternsIncludeSjr:
-    """The deployer's glob-mode discovery must find .sjr files;
-    without this pattern jar_install scripts ship in the payload but
-    never deploy."""
+class TestDefaultFilePatternsIncludeCriticalExtensions:
+    """The deployer's glob-mode discovery must find non-legacy extensions.
+
+    Without these patterns, artefacts can ship in the payload but never
+    execute when a package lacks build-time discovery metadata.
+    """
 
     def test_sjr_in_default_patterns(self):
         # We can't easily call deploy_package without a cursor, so
@@ -78,6 +80,14 @@ class TestDefaultFilePatternsIncludeSjr:
         source = inspect.getsource(deploy_package)
         assert '"*.sjr"' in source, (
             ".sjr is missing from deploy_package's default file_patterns"
+        )
+
+    def test_grt_in_default_patterns(self):
+        import inspect
+
+        source = inspect.getsource(deploy_package)
+        assert '"*.grt"' in source, (
+            ".grt is missing from deploy_package's default file_patterns"
         )
 
 
