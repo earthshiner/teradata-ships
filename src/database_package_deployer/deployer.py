@@ -3534,6 +3534,7 @@ def _count_rows(cursor, database_name: str, table_name: str) -> int:
 
 _ROUTINE_BODY_OBJECT_TYPES = frozenset(
     {
+        ObjectType.MACRO,
         ObjectType.PROCEDURE,
         ObjectType.FUNCTION,
         ObjectType.TRIGGER,
