@@ -156,6 +156,44 @@ def test_single_package_archive_uses_context_metadata_only(
         assert schema["examples"]
 
 
+def test_inferred_grants_are_packaged_as_dcl(
+    tmp_path, tmp_project, sample_env_config_file
+):
+    """Grant inference output must ship as visible deployable .dcl scripts."""
+    from td_release_packager.validate_grants import fix_grants
+
+    macro = tmp_project / "payload" / "database" / "DDL" / "macros" / "APP_DB.M.mcr"
+    macro.write_text(
+        "REPLACE MACRO APP_DB.M AS (SELECT Id FROM DATA_DB.T;);\n",
+        encoding="utf-8",
+    )
+    result, files_written = fix_grants(tmp_project)
+    assert result.passed
+    assert files_written == 1
+    assert (
+        tmp_project / "payload" / "database" / "DCL" / "inter_db" / "APP_DB.dcl"
+    ).exists()
+
+    config = BuildConfig(
+        source_dir=str(tmp_project),
+        environment="DEV",
+        package_name="Pkg",
+        env_config_file=str(sample_env_config_file),
+        build_number=1,
+        output_dir=str(tmp_path),
+    )
+
+    ((archive_path, _manifest), companion) = build_package(config)
+    assert companion is None
+
+    with zipfile.ZipFile(archive_path) as archive:
+        names = [name.replace("\\", "/") for name in archive.namelist()]
+        assert any(name.endswith("payload/02_dcl/inter_db/APP_DB.dcl") for name in names)
+        report_name = next(name for name in names if name.endswith("package_report.html"))
+        report = archive.read(report_name).decode("utf-8")
+        assert "APP_DB.dcl" in report
+
+
 # ---------------------------------------------------------------
 # _check_working_tree
 # ---------------------------------------------------------------

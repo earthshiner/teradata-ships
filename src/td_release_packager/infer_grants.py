@@ -5,7 +5,7 @@ infer_grants.py — Intent-Based Cross-Database Grant Inference for SHIPS Projec
 Scans a SHIPS project directory for DDL files (views, procedures, macros,
 triggers, functions), parses each file to determine what SQL operations are
 performed on objects in each referenced database, and generates consolidated
-.grt files per grantee database.
+.dcl files per grantee database.
 
 Core axiom:
     The SQL verb applied to objects in each specific database determines the
@@ -19,7 +19,7 @@ Grant rules:
     - WITH GRANT OPTION always (pass-through to consumers)
     - Self-references excluded (same database needs no grant)
     - Token-aware: works on tokenised DDL (e.g. {{DOM_DATABASE_T}})
-    - One .grt file per grantee database, all privileges consolidated
+    - One .dcl file per grantee database, all privileges consolidated
     - Multiple privileges on the same grantor→grantee pair consolidated
       into a single comma-separated GRANT statement
 
@@ -27,7 +27,7 @@ Usage:
     python infer_grants.py <project_dir> [--output-dir <dir>] [--dry-run] [--verbose]
 
 Examples:
-    # Generate .grt files into the project's payload/database/DCL/inter_db/ directory
+    # Generate .dcl files into the project's payload/database/DCL/inter_db/ directory
     python infer_grants.py ./MortgagePlatform
 
     # Preview without writing files
@@ -573,7 +573,7 @@ def analyse_file(filepath: Path, verbose: bool = False) -> Optional[Dict]:
 
 
 # ---------------------------------------------------------------------------
-# Consolidation and .grt file generation
+# Consolidation and .dcl file generation
 # ---------------------------------------------------------------------------
 
 
@@ -610,7 +610,7 @@ def generate_grt_content(
     project_name: str,
 ) -> str:
     """
-    Generate the content of a single .grt file for a grantee database.
+    Generate the content of a single .dcl file for a grantee database.
 
     Produces Teradata GRANT statements with consolidated privileges per
     grantor→grantee pair, ordered canonically.
@@ -622,7 +622,7 @@ def generate_grt_content(
         project_name: The SHIPS project name (for the file header comment).
 
     Returns:
-        The complete .grt file content as a string.
+        The complete .dcl file content as a string.
     """
     lines = []
 
@@ -661,19 +661,19 @@ def generate_grt_content(
 
 def grantee_filename(grantee: str) -> str:
     """
-    Derive the .grt filename from a grantee database reference.
+    Derive the .dcl filename from a grantee database reference.
 
     For tokenised references like '{{DOM_DATABASE_V}}', the filename
-    uses the token directly: {{DOM_DATABASE_V}}.grt
+    uses the token directly: {{DOM_DATABASE_V}}.dcl
     For literal references, the name is used as-is.
 
     Args:
         grantee: The grantee database token/name.
 
     Returns:
-        The filename string (e.g. '{{DOM_DATABASE_V}}.grt').
+        The filename string (e.g. '{{DOM_DATABASE_V}}.dcl').
     """
-    return f"{grantee}.grt"
+    return f"{grantee}.dcl"
 
 
 # ---------------------------------------------------------------------------
@@ -714,7 +714,7 @@ def main():
 
     Parses command-line arguments, scans the SHIPS project directory,
     analyses each DDL file, consolidates grants per grantee, and writes
-    .grt files to the output directory.
+    .dcl files to the output directory.
     """
     parser = argparse.ArgumentParser(
         description="Infer cross-database grants from DDL intent in a SHIPS project.",
@@ -731,7 +731,7 @@ def main():
         type=Path,
         default=None,
         help=(
-            "Directory to write .grt files to. "
+            "Directory to write .dcl files to. "
             "Defaults to <project_dir>/payload/database/DCL/inter_db/ — the DCL "
             "subdirectory for inter-database grants."
         ),
@@ -741,14 +741,14 @@ def main():
         type=str,
         default=None,
         help=(
-            "Project name for the .grt file headers. "
+            "Project name for the .dcl file headers. "
             "Defaults to the project directory name."
         ),
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Print generated .grt content to stdout without writing files.",
+        help="Print generated .dcl content to stdout without writing files.",
     )
     parser.add_argument(
         "--verbose",
@@ -797,7 +797,7 @@ def main():
     print(f"  Grantee databases: {len(consolidated)}")
     print()
 
-    # --- Step 4: Generate .grt files ---
+    # --- Step 4: Generate .dcl files ---
     for grantee in sorted(consolidated.keys()):
         grants = consolidated[grantee]
         # Collect the source files that contributed to this grantee
@@ -827,7 +827,7 @@ def main():
             out_path.write_text(content, encoding="utf-8")
             print(f"    → Written to {out_path}")
 
-    print(f"\nDone. {len(consolidated)} .grt file(s) generated.")
+    print(f"\nDone. {len(consolidated)} .dcl file(s) generated.")
 
 
 if __name__ == "__main__":
