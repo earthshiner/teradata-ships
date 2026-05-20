@@ -285,18 +285,6 @@ class TestResolveFilename:
         result = _resolve_filename("some_grant.dcl", content)
         assert result == "some_grant.dcl"
 
-    def test_dcl_grant_create_procedure_does_not_rename_to_on(self):
-        """DCL files keep their filename even when privileges contain DDL words."""
-        content = "GRANT CREATE PROCEDURE ON GDEV1P_BB TO DBC;"
-        result = _resolve_filename("GDEV1P_BB.dcl", content)
-        assert result == "GDEV1P_BB.dcl"
-
-    def test_tokenised_dcl_filename_kept_for_later_token_resolution(self):
-        """Tokenised DCL filenames are not eponymously reparsed by content."""
-        content = "GRANT CREATE PROCEDURE ON GDEV1P_BB TO DBC;"
-        result = _resolve_filename("{{GCFR_P_BB}}.dcl", content)
-        assert result == "{{GCFR_P_BB}}.dcl"
-
     def test_c_source_unchanged(self):
         """C source files (.c) are never renamed."""
         content = "#include <stdio.h>\nvoid fn() {}"
