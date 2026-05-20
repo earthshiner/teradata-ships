@@ -159,20 +159,16 @@ def test_single_package_archive_uses_context_metadata_only(
 def test_inferred_grants_are_packaged_as_dcl(
     tmp_path, tmp_project, sample_env_config_file
 ):
-    """Grant inference output must ship as visible deployable .dcl scripts."""
-    from td_release_packager.validate_grants import fix_grants
-
+    """Package build backfills visible deployable .dcl grant scripts."""
     macro = tmp_project / "payload" / "database" / "DDL" / "macros" / "APP_DB.M.mcr"
     macro.write_text(
         "REPLACE MACRO APP_DB.M AS (SELECT Id FROM DATA_DB.T;);\n",
         encoding="utf-8",
     )
-    result, files_written = fix_grants(tmp_project)
-    assert result.passed
-    assert files_written == 1
-    assert (
+    source_dcl = (
         tmp_project / "payload" / "database" / "DCL" / "inter_db" / "APP_DB.dcl"
-    ).exists()
+    )
+    assert not source_dcl.exists()
 
     config = BuildConfig(
         source_dir=str(tmp_project),
@@ -192,6 +188,8 @@ def test_inferred_grants_are_packaged_as_dcl(
         report_name = next(name for name in names if name.endswith("package_report.html"))
         report = archive.read(report_name).decode("utf-8")
         assert "APP_DB.dcl" in report
+
+    assert not source_dcl.exists()
 
 
 # ---------------------------------------------------------------
