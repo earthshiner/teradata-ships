@@ -384,12 +384,18 @@ def parse_statement_text(ddl_text: str, file_path: str = "<inline>") -> ParsedSt
     """
     original_text = ddl_text
 
+    ordered_sql_file = os.path.splitext(file_path)[1].lower() == ".osql"
+
     # Strip comments for classification — prevents false matches
     # from DDL keywords in comments (e.g. "-- uses CREATE DATABASE IF").
     # The original text (with comments) is preserved for execution.
     clean_text = _strip_sql_comments(ddl_text)
 
-    object_type, qualified_raw = _detect_object_type(clean_text)
+    if ordered_sql_file:
+        object_type = ObjectType.ORDERED_SQL
+        qualified_raw = "ORDERED_SQL_SCRIPT"
+    else:
+        object_type, qualified_raw = _detect_object_type(clean_text)
 
     if object_type == ObjectType.UNKNOWN:
         raise ValueError(
@@ -427,6 +433,7 @@ def parse_statement_text(ddl_text: str, file_path: str = "<inline>") -> ParsedSt
         # captured first target (a multi-target DML file would
         # otherwise collide with another file sharing that target).
         ObjectType.DML,
+        ObjectType.ORDERED_SQL,
         # STATISTICS — qualified name is filename-derived.
         # The _STATISTICS_RE detects the statement type but does not
         # extract the ON-clause table name; filename is the reliable key.
@@ -486,7 +493,11 @@ def parse_statement_text(ddl_text: str, file_path: str = "<inline>") -> ParsedSt
             # For GRANT/REVOKE, the DDL has no unique object name.
             # Derive a unique identifier from the filename so each
             # GRANT file gets its own manifest entry.
-            if object_type in (ObjectType.GRANT, ObjectType.REVOKE) and file_path:
+            if (
+                object_type
+                in (ObjectType.GRANT, ObjectType.REVOKE, ObjectType.ORDERED_SQL)
+                and file_path
+            ):
                 basename = os.path.splitext(os.path.basename(file_path))[0]
                 qualified_name = f"{object_type.value}:{basename}"
                 obj_name = basename
@@ -595,6 +606,7 @@ def _detect_deploy_intent(ddl_text: str, object_type: ObjectType) -> DeployInten
         # DML scripts (INSERT/UPDATE/DELETE/MERGE) execute as-is.
         # _execute_ddl already handles multi-statement bodies.
         ObjectType.DML,
+        ObjectType.ORDERED_SQL,
         # FK alter scripts execute as-is — ALTER TABLE ... ADD FOREIGN KEY
         # has no CREATE/REPLACE verb so no strategy inference is needed.
         ObjectType.FOREIGN_KEY,

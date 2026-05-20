@@ -811,6 +811,18 @@ class TestDmlDetection:
         # First target's database is preserved for the report
         assert parsed.database_name == "MyDB"
 
+    def test_ordered_sql_extension_forces_direct_execute(self):
+        """Mixed ordered scripts are direct-execute regardless of first verb."""
+        parsed = parse_statement_text(
+            "CREATE TABLE MyDB.T (id INT);\n"
+            "REVOKE SELECT ON MyDB FROM WorkerRole;",
+            file_path="/some/path/temporary_access.ordered.osql",
+        )
+        assert parsed.object_type == ObjectType.ORDERED_SQL
+        assert parsed.deploy_intent == DeployIntent.DIRECT_EXECUTE
+        assert parsed.strategy == DeployStrategy.DIRECT_EXECUTE
+        assert parsed.qualified_name == "ORDERED_SQL:temporary_access.ordered"
+
     def test_procedure_with_inner_insert_does_not_classify_as_dml(self):
         """A PROCEDURE body containing INSERT must classify as
         PROCEDURE — DML matching is the last rung in the pattern

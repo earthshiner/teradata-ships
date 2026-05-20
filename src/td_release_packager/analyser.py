@@ -1313,6 +1313,7 @@ def _collect_ddl_files(payload_dir: str) -> List[str]:
         ".fsvr",  # FOREIGN_SERVER
         # DML
         ".dml",  # DML scripts
+        ".osql",  # ordered mixed SQL scripts
         # FK alters
         ".fk",  # ALTER TABLE ... ADD FOREIGN KEY
         # Generic

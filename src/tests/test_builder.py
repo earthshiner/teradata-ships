@@ -285,6 +285,22 @@ class TestResolveFilename:
         result = _resolve_filename("some_grant.dcl", content)
         assert result == "some_grant.dcl"
 
+    def test_dcl_grant_create_procedure_does_not_rename_to_on(self):
+        """DCL files keep their filename even when privileges contain DDL words."""
+        content = "GRANT CREATE PROCEDURE ON GDEV1P_BB TO DBC;"
+        result = _resolve_filename("GDEV1P_BB.dcl", content)
+        assert result == "GDEV1P_BB.dcl"
+
+    def test_ordered_sql_filename_is_not_derived_from_inner_ddl(self):
+        """Ordered SQL keeps source choreography identity."""
+        content = (
+            "GRANT SELECT ON MyDB TO WorkerRole;\n"
+            "CREATE TABLE MyDB.T (id INT);\n"
+            "REVOKE SELECT ON MyDB FROM WorkerRole;"
+        )
+        result = _resolve_filename("temporary_access.ordered.osql", content)
+        assert result == "temporary_access.ordered.osql"
+
     def test_c_source_unchanged(self):
         """C source files (.c) are never renamed."""
         content = "#include <stdio.h>\nvoid fn() {}"

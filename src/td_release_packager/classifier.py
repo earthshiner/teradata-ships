@@ -84,6 +84,7 @@ BASE_TYPES: Set[str] = {
     "C_SOURCE",
     "C_HEADER",
     "DML",
+    "ORDERED_SQL",
     "FOREIGN_KEY",
 }
 
@@ -140,6 +141,7 @@ TYPE_TO_EXTENSION: Dict[str, str] = {
     "C_SOURCE": ".c",
     "C_HEADER": ".h",
     "DML": ".dml",
+    "ORDERED_SQL": ".osql",
     "FOREIGN_KEY": ".fk",
 }
 
@@ -176,6 +178,7 @@ TYPE_TO_SUBDIR: Dict[str, str] = {
     "C_SOURCE": "DDL/functions",
     "C_HEADER": "DDL/functions",
     "DML": "DML",
+    "ORDERED_SQL": "DML",
     "FOREIGN_KEY": "DDL/alters",
 }
 
@@ -213,6 +216,8 @@ EXTENSION_TO_EXPECTED: Dict[str, Optional[Set[str]]] = {
     ".fsvr": {"FOREIGN_SERVER"},
     # DML scripts — INSERT/UPDATE/DELETE/MERGE.
     ".dml": {"DML"},
+    # Ordered mixed SQL scripts preserve source choreography.
+    ".osql": {"ORDERED_SQL"},
     # Foreign key ALTER scripts — ALTER TABLE ... ADD FOREIGN KEY.
     ".fk": {"FOREIGN_KEY"},
     # Generic — any type acceptable

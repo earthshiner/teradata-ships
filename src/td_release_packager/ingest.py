@@ -478,7 +478,12 @@ def _ingest_directory_impl(
 
             from td_release_packager.classifier import classify, base_type
 
-            # -- Pre-pass: detect multi-target DML --
+            # -- Pre-pass: detect multi-target DML and mixed DCL choreography --
+            # A source file that interleaves GRANT/REVOKE with non-DCL
+            # statements is an ordered executable script, not independent
+            # phase-bucket artefacts. Keep it together so temporary
+            # privilege changes stay wrapped around the actions that need them.
+            #
             # When all classifiable chunks in a source file are DML and
             # they target more than one distinct table, the source's
             # statement order is meaningful (FK ordering, sequenced
@@ -496,15 +501,37 @@ def _ingest_directory_impl(
             # across multiple INSERTs into a single history table.
             dml_targets: Set[Tuple[Optional[str], Optional[str]]] = set()
             non_dml_classified = False
+            saw_grant = False
+            saw_revoke = False
+            saw_non_dcl = False
             for chunk in statements:
                 chunk_clean = _strip_comments(chunk)
                 pre_cls = classify(path=src_path, content=chunk_clean)
                 pre_type = base_type(pre_cls.type)
+                if pre_type == "GRANT":
+                    saw_grant = True
+                elif pre_type == "REVOKE":
+                    saw_revoke = True
+                elif pre_type is not None:
+                    saw_non_dcl = True
                 if pre_type == "DML":
                     chunk_db, chunk_obj = _extract_qualified_name(chunk_clean)
                     dml_targets.add((chunk_db, chunk_obj))
                 elif pre_type is not None:
                     non_dml_classified = True
+
+            if saw_grant and saw_revoke and saw_non_dcl:
+                _place_ordered_sql(
+                    raw_content=raw_content,
+                    src_path=src_path,
+                    source_dir=source_dir,
+                    project_dir=project_dir,
+                    payload_base=payload_base,
+                    apply_tokens=apply_tokens,
+                    kind_index=kind_index,
+                    result=result,
+                )
+                continue  # next source file
 
             force_marker = _has_multi_table_dml_marker(raw_content)
             multi_target_detected = not non_dml_classified and len(dml_targets) > 1
@@ -991,6 +1018,51 @@ def _place_multi_table_dml(
         f"{db}.{obj}" if db else (obj or "?") for db, obj in dml_targets
     )
     result.multi_table_targets[rel_dest] = targets_pretty
+
+
+def _place_ordered_sql(
+    *,
+    raw_content: str,
+    src_path: str,
+    source_dir: str,
+    project_dir: str,
+    payload_base: str,
+    apply_tokens: Optional[Dict[str, str]],
+    kind_index: Optional[Dict[str, str]],
+    result: IngestResult,
+) -> None:
+    """Place a mixed DCL/non-DCL source as one ordered SQL artefact.
+
+    These scripts encode choreography such as GRANT -> action -> REVOKE.
+    Splitting them into ordinary phase files changes their semantics, so
+    SHIPS keeps the whole source together and deploys it via DIRECT_EXECUTE.
+    """
+    source_basename = os.path.splitext(os.path.basename(src_path))[0]
+    dest_name = f"{source_basename}.ordered.osql"
+    dest_dir = os.path.join(payload_base, "DML")
+    os.makedirs(dest_dir, exist_ok=True)
+
+    gitkeep = os.path.join(dest_dir, ".gitkeep")
+    if os.path.exists(gitkeep):
+        os.remove(gitkeep)
+
+    content = raw_content
+    if apply_tokens:
+        content = _apply_kind_aware_tokens(content, "T", apply_tokens, kind_index or {})
+
+    dest_path = os.path.join(dest_dir, dest_name)
+    with open(dest_path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+    rel_dest = os.path.relpath(dest_path, project_dir)
+    result.classified += 1
+    result.files_placed.append(
+        (
+            os.path.relpath(src_path, source_dir),
+            rel_dest,
+            "ORDERED_SQL",
+        )
+    )
 
 
 def _clean_payload_tree(payload_base: str) -> int:
