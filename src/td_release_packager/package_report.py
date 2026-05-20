@@ -52,6 +52,7 @@ _EXT_TYPE: Dict[str, str] = {
     ".sjr": "JAR",
     ".sto": "STO",
     ".dcl": "GRANT",
+    ".grt": "GRANT",
     ".db": "DATABASE",
     ".usr": "USER",
     ".rol": "ROLE",

@@ -70,7 +70,7 @@ class TestDefaultExtensions:
     extensions a future cleanup might be tempted to remove."""
 
     def test_canonical_sql_extensions_present(self):
-        for ext in (".sql", ".tbl", ".viw", ".spl", ".mcr"):
+        for ext in (".sql", ".tbl", ".viw", ".spl", ".mcr", ".grt"):
             assert ext in DEFAULT_HARVEST_EXTENSIONS
 
     def test_bteq_and_btq_present(self):

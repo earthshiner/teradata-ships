@@ -226,6 +226,18 @@ class TestScanPayload:
         assert by_file["DB.P.spl"] == "REPLACE/PROCEDURE"
         assert by_file["seed.dml"] == "INSERT"
 
+    def test_grt_files_are_reported_as_dcl_grants(self, tmp_path):
+        _make_payload(
+            tmp_path,
+            [("02_dcl/inter_db/APP_DB.grt", "GRANT SELECT ON DATA_DB TO APP_DB;")],
+        )
+
+        records = _scan_payload(str(tmp_path))
+
+        assert records[0]["type"] == "GRANT"
+        assert records[0]["phase"] == "DCL"
+        assert records[0]["intent"] == "GRANT"
+
     def test_invalid_utf8_payload_does_not_abort_scan(self, tmp_path):
         file_path = tmp_path / "payload" / "03_ddl" / "procedures" / "DB.Native.spl"
         file_path.parent.mkdir(parents=True)
