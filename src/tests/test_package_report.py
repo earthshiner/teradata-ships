@@ -23,6 +23,8 @@ from td_release_packager.package_report import (
     _objects_tab,
     _parse_waves_txt,
     _scan_payload,
+    _script_summary,
+    _summary_tab,
     _trust_tab,
     _waves_tab,
     _deploy_tab,
@@ -208,6 +210,52 @@ class TestScanPayload:
         records = _scan_payload(str(tmp_path))
         types = [r["type"] for r in records]
         assert "TABLE" in types and "VIEW" in types
+
+    def test_records_include_script_intent(self, tmp_path):
+        _make_payload(
+            tmp_path,
+            [
+                ("02_dcl/inter_db/DB.dcl", "REVOKE SELECT ON DB FROM role;"),
+                ("03_ddl/procedures/DB.P.spl", "REPLACE PROCEDURE DB.P() BEGIN END;"),
+                ("04_dml/seed.dml", "INSERT INTO DB.T (id) VALUES (1);"),
+            ],
+        )
+        records = _scan_payload(str(tmp_path))
+        by_file = {r["file"]: r["intent"] for r in records}
+        assert by_file["DB.dcl"] == "REVOKE"
+        assert by_file["DB.P.spl"] == "REPLACE/PROCEDURE"
+        assert by_file["seed.dml"] == "INSERT"
+
+
+# ---------------------------------------------------------------
+# _summary_tab
+# ---------------------------------------------------------------
+
+
+class TestSummaryTab:
+    def test_counts_dcl_ddl_and_dml_intents(self):
+        records = [
+            {"phase": "DCL", "intent": "GRANT", "type": "GRANT"},
+            {"phase": "DCL", "intent": "REVOKE", "type": "GRANT"},
+            {"phase": "DDL", "intent": "CREATE/PROCEDURE", "type": "PROCEDURE"},
+            {"phase": "DML", "intent": "DELETE", "type": "DML"},
+        ]
+        summary = _script_summary(records)
+        assert summary["DCL"]["GRANT"] == 1
+        assert summary["DCL"]["REVOKE"] == 1
+        assert summary["DDL"]["CREATE/PROCEDURE"] == 1
+        assert summary["DML"]["DELETE"] == 1
+        assert summary["DML"]["MERGE"] == 0
+
+    def test_renders_zero_baseline_rows_and_flags(self):
+        records = [
+            {"phase": "DCL", "intent": "REVOKE", "type": "GRANT"},
+            {"phase": "DML", "intent": "DELETE", "type": "DML"},
+        ]
+        html = _summary_tab(records)
+        assert "DROP/TABLE" in html
+        assert "MERGE" in html
+        assert "DCL contains REVOKE scripts but no GRANT scripts" in html
 
 
 # ---------------------------------------------------------------
@@ -450,6 +498,20 @@ class TestGeneratePackageReport:
         generate_package_report(str(tmp_path), m)
         html = (tmp_path / "package_report.html").read_text(encoding="utf-8")
         assert "DB.Customer" in html
+
+    def test_html_contains_summary_tab(self, tmp_path):
+        _make_payload(
+            tmp_path,
+            [
+                ("02_dcl/inter_db/DB.dcl", "GRANT SELECT ON DB TO role;"),
+                ("03_ddl/macros/DB.M.mcr", "REPLACE MACRO DB.M AS (SELECT 1;);"),
+            ],
+        )
+        generate_package_report(str(tmp_path), _minimal_manifest())
+        html = (tmp_path / "package_report.html").read_text(encoding="utf-8")
+        assert "tab-summary" in html
+        assert "Summary" in html
+        assert "REPLACE/MACRO" in html
 
     def test_html_is_valid_utf8_and_has_doctype(self, tmp_path):
         _make_payload(tmp_path, [])
