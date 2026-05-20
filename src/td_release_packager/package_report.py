@@ -141,11 +141,12 @@ def _phase_label(phase_dir: str) -> str:
 
 
 def _parse_waves_txt(waves_path: str) -> Dict[str, int]:
-    """Parse a _waves.txt file into {filename: wave_number} mapping (1-based)."""
+    """Parse a _waves.txt file into a path-aware wave mapping (1-based)."""
     result: Dict[str, int] = {}
     if not os.path.isfile(waves_path):
         return result
     wave_num = 1
+    basenames: Dict[str, Optional[int]] = {}
     try:
         with open(waves_path, encoding="utf-8") as f:
             for line in f:
@@ -155,8 +156,24 @@ def _parse_waves_txt(waves_path: str) -> Dict[str, int]:
                 if line == "---":
                     wave_num += 1
                 else:
-                    # Entries are relative paths like "tables/DB.Object.tbl"
-                    result[os.path.basename(line)] = wave_num
+                    # Entries are phase-relative paths like
+                    # "views/DB.Object.viw". Keep the full relative path
+                    # so duplicate filenames in different folders cannot
+                    # borrow each other's wave labels in the report.
+                    norm = line.replace("\\", "/").lstrip("./")
+                    result[norm] = wave_num
+
+                    # Backward compatibility for old reports/tests that
+                    # looked up by filename only. If the same basename is
+                    # seen in more than one wave, remove the ambiguous alias.
+                    basename = os.path.basename(norm)
+                    previous = basenames.get(basename)
+                    if previous is None and basename not in basenames:
+                        basenames[basename] = wave_num
+                        result[basename] = wave_num
+                    elif previous != wave_num:
+                        basenames[basename] = None
+                        result.pop(basename, None)
     except OSError as exc:
         logger.debug("package_report: could not read %s: %s", waves_path, exc)
     return result
@@ -195,11 +212,19 @@ def _scan_payload(pkg_dir: str) -> List[Dict]:
 
             obj_type = _EXT_TYPE.get(ext, "UNKNOWN")
             # Derive DB.Object from filename (strip extension)
-            stem = os.path.splitext(fname)[0]  # e.g. "OMR_STD.Customer"
-            wave = wave_map.get(fname)
-
             rel_file = os.path.relpath(os.path.join(root, fname), pkg_dir).replace(
                 "\\", "/"
+            )
+            phase_root = os.path.join(payload_dir, phase_dir) if phase_dir else root
+            phase_rel_file = os.path.relpath(
+                os.path.join(root, fname), phase_root
+            ).replace("\\", "/")
+
+            stem = os.path.splitext(fname)[0]  # e.g. "OMR_STD.Customer"
+            wave = (
+                wave_map.get(phase_rel_file)
+                or wave_map.get(rel_file)
+                or wave_map.get(fname)
             )
 
             records.append(
