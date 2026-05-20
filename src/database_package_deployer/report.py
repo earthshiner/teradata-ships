@@ -18,8 +18,9 @@ the manifest as .deploy_report_{deployment_id}.html.
 
 import logging
 import os
+import re
 from datetime import datetime, timezone
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 from database_package_deployer.models import (
     DeployState,
@@ -99,6 +100,78 @@ _STATE_BADGES = {
     DeployState.MIGRATED: ("Migrated", "#28A745", _WHITE),
 }
 
+_SQL_KEYWORDS = frozenset(
+    {
+        "ABORT",
+        "ADD",
+        "ALTER",
+        "AND",
+        "AS",
+        "BEGIN",
+        "BETWEEN",
+        "BY",
+        "CALL",
+        "CASE",
+        "COLLECT",
+        "COLUMN",
+        "COMMENT",
+        "CREATE",
+        "CURRENT_DATE",
+        "CURRENT_TIMESTAMP",
+        "DATABASE",
+        "DEFAULT",
+        "DELETE",
+        "DROP",
+        "ELSE",
+        "END",
+        "EXECUTE",
+        "EXTERNAL",
+        "FROM",
+        "FUNCTION",
+        "GRANT",
+        "GROUP",
+        "IF",
+        "IN",
+        "INDEX",
+        "INNER",
+        "INSERT",
+        "JOIN",
+        "LEFT",
+        "MACRO",
+        "MERGE",
+        "MULTISET",
+        "NOT",
+        "NULL",
+        "ON",
+        "OR",
+        "ORDER",
+        "OUT",
+        "PROCEDURE",
+        "REPLACE",
+        "REVOKE",
+        "RIGHT",
+        "ROLE",
+        "SELECT",
+        "SET",
+        "TABLE",
+        "THEN",
+        "TO",
+        "TRIGGER",
+        "UPDATE",
+        "USER",
+        "VALUES",
+        "VIEW",
+        "VOLATILE",
+        "WHEN",
+        "WHERE",
+    }
+)
+
+_SQL_TOKEN_RE = re.compile(
+    r"(--[^\r\n]*|/\*.*?\*/|'(?:''|[^'])*'|\b[A-Za-z_][A-Za-z0-9_]*\b)",
+    re.DOTALL,
+)
+
 
 def generate_report(
     result: PackageDeployResult,
@@ -120,8 +193,11 @@ def generate_report(
     # Load provenance map if available (built by the builder).
     # Maps resolved package paths → original project source paths.
     provenance, prov_status = _load_provenance(output_dir)
+    source_view_links = _write_source_viewers(
+        output_dir, result.deployment_id, provenance
+    )
 
-    html = _build_html(result, provenance, prov_status)
+    html = _build_html(result, provenance, prov_status, source_view_links)
 
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(html)
@@ -208,6 +284,7 @@ def _build_html(
     result: PackageDeployResult,
     provenance: Optional[ProvenanceDocument] = None,
     provenance_status: str = "",
+    source_view_links: Optional[Dict[str, str]] = None,
 ) -> str:
     """Build the complete HTML report string."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -228,11 +305,11 @@ def _build_html(
 
     deployment_content = [
         _html_provenance_notice(provenance_status),
-        _html_action_items(result, provenance),
+        _html_action_items(result, provenance, source_view_links),
         _html_summary(result, mode),
         _html_preflight(result.preflight_result),
         _html_wave_summary(result),
-        _html_object_results(result, provenance),
+        _html_object_results(result, provenance, source_view_links),
     ]
 
     if result.is_wave_parallel:
@@ -491,12 +568,24 @@ def _payload_href(chain: ProvenanceChain) -> str:
     return f"../payload/{final_path}"
 
 
+def _source_href(
+    chain: ProvenanceChain,
+    source_view_links: Optional[Dict[str, str]] = None,
+) -> str:
+    """Return the preferred href for opening a packaged source file."""
+    final_path = chain.final_path().replace("\\", "/").lstrip("/")
+    if source_view_links and final_path in source_view_links:
+        return source_view_links[final_path]
+    return _payload_href(chain)
+
+
 def _linked_source_path(
     ddl_file: Optional[str],
     provenance: Optional[ProvenanceDocument],
     *,
     label: Optional[str] = None,
     css: str = "",
+    source_view_links: Optional[Dict[str, str]] = None,
 ) -> str:
     """Render a source/path label as a hyperlink when provenance is available."""
     chain = _lookup_chain(ddl_file, provenance)
@@ -514,7 +603,7 @@ def _linked_source_path(
     )
     style = f' style="{css}"' if css else ""
     return (
-        f'<a href="{_escape_html(_payload_href(chain))}" '
+        f'<a href="{_escape_html(_source_href(chain, source_view_links))}" '
         f'title="{_escape_html(title)}"{style}>{_escape_html(display)}</a>'
     )
 
@@ -554,7 +643,152 @@ def _escape_html(value: str) -> str:
         .replace("<", "&lt;")
         .replace(">", "&gt;")
         .replace('"', "&quot;")
+        .replace("'", "&#x27;")
     )
+
+
+def _highlight_sql(source: str) -> str:
+    """Return HTML with simple SQL keyword, comment, and string highlighting."""
+    pieces = []
+    pos = 0
+    for match in _SQL_TOKEN_RE.finditer(source):
+        pieces.append(_escape_html(source[pos : match.start()]))
+        token = match.group(0)
+        escaped = _escape_html(token)
+        upper = token.upper()
+        if token.startswith("--") or token.startswith("/*"):
+            pieces.append(f'<span class="sql-comment">{escaped}</span>')
+        elif token.startswith("'"):
+            pieces.append(f'<span class="sql-string">{escaped}</span>')
+        elif upper in _SQL_KEYWORDS:
+            pieces.append(f'<span class="sql-keyword">{escaped}</span>')
+        else:
+            pieces.append(escaped)
+        pos = match.end()
+    pieces.append(_escape_html(source[pos:]))
+    return "".join(pieces)
+
+
+def _source_viewer_html(
+    *,
+    title: str,
+    packaged_path: str,
+    source_path: str,
+    content: str,
+) -> str:
+    """Build a standalone highlighted source viewer page."""
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{_escape_html(title)}</title>
+<style>
+body {{
+  margin: 0;
+  background: #F8F9FA;
+  color: #00233C;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}}
+header {{
+  background: #00233C;
+  color: white;
+  padding: 16px 22px;
+  border-bottom: 4px solid #FF5F02;
+}}
+h1 {{
+  margin: 0 0 8px 0;
+  font-size: 18px;
+  font-weight: 700;
+}}
+.meta {{
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #DDEAF3;
+}}
+main {{
+  padding: 18px 22px;
+}}
+pre {{
+  margin: 0;
+  padding: 18px;
+  overflow: auto;
+  background: #FFFFFF;
+  border: 1px solid #DEE2E6;
+  border-radius: 6px;
+  line-height: 1.5;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 13px;
+  tab-size: 4;
+  white-space: pre;
+}}
+.sql-keyword {{ color: #0D6EFD; font-weight: 700; }}
+.sql-string {{ color: #198754; }}
+.sql-comment {{ color: #6C757D; font-style: italic; }}
+</style>
+</head>
+<body>
+<header>
+<h1>{_escape_html(os.path.basename(packaged_path) or title)}</h1>
+<div class="meta">Package: {_escape_html(packaged_path)}</div>
+<div class="meta">Source: {_escape_html(source_path)}</div>
+</header>
+<main>
+<pre><code>{_highlight_sql(content)}</code></pre>
+</main>
+</body>
+</html>"""
+
+
+def _safe_viewer_filename(final_path: str, index: int) -> str:
+    """Create a filesystem-safe viewer filename for a package path."""
+    stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", final_path.replace("\\", "/")).strip("_")
+    if not stem:
+        stem = f"source_{index}"
+    return f"{index:04d}_{stem}.html"
+
+
+def _write_source_viewers(
+    output_dir: str,
+    deployment_id: str,
+    provenance: Optional[ProvenanceDocument],
+) -> Dict[str, str]:
+    """Write highlighted source-view pages and return final_path -> href."""
+    if provenance is None:
+        return {}
+
+    viewer_dir_name = f".deploy_report_{deployment_id}_code"
+    viewer_dir = os.path.join(output_dir, viewer_dir_name)
+    payload_root = os.path.abspath(os.path.join(output_dir, "..", "payload"))
+    links: Dict[str, str] = {}
+
+    for index, chain in enumerate(provenance.entries.values(), 1):
+        final_path = chain.final_path().replace("\\", "/").lstrip("/")
+        if not final_path:
+            continue
+        payload_path = os.path.abspath(os.path.join(payload_root, final_path))
+        try:
+            if os.path.commonpath([payload_root, payload_path]) != payload_root:
+                continue
+            with open(payload_path, encoding="utf-8", errors="replace") as f:
+                content = f.read()
+        except (OSError, ValueError):
+            continue
+
+        os.makedirs(viewer_dir, exist_ok=True)
+        viewer_name = _safe_viewer_filename(final_path, index)
+        viewer_path = os.path.join(viewer_dir, viewer_name)
+        html = _source_viewer_html(
+            title=f"Source: {final_path}",
+            packaged_path=f"payload/{final_path}",
+            source_path=chain.source_path(),
+            content=content,
+        )
+        with open(viewer_path, "w", encoding="utf-8") as f:
+            f.write(html)
+        links[final_path] = f"{viewer_dir_name}/{viewer_name}"
+
+    return links
 
 
 def _html_privilege_failure(priv_result) -> str:
@@ -606,7 +840,11 @@ def _html_privilege_failure(priv_result) -> str:
     )
 
 
-def _html_action_items(result, provenance: Optional[ProvenanceDocument] = None):
+def _html_action_items(
+    result,
+    provenance: Optional[ProvenanceDocument] = None,
+    source_view_links: Optional[Dict[str, str]] = None,
+):
     """Action items section — SKIPPED and FAILED objects, grouped and collapsible.
 
     FAILED items are shown expanded by default (they need attention).
@@ -637,6 +875,7 @@ def _html_action_items(result, provenance: Optional[ProvenanceDocument] = None):
                     provenance,
                     label=origin,
                     css="color:#0D6EFD;text-decoration:none",
+                    source_view_links=source_view_links,
                 )
                 provenance_html = (
                     f'<div style="font-size:11px;color:#6C757D;margin-top:4px">'
@@ -881,7 +1120,11 @@ def _html_wave_summary(result):
 </table>"""
 
 
-def _html_object_results(result, provenance: Optional[ProvenanceDocument] = None):
+def _html_object_results(
+    result,
+    provenance: Optional[ProvenanceDocument] = None,
+    source_view_links: Optional[Dict[str, str]] = None,
+):
     """Per-object results table with optional wave column."""
     has_waves = result.is_wave_parallel
     rows = []
@@ -955,6 +1198,7 @@ def _html_object_results(result, provenance: Optional[ProvenanceDocument] = None
             provenance,
             label=source_file,
             css="color:#0D6EFD;text-decoration:none",
+            source_view_links=source_view_links,
         )
         source_cell = (
             f'<span class="mono" style="font-size:11px;color:#6C757D">'
@@ -966,6 +1210,7 @@ def _html_object_results(result, provenance: Optional[ProvenanceDocument] = None
                 provenance,
                 label=origin,
                 css="color:#0D6EFD;text-decoration:none",
+                source_view_links=source_view_links,
             )
             source_cell += (
                 f'<div style="font-size:10px;color:#F47B20;margin-top:2px">'
