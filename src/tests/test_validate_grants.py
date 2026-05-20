@@ -89,8 +89,8 @@ class TestLifecycle:
         assert result.ddl_count == 0
         assert result.statuses == []
 
-    def test_missing_grt_files_detected(self, project):
-        """View DDL exists but no .grt file — grantee classified as missing."""
+    def test_missing_dcl_files_detected(self, project):
+        """View DDL exists but no .dcl file — grantee classified as missing."""
         _add_view(
             project,
             "{{DOM_V}}.Customer.viw",
@@ -103,7 +103,7 @@ class TestLifecycle:
         assert result.missing[0].expected_grants == {"{{DOM_T}}": {"SELECT"}}
 
     def test_fix_writes_missing_files(self, project):
-        """fix_grants creates .grt files; post-fix result is consistent."""
+        """fix_grants creates .dcl files; post-fix result is consistent."""
         _add_view(
             project,
             "{{DOM_V}}.Customer.viw",
@@ -112,7 +112,7 @@ class TestLifecycle:
         result, files_written = fix_grants(project)
         assert files_written == 1
         assert result.passed
-        assert (_dcl_dir(project) / "{{DOM_V}}.grt").exists()
+        assert (_dcl_dir(project) / "{{DOM_V}}.dcl").exists()
 
     def test_validate_after_fix_is_consistent(self, project):
         """Re-validate after fix — clean state."""
@@ -127,7 +127,7 @@ class TestLifecycle:
         assert len(result.consistent) == 1
 
     def test_drift_detected_after_corruption(self, project):
-        """Modify a .grt to remove a privilege — drift detected."""
+        """Modify a .dcl to remove a privilege — drift detected."""
         _add_view(
             project,
             "{{DOM_V}}.Customer.viw",
@@ -135,7 +135,7 @@ class TestLifecycle:
         )
         fix_grants(project)
         # Replace SELECT with INSERT — drift in BOTH directions
-        grt = _dcl_dir(project) / "{{DOM_V}}.grt"
+        grt = _dcl_dir(project) / "{{DOM_V}}.dcl"
         grt.write_text(
             grt.read_text(encoding="utf-8").replace("SELECT", "INSERT"),
             encoding="utf-8",
@@ -148,15 +148,15 @@ class TestLifecycle:
         assert d.extra_privs == {"{{DOM_T}}": {"INSERT"}}
 
     def test_orphan_detected(self, project):
-        """A .grt for a grantee with no DDL backing — orphaned."""
+        """A .dcl for a grantee with no DDL backing — orphaned."""
         _add_view(
             project,
             "{{DOM_V}}.Customer.viw",
             _make_view_ddl("{{DOM_V}}", "{{DOM_T}}"),
         )
         fix_grants(project)
-        # Add a stray .grt for a grantee that no DDL references
-        orphan = _dcl_dir(project) / "{{LEGACY_V}}.grt"
+        # Add a stray .dcl for a grantee that no DDL references
+        orphan = _dcl_dir(project) / "{{LEGACY_V}}.dcl"
         orphan.write_text(
             "GRANT SELECT ON {{LEGACY_T}} TO {{LEGACY_V}} WITH GRANT OPTION;\n",
             encoding="utf-8",
@@ -174,7 +174,7 @@ class TestLifecycle:
             _make_view_ddl("{{DOM_V}}", "{{DOM_T}}"),
         )
         fix_grants(project)
-        orphan = _dcl_dir(project) / "{{LEGACY_V}}.grt"
+        orphan = _dcl_dir(project) / "{{LEGACY_V}}.dcl"
         orphan.write_text(
             "GRANT SELECT ON {{LEGACY_T}} TO {{LEGACY_V}} WITH GRANT OPTION;\n",
             encoding="utf-8",
@@ -283,7 +283,7 @@ class TestComputeDrift:
 
 class TestMultiSourceConsolidation:
     """When multiple DDL files imply grants for the same grantee, the
-    .grt should consolidate them — privilege union per grantor."""
+    .dcl should consolidate them — privilege union per grantor."""
 
     def test_two_views_same_grantee_different_grantors(self, project):
         _add_view(
@@ -299,7 +299,7 @@ class TestMultiSourceConsolidation:
         result, _ = fix_grants(project)
         assert result.passed
 
-        grt = (_dcl_dir(project) / "{{V}}.grt").read_text(encoding="utf-8")
+        grt = (_dcl_dir(project) / "{{V}}.dcl").read_text(encoding="utf-8")
         # Both grantors must appear in the file
         assert "{{T1}}" in grt
         assert "{{T2}}" in grt
@@ -315,12 +315,12 @@ class TestMultiSourceConsolidation:
         assert result.passed
 
         actual = _parse_grt_content(
-            (_dcl_dir(project) / "{{V}}.grt").read_text(encoding="utf-8")
+            (_dcl_dir(project) / "{{V}}.dcl").read_text(encoding="utf-8")
         )
         assert actual == {"{{T1}}": {"SELECT"}, "{{T2}}": {"SELECT"}}
 
     def test_multiple_grantees_distinct_files(self, project):
-        """Two grantees → two separate .grt files."""
+        """Two grantees → two separate .dcl files."""
         _add_view(
             project,
             "{{V1}}.A.viw",
@@ -334,8 +334,8 @@ class TestMultiSourceConsolidation:
         result, files_written = fix_grants(project)
         assert files_written == 2
         assert result.passed
-        assert (_dcl_dir(project) / "{{V1}}.grt").exists()
-        assert (_dcl_dir(project) / "{{V2}}.grt").exists()
+        assert (_dcl_dir(project) / "{{V1}}.dcl").exists()
+        assert (_dcl_dir(project) / "{{V2}}.dcl").exists()
 
 
 # ===================================================================
@@ -354,7 +354,7 @@ class TestCustomDclDir:
         custom_dcl = tmp_path / "elsewhere"
         result, files_written = fix_grants(project, dcl_dir=custom_dcl)
         assert files_written == 1
-        assert (custom_dcl / "{{V}}.grt").exists()
+        assert (custom_dcl / "{{V}}.dcl").exists()
         assert not _dcl_dir(project).exists()
 
         # Validate against the same custom dir → consistent
@@ -455,7 +455,7 @@ class TestFormatReport:
         )
         fix_grants(project)
         # Corrupt
-        grt = _dcl_dir(project) / "{{V}}.grt"
+        grt = _dcl_dir(project) / "{{V}}.dcl"
         grt.write_text(
             grt.read_text(encoding="utf-8").replace("SELECT", "DELETE"),
             encoding="utf-8",
@@ -476,10 +476,10 @@ class TestFormatReport:
         assert "missing" in report.lower()
 
     def test_orphan_marker(self, project):
-        # Stray .grt with no DDL
+        # Stray .dcl with no DDL
         dcl = _dcl_dir(project)
         dcl.mkdir(parents=True)
-        (dcl / "{{LEGACY}}.grt").write_text(
+        (dcl / "{{LEGACY}}.dcl").write_text(
             "GRANT SELECT ON {{X}} TO {{LEGACY}} WITH GRANT OPTION;\n",
             encoding="utf-8",
         )
