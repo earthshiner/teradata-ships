@@ -29,6 +29,7 @@ from __future__ import annotations
 import html
 import logging
 import os
+import re
 from typing import Dict, List, Optional, Tuple
 
 from td_release_packager.trust import TRUST_PASS, TRUST_WARN
@@ -116,6 +117,34 @@ _SKIP_NAMES = frozenset(
 )
 _SKIP_EXTS = frozenset({".json", ".py", ".sh", ".bat", ".txt", ".html", ".jar"})
 
+_SCRIPT_VERB_RE = re.compile(
+    r"""
+    ^\s*
+    (?P<verb>CREATE|REPLACE|DROP|ALTER|GRANT|REVOKE|INSERT|UPDATE|DELETE|MERGE|CALL|COMMENT|COLLECT)
+    (?:\s+(?P<qualifier>MULTISET|SET|GLOBAL\s+TEMPORARY|VOLATILE|JOIN|HASH|UNIQUE|SUMMARY|ON))?
+    (?:\s+(?P<object>TABLE|VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER|INDEX|DATABASE|USER|ROLE|PROFILE|MAP|AUTHORIZATION|SERVER|STATISTICS|SQLJ))?
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+_SUMMARY_BASELINES = {
+    "DCL": ["GRANT", "REVOKE", "MIXED DCL"],
+    "DDL": [
+        "CREATE/TABLE",
+        "CREATE/VIEW",
+        "CREATE/MACRO",
+        "CREATE/PROCEDURE",
+        "CREATE/FUNCTION",
+        "REPLACE/VIEW",
+        "REPLACE/MACRO",
+        "REPLACE/PROCEDURE",
+        "REPLACE/FUNCTION",
+        "DROP/TABLE",
+        "DROP/VIEW",
+    ],
+    "DML": ["INSERT", "UPDATE", "DELETE", "MERGE", "MIXED DML", "ORDERED SQL"],
+}
+
 
 # ---------------------------------------------------------------------------
 # Data extraction
@@ -180,6 +209,119 @@ def _parse_waves_txt(waves_path: str) -> Dict[str, int]:
     return result
 
 
+def _strip_report_comments_and_strings(sql: str) -> str:
+    """Blank comments and string literals for lightweight script classification."""
+    chars = list(sql)
+    i = 0
+    while i < len(chars):
+        ch = chars[i]
+        nxt = chars[i + 1] if i + 1 < len(chars) else ""
+        if ch == "-" and nxt == "-":
+            start = i
+            i += 2
+            while i < len(chars) and chars[i] != "\n":
+                i += 1
+            for j in range(start, i):
+                chars[j] = " "
+            continue
+        if ch == "/" and nxt == "*":
+            start = i
+            i += 2
+            while i + 1 < len(chars) and not (chars[i] == "*" and chars[i + 1] == "/"):
+                i += 1
+            i = min(i + 2, len(chars))
+            for j in range(start, i):
+                chars[j] = " "
+            continue
+        if ch == "'":
+            start = i
+            i += 1
+            while i < len(chars):
+                if chars[i] == "'":
+                    if i + 1 < len(chars) and chars[i + 1] == "'":
+                        i += 2
+                        continue
+                    i += 1
+                    break
+                i += 1
+            for j in range(start, i):
+                chars[j] = " "
+            continue
+        i += 1
+    return "".join(chars)
+
+
+def _normalise_script_head(verb: str, qualifier: str, obj: str, fallback_type: str) -> str:
+    """Return a compact report label such as ``CREATE/PROCEDURE``."""
+    verb = verb.upper()
+    qualifier = " ".join((qualifier or "").upper().split())
+    obj = (obj or "").upper()
+    if qualifier == "JOIN" and obj == "INDEX":
+        obj = "JOIN INDEX"
+    elif qualifier == "HASH" and obj == "INDEX":
+        obj = "HASH INDEX"
+    elif obj in {"", "SQLJ"}:
+        obj = fallback_type.upper()
+    if verb == "DELETE":
+        return "DELETE"
+    if verb == "INSERT":
+        return "INSERT"
+    if verb == "UPDATE":
+        return "UPDATE"
+    if verb == "MERGE":
+        return "MERGE"
+    if verb in {"GRANT", "REVOKE"}:
+        return verb
+    if verb == "CALL" and fallback_type == "JAR":
+        return "CALL/JAR"
+    if verb in {"COMMENT", "COLLECT"}:
+        return fallback_type.upper()
+    return f"{verb}/{obj}"
+
+
+def _script_intent(content: str, obj_type: str, phase: str, ext: str) -> str:
+    """Classify the script's high-level intent for the Summary tab."""
+    if ext == ".osql":
+        return "ORDERED SQL"
+
+    clean = _strip_report_comments_and_strings(content)
+    heads: List[str] = []
+    for chunk in re.split(r";", clean):
+        match = _SCRIPT_VERB_RE.search(chunk)
+        if not match:
+            continue
+        heads.append(
+            _normalise_script_head(
+                match.group("verb") or "",
+                match.group("qualifier") or "",
+                match.group("object") or "",
+                obj_type,
+            )
+        )
+
+    if not heads:
+        return obj_type
+
+    phase_upper = phase.upper()
+    if phase_upper == "DCL":
+        dcl_heads = [h for h in heads if h in {"GRANT", "REVOKE"}]
+        if dcl_heads and len(set(dcl_heads)) == 1:
+            return dcl_heads[0]
+        if dcl_heads:
+            return "MIXED DCL"
+        return obj_type
+
+    if phase_upper == "DML":
+        dml_heads = [h for h in heads if h in {"INSERT", "UPDATE", "DELETE", "MERGE"}]
+        if dml_heads and len(set(dml_heads)) == 1:
+            return dml_heads[0]
+        if dml_heads:
+            return "MIXED DML"
+        return heads[0]
+
+    return heads[0]
+
+
 def _scan_payload(pkg_dir: str) -> List[Dict]:
     """Walk the payload directory and return one record per DDL object."""
     payload_dir = os.path.join(pkg_dir, "payload")
@@ -227,12 +369,20 @@ def _scan_payload(pkg_dir: str) -> List[Dict]:
                 or wave_map.get(rel_file)
                 or wave_map.get(fname)
             )
+            phase_label = _phase_label(os.path.join(payload_dir, phase_dir))
+            file_path = os.path.join(root, fname)
+            try:
+                with open(file_path, encoding="utf-8") as f:
+                    content = f.read()
+            except OSError:
+                content = ""
 
             records.append(
                 {
                     "name": stem,
                     "type": obj_type,
-                    "phase": _phase_label(os.path.join(payload_dir, phase_dir)),
+                    "phase": phase_label,
+                    "intent": _script_intent(content, obj_type, phase_label, ext),
                     "wave": wave,
                     "file": fname,
                     "path": rel_file,
@@ -450,6 +600,95 @@ document.querySelectorAll('#obj-tbody tr').forEach(function(row, i) {{
   row.style.background = i % 2 === 0 ? '#fff' : '#f8f9fa';
 }});
 </script>
+"""
+
+
+def _summary_category(phase: str) -> str:
+    phase_upper = phase.upper()
+    if phase_upper == "DCL":
+        return "DCL"
+    if phase_upper == "DML":
+        return "DML"
+    if phase_upper in {"DDL", "PRE-REQUISITES", "SYSTEM", "POST-INSTALL"}:
+        return "DDL" if phase_upper == "DDL" else phase
+    return "Other"
+
+
+def _script_summary(records: List[Dict]) -> Dict[str, Dict[str, int]]:
+    """Aggregate records by report category and intent label."""
+    summary: Dict[str, Dict[str, int]] = {}
+    for category, labels in _SUMMARY_BASELINES.items():
+        summary[category] = {label: 0 for label in labels}
+
+    for record in records:
+        category = _summary_category(record.get("phase", "Other"))
+        intent = record.get("intent") or record.get("type") or "UNKNOWN"
+        summary.setdefault(category, {})
+        summary[category][intent] = summary[category].get(intent, 0) + 1
+
+    return summary
+
+
+def _summary_flags(summary: Dict[str, Dict[str, int]]) -> List[str]:
+    """Return human-readable high-level signals from the summary counts."""
+    flags: List[str] = []
+    dcl = summary.get("DCL", {})
+    dml = summary.get("DML", {})
+    if dcl.get("REVOKE", 0) and dcl.get("GRANT", 0) == 0:
+        flags.append("DCL contains REVOKE scripts but no GRANT scripts.")
+    if dcl.get("MIXED DCL", 0):
+        flags.append("DCL contains mixed GRANT/REVOKE scripts.")
+    if dml.get("DELETE", 0) and dml.get("MERGE", 0) == 0:
+        flags.append("DML contains DELETE scripts and no MERGE scripts.")
+    if dml.get("ORDERED SQL", 0):
+        flags.append("Ordered SQL scripts preserve source choreography.")
+    return flags
+
+
+def _summary_tab(records: List[Dict]) -> str:
+    """Top-down script type summary."""
+    summary = _script_summary(records)
+    flags = _summary_flags(summary)
+
+    def render_category(name: str, counts: Dict[str, int]) -> str:
+        rows = "\n".join(
+            f"<tr><td>{_h(label)}</td><td>{count}</td></tr>"
+            for label, count in sorted(counts.items(), key=lambda item: (item[0]))
+        )
+        return f"""
+<section class="summary-section">
+  <h3>{_h(name)}</h3>
+  <table class="summary-table">
+    <tbody>{rows}</tbody>
+  </table>
+</section>
+"""
+
+    ordered_categories = ["DCL", "DDL", "DML"]
+    extra_categories = sorted(k for k in summary if k not in ordered_categories)
+    sections = "\n".join(
+        render_category(category, summary[category])
+        for category in ordered_categories + extra_categories
+        if summary.get(category)
+    )
+    flag_html = ""
+    if flags:
+        flag_items = "".join(f"<li>{_h(flag)}</li>" for flag in flags)
+        flag_html = f"""
+<div class="summary-flags">
+  <strong>Signals worth checking</strong>
+  <ul>{flag_items}</ul>
+</div>
+"""
+
+    return f"""
+<p style="color:#555;margin-bottom:16px">
+  Script intent is inferred from the top-level statement verbs in each packaged file.
+</p>
+{flag_html}
+<div class="summary-grid">
+{sections}
+</div>
 """
 
 
@@ -821,6 +1060,15 @@ pre {{ white-space: pre-wrap; word-break: break-all; }}
 .action-banner h2 {{ color: #7a3b00; font-size: 18px; margin-bottom: 8px; }}
 .action-banner p {{ margin: 6px 0; color: #3b2a00; }}
 .action-banner code {{ background: rgba(255,255,255,.8); padding: 2px 5px; border-radius: 4px; }}
+.summary-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }}
+.summary-section {{ border: 1px solid {_BORDER}; border-radius: 6px; overflow: hidden; background: #fff; }}
+.summary-section h3 {{ background: {_NAVY}; color: {_WHITE}; padding: 9px 12px; font-size: 14px; }}
+.summary-table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
+.summary-table td {{ padding: 8px 12px; border-bottom: 1px solid #f0f0f0; }}
+.summary-table td:last-child {{ text-align: right; font-weight: 700; font-family: monospace; }}
+.summary-flags {{ background: #fff3cd; border: 1px solid #ffca2c; border-left: 6px solid {_ORANGE};
+                  padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; }}
+.summary-flags ul {{ margin: 8px 0 0 18px; color: #7a3b00; }}
 </style>
 </head>
 <body>
@@ -844,7 +1092,8 @@ pre {{ white-space: pre-wrap; word-break: break-all; }}
 </div>
 
 <div class="tabs">
-  <button class="tab-btn active" onclick="switchTab(this,'tab-objects')">Objects</button>
+  <button class="tab-btn active" onclick="switchTab(this,'tab-summary')">Summary</button>
+  <button class="tab-btn" onclick="switchTab(this,'tab-objects')">Objects</button>
   <button class="tab-btn" onclick="switchTab(this,'tab-waves')">Waves</button>
   <button class="tab-btn" onclick="switchTab(this,'tab-trust')">Trust Report</button>
   <button class="tab-btn" onclick="switchTab(this,'tab-deploy')">Deploy</button>
@@ -854,7 +1103,11 @@ pre {{ white-space: pre-wrap; word-break: break-all; }}
 
 {_environment_prereq_banner(manifest_dict)}
 
-<div id="tab-objects" class="tab-pane active card">
+<div id="tab-summary" class="tab-pane active card">
+{_summary_tab(records)}
+</div>
+
+<div id="tab-objects" class="tab-pane card">
 {_objects_tab(records, trust)}
 </div>
 
