@@ -714,6 +714,65 @@ class TestSqljClientFilePathResolution:
             f"CALL SQLJ.INSTALL_JAR('CJ!{expected}', 'GCFR_QB', 0)",
         ]
 
+    def test_replace_jar_fallback_targets_missing_alias_in_multi_call_file(
+        self, tmp_path
+    ):
+        from database_package_deployer.deployer import _deploy_direct_execute
+        from database_package_deployer.models import DeployIntent, ParsedStatement
+
+        script = tmp_path / "DDL" / "jar_install" / "replace.sjr"
+        script.parent.mkdir(parents=True)
+        ddl = "\n".join(
+            [
+                "DATABASE GDEV1P_UT;",
+                "CALL SQLJ.REPLACE_JAR('CJ!./ExecLargeSqlJ.jar', 'JAR_EXECUTE_LARGE_SQL');",
+                "CALL SQLJ.REPLACE_JAR('CJ!./ExecLargeNOSSqlJ.jar', 'JAR_EXECUTE_LARGE_NOS_SQL');",
+            ]
+        )
+        parsed = ParsedStatement(
+            file_path=str(script),
+            ddl_text=ddl,
+            original_text=ddl,
+            database_name="",
+            object_name="JAR",
+            object_type=ObjectType.JAR,
+            strategy=DeployStrategy.DIRECT_EXECUTE,
+            qualified_name="JAR",
+            deploy_intent=DeployIntent.DIRECT_EXECUTE,
+        )
+
+        class _FailOnMissingAliasCursor(_RecordingCursor):
+            def __init__(self):
+                super().__init__()
+                self._failed = False
+
+            def execute(self, sql):
+                super().execute(sql)
+                if (
+                    not self._failed
+                    and "REPLACE_JAR" in sql
+                    and "JAR_EXECUTE_LARGE_NOS_SQL" in sql
+                ):
+                    self._failed = True
+                    raise Exception(
+                        "[Error 7972] Jar "
+                        "'GDEV1P_UT.JAR_EXECUTE_LARGE_NOS_SQL' does not exist."
+                    )
+
+        cur = _FailOnMissingAliasCursor()
+        result = _deploy_direct_execute(cur, parsed, dry_run=False)
+
+        jar_one = (script.parent / "ExecLargeSqlJ.jar").resolve().as_posix()
+        jar_two = (script.parent / "ExecLargeNOSSqlJ.jar").resolve().as_posix()
+        assert result.state == DeployState.COMPLETED
+        retry_sql = "\n".join(cur.executed[3:])
+        assert f"CALL SQLJ.REPLACE_JAR('CJ!{jar_one}', 'JAR_EXECUTE_LARGE_SQL')" in retry_sql
+        assert f"CALL SQLJ.INSTALL_JAR('CJ!{jar_two}', 'JAR_EXECUTE_LARGE_NOS_SQL', 0)" in retry_sql
+        assert (
+            f"CALL SQLJ.INSTALL_JAR('CJ!{jar_one}', 'JAR_EXECUTE_LARGE_SQL', 0)"
+            not in retry_sql
+        )
+
     def test_install_jar_already_exists_still_fails(self, tmp_path):
         from database_package_deployer.deployer import _deploy_direct_execute
         from database_package_deployer.models import DeployIntent, ParsedStatement
