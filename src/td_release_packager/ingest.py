@@ -174,6 +174,16 @@ _CREATE_VIEW_RE = re.compile(
     r"CREATE\s+VIEW\b",
     re.IGNORECASE,
 )
+_DATABASE_CONTEXT_RE = re.compile(r"^\s*DATABASE\s+[^;]+;?\s*$", re.IGNORECASE)
+_SQLJ_JAR_CALL_STMT_RE = re.compile(
+    r"\bCALL\s+SQLJ\s*\.\s*(?:INSTALL_JAR|CREATE_JAR|REPLACE_JAR)\s*\(",
+    re.IGNORECASE,
+)
+_SQLJ_JAR_ALIAS_RE = re.compile(
+    r"\bCALL\s+SQLJ\s*\.\s*(?:INSTALL_JAR|CREATE_JAR|REPLACE_JAR)\s*\("
+    r"\s*'(?:[^']|'')*'\s*,\s*'(?P<alias>(?:[^']|'')*)'",
+    re.IGNORECASE | re.DOTALL,
+)
 
 # -- MULTISET detection --
 _HAS_SET_MULTISET_RE = re.compile(
@@ -462,7 +472,9 @@ def _ingest_directory_impl(
             # A file like create_databases.sql with 5 CREATE DATABASE
             # statements becomes 5 individual statements, each
             # processed and placed as a separate eponymous file.
-            statements = _split_multi_statement(raw_content, src_path)
+            statements = _split_multi_sqlj_jar_script(
+                raw_content, src_path
+            ) or _split_multi_statement(raw_content, src_path)
 
             from td_release_packager.classifier import classify, base_type
 
@@ -611,6 +623,10 @@ def _ingest_directory_impl(
                     specific_name = _extract_specific_function_name(content)
                     if specific_name:
                         obj_name = specific_name
+                elif obj_type == "JAR":
+                    jar_alias = _extract_sqlj_jar_alias(content)
+                    if jar_alias:
+                        obj_name = jar_alias
 
                 # Build eponymous filename
                 if db_name and obj_name:
@@ -1130,6 +1146,58 @@ def _split_multi_statement(
     return statements
 
 
+def _split_multi_sqlj_jar_script(content: str, src_path: str) -> Optional[List[str]]:
+    """Split a multi-alias SQLJ JAR script into one script per active alias.
+
+    Legacy Teradata projects often keep several ``CALL SQLJ.*_JAR`` statements
+    in one ``.ddl`` file with a leading ``DATABASE target_db;`` context. SHIPS
+    treats each JAR alias as its own deployable object, so harvest fans those
+    files out into atomic ``.sjr`` scripts while preserving the database context
+    above each call.
+    """
+    from td_release_packager.sql_text import strip_comments_and_string_literals
+
+    clean = strip_comments_and_string_literals(content)
+    semi_positions = _top_level_semicolon_positions(clean)
+    if len(semi_positions) <= 1:
+        return None
+
+    chunks: List[Tuple[str, str]] = []
+    start = 0
+    for pos in semi_positions:
+        original = content[start : pos + 1].strip()
+        clean_chunk = clean[start : pos + 1].strip()
+        start = pos + 1
+        if original:
+            chunks.append((original, clean_chunk))
+
+    trailing = content[start:].strip()
+    if trailing:
+        chunks.append((trailing, clean[start:].strip()))
+
+    database_context = ""
+    jar_calls: List[str] = []
+    for original, clean_chunk in chunks:
+        if not database_context and _DATABASE_CONTEXT_RE.match(clean_chunk):
+            database_context = original
+        elif _SQLJ_JAR_CALL_STMT_RE.search(clean_chunk):
+            jar_calls.append(original)
+
+    if len(jar_calls) <= 1:
+        return None
+
+    statements = [
+        f"{database_context}\n\n{call}".strip() if database_context else call
+        for call in jar_calls
+    ]
+    logger.info(
+        "Multi-JAR script split: %s -> %d SQLJ scripts",
+        os.path.basename(src_path),
+        len(statements),
+    )
+    return statements
+
+
 def _top_level_semicolon_positions(clean_sql: str) -> List[int]:
     """Return semicolon offsets that terminate top-level statements.
 
@@ -1427,6 +1495,15 @@ def _extract_specific_function_name(
     parts = qualified.split(".")
     # Return just the object name (last part)
     return parts[-1].strip()
+
+
+def _extract_sqlj_jar_alias(content: str) -> Optional[str]:
+    """Extract the SQLJ JAR alias so harvested JAR scripts are eponymous."""
+    match = _SQLJ_JAR_ALIAS_RE.search(_strip_comments(content))
+    if not match:
+        return None
+    alias = match.group("alias").replace("''", "'").strip()
+    return alias or None
 
 
 # ---------------------------------------------------------------
