@@ -1062,14 +1062,53 @@ class TestIngestDirectory:
             detect_tokens=False,
         )
 
-        assert result.classified == 1
+        assert result.classified == 2
         # Classification stays "JAR" — that's the semantic type
-        assert result.files_placed[0][2] == "JAR"
-        # ...but the staged file extension is .sjr, not .jar
-        dest_path = result.files_placed[0][1]
-        assert dest_path.endswith(".sjr"), f"Expected .sjr extension; got {dest_path}"
-        # And it lives under DDL/jar_install (not DDL/JARs)
-        assert "jar_install" in dest_path.replace("\\", "/")
+        assert all(kind == "JAR" for _, _, kind in result.files_placed)
+        # ...but the staged files use .sjr, not .jar
+        for _, dest_path, _ in result.files_placed:
+            assert dest_path.endswith(".sjr"), (
+                f"Expected .sjr extension; got {dest_path}"
+            )
+            # And they live under DDL/jar_install (not DDL/JARs)
+            assert "jar_install" in dest_path.replace("\\", "/")
+
+    def test_ingest_splits_multi_alias_sqlj_script(self, tmp_path, tmp_project):
+        src = tmp_path / "source"
+        src.mkdir()
+        jar_dir = src / "JAVA" / "JAR"
+        jar_dir.mkdir(parents=True)
+        (jar_dir / "ExecLargeSqlJ.jar").write_bytes(b"jar-one")
+        (jar_dir / "ExecLargeNOSSqlJ.jar").write_bytes(b"jar-two")
+        (src / "GCFR_UT_Install_Jar.ddl").write_text(
+            "DATABASE $GCFR_P_UT;\n"
+            "\n"
+            "-- CALL SQLJ.INSTALL_JAR('CJ!../JAVA/JAR/ExecLargeSqlJ.jar', "
+            "'JAR_EXECUTE_LARGE_SQL', 0);\n"
+            "\n"
+            "-- CALL SQLJ.INSTALL_JAR('CJ!../JAVA/JAR/ExecLargeNOSSqlJ.jar', "
+            "'JAR_EXECUTE_LARGE_NOS_SQL', 0);\n"
+            "\n"
+            "CALL SQLJ.REPLACE_JAR('CJ!JAVA/JAR/ExecLargeSqlJ.jar', "
+            "'JAR_EXECUTE_LARGE_SQL');\n"
+            "\n"
+            "CALL SQLJ.REPLACE_JAR('CJ!JAVA/JAR/ExecLargeNOSSqlJ.jar', "
+            "'JAR_EXECUTE_LARGE_NOS_SQL');\n",
+            encoding="utf-8",
+        )
+
+        result = ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        jar_dests = sorted(d for _, d, kind in result.files_placed if kind == "JAR")
+        assert len(jar_dests) == 2
+        assert any(d.endswith("JAR_EXECUTE_LARGE_SQL.sjr") for d in jar_dests)
+        assert any(d.endswith("JAR_EXECUTE_LARGE_NOS_SQL.sjr") for d in jar_dests)
+        for dest in jar_dests:
+            text = (tmp_project / dest).read_text(encoding="utf-8")
+            assert text.count("CALL SQLJ.REPLACE_JAR") == 1
+            assert "DATABASE $GCFR_P_UT;" in text
+            assert "CJ!./" in text
+        assert len(result.binaries_placed) == 2
 
     def test_ingest_splits_multistatement_ddl_and_grant(self, tmp_path, tmp_project):
         """A file with CREATE TABLE followed by GRANT splits into
