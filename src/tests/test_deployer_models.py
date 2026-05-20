@@ -796,3 +796,59 @@ class TestSqljClientFilePathResolution:
 
         with pytest.raises(Exception, match="already exists"):
             _deploy_direct_execute(cur, parsed, dry_run=False)
+
+
+class TestExternalNameClientFilePathResolution:
+    """C/C++ EXTERNAL NAME paths resolve relative to the deploy script."""
+
+    def test_cpp_external_name_path_resolves_against_script_directory(self, tmp_path):
+        from database_package_deployer.deployer import (
+            _resolve_external_name_client_file_paths,
+        )
+
+        script = tmp_path / "DDL" / "procedures" / "raise.spl"
+        script.parent.mkdir(parents=True)
+        ddl = (
+            "REPLACE PROCEDURE DB.raise_error()\n"
+            "LANGUAGE CPP\n"
+            "EXTERNAL NAME 'CS!RaiseException!./RaiseException.cpp!F!RaiseException';"
+        )
+
+        resolved = _resolve_external_name_client_file_paths(ddl, str(script))
+
+        expected = (script.parent / "RaiseException.cpp").resolve().as_posix()
+        assert (
+            f"EXTERNAL NAME 'CS!RaiseException!{expected}!F!RaiseException'"
+            in resolved
+        )
+
+    def test_deploy_direct_execute_rewrites_cpp_external_path_only_for_execution(
+        self, tmp_path
+    ):
+        from database_package_deployer.deployer import _deploy_direct_execute
+        from database_package_deployer.models import DeployIntent, ParsedStatement
+
+        script = tmp_path / "DDL" / "procedures" / "raise.spl"
+        script.parent.mkdir(parents=True)
+        ddl = (
+            "REPLACE PROCEDURE DB.raise_error()\n"
+            "LANGUAGE CPP\n"
+            "EXTERNAL NAME 'CS!RaiseException!./RaiseException.cpp!F!RaiseException';"
+        )
+        parsed = ParsedStatement(
+            file_path=str(script),
+            ddl_text=ddl,
+            original_text=ddl,
+            database_name="DB",
+            object_name="raise_error",
+            object_type=ObjectType.PROCEDURE,
+            strategy=DeployStrategy.REPLACE_IN_PLACE,
+            qualified_name="DB.raise_error",
+            deploy_intent=DeployIntent.REPLACE_WITH_BACKUP,
+        )
+
+        cur = _RecordingCursor()
+        _deploy_direct_execute(cur, parsed, dry_run=False)
+
+        expected = (script.parent / "RaiseException.cpp").resolve().as_posix()
+        assert f"CS!RaiseException!{expected}!F!RaiseException" in cur.executed[0]

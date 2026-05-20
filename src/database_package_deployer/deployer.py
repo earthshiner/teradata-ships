@@ -124,6 +124,20 @@ def _clean_db_error(raw: str) -> str:
 
 
 _SQLJ_CLIENT_FILE_RE = re.compile(r"'CJ!((?:[^']|'')*)'", re.IGNORECASE)
+_EXTERNAL_NAME_RE = re.compile(
+    r"(?P<prefix>\bEXTERNAL\s+NAME\s*)'(?P<body>(?:[^']|'')*)'",
+    re.IGNORECASE | re.DOTALL,
+)
+_CLIENT_SOURCE_EXTS = (
+    ".c",
+    ".cc",
+    ".cpp",
+    ".cxx",
+    ".h",
+    ".hh",
+    ".hpp",
+    ".hxx",
+)
 _SQLJ_JAR_CALL_RE = re.compile(
     r"""
     (?P<prefix>\bCALL\s+SQLJ\s*\.\s*)
@@ -266,6 +280,50 @@ def _resolve_sqlj_client_file_paths(ddl_text: str, ddl_file_path: str) -> str:
         return f"'CJ!{resolved}'"
 
     return _SQLJ_CLIENT_FILE_RE.sub(repl, ddl_text)
+
+
+def _resolve_external_name_client_file_paths(
+    ddl_text: str, ddl_file_path: str
+) -> str:
+    """
+    Resolve relative C/C++ EXTERNAL NAME file paths against the owning script.
+
+    Teradata ``CS!`` external source files are opened by the client driver in
+    the same way SQLJ ``CJ!`` files are. Harvest places C/C++ dependencies
+    beside the generated ``.spl``/``.fnc`` file, so convert relative source or
+    header paths to absolute paths before execution without mutating the
+    packaged source file.
+    """
+    if not ddl_file_path or ddl_file_path == "<inline>":
+        return ddl_text
+
+    base_dir = os.path.dirname(os.path.abspath(ddl_file_path))
+
+    def resolve_piece(piece: str) -> str:
+        raw = piece.replace("''", "'").strip()
+        if not raw or not raw.lower().endswith(_CLIENT_SOURCE_EXTS):
+            return piece
+        if os.path.isabs(raw):
+            resolved = raw
+        else:
+            resolved = os.path.abspath(os.path.join(base_dir, raw))
+        return resolved.replace("\\", "/").replace("'", "''")
+
+    def repl(match: re.Match) -> str:
+        body = match.group("body")
+        if not body.upper().startswith("CS!"):
+            return match.group(0)
+        parts = body.split("!")
+        resolved = "!".join(resolve_piece(part) for part in parts)
+        return f"{match.group('prefix')}'{resolved}'"
+
+    return _EXTERNAL_NAME_RE.sub(repl, ddl_text)
+
+
+def _resolve_client_file_paths(ddl_text: str, ddl_file_path: str) -> str:
+    """Resolve all client-opened local file references for execution."""
+    ddl_text = _resolve_sqlj_client_file_paths(ddl_text, ddl_file_path)
+    return _resolve_external_name_client_file_paths(ddl_text, ddl_file_path)
 
 
 # ---------------------------------------------------------------
@@ -2441,8 +2499,7 @@ def _deploy_direct_execute(
     )
 
     ddl_text = parsed.ddl_text
-    if obj_type == ObjectType.JAR:
-        ddl_text = _resolve_sqlj_client_file_paths(parsed.ddl_text, parsed.file_path)
+    ddl_text = _resolve_client_file_paths(parsed.ddl_text, parsed.file_path)
 
     try:
         _execute_parsed_ddl(cursor, parsed, ddl_text=ddl_text)
