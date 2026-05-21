@@ -188,6 +188,63 @@ class TestFindDbReferences:
         assert "BCS" not in refs
         assert "DT" not in refs
 
+    def test_excludes_derived_alias_without_whitespace(self):
+        """Derived aliases may follow the close paren with no whitespace."""
+        sql = textwrap.dedent("""
+            REPLACE VIEW GDEV1V_OPR.Stream_Report AS
+            SELECT BD.Multi_Streams_On_Multi_Dates_Flag
+            FROM GDEV1V_OPR.GCFR_RV_Stream S
+            LEFT JOIN (
+                SELECT Business_Date
+                FROM GDEV1T_OPR.Business_Date
+            )BD ON S.Business_Date = BD.Business_Date;
+        """)
+
+        refs = find_all_db_references(sql, tokens_only=False)
+
+        assert "GDEV1T_OPR" in refs
+        assert "GDEV1V_OPR" in refs
+        assert "BD" not in refs
+
+    def test_excludes_aliases_after_quoted_object_names(self):
+        """Quoted Teradata object names can still have table aliases."""
+        sql = textwrap.dedent("""
+            REPLACE VIEW GDEV1V_OPR.Sankey AS
+            SELECT PR.Process_Name, PT.Process_Type, FPR.File_Id
+            FROM GDEV1V_GCFR."GCFR_Process" PR
+            LEFT JOIN GDEV1V_GCFR."GCFR_Process_Type" PT
+                ON PR.Process_Type = PT.Process_Type
+            LEFT JOIN GDEV1V_GCFR."GCFR_File_Process" FPR
+                ON PR.Ctl_Id = FPR.Ctl_Id;
+        """)
+
+        refs = find_all_db_references(sql, tokens_only=False)
+
+        assert refs == {"GDEV1V_GCFR", "GDEV1V_OPR"}
+        assert "PR" not in refs
+        assert "PT" not in refs
+        assert "FPR" not in refs
+
+    def test_excludes_unqualified_cte_source_aliases(self):
+        """Aliases after unqualified CTE references must not infer grants."""
+        sql = textwrap.dedent("""
+            REPLACE VIEW GDEV1V_OPR.Row_Count AS
+            WITH GCFR_Rep_System_File_Extract AS (
+                SELECT Count_Source
+                FROM GDEV1V_GCFR.GCFR_System_File_Extract
+            )
+            SELECT RSFE.Count_Source, DF.Count_Source
+            FROM GCFR_Rep_System_File_Extract RSFE
+            LEFT JOIN "GCFR_Rep_System_File_Extract" DF
+                ON RSFE.File_Id = DF.File_Id;
+        """)
+
+        refs = find_all_db_references(sql, tokens_only=False)
+
+        assert refs == {"GDEV1V_GCFR", "GDEV1V_OPR"}
+        assert "RSFE" not in refs
+        assert "DF" not in refs
+
     def test_excludes_nested_derived_table_aliases(self):
         """Derived aliases after nested expressions must not infer grants."""
         sql = textwrap.dedent("""

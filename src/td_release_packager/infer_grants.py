@@ -68,12 +68,14 @@ from typing import Dict, Set, List, Optional, Tuple
 # DDL file extensions we scan (lowercase, without leading dot)
 SCANNABLE_EXTENSIONS = {"viw", "spl", "mcr", "trg", "fnc"}
 
+SQL_OBJECT_NAME_PATTERN = r'(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_]*)'
+
 # Regex to match tokenised database references: {{TOKEN}}.ObjectName
 # Captures the full token including braces and the object name
 RE_TOKEN_REF = re.compile(
     r"\{\{([A-Z][A-Z0-9_]*)\}\}"  # group 1: token name (inside braces)
     r"\s*\.\s*"  # dot separator (optional whitespace)
-    r"([A-Za-z_][A-Za-z0-9_]*)",  # group 2: object name
+    rf"({SQL_OBJECT_NAME_PATTERN})",  # group 2: object name
     re.IGNORECASE,
 )
 
@@ -82,7 +84,7 @@ RE_TOKEN_REF = re.compile(
 RE_LITERAL_REF = re.compile(
     r"(?<!\{)\b([A-Z][A-Z0-9_]{1,127})"  # group 1: database name
     r"\s*\.\s*"  # dot separator
-    r"([A-Za-z_][A-Za-z0-9_]*)\b",  # group 2: object name
+    rf"({SQL_OBJECT_NAME_PATTERN})",  # group 2: object name
     re.IGNORECASE,
 )
 
@@ -96,7 +98,7 @@ RE_LITERAL_REF = re.compile(
 RE_INSERT_TARGET = re.compile(
     r"\bINSERT\s+(?:INTO\s+)?"
     r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
-    r"\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)",
+    rf"\s*\.\s*({SQL_OBJECT_NAME_PATTERN})",
     re.IGNORECASE,
 )
 
@@ -104,7 +106,7 @@ RE_INSERT_TARGET = re.compile(
 RE_UPDATE_TARGET = re.compile(
     r"\bUPDATE\s+"
     r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
-    r"\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)",
+    rf"\s*\.\s*({SQL_OBJECT_NAME_PATTERN})",
     re.IGNORECASE,
 )
 
@@ -113,7 +115,7 @@ RE_UPDATE_TARGET = re.compile(
 RE_DELETE_TARGET = re.compile(
     r"\bDELETE\s+(?:FROM\s+)?"
     r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
-    r"\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)",
+    rf"\s*\.\s*({SQL_OBJECT_NAME_PATTERN})",
     re.IGNORECASE,
 )
 
@@ -121,7 +123,7 @@ RE_DELETE_TARGET = re.compile(
 RE_MERGE_TARGET = re.compile(
     r"\bMERGE\s+INTO\s+"
     r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
-    r"\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)",
+    rf"\s*\.\s*({SQL_OBJECT_NAME_PATTERN})",
     re.IGNORECASE,
 )
 
@@ -129,7 +131,7 @@ RE_MERGE_TARGET = re.compile(
 RE_CALL_TARGET = re.compile(
     r"\bCALL\s+"
     r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
-    r"\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)",
+    rf"\s*\.\s*({SQL_OBJECT_NAME_PATTERN})",
     re.IGNORECASE,
 )
 
@@ -137,7 +139,7 @@ RE_CALL_TARGET = re.compile(
 RE_EXEC_TARGET = re.compile(
     r"\bEXEC(?:UTE)?\s+"
     r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
-    r"\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)",
+    rf"\s*\.\s*({SQL_OBJECT_NAME_PATTERN})",
     re.IGNORECASE,
 )
 
@@ -148,7 +150,7 @@ RE_CREATE_STMT = re.compile(
     r"|SET\s+TABLE|VOLATILE\s+TABLE)"
     r"\s+"
     r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
-    r"\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)",
+    rf"\s*\.\s*({SQL_OBJECT_NAME_PATTERN})",
     re.IGNORECASE,
 )
 
@@ -389,7 +391,7 @@ def _collect_balanced_derived_aliases(sql: str) -> Set[str]:
     aliases: Set[str] = set()
     derived_start = re.compile(r"(?:\bFROM\b|\bJOIN\b|,)\s*\(", re.IGNORECASE)
     alias_after_close = re.compile(
-        r"\s+(?:AS\s+)?([A-Za-z_][A-Za-z0-9_]*)",
+        r"\s*(?:AS\s+)?([A-Za-z_][A-Za-z0-9_]*)",
         re.IGNORECASE,
     )
     for match in derived_start.finditer(sql):
@@ -415,7 +417,7 @@ def _collect_known_aliases(sql: str, known_objects: Set[str]) -> Set[str]:
         r"|[A-Z][A-Z0-9_]{1,127}"
         r")"
         r"\s*\.\s*"
-        r"[A-Za-z_][A-Za-z0-9_]*"
+        rf"{SQL_OBJECT_NAME_PATTERN}"
         r"(?:\s+(?:AS\s+)?([A-Za-z_][A-Za-z0-9_]*))?",
         re.IGNORECASE,
     )
@@ -431,13 +433,25 @@ def _collect_known_aliases(sql: str, known_objects: Set[str]) -> Set[str]:
         r"|[A-Z][A-Z0-9_]{1,127}"
         r")"
         r"\s*\.\s*"
-        r"[A-Za-z_][A-Za-z0-9_]*"
+        rf"{SQL_OBJECT_NAME_PATTERN}"
         r"\s+(?:AS\s+)?"
         r"(?!(?:FROM|WHERE|JOIN|ON|GROUP|ORDER|HAVING|QUALIFY|;)\b)"
         r"([A-Za-z_][A-Za-z0-9_]*)",
         re.IGNORECASE,
     )
     for match in re_comma_join_alias.finditer(sql):
+        _add_alias(aliases, match.group(1))
+
+    # Aliases after CTE or other unqualified FROM/JOIN sources.
+    re_unqualified_source_alias = re.compile(
+        r"(?:\bFROM\b|\bJOIN\b)\s+"
+        rf"{SQL_OBJECT_NAME_PATTERN}"
+        r"\s+(?:AS\s+)?"
+        r"(?!(?:ON|WHERE|JOIN|GROUP|ORDER|HAVING|QUALIFY|;)\b)"
+        r"([A-Za-z_][A-Za-z0-9_]*)",
+        re.IGNORECASE,
+    )
+    for match in re_unqualified_source_alias.finditer(sql):
         _add_alias(aliases, match.group(1))
 
     # CTE names used later as correlation-style qualifiers.
