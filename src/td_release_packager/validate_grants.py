@@ -364,6 +364,19 @@ def _infer_expected_grants(
         )
         if result and result.get("grants"):
             raw_results.append(result)
+            for passthrough_grantee, grants in result.get(
+                "passthrough_grants",
+                {},
+            ).items():
+                raw_results.append(
+                    {
+                        "file": result["file"],
+                        "grantee": passthrough_grantee,
+                        "obj_type": f"{result['obj_type']}_VIEW_PASSTHROUGH",
+                        "obj_name": result["obj_name"],
+                        "grants": grants,
+                    }
+                )
     consolidated = consolidate_grants(raw_results) if raw_results else {}
     return consolidated, raw_results, len(raw_results)
 

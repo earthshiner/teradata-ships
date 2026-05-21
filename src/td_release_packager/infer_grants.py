@@ -682,6 +682,10 @@ def analyse_file(
     # grants_map: {grantor_database: set of privileges}
     grants_map: Dict[str, Set[str]] = defaultdict(set)
     object_privs: Dict[Tuple[str, str], Set[str]] = defaultdict(set)
+    object_databases: Dict[Tuple[str, str], str] = {}
+    passthrough_grants: Dict[str, Dict[str, Set[str]]] = defaultdict(
+        lambda: defaultdict(set)
+    )
 
     # For views, the entire body is SELECT context — every referenced
     # database gets SELECT
@@ -706,7 +710,9 @@ def analyse_file(
             db, obj = extract_object_ref(match)
             if _is_excluded_db_ref(db):
                 continue
-            object_privs[_ref_key(db, obj)].add(PRIV_INSERT)
+            key = _ref_key(db, obj)
+            object_databases[key] = db
+            object_privs[key].add(PRIV_INSERT)
             grants_map[db].add(PRIV_INSERT)
 
         # UPDATE targets
@@ -714,7 +720,9 @@ def analyse_file(
             db, obj = extract_object_ref(match)
             if _is_excluded_db_ref(db):
                 continue
-            object_privs[_ref_key(db, obj)].add(PRIV_UPDATE)
+            key = _ref_key(db, obj)
+            object_databases[key] = db
+            object_privs[key].add(PRIV_UPDATE)
             grants_map[db].add(PRIV_UPDATE)
 
         # DELETE targets
@@ -722,7 +730,9 @@ def analyse_file(
             db, obj = extract_object_ref(match)
             if _is_excluded_db_ref(db):
                 continue
-            object_privs[_ref_key(db, obj)].add(PRIV_DELETE)
+            key = _ref_key(db, obj)
+            object_databases[key] = db
+            object_privs[key].add(PRIV_DELETE)
             grants_map[db].add(PRIV_DELETE)
 
         # MERGE targets — implies both INSERT and UPDATE
@@ -730,7 +740,9 @@ def analyse_file(
             db, obj = extract_object_ref(match)
             if _is_excluded_db_ref(db):
                 continue
-            object_privs[_ref_key(db, obj)].update({PRIV_INSERT, PRIV_UPDATE})
+            key = _ref_key(db, obj)
+            object_databases[key] = db
+            object_privs[key].update({PRIV_INSERT, PRIV_UPDATE})
             grants_map[db].add(PRIV_INSERT)
             grants_map[db].add(PRIV_UPDATE)
 
@@ -739,7 +751,9 @@ def analyse_file(
             db, obj = extract_object_ref(match)
             if _is_excluded_db_ref(db):
                 continue
-            object_privs[_ref_key(db, obj)].add(PRIV_EXEC_PROC)
+            key = _ref_key(db, obj)
+            object_databases[key] = db
+            object_privs[key].add(PRIV_EXEC_PROC)
             grants_map[db].add(PRIV_EXEC_PROC)
 
         # EXEC/EXECUTE targets — implies EXECUTE (macros)
@@ -747,7 +761,9 @@ def analyse_file(
             db, obj = extract_object_ref(match)
             if _is_excluded_db_ref(db):
                 continue
-            object_privs[_ref_key(db, obj)].add(PRIV_EXEC)
+            key = _ref_key(db, obj)
+            object_databases[key] = db
+            object_privs[key].add(PRIV_EXEC)
             grants_map[db].add(PRIV_EXEC)
 
         # --- Read sources: all FROM/JOIN references → SELECT ---
@@ -759,12 +775,15 @@ def analyse_file(
                 grants_map[db_ref].add(PRIV_SELECT)
         for db_ref, obj_name in find_all_object_references(sql, tokens_only=False):
             if appears_as_read_source(sql, db_ref):
-                object_privs[_ref_key(db_ref, obj_name)].add(PRIV_SELECT)
+                key = _ref_key(db_ref, obj_name)
+                object_databases[key] = db_ref
+                object_privs[key].add(PRIV_SELECT)
 
         if view_dependency_index:
             for ref_key, privs in object_privs.items():
+                view_db = object_databases.get(ref_key, ref_key[0])
                 for base_db in view_dependency_index.get(ref_key, set()):
-                    grants_map[base_db].update(privs)
+                    passthrough_grants[view_db][base_db].update(privs)
 
     # Tables don't typically reference other databases in their DDL
     elif obj_type == "TABLE":
@@ -788,13 +807,20 @@ def analyse_file(
             priv_list = ", ".join(sorted(privs, key=lambda p: PRIV_ORDER.index(p)))
             print(f"    Grant: {priv_list} ON {grantor} TO {grantee}")
 
-    return {
+    result = {
         "file": filepath.name,
         "grantee": grantee,
         "obj_type": obj_type,
         "obj_name": obj_name,
         "grants": dict(grants_map),
     }
+    if passthrough_grants:
+        result["passthrough_grants"] = {
+            view_db: dict(grants)
+            for view_db, grants in passthrough_grants.items()
+            if grants
+        }
+    return result
 
 
 # ---------------------------------------------------------------------------
