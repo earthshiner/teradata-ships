@@ -230,6 +230,54 @@ class TestFindDbReferences:
         assert "sRV_ProcessSumByBusDate" not in refs
         assert "sRV_ProcByCtlSumByBusDate" not in refs
 
+    def test_excludes_literal_join_aliases_from_process_status_view(self):
+        """Join aliases from process status view must not infer grants."""
+        sql = textwrap.dedent("""
+            REPLACE VIEW GDEV1V_OPR.GCFR_RV_Process_Status AS
+            SELECT PID.business_date
+                , SYS.system_Name
+                , PID.Process_Name
+                , PID.Process_State
+                , SF.Data_File_Name
+                , CASE
+                    WHEN Process_State = 99 THEN 'Completed'
+                    WHEN Process_State <> 99 THEN 'NOT Completed'
+                  END Process_status
+                , (
+                    SELECT CASE
+                        WHEN System_Defined_Msg IS NULL THEN 'N/A'
+                        ELSE System_Defined_Msg
+                      END
+                    FROM GDEV1V_GCFR.GCFR_Error_Log
+                    INNER JOIN GDEV1V_GCFR.GCFR_Process_Id id
+                        ON id.Process_Name = PID.Process_Name
+                        AND id.Process_State <> 99
+                    WHERE Logger_Name = PID.Process_Name
+                    AND Logger_Id = (
+                        SELECT MAX(Logger_Id)
+                        FROM GDEV1V_GCFR.GCFR_Error_Log
+                        WHERE Logger_Name = PID.Process_Name
+                    )
+                  ) Error_Message
+                , PID.update_ts
+            FROM GDEV1V_GCFR.GCFR_Process_Id PID
+            INNER JOIN GDEV1V_GCFR.GCFR_PROCESS PR
+                ON PID.Process_Name = PR.Process_Name
+            INNER JOIN GDEV1V_GCFR.GCFR_FILE_PROCESS FPR
+                ON FPR.Process_Name = PR.Process_Name
+            INNER JOIN GDEV1V_GCFR.GCFR_SYSTEM_FILE SF
+                ON SF.Ctl_Id = FPR.Ctl_Id
+                AND SF.file_id = FPR.file_id
+            INNER JOIN GDEV1V_GCFR.GCFR_SYSTEM SYS
+                ON SYS.Ctl_Id = PR.Ctl_Id;
+        """)
+
+        refs = find_all_db_references(sql, tokens_only=False)
+
+        assert refs == {"GDEV1V_GCFR", "GDEV1V_OPR"}
+        for alias in {"PID", "PR", "FPR", "SF", "SYS", "ID"}:
+            assert alias not in refs
+
     def test_excludes_object_names_as_correlation_names(self):
         """
         Unqualified table names used as correlation names
