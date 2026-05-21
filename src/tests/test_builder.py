@@ -190,13 +190,17 @@ def test_inferred_grants_are_packaged_as_dcl(
     with zipfile.ZipFile(archive_path) as archive:
         names = [name.replace("\\", "/") for name in archive.namelist()]
         assert any(name.endswith("payload/02_dcl/inter_db/APP_DB.dcl") for name in names)
+        assert any(name.endswith("payload/02_dcl/inter_db/APP_V.dcl") for name in names)
         report_name = next(name for name in names if name.endswith("package_report.html"))
         report = archive.read(report_name).decode("utf-8")
         assert "APP_DB.dcl" in report
         dcl_name = next(name for name in names if name.endswith("APP_DB.dcl"))
         dcl = archive.read(dcl_name).decode("utf-8")
         assert "GRANT DELETE ON APP_V TO APP_DB WITH GRANT OPTION;" in dcl
-        assert "GRANT DELETE ON DATA_DB TO APP_DB WITH GRANT OPTION;" in dcl
+        assert "GRANT DELETE ON DATA_DB TO APP_DB WITH GRANT OPTION;" not in dcl
+        view_dcl_name = next(name for name in names if name.endswith("APP_V.dcl"))
+        view_dcl = archive.read(view_dcl_name).decode("utf-8")
+        assert "GRANT SELECT, DELETE ON DATA_DB TO APP_V WITH GRANT OPTION;" in view_dcl
 
     assert not source_dcl.exists()
 

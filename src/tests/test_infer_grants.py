@@ -533,7 +533,8 @@ class TestAnalyseMacro:
             PRIV_INSERT,
             PRIV_SELECT,
         }
-        assert result["grants"]["GDEV1T_GCFR"] == {
+        assert "GDEV1T_GCFR" not in result["grants"]
+        assert result["passthrough_grants"]["GDEV1V_GCFR"]["GDEV1T_GCFR"] == {
             PRIV_DELETE,
             PRIV_INSERT,
             PRIV_SELECT,
