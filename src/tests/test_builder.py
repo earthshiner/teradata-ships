@@ -159,20 +159,21 @@ def test_single_package_archive_uses_context_metadata_only(
 def test_inferred_grants_are_packaged_as_dcl(
     tmp_path, tmp_project, sample_env_config_file
 ):
-    """Grant inference output must ship as visible deployable .dcl scripts."""
-    from td_release_packager.validate_grants import fix_grants
-
-    macro = tmp_project / "payload" / "database" / "DDL" / "macros" / "APP_DB.M.mcr"
-    macro.write_text(
-        "REPLACE MACRO APP_DB.M AS (SELECT Id FROM DATA_DB.T;);\n",
+    """Package build backfills visible deployable .dcl grant scripts."""
+    view = tmp_project / "payload" / "database" / "DDL" / "views" / "APP_V.MV.viw"
+    view.write_text(
+        "REPLACE VIEW APP_V.MV AS SELECT Id FROM DATA_DB.T;\n",
         encoding="utf-8",
     )
-    result, files_written = fix_grants(tmp_project)
-    assert result.passed
-    assert files_written == 1
-    assert (
+    macro = tmp_project / "payload" / "database" / "DDL" / "macros" / "APP_DB.M.mcr"
+    macro.write_text(
+        "REPLACE MACRO APP_DB.M AS (DELETE FROM APP_V.MV WHERE Id = :Id;);\n",
+        encoding="utf-8",
+    )
+    source_dcl = (
         tmp_project / "payload" / "database" / "DCL" / "inter_db" / "APP_DB.dcl"
-    ).exists()
+    )
+    assert not source_dcl.exists()
 
     config = BuildConfig(
         source_dir=str(tmp_project),
@@ -192,6 +193,12 @@ def test_inferred_grants_are_packaged_as_dcl(
         report_name = next(name for name in names if name.endswith("package_report.html"))
         report = archive.read(report_name).decode("utf-8")
         assert "APP_DB.dcl" in report
+        dcl_name = next(name for name in names if name.endswith("APP_DB.dcl"))
+        dcl = archive.read(dcl_name).decode("utf-8")
+        assert "GRANT DELETE ON APP_V TO APP_DB WITH GRANT OPTION;" in dcl
+        assert "GRANT DELETE ON DATA_DB TO APP_DB WITH GRANT OPTION;" in dcl
+
+    assert not source_dcl.exists()
 
 
 # ---------------------------------------------------------------

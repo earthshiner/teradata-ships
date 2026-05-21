@@ -56,6 +56,7 @@ from typing import Dict, List, Optional, Set, Tuple
 from td_release_packager.infer_grants import (
     PRIV_ORDER,
     analyse_file,
+    build_view_dependency_index,
     consolidate_grants,
     find_ddl_files,
     generate_grt_content,
@@ -353,9 +354,14 @@ def _infer_expected_grants(
             ddl_count:    number of DDL files contributing grants
     """
     ddl_files = find_ddl_files(project_dir)
+    view_dependency_index = build_view_dependency_index(project_dir)
     raw_results: List[Dict] = []
     for ddl_file in ddl_files:
-        result = analyse_file(ddl_file, verbose=verbose)
+        result = analyse_file(
+            ddl_file,
+            verbose=verbose,
+            view_dependency_index=view_dependency_index,
+        )
         if result and result.get("grants"):
             raw_results.append(result)
     consolidated = consolidate_grants(raw_results) if raw_results else {}
