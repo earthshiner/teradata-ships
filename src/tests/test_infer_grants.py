@@ -134,6 +134,60 @@ class TestFindDbReferences:
         assert "p" not in refs
         assert "dq" not in refs
 
+    def test_excludes_literal_database_object_aliases(self):
+        """Literal Database.Object aliases must not be inferred as databases."""
+        sql = textwrap.dedent("""
+            REPLACE VIEW GDEV1V_OPR.Some_View AS
+            SELECT BD.Business_Date
+            FROM GDEV1T_OPR.Business_Date AS BD
+            INNER JOIN GDEV1T_OPR.Calendar C ON BD.Calendar_Id = C.Calendar_Id;
+        """)
+
+        refs = find_all_db_references(sql, tokens_only=False)
+
+        assert "GDEV1T_OPR" in refs
+        assert "BD" not in refs
+        assert "C" not in refs
+
+    def test_excludes_comma_join_aliases(self):
+        """Comma-join aliases must not be inferred as databases."""
+        sql = textwrap.dedent("""
+            REPLACE VIEW GDEV1V_OPR.Some_View AS
+            SELECT BD.Business_Date, CAL.Calendar_Date
+            FROM GDEV1T_OPR.Business_Date BD,
+                 GDEV1T_OPR.Calendar CAL
+            WHERE BD.Calendar_Id = CAL.Calendar_Id;
+        """)
+
+        refs = find_all_db_references(sql, tokens_only=False)
+
+        assert "GDEV1T_OPR" in refs
+        assert "BD" not in refs
+        assert "CAL" not in refs
+
+    def test_excludes_cte_and_derived_table_aliases(self):
+        """CTE and derived table aliases must not be inferred as databases."""
+        sql = textwrap.dedent("""
+            REPLACE VIEW GDEV1V_GCFR.Some_View AS
+            WITH BCS AS (
+                SELECT Stream_Key
+                FROM GDEV1T_GCFR.GCFR_Stream_BusDate
+            )
+            SELECT BCS.Stream_Key, DT.Update_Ts
+            FROM BCS
+            INNER JOIN (
+                SELECT Stream_Key, Update_Ts
+                FROM GDEV1T_GCFR.GCFR_Stream_BusDate_Log
+            ) DT
+                ON BCS.Stream_Key = DT.Stream_Key;
+        """)
+
+        refs = find_all_db_references(sql, tokens_only=False)
+
+        assert "GDEV1T_GCFR" in refs
+        assert "BCS" not in refs
+        assert "DT" not in refs
+
     def test_excludes_object_names_as_correlation_names(self):
         """
         Unqualified table names used as correlation names
@@ -152,7 +206,7 @@ class TestFindDbReferences:
 
     def test_excludes_system_databases(self):
         sql = "SELECT col FROM DBC.TablesV"
-        refs = find_all_db_references(sql)
+        refs = find_all_db_references(sql, tokens_only=False)
         assert "DBC" not in refs
 
     def test_returns_empty_for_no_references(self):
@@ -325,6 +379,21 @@ class TestAnalyseProcedure:
             assert result is not None
             assert "{{MEM_DATABASE_T}}" in result["grants"]
             assert PRIV_EXEC_PROC in result["grants"]["{{MEM_DATABASE_T}}"]
+        finally:
+            os.unlink(path)
+
+    def test_call_to_system_database_does_not_infer_grant(self):
+        """CALL DBC.* must not create an app-to-DBC inferred grant."""
+        content = textwrap.dedent("""
+            CREATE PROCEDURE GDEV1P_BB.Runner()
+            BEGIN
+                CALL DBC.SysExecSQL('COLLECT STATISTICS ON GDEV1T_BB.Some_Table');
+            END;
+        """)
+        path = write_temp_file(content, ".spl")
+        try:
+            result = analyse_file(path)
+            assert result is None
         finally:
             os.unlink(path)
 
