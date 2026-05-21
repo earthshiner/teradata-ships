@@ -68,12 +68,14 @@ from typing import Dict, Set, List, Optional, Tuple
 # DDL file extensions we scan (lowercase, without leading dot)
 SCANNABLE_EXTENSIONS = {"viw", "spl", "mcr", "trg", "fnc"}
 
+SQL_OBJECT_NAME_PATTERN = r'(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_]*)'
+
 # Regex to match tokenised database references: {{TOKEN}}.ObjectName
 # Captures the full token including braces and the object name
 RE_TOKEN_REF = re.compile(
     r"\{\{([A-Z][A-Z0-9_]*)\}\}"  # group 1: token name (inside braces)
     r"\s*\.\s*"  # dot separator (optional whitespace)
-    r"([A-Za-z_][A-Za-z0-9_]*)",  # group 2: object name
+    rf"({SQL_OBJECT_NAME_PATTERN})",  # group 2: object name
     re.IGNORECASE,
 )
 
@@ -82,7 +84,7 @@ RE_TOKEN_REF = re.compile(
 RE_LITERAL_REF = re.compile(
     r"(?<!\{)\b([A-Z][A-Z0-9_]{1,127})"  # group 1: database name
     r"\s*\.\s*"  # dot separator
-    r"([A-Za-z_][A-Za-z0-9_]*)\b",  # group 2: object name
+    rf"({SQL_OBJECT_NAME_PATTERN})",  # group 2: object name
     re.IGNORECASE,
 )
 
@@ -96,7 +98,7 @@ RE_LITERAL_REF = re.compile(
 RE_INSERT_TARGET = re.compile(
     r"\bINSERT\s+(?:INTO\s+)?"
     r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
-    r"\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)",
+    rf"\s*\.\s*({SQL_OBJECT_NAME_PATTERN})",
     re.IGNORECASE,
 )
 
@@ -104,7 +106,7 @@ RE_INSERT_TARGET = re.compile(
 RE_UPDATE_TARGET = re.compile(
     r"\bUPDATE\s+"
     r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
-    r"\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)",
+    rf"\s*\.\s*({SQL_OBJECT_NAME_PATTERN})",
     re.IGNORECASE,
 )
 
@@ -113,7 +115,7 @@ RE_UPDATE_TARGET = re.compile(
 RE_DELETE_TARGET = re.compile(
     r"\bDELETE\s+(?:FROM\s+)?"
     r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
-    r"\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)",
+    rf"\s*\.\s*({SQL_OBJECT_NAME_PATTERN})",
     re.IGNORECASE,
 )
 
@@ -121,7 +123,7 @@ RE_DELETE_TARGET = re.compile(
 RE_MERGE_TARGET = re.compile(
     r"\bMERGE\s+INTO\s+"
     r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
-    r"\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)",
+    rf"\s*\.\s*({SQL_OBJECT_NAME_PATTERN})",
     re.IGNORECASE,
 )
 
@@ -129,7 +131,7 @@ RE_MERGE_TARGET = re.compile(
 RE_CALL_TARGET = re.compile(
     r"\bCALL\s+"
     r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
-    r"\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)",
+    rf"\s*\.\s*({SQL_OBJECT_NAME_PATTERN})",
     re.IGNORECASE,
 )
 
@@ -137,7 +139,7 @@ RE_CALL_TARGET = re.compile(
 RE_EXEC_TARGET = re.compile(
     r"\bEXEC(?:UTE)?\s+"
     r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
-    r"\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)",
+    rf"\s*\.\s*({SQL_OBJECT_NAME_PATTERN})",
     re.IGNORECASE,
 )
 
@@ -148,7 +150,7 @@ RE_CREATE_STMT = re.compile(
     r"|SET\s+TABLE|VOLATILE\s+TABLE)"
     r"\s+"
     r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
-    r"\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)",
+    rf"\s*\.\s*({SQL_OBJECT_NAME_PATTERN})",
     re.IGNORECASE,
 )
 
@@ -169,6 +171,102 @@ PRIV_ORDER = [
     PRIV_EXEC_PROC,
     PRIV_EXEC,
 ]
+
+SQL_KEYWORDS = {
+    "ON",
+    "WHERE",
+    "SET",
+    "INNER",
+    "LEFT",
+    "RIGHT",
+    "CROSS",
+    "FULL",
+    "OUTER",
+    "JOIN",
+    "AND",
+    "OR",
+    "NOT",
+    "IN",
+    "EXISTS",
+    "BETWEEN",
+    "LIKE",
+    "AS",
+    "WHEN",
+    "THEN",
+    "ELSE",
+    "END",
+    "CASE",
+    "GROUP",
+    "ORDER",
+    "BY",
+    "HAVING",
+    "UNION",
+    "ALL",
+    "EXCEPT",
+    "INTERSECT",
+    "INTO",
+    "FROM",
+    "SELECT",
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "MERGE",
+    "VALUES",
+    "WITH",
+    "GRANT",
+    "OPTION",
+    "LOCKING",
+    "ROW",
+    "FOR",
+    "ACCESS",
+    "TABLE",
+    "VIEW",
+    "USING",
+    "MATCHED",
+    "VOLATILE",
+    "QUALIFY",
+}
+
+SYSTEM_DATABASES = {
+    "DBC",
+    "SYSLIB",
+    "SYSUDTLIB",
+    "SYSSPATIAL",
+    "SYSJDBC",
+    "SYSBAR",
+    "TDSTATS",
+    "TDWM",
+    "SYSTEMFE",
+    "DBCMNGR",
+    "SYSADMIN",
+    "CAST",
+    "TRIM",
+    "COALESCE",
+    "CASE",
+    "WHEN",
+    "THEN",
+    "ELSE",
+    "END",
+    "AND",
+    "NOT",
+    "NULL",
+    "DATE",
+    "TIME",
+    "TIMESTAMP",
+    "INTERVAL",
+    "CHARACTER",
+    "VARCHAR",
+    "INTEGER",
+    "DECIMAL",
+    "FLOAT",
+    "BYTEINT",
+    "SMALLINT",
+    "BIGINT",
+    "LOCKING",
+    "ROW",
+    "FOR",
+    "ACCESS",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -246,6 +344,141 @@ def _ref_key(db_ref: str, obj_name: str) -> Tuple[str, str]:
     return (db_ref.upper(), obj_name.upper())
 
 
+def _normalise_identifier(identifier: str) -> str:
+    """Normalise a SQL identifier for keyword/alias comparisons."""
+    return identifier.strip().strip('"').upper()
+
+
+def _is_excluded_db_ref(db_ref: str) -> bool:
+    """Return True when a reference must never receive inferred grants."""
+    return _normalise_identifier(db_ref) in SYSTEM_DATABASES
+
+
+def _add_alias(aliases: Set[str], alias_candidate: Optional[str]) -> None:
+    """Add a correlation name unless it is a SQL keyword."""
+    if not alias_candidate:
+        return
+    alias = _normalise_identifier(alias_candidate)
+    if alias and alias not in SQL_KEYWORDS:
+        aliases.add(alias)
+
+
+def _find_matching_paren(sql: str, open_index: int) -> int:
+    """Return the matching close paren index, or -1 when unbalanced."""
+    depth = 0
+    in_string = False
+    index = open_index
+    while index < len(sql):
+        char = sql[index]
+        if char == "'":
+            if in_string and index + 1 < len(sql) and sql[index + 1] == "'":
+                index += 2
+                continue
+            in_string = not in_string
+        elif not in_string:
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0:
+                    return index
+        index += 1
+    return -1
+
+
+def _collect_balanced_derived_aliases(sql: str) -> Set[str]:
+    """Collect aliases after FROM/JOIN comma-introduced derived tables."""
+    aliases: Set[str] = set()
+    derived_start = re.compile(r"(?:\bFROM\b|\bJOIN\b|,)\s*\(", re.IGNORECASE)
+    alias_after_close = re.compile(
+        r"\s*(?:AS\s+)?([A-Za-z_][A-Za-z0-9_]*)",
+        re.IGNORECASE,
+    )
+    for match in derived_start.finditer(sql):
+        open_index = sql.find("(", match.start(), match.end())
+        close_index = _find_matching_paren(sql, open_index)
+        if close_index < 0:
+            continue
+        alias_match = alias_after_close.match(sql, close_index + 1)
+        if alias_match:
+            _add_alias(aliases, alias_match.group(1))
+    return aliases
+
+
+def _collect_known_aliases(sql: str, known_objects: Set[str]) -> Set[str]:
+    """Collect table, CTE, derived table, and update correlation aliases."""
+    aliases: Set[str] = set()
+
+    # Table/view aliases after FROM/JOIN/USING.
+    re_qualified_alias = re.compile(
+        r"(?:\bFROM\b|\bJOIN\b|\bUSING\b)\s+"
+        r"(?:"
+        r"\{\{[A-Z][A-Z0-9_]*\}\}"
+        r"|[A-Z][A-Z0-9_]{1,127}"
+        r")"
+        r"\s*\.\s*"
+        rf"{SQL_OBJECT_NAME_PATTERN}"
+        r"(?:\s+(?:AS\s+)?([A-Za-z_][A-Za-z0-9_]*))?",
+        re.IGNORECASE,
+    )
+    for match in re_qualified_alias.finditer(sql):
+        _add_alias(aliases, match.group(1))
+
+    # Comma-join aliases. The negative lookahead prevents SELECT-list commas
+    # such as ", CAL.Calendar_Date FROM ..." from consuming the FROM keyword.
+    re_comma_join_alias = re.compile(
+        r",\s+"
+        r"(?:"
+        r"\{\{[A-Z][A-Z0-9_]*\}\}"
+        r"|[A-Z][A-Z0-9_]{1,127}"
+        r")"
+        r"\s*\.\s*"
+        rf"{SQL_OBJECT_NAME_PATTERN}"
+        r"\s+(?:AS\s+)?"
+        r"(?!(?:FROM|WHERE|JOIN|ON|GROUP|ORDER|HAVING|QUALIFY|;)\b)"
+        r"([A-Za-z_][A-Za-z0-9_]*)",
+        re.IGNORECASE,
+    )
+    for match in re_comma_join_alias.finditer(sql):
+        _add_alias(aliases, match.group(1))
+
+    # Aliases after CTE or other unqualified FROM/JOIN sources.
+    re_unqualified_source_alias = re.compile(
+        r"(?:\bFROM\b|\bJOIN\b)\s+"
+        rf"{SQL_OBJECT_NAME_PATTERN}"
+        r"\s+(?:AS\s+)?"
+        r"(?!(?:ON|WHERE|JOIN|GROUP|ORDER|HAVING|QUALIFY|;)\b)"
+        r"([A-Za-z_][A-Za-z0-9_]*)",
+        re.IGNORECASE,
+    )
+    for match in re_unqualified_source_alias.finditer(sql):
+        _add_alias(aliases, match.group(1))
+
+    # CTE names used later as correlation-style qualifiers.
+    re_cte_alias = re.compile(
+        r"(?:\bWITH\b|,)\s*([A-Za-z_][A-Za-z0-9_]*)\s+AS\s*\(",
+        re.IGNORECASE,
+    )
+    for match in re_cte_alias.finditer(sql):
+        _add_alias(aliases, match.group(1))
+
+    aliases.update(_collect_balanced_derived_aliases(sql))
+
+    # Aliases from UPDATE target.
+    re_update_alias = re.compile(
+        r"\bUPDATE\s+"
+        r"(?:\{\{[A-Z][A-Z0-9_]*\}\}\s*\.\s*)?"
+        r"([A-Za-z_][A-Za-z0-9_]*)"
+        r"\s+([A-Za-z_][A-Za-z0-9_]*)",
+        re.IGNORECASE,
+    )
+    for match in re_update_alias.finditer(sql):
+        known_objects.add(_normalise_identifier(match.group(1)))
+        _add_alias(aliases, match.group(2))
+
+    return aliases
+
+
 def find_all_db_references(sql: str, tokens_only: bool = True) -> Set[str]:
     """
     Find all fully-qualified database references in SQL text.
@@ -279,139 +512,21 @@ def find_all_db_references(sql: str, tokens_only: bool = True) -> Set[str]:
     if not tokens_only:
         # Collect known object names and aliases to use as a blacklist
         known_objects = set()
-        known_aliases = set()
 
         # Object names from tokenised references
         for match in RE_TOKEN_REF.finditer(sql):
-            known_objects.add(match.group(2).upper())
+            known_objects.add(_normalise_identifier(match.group(2)))
+        for match in RE_LITERAL_REF.finditer(sql):
+            known_objects.add(_normalise_identifier(match.group(2)))
 
-        # Table/view aliases from FROM, JOIN, USING clauses
-        re_alias = re.compile(
-            r"\b(?:FROM|JOIN|USING)\s+"
-            r"(?:\{\{[A-Z][A-Z0-9_]*\}\}\s*\.\s*)?"
-            r"[A-Za-z_][A-Za-z0-9_]*"
-            r"\s+([A-Za-z_][A-Za-z0-9_]*)",
-            re.IGNORECASE,
-        )
-        sql_keywords = {
-            "ON",
-            "WHERE",
-            "SET",
-            "INNER",
-            "LEFT",
-            "RIGHT",
-            "CROSS",
-            "FULL",
-            "OUTER",
-            "JOIN",
-            "AND",
-            "OR",
-            "NOT",
-            "IN",
-            "EXISTS",
-            "BETWEEN",
-            "LIKE",
-            "AS",
-            "WHEN",
-            "THEN",
-            "ELSE",
-            "END",
-            "CASE",
-            "GROUP",
-            "ORDER",
-            "BY",
-            "HAVING",
-            "UNION",
-            "ALL",
-            "EXCEPT",
-            "INTERSECT",
-            "INTO",
-            "FROM",
-            "SELECT",
-            "INSERT",
-            "UPDATE",
-            "DELETE",
-            "MERGE",
-            "VALUES",
-            "WITH",
-            "GRANT",
-            "OPTION",
-            "LOCKING",
-            "ROW",
-            "FOR",
-            "ACCESS",
-            "TABLE",
-            "VIEW",
-            "USING",
-            "MATCHED",
-            "VOLATILE",
-        }
-        for match in re_alias.finditer(sql):
-            alias_candidate = match.group(1).upper()
-            if alias_candidate not in sql_keywords:
-                known_aliases.add(alias_candidate)
-
-        # Aliases from UPDATE target
-        re_update_alias = re.compile(
-            r"\bUPDATE\s+"
-            r"(?:\{\{[A-Z][A-Z0-9_]*\}\}\s*\.\s*)?"
-            r"([A-Za-z_][A-Za-z0-9_]*)"
-            r"\s+([A-Za-z_][A-Za-z0-9_]*)",
-            re.IGNORECASE,
-        )
-        for match in re_update_alias.finditer(sql):
-            obj_name = match.group(1).upper()
-            alias_candidate = match.group(2).upper()
-            known_objects.add(obj_name)
-            if alias_candidate not in sql_keywords:
-                known_aliases.add(alias_candidate)
+        known_aliases = _collect_known_aliases(sql, known_objects)
 
         exclusions = known_objects | known_aliases
 
-        system_dbs = {
-            "DBC",
-            "SYSLIB",
-            "SYSUDTLIB",
-            "SYSSPATIAL",
-            "SYSJDBC",
-            "SYSBAR",
-            "TDSTATS",
-            "TDWM",
-            "SYSTEMFE",
-            "DBCMNGR",
-            "SYSADMIN",
-            "CAST",
-            "TRIM",
-            "COALESCE",
-            "CASE",
-            "WHEN",
-            "THEN",
-            "ELSE",
-            "END",
-            "AND",
-            "NOT",
-            "NULL",
-            "DATE",
-            "TIME",
-            "TIMESTAMP",
-            "INTERVAL",
-            "CHARACTER",
-            "VARCHAR",
-            "INTEGER",
-            "DECIMAL",
-            "FLOAT",
-            "BYTEINT",
-            "SMALLINT",
-            "BIGINT",
-            "LOCKING",
-            "ROW",
-            "FOR",
-            "ACCESS",
-        }
         for match in RE_LITERAL_REF.finditer(sql):
             db_name = match.group(1)
-            db_upper = db_name.upper()
-            if db_upper not in system_dbs and db_upper not in exclusions:
+            db_upper = _normalise_identifier(db_name)
+            if not _is_excluded_db_ref(db_name) and db_upper not in exclusions:
                 refs.add(db_name)
 
     return refs
@@ -493,6 +608,7 @@ def build_view_dependency_index(project_dir: Path) -> Dict[Tuple[str, str], Set[
                 tokens_only=False,
             )
             if db_ref.upper() != view_db.upper()
+            and not _is_excluded_db_ref(db_ref)
         }
         if base_dbs:
             index[_ref_key(view_db, view_obj)] = base_dbs
@@ -566,6 +682,10 @@ def analyse_file(
     # grants_map: {grantor_database: set of privileges}
     grants_map: Dict[str, Set[str]] = defaultdict(set)
     object_privs: Dict[Tuple[str, str], Set[str]] = defaultdict(set)
+    object_databases: Dict[Tuple[str, str], str] = {}
+    passthrough_grants: Dict[str, Dict[str, Set[str]]] = defaultdict(
+        lambda: defaultdict(set)
+    )
 
     # For views, the entire body is SELECT context — every referenced
     # database gets SELECT
@@ -588,38 +708,62 @@ def analyse_file(
         # INSERT targets
         for match in RE_INSERT_TARGET.finditer(sql):
             db, obj = extract_object_ref(match)
-            object_privs[_ref_key(db, obj)].add(PRIV_INSERT)
+            if _is_excluded_db_ref(db):
+                continue
+            key = _ref_key(db, obj)
+            object_databases[key] = db
+            object_privs[key].add(PRIV_INSERT)
             grants_map[db].add(PRIV_INSERT)
 
         # UPDATE targets
         for match in RE_UPDATE_TARGET.finditer(sql):
             db, obj = extract_object_ref(match)
-            object_privs[_ref_key(db, obj)].add(PRIV_UPDATE)
+            if _is_excluded_db_ref(db):
+                continue
+            key = _ref_key(db, obj)
+            object_databases[key] = db
+            object_privs[key].add(PRIV_UPDATE)
             grants_map[db].add(PRIV_UPDATE)
 
         # DELETE targets
         for match in RE_DELETE_TARGET.finditer(sql):
             db, obj = extract_object_ref(match)
-            object_privs[_ref_key(db, obj)].add(PRIV_DELETE)
+            if _is_excluded_db_ref(db):
+                continue
+            key = _ref_key(db, obj)
+            object_databases[key] = db
+            object_privs[key].add(PRIV_DELETE)
             grants_map[db].add(PRIV_DELETE)
 
         # MERGE targets — implies both INSERT and UPDATE
         for match in RE_MERGE_TARGET.finditer(sql):
             db, obj = extract_object_ref(match)
-            object_privs[_ref_key(db, obj)].update({PRIV_INSERT, PRIV_UPDATE})
+            if _is_excluded_db_ref(db):
+                continue
+            key = _ref_key(db, obj)
+            object_databases[key] = db
+            object_privs[key].update({PRIV_INSERT, PRIV_UPDATE})
             grants_map[db].add(PRIV_INSERT)
             grants_map[db].add(PRIV_UPDATE)
 
         # CALL targets — implies EXECUTE PROCEDURE
         for match in RE_CALL_TARGET.finditer(sql):
             db, obj = extract_object_ref(match)
-            object_privs[_ref_key(db, obj)].add(PRIV_EXEC_PROC)
+            if _is_excluded_db_ref(db):
+                continue
+            key = _ref_key(db, obj)
+            object_databases[key] = db
+            object_privs[key].add(PRIV_EXEC_PROC)
             grants_map[db].add(PRIV_EXEC_PROC)
 
         # EXEC/EXECUTE targets — implies EXECUTE (macros)
         for match in RE_EXEC_TARGET.finditer(sql):
             db, obj = extract_object_ref(match)
-            object_privs[_ref_key(db, obj)].add(PRIV_EXEC)
+            if _is_excluded_db_ref(db):
+                continue
+            key = _ref_key(db, obj)
+            object_databases[key] = db
+            object_privs[key].add(PRIV_EXEC)
             grants_map[db].add(PRIV_EXEC)
 
         # --- Read sources: all FROM/JOIN references → SELECT ---
@@ -631,12 +775,15 @@ def analyse_file(
                 grants_map[db_ref].add(PRIV_SELECT)
         for db_ref, obj_name in find_all_object_references(sql, tokens_only=False):
             if appears_as_read_source(sql, db_ref):
-                object_privs[_ref_key(db_ref, obj_name)].add(PRIV_SELECT)
+                key = _ref_key(db_ref, obj_name)
+                object_databases[key] = db_ref
+                object_privs[key].add(PRIV_SELECT)
 
         if view_dependency_index:
             for ref_key, privs in object_privs.items():
+                view_db = object_databases.get(ref_key, ref_key[0])
                 for base_db in view_dependency_index.get(ref_key, set()):
-                    grants_map[base_db].update(privs)
+                    passthrough_grants[view_db][base_db].update(privs)
 
     # Tables don't typically reference other databases in their DDL
     elif obj_type == "TABLE":
@@ -660,13 +807,20 @@ def analyse_file(
             priv_list = ", ".join(sorted(privs, key=lambda p: PRIV_ORDER.index(p)))
             print(f"    Grant: {priv_list} ON {grantor} TO {grantee}")
 
-    return {
+    result = {
         "file": filepath.name,
         "grantee": grantee,
         "obj_type": obj_type,
         "obj_name": obj_name,
         "grants": dict(grants_map),
     }
+    if passthrough_grants:
+        result["passthrough_grants"] = {
+            view_db: dict(grants)
+            for view_db, grants in passthrough_grants.items()
+            if grants
+        }
+    return result
 
 
 # ---------------------------------------------------------------------------

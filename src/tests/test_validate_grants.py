@@ -337,6 +337,54 @@ class TestMultiSourceConsolidation:
         assert (_dcl_dir(project) / "{{V1}}.dcl").exists()
         assert (_dcl_dir(project) / "{{V2}}.dcl").exists()
 
+    def test_macro_dml_through_view_emits_two_hop_grants(self, project):
+        """Macro owner gets view DB grants; view owner gets base DB grants."""
+        views_dir = project / "payload" / "database" / "DDL" / "views"
+        macros_dir = project / "payload" / "database" / "DDL" / "macros"
+        macros_dir.mkdir(parents=True)
+        (views_dir / "GDEV1V_GCFR.GCFR_Process_Type_Param.viw").write_text(
+            (
+                "REPLACE VIEW GDEV1V_GCFR.GCFR_Process_Type_Param AS\n"
+                "SELECT Process_Type, Param_Group, Param_Name\n"
+                "FROM GDEV1T_GCFR.GCFR_Process_Type_Param;\n"
+            ),
+            encoding="utf-8",
+        )
+        (macros_dir / "GDEV1M_GCFR.GCFR_Reg_Process_Type_Param.mcr").write_text(
+            (
+                "REPLACE MACRO GDEV1M_GCFR.GCFR_Reg_Process_Type_Param AS\n"
+                "(\n"
+                "    DELETE FROM GDEV1V_GCFR.GCFR_Process_Type_Param\n"
+                "    WHERE Process_Type = :Process_Type;\n"
+                "\n"
+                "    INSERT INTO GDEV1V_GCFR.GCFR_Process_Type_Param\n"
+                "    (Process_Type, Param_Group, Param_Name)\n"
+                "    SELECT :Process_Type, :Param_Group, :Param_Name;\n"
+                "\n"
+                "    SELECT Process_Type, Param_Group, Param_Name\n"
+                "    FROM GDEV1V_GCFR.GCFR_Process_Type_Param;\n"
+                ");\n"
+            ),
+            encoding="utf-8",
+        )
+
+        result, files_written = fix_grants(project)
+
+        assert result.passed
+        assert files_written == 2
+        macro_grants = _parse_grt_content(
+            (_dcl_dir(project) / "GDEV1M_GCFR.dcl").read_text(encoding="utf-8")
+        )
+        view_grants = _parse_grt_content(
+            (_dcl_dir(project) / "GDEV1V_GCFR.dcl").read_text(encoding="utf-8")
+        )
+        assert macro_grants == {
+            "GDEV1V_GCFR": {"DELETE", "INSERT", "SELECT"},
+        }
+        assert view_grants == {
+            "GDEV1T_GCFR": {"DELETE", "INSERT", "SELECT"},
+        }
+
 
 # ===================================================================
 # Custom dcl_dir
