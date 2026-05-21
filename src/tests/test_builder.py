@@ -160,9 +160,14 @@ def test_inferred_grants_are_packaged_as_dcl(
     tmp_path, tmp_project, sample_env_config_file
 ):
     """Package build backfills visible deployable .dcl grant scripts."""
+    view = tmp_project / "payload" / "database" / "DDL" / "views" / "APP_V.MV.viw"
+    view.write_text(
+        "REPLACE VIEW APP_V.MV AS SELECT Id FROM DATA_DB.T;\n",
+        encoding="utf-8",
+    )
     macro = tmp_project / "payload" / "database" / "DDL" / "macros" / "APP_DB.M.mcr"
     macro.write_text(
-        "REPLACE MACRO APP_DB.M AS (SELECT Id FROM DATA_DB.T;);\n",
+        "REPLACE MACRO APP_DB.M AS (DELETE FROM APP_V.MV WHERE Id = :Id;);\n",
         encoding="utf-8",
     )
     source_dcl = (
@@ -188,6 +193,10 @@ def test_inferred_grants_are_packaged_as_dcl(
         report_name = next(name for name in names if name.endswith("package_report.html"))
         report = archive.read(report_name).decode("utf-8")
         assert "APP_DB.dcl" in report
+        dcl_name = next(name for name in names if name.endswith("APP_DB.dcl"))
+        dcl = archive.read(dcl_name).decode("utf-8")
+        assert "GRANT DELETE ON APP_V TO APP_DB WITH GRANT OPTION;" in dcl
+        assert "GRANT DELETE ON DATA_DB TO APP_DB WITH GRANT OPTION;" in dcl
 
     assert not source_dcl.exists()
 
