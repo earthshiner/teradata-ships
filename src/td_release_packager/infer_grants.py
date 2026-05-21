@@ -58,7 +58,7 @@ import re
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, Set, List, Optional
+from typing import Dict, Set, List, Optional, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +226,24 @@ def extract_db_ref(
     if token:
         return f"{{{{{token}}}}}"
     return literal
+
+
+def extract_object_ref(
+    match: re.Match,
+    token_group: int = 1,
+    literal_group: int = 2,
+    object_group: int = 3,
+) -> Tuple[str, str]:
+    """Extract ``(database, object)`` from a regex match."""
+    return (
+        extract_db_ref(match, token_group=token_group, literal_group=literal_group),
+        match.group(object_group),
+    )
+
+
+def _ref_key(db_ref: str, obj_name: str) -> Tuple[str, str]:
+    """Normalise a database/object pair for lookup."""
+    return (db_ref.upper(), obj_name.upper())
 
 
 def find_all_db_references(sql: str, tokens_only: bool = True) -> Set[str]:
@@ -399,6 +417,28 @@ def find_all_db_references(sql: str, tokens_only: bool = True) -> Set[str]:
     return refs
 
 
+def find_all_object_references(
+    sql: str,
+    tokens_only: bool = True,
+) -> Set[Tuple[str, str]]:
+    """Find fully-qualified database/object references in SQL text."""
+    refs: Set[Tuple[str, str]] = set()
+
+    for match in RE_TOKEN_REF.finditer(sql):
+        refs.add((f"{{{{{match.group(1)}}}}}", match.group(2)))
+
+    if tokens_only:
+        return refs
+
+    valid_db_refs = {ref.upper() for ref in find_all_db_references(sql, tokens_only=False)}
+    for match in RE_LITERAL_REF.finditer(sql):
+        db_name = match.group(1)
+        if db_name.upper() in valid_db_refs:
+            refs.add((db_name, match.group(2)))
+
+    return refs
+
+
 def appears_as_read_source(sql: str, db_ref: str) -> bool:
     """
     Return True when a database reference appears in a read-source context.
@@ -422,12 +462,53 @@ def appears_as_read_source(sql: str, db_ref: str) -> bool:
     return False
 
 
+def build_view_dependency_index(project_dir: Path) -> Dict[Tuple[str, str], Set[str]]:
+    """Map packaged view ``(db, object)`` names to referenced base databases."""
+    index: Dict[Tuple[str, str], Set[str]] = {}
+    for ddl_file in find_ddl_files(project_dir):
+        try:
+            raw_sql = ddl_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+
+        sql = strip_sql_comments(raw_sql)
+        create_match = RE_CREATE_STMT.search(sql)
+        if not create_match:
+            continue
+
+        obj_type_raw = create_match.group(1).upper().strip()
+        if obj_type_raw != "VIEW":
+            continue
+
+        view_db = extract_db_ref(create_match, token_group=2, literal_group=3)
+        view_obj = create_match.group(4)
+        as_match = re.search(r"\bAS\b", sql, re.IGNORECASE)
+        if not as_match:
+            continue
+
+        base_dbs = {
+            db_ref
+            for db_ref, _obj in find_all_object_references(
+                sql[as_match.end() :],
+                tokens_only=False,
+            )
+            if db_ref.upper() != view_db.upper()
+        }
+        if base_dbs:
+            index[_ref_key(view_db, view_obj)] = base_dbs
+    return index
+
+
 # ---------------------------------------------------------------------------
 # Intent analysis per file
 # ---------------------------------------------------------------------------
 
 
-def analyse_file(filepath: Path, verbose: bool = False) -> Optional[Dict]:
+def analyse_file(
+    filepath: Path,
+    verbose: bool = False,
+    view_dependency_index: Optional[Dict[Tuple[str, str], Set[str]]] = None,
+) -> Optional[Dict]:
     """
     Analyse a single DDL file and extract its grant implications.
 
@@ -439,6 +520,7 @@ def analyse_file(filepath: Path, verbose: bool = False) -> Optional[Dict]:
     Args:
         filepath: Path to the DDL file.
         verbose:  If True, print diagnostic information.
+        view_dependency_index: Optional packaged view to base database mapping.
 
     Returns:
         A dict with keys:
@@ -483,6 +565,7 @@ def analyse_file(filepath: Path, verbose: bool = False) -> Optional[Dict]:
     # --- Step 2: Determine intent per referenced database/user ---
     # grants_map: {grantor_database: set of privileges}
     grants_map: Dict[str, Set[str]] = defaultdict(set)
+    object_privs: Dict[Tuple[str, str], Set[str]] = defaultdict(set)
 
     # For views, the entire body is SELECT context — every referenced
     # database gets SELECT
@@ -504,33 +587,39 @@ def analyse_file(filepath: Path, verbose: bool = False) -> Optional[Dict]:
 
         # INSERT targets
         for match in RE_INSERT_TARGET.finditer(sql):
-            db = extract_db_ref(match)
+            db, obj = extract_object_ref(match)
+            object_privs[_ref_key(db, obj)].add(PRIV_INSERT)
             grants_map[db].add(PRIV_INSERT)
 
         # UPDATE targets
         for match in RE_UPDATE_TARGET.finditer(sql):
-            db = extract_db_ref(match)
+            db, obj = extract_object_ref(match)
+            object_privs[_ref_key(db, obj)].add(PRIV_UPDATE)
             grants_map[db].add(PRIV_UPDATE)
 
         # DELETE targets
         for match in RE_DELETE_TARGET.finditer(sql):
-            db = extract_db_ref(match)
+            db, obj = extract_object_ref(match)
+            object_privs[_ref_key(db, obj)].add(PRIV_DELETE)
             grants_map[db].add(PRIV_DELETE)
 
         # MERGE targets — implies both INSERT and UPDATE
         for match in RE_MERGE_TARGET.finditer(sql):
-            db = extract_db_ref(match)
+            db, obj = extract_object_ref(match)
+            object_privs[_ref_key(db, obj)].update({PRIV_INSERT, PRIV_UPDATE})
             grants_map[db].add(PRIV_INSERT)
             grants_map[db].add(PRIV_UPDATE)
 
         # CALL targets — implies EXECUTE PROCEDURE
         for match in RE_CALL_TARGET.finditer(sql):
-            db = extract_db_ref(match)
+            db, obj = extract_object_ref(match)
+            object_privs[_ref_key(db, obj)].add(PRIV_EXEC_PROC)
             grants_map[db].add(PRIV_EXEC_PROC)
 
         # EXEC/EXECUTE targets — implies EXECUTE (macros)
         for match in RE_EXEC_TARGET.finditer(sql):
-            db = extract_db_ref(match)
+            db, obj = extract_object_ref(match)
+            object_privs[_ref_key(db, obj)].add(PRIV_EXEC)
             grants_map[db].add(PRIV_EXEC)
 
         # --- Read sources: all FROM/JOIN references → SELECT ---
@@ -540,6 +629,14 @@ def analyse_file(filepath: Path, verbose: bool = False) -> Optional[Dict]:
         for db_ref in all_refs:
             if appears_as_read_source(sql, db_ref):
                 grants_map[db_ref].add(PRIV_SELECT)
+        for db_ref, obj_name in find_all_object_references(sql, tokens_only=False):
+            if appears_as_read_source(sql, db_ref):
+                object_privs[_ref_key(db_ref, obj_name)].add(PRIV_SELECT)
+
+        if view_dependency_index:
+            for ref_key, privs in object_privs.items():
+                for base_db in view_dependency_index.get(ref_key, set()):
+                    grants_map[base_db].update(privs)
 
     # Tables don't typically reference other databases in their DDL
     elif obj_type == "TABLE":

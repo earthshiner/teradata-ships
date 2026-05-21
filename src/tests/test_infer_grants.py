@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from td_release_packager.infer_grants import (
     strip_sql_comments,
     find_all_db_references,
+    build_view_dependency_index,
     analyse_file,
     consolidate_grants,
     generate_grt_content,
@@ -486,6 +487,57 @@ class TestAnalyseMacro:
             }
         finally:
             os.unlink(path)
+
+    def test_macro_dml_through_packaged_view_expands_to_base_table_database(
+        self,
+        tmp_path,
+    ):
+        """DML against a packaged view also infers rights on its base table DB."""
+        views = tmp_path / "payload" / "03_ddl" / "views"
+        macros = tmp_path / "payload" / "03_ddl" / "macros"
+        views.mkdir(parents=True)
+        macros.mkdir(parents=True)
+        (views / "GDEV1V_GCFR.GCFR_Process_Type_Param.viw").write_text(
+            textwrap.dedent("""
+                REPLACE VIEW GDEV1V_GCFR.GCFR_Process_Type_Param AS
+                SELECT Process_Type, Param_Group, Param_Name
+                FROM GDEV1T_GCFR.GCFR_Process_Type_Param;
+            """),
+            encoding="utf-8",
+        )
+        macro = macros / "GDEV1M_GCFR.GCFR_Reg_Process_Type_Param.mcr"
+        macro.write_text(
+            textwrap.dedent("""
+                REPLACE MACRO GDEV1M_GCFR.GCFR_Reg_Process_Type_Param AS
+                (
+                    DELETE FROM GDEV1V_GCFR.GCFR_Process_Type_Param
+                    WHERE Process_Type = :Process_Type;
+
+                    INSERT INTO GDEV1V_GCFR.GCFR_Process_Type_Param
+                    (Process_Type, Param_Group, Param_Name)
+                    SELECT :Process_Type, :Param_Group, :Param_Name;
+
+                    SELECT Process_Type, Param_Group, Param_Name
+                    FROM GDEV1V_GCFR.GCFR_Process_Type_Param;
+                );
+            """),
+            encoding="utf-8",
+        )
+
+        index = build_view_dependency_index(tmp_path)
+        result = analyse_file(macro, view_dependency_index=index)
+
+        assert result is not None
+        assert result["grants"]["GDEV1V_GCFR"] == {
+            PRIV_DELETE,
+            PRIV_INSERT,
+            PRIV_SELECT,
+        }
+        assert result["grants"]["GDEV1T_GCFR"] == {
+            PRIV_DELETE,
+            PRIV_INSERT,
+            PRIV_SELECT,
+        }
 
     def test_exec_implies_execute(self):
         """EXEC {{DB}}.Macro implies EXECUTE on that DB."""
