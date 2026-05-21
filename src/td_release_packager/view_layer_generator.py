@@ -12,35 +12,35 @@ It also exposes ``main()`` so the standalone CLI shim at
 td_release_packager.view_layer_generator``) can keep working with
 no behaviour change for users running ad-hoc.
 
-For each ``.tbl`` file found in a SHIPS module, this engine produces:
+For each ``.tbl`` file found in a SHIPS token group, this engine produces:
 
-    1. A 1:1 locking view in the matching ``{{<MOD>_DATABASE_V}}``
+    1. A 1:1 locking view in the matching ``{{<TOKEN_BASE>_V}}``
        database. The view declares an explicit column list in BOTH
        the header (interface contract) and the SELECT, uses
        ``LOCKING ROW FOR ACCESS``, and has the same object name as
        the source table.
-    2. Rewrites of existing business views in the module:
+    2. Rewrites of existing business views in the token group:
          (a) ``SELECT *`` and ``alias.*`` forms are expanded into
              explicit, alias-qualified column lists by parsing the
              FROM and JOIN clauses and looking up source columns.
-         (b) Direct ``{{<MOD>_DATABASE_T}}`` references are
-             redirected to ``{{<MOD>_DATABASE_V}}`` so all reads
+         (b) Direct ``{{<TOKEN_BASE>_T}}`` references are
+             redirected to ``{{<TOKEN_BASE>_V}}`` so all reads
              go through the locking view layer.
     3. A ``CREATE DATABASE`` file for each views database that does
        not already exist in ``payload/database/pre-requisites/databases``.
     4. Consolidated ``.grt`` files (one per grantee views database)
        containing:
-         (a) ``GRANT SELECT ON {{<MOD>_DATABASE_T}} TO {{<MOD>_DATABASE_V}}
-             WITH GRANT OPTION;``  -- same-module read path
-         (b) ``GRANT SELECT ON {{<OTHER>_DATABASE_V}} TO
-             {{<MOD>_DATABASE_V}} WITH GRANT OPTION;``  -- cross-module
+         (a) ``GRANT SELECT ON {{<TOKEN_BASE>_T}} TO {{<TOKEN_BASE>_V}}
+             WITH GRANT OPTION;``  -- same-token-group read path
+         (b) ``GRANT SELECT ON {{<OTHER_TOKEN_BASE>_V}} TO
+             {{<TOKEN_BASE>_V}} WITH GRANT OPTION;``  -- cross-module
              reads detected in business views.
 
 Filename conventions assumed:
-    payload/database/DDL/tables/{{<MOD>_DATABASE_T}}.<TableName>.tbl
-    payload/database/DDL/views/ {{<MOD>_DATABASE_V}}.<ViewName>.viw
-    payload/database/pre-requisites/databases/{{<MOD>_DATABASE_V}}.db
-    payload/database/DCL/inter_db/{{<MOD>_DATABASE_V}}.grt
+    payload/database/DDL/tables/{{<TOKEN_BASE>_T}}.<TableName>.tbl
+    payload/database/DDL/views/ {{<TOKEN_BASE>_V}}.<ViewName>.viw
+    payload/database/pre-requisites/databases/{{<TOKEN_BASE>_V}}.db
+    payload/database/DCL/inter_db/{{<TOKEN_BASE>_V}}.grt
 
 The tool is idempotent: re-running produces no diff on already-correct
 files. Use ``--dry-run`` to preview changes without writing.
@@ -49,12 +49,12 @@ Usage — explicit (standalone CLI):
 
     # Always works from a clone, no install required:
     python tools/generate_view_layer.py \\
-        --project ./MortgagePlatform \\
-        --modules DOM,SEM,MEM,OBS,STG
+        --project ./Customer360 \\
+        --modules DB_CUSTOMER,DB_ORDER
 
     # Equivalent once the package is installed (pip install -e . or uv sync):
     python -m td_release_packager.view_layer_generator \\
-        --project ./MortgagePlatform \\
+        --project ./Customer360 \\
         --modules ALL --dry-run
 
 Usage — orchestrated (as a library):
@@ -93,12 +93,14 @@ logger = logging.getLogger("generate_view_layer")
 # Constants — token patterns, paths, indentation
 # ---------------------------------------------------------------------------
 
-# Module token pattern:  {{<MODULE>_DATABASE_T}}  or  {{<MODULE>_DATABASE_V}}
-# Captures: (module_name, suffix)  where suffix is 'T' or 'V'.
-_MODULE_TOKEN_RE = re.compile(r"\{\{([A-Z][A-Z0-9_]*?)_DATABASE_([TV])\}\}")
+# Paired placement token pattern: {{<TOKEN_BASE>_T}} or {{<TOKEN_BASE>_V}}.
+# Captures: (token_base, suffix) where suffix is 'T' or 'V'. Supports both
+# legacy OPS-style tokens ({{APP_DATABASE_T}}) and simpler project tokens
+# ({{DB_DOMAIN_T}}).
+_MODULE_TOKEN_RE = re.compile(r"\{\{([A-Z][A-Z0-9_]*?)_([TV])\}\}")
 
-# Generic token reference (any {{XXX_DATABASE_[TV]}}).
-_TOKEN_REF_RE = re.compile(r"\{\{[A-Z][A-Z0-9_]*?_DATABASE_[TV]\}\}")
+# Generic paired placement token reference (any {{XXX_[TV]}}).
+_TOKEN_REF_RE = re.compile(r"\{\{[A-Z][A-Z0-9_]*?_[TV]\}\}")
 
 # SQL comments — used for masking before structural parsing.
 _LINE_COMMENT_RE = re.compile(r"--.*$", re.MULTILINE)
@@ -206,8 +208,10 @@ class TableSpec:
 
     Attributes:
         file_path:        Absolute path of the .tbl file.
-        database_token:   Tables-side token, e.g. "{{DOM_DATABASE_T}}".
-        module:           Module abbreviation, e.g. "DOM".
+        database_token:   Tables-side token, e.g. "{{APP_DATABASE_T}}"
+                          or "{{DB_DOMAIN_T}}".
+        module:           Token group/filter name, e.g. "APP" or
+                          "DB_DOMAIN".
         object_name:      Table name (no database qualifier).
         columns:          Ordered column names.
         table_comment:    Text of COMMENT ON TABLE (without quotes), or
@@ -249,7 +253,7 @@ class ViewSpec:
 class FromClauseRef:
     """A single table reference in a FROM or JOIN clause."""
 
-    database_token: str  # e.g. "{{DOM_DATABASE_T}}" or "{{DOM_DATABASE_V}}"
+    database_token: str  # e.g. "{{APP_DATABASE_T}}" or "{{DB_DOMAIN_V}}"
     object_name: str
     alias: str  # Empty string if the source had no alias.
 
@@ -282,34 +286,53 @@ class GenerationResult:
 
 def parse_module_token(token: str) -> Optional[Tuple[str, str]]:
     """
-    Parse a ``{{<MODULE>_DATABASE_<T|V>}}`` token.
+    Parse a paired placement token ending ``_T`` or ``_V``.
 
     Args:
         token: A token literal including the surrounding braces.
 
     Returns:
-        ``(module, suffix)`` where suffix is "T" or "V", or None if
+        ``(token_base, suffix)`` where suffix is "T" or "V", or None if
         the token does not match the expected pattern.
     """
+    parsed = _parse_placement_token(token)
+    if parsed is None:
+        return None
+    token_base, suffix = parsed
+    if token_base.endswith("_DATABASE"):
+        return token_base[: -len("_DATABASE")], suffix
+    return token_base, suffix
+
+
+def _parse_placement_token(token: str) -> Optional[Tuple[str, str]]:
+    """Return the raw paired token base and suffix for ``{{..._T/V}}``."""
     match = _MODULE_TOKEN_RE.fullmatch(token)
     if not match:
         return None
     return match.group(1), match.group(2)
 
 
+def _module_from_token_base(token_base: str) -> str:
+    """Return the module/filter name represented by a paired token base."""
+    if token_base.endswith("_DATABASE"):
+        return token_base[: -len("_DATABASE")]
+    return token_base
+
+
 def companion_token(token: str) -> Optional[str]:
     """
-    Return the companion token (T <-> V) for a module-database token.
+    Return the companion token (T <-> V) for a paired placement token.
 
     Example:
-        ``{{DOM_DATABASE_T}}`` -> ``{{DOM_DATABASE_V}}``
+        ``{{APP_DATABASE_T}}`` -> ``{{APP_DATABASE_V}}``
+        ``{{DB_DOMAIN_T}}`` -> ``{{DB_DOMAIN_V}}``
     """
-    parsed = parse_module_token(token)
+    parsed = _parse_placement_token(token)
     if parsed is None:
         return None
-    module, suffix = parsed
+    token_base, suffix = parsed
     other = "V" if suffix == "T" else "T"
-    return f"{{{{{module}_DATABASE_{other}}}}}"
+    return f"{{{{{token_base}_{other}}}}}"
 
 
 def split_object_filename(filename: str) -> Optional[Tuple[str, str, str]]:
@@ -527,7 +550,7 @@ def generate_locking_view_ddl(table: TableSpec) -> str:
     Generate the DDL text for a 1:1 locking view over a table.
 
     The view:
-        - Lives in the views database (``{{<MOD>_DATABASE_V}}``)
+        - Lives in the views database (``{{<TOKEN_BASE>_V}}``)
         - Has the same object name as the table
         - Declares an explicit column list in BOTH the header
           (Coding Discipline rule 42) and the SELECT
@@ -774,7 +797,7 @@ def expand_select_star(
     Args:
         view_content: Full text of the .viw file.
         column_index: ``(database_token, object_name) -> [columns]``
-                      built from all .tbl files across modules.
+                      built from all .tbl files across token groups.
         warnings:     Mutable list — receives any soft failures.
         view_label:   Identifier used in warning messages
                       (typically the relative file path).
@@ -880,8 +903,8 @@ def rewrite_tables_to_views(
     view_label: str,
 ) -> Tuple[str, int]:
     """
-    Redirect ``{{<MOD>_DATABASE_T}}`` references to
-    ``{{<MOD>_DATABASE_V}}`` in a view body.
+    Redirect ``{{<TOKEN_BASE>_T}}`` references to
+    ``{{<TOKEN_BASE>_V}}`` in a view body.
 
     Comment text and string literals are masked out so a reference
     inside a ``--`` comment or a ``'...'`` string is not rewritten.
@@ -911,7 +934,7 @@ def rewrite_tables_to_views(
         for pos in range(match.start(), match.end()):
             mask[pos] = True
 
-    # Walk every {{<MOD>_DATABASE_T}} occurrence and rewrite if not masked.
+    # Walk every {{<TOKEN_BASE>_T}} occurrence and rewrite if not masked.
     out_parts: List[str] = []
     last_end = 0
     count = 0
@@ -922,8 +945,8 @@ def rewrite_tables_to_views(
             continue
         # Append text up to this match, then the rewritten token.
         out_parts.append(view_content[last_end : match.start()])
-        module = match.group(1)
-        out_parts.append(f"{{{{{module}_DATABASE_V}}}}")
+        token_base = match.group(1)
+        out_parts.append(f"{{{{{token_base}_V}}}}")
         last_end = match.end()
         count += 1
     out_parts.append(view_content[last_end:])
@@ -1004,7 +1027,7 @@ def _extract_table_comments(
 
     The sibling file lives at ``DDL/comments/<stem>.cmt`` where
     ``<stem>`` is the ``.tbl`` filename without the ``.tbl`` extension
-    (e.g. ``{{DOM_DATABASE_T}}.Customer``).
+    (e.g. ``{{DB_CUSTOMER_T}}.Customer``).
 
     If the ``.cmt`` file is absent or unreadable, both return values
     are empty — no spurious comments are fabricated.
@@ -1057,7 +1080,7 @@ def discover_tables(project_root: Path) -> List[TableSpec]:
     Find and parse every ``.tbl`` file in the project's tables dir.
 
     Files that do not follow the SHIPS naming convention or whose
-    token is not a module-database token are silently skipped — they
+    token is not a paired ``_T`` token is silently skipped — it
     do not belong to the OPS view-layer pipeline.
 
     For each table, the sibling ``.cmt`` file (if present) is also
@@ -1079,8 +1102,7 @@ def discover_tables(project_root: Path) -> List[TableSpec]:
 
         parsed_token = parse_module_token(token)
         if parsed_token is None or parsed_token[1] != "T":
-            # Either not a module-database token, or it's the views
-            # side. Either way, skip.
+            # Either not a paired placement token, or it's the views side.
             continue
         module = parsed_token[0]
 
@@ -1156,12 +1178,12 @@ def discover_modules(
     views: Optional[List[ViewSpec]] = None,
 ) -> List[str]:
     """
-    Return the sorted list of module abbreviations present.
+    Return the sorted list of token groups present.
 
-    A module is "present" if it has at least one table OR at least
-    one view. Including view-only modules matters for cross-module
-    grant detection — a downstream module (e.g. SEM) may reference
-    upstream views even when it owns no tables of its own.
+    A token group is "present" if it has at least one table OR at
+    least one view. Including view-only groups matters for cross-group
+    grant detection because downstream views may reference upstream
+    views even when they own no tables of their own.
     """
     modules: Set[str] = {t.module for t in tables}
     if views:
@@ -1238,10 +1260,10 @@ def collect_cross_module_grants(
     rewritten_views: List[Tuple[ViewSpec, str]],
 ) -> Dict[str, Set[str]]:
     """
-    Walk every rewritten business view to find cross-module reads.
+    Walk every rewritten business view to find cross-token-group reads.
 
     For each (grantee_views_db, set_of_grantor_dbs) the views in that
-    module read from, return the grants that need to exist.
+    token group read from, return the grants that need to exist.
 
     Args:
         rewritten_views: List of ``(view_spec, rewritten_content)``
@@ -1249,9 +1271,9 @@ def collect_cross_module_grants(
 
     Returns:
         Dict ``{grantee_token: {grantor_token, ...}}`` containing
-        cross-module read grants ONLY. Same-module grants
-        (``_T -> _V`` for the view's own module) are added by the
-        caller to keep this function focused on cross-module logic.
+        cross-token-group read grants ONLY. Same-token-group grants
+        (``_T -> _V`` for the view's own token group) are added by the
+        caller to keep this function focused on cross-group logic.
     """
     grants: Dict[str, Set[str]] = {}
     for view, content in rewritten_views:
@@ -1260,11 +1282,12 @@ def collect_cross_module_grants(
         grantee = view.database_token
         cleaned = _strip_sql_comments(content)
         for match in _MODULE_TOKEN_RE.finditer(cleaned):
-            ref_module = match.group(1)
+            ref_base = match.group(1)
+            ref_module = _module_from_token_base(ref_base)
             ref_suffix = match.group(2)
-            ref_token = f"{{{{{ref_module}_DATABASE_{ref_suffix}}}}}"
+            ref_token = f"{{{{{ref_base}_{ref_suffix}}}}}"
             # Skip self-references to the view's own _V (a view in
-            # SEM_V referencing SEM_V is a no-op grant).
+            # A view referencing its own _V token is a no-op grant.
             if ref_token == grantee:
                 continue
             # Skip same-module _T references (the same-module grant
@@ -1285,8 +1308,8 @@ def run(
 
     Args:
         project_root:       SHIPS project root.
-        requested_modules:  None or empty set means "all detected
-                            modules"; otherwise filter to these.
+        requested_modules:  None or empty set means "all detected token
+                            groups"; otherwise filter to these.
         dry_run:            If True, skip writes.
 
     Returns:
@@ -1301,8 +1324,8 @@ def run(
     if not tables:
         result.errors.append(
             f"No tables found under {project_root / _PATH_TABLES}. "
-            f"Is this a SHIPS project with the OPS token convention "
-            f"({{{{<MOD>_DATABASE_T}}}})?"
+            f"Is this a SHIPS project with paired table/view tokens "
+            f"such as {{{{DB_DOMAIN_T}}}} and {{{{DB_DOMAIN_V}}}}?"
         )
         return result
 
@@ -1312,17 +1335,17 @@ def run(
         missing = requested_modules - available_modules
         for module in sorted(missing):
             result.warnings.append(
-                f"Module '{module}' requested but no .tbl files found."
+                f"Token group '{module}' requested but no .tbl files found."
             )
     else:
         targets = available_modules
 
     if not targets:
-        result.errors.append("No matching modules to process.")
+        result.errors.append("No matching token groups to process.")
         return result
 
     logger.info(
-        "Processing modules: %s (dry-run=%s)",
+        "Processing token groups: %s (dry-run=%s)",
         ", ".join(sorted(targets)),
         dry_run,
     )
@@ -1343,7 +1366,7 @@ def run(
             result.locking_views_written += 1
         else:
             result.locking_views_unchanged += 1
-        # Record the same-module grant we'll emit later.
+        # Record the same-token-group grant we'll emit later.
         grantees_needing_same_module[views_token] = table.database_token
 
     # -- Phase 3: rewrite existing business views -------------------
@@ -1396,7 +1419,7 @@ def run(
     # -- Phase 5: consolidated grants -------------------------------
     cross_module = collect_cross_module_grants(rewritten)
 
-    # Merge same-module grants on top of cross-module grants so
+    # Merge same-token-group grants on top of cross-token-group grants so
     # every views database we touched gets the _T -> _V baseline.
     all_grantees: Set[str] = set(grantees_needing_same_module)
     all_grantees.update(cross_module.keys())
@@ -1451,7 +1474,7 @@ def _build_arg_parser(prog: Optional[str] = None) -> argparse.ArgumentParser:
         description=(
             "Generate the Object Placement Standard view layer "
             "(1:1 locking views, business view rewrites, _V databases, "
-            "and consolidated grants) for one or more SHIPS modules."
+            "and consolidated grants) for one or more SHIPS token groups."
         ),
     )
     parser.add_argument(
@@ -1463,9 +1486,9 @@ def _build_arg_parser(prog: Optional[str] = None) -> argparse.ArgumentParser:
         "--modules",
         default="ALL",
         help=(
-            "Comma-separated list of module abbreviations "
-            "(e.g. DOM,SEM,MEM,OBS,STG) or 'ALL' to process every "
-            "module discovered under payload/database/DDL/tables. "
+            "Comma-separated list of token groups "
+            "(e.g. DB_CUSTOMER,DB_ORDER) or 'ALL' to process every "
+            "group discovered under payload/database/DDL/tables. "
             "Default: ALL."
         ),
     )
