@@ -361,6 +361,48 @@ def _add_alias(aliases: Set[str], alias_candidate: Optional[str]) -> None:
         aliases.add(alias)
 
 
+def _find_matching_paren(sql: str, open_index: int) -> int:
+    """Return the matching close paren index, or -1 when unbalanced."""
+    depth = 0
+    in_string = False
+    index = open_index
+    while index < len(sql):
+        char = sql[index]
+        if char == "'":
+            if in_string and index + 1 < len(sql) and sql[index + 1] == "'":
+                index += 2
+                continue
+            in_string = not in_string
+        elif not in_string:
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0:
+                    return index
+        index += 1
+    return -1
+
+
+def _collect_balanced_derived_aliases(sql: str) -> Set[str]:
+    """Collect aliases after FROM/JOIN comma-introduced derived tables."""
+    aliases: Set[str] = set()
+    derived_start = re.compile(r"(?:\bFROM\b|\bJOIN\b|,)\s*\(", re.IGNORECASE)
+    alias_after_close = re.compile(
+        r"\s+(?:AS\s+)?([A-Za-z_][A-Za-z0-9_]*)",
+        re.IGNORECASE,
+    )
+    for match in derived_start.finditer(sql):
+        open_index = sql.find("(", match.start(), match.end())
+        close_index = _find_matching_paren(sql, open_index)
+        if close_index < 0:
+            continue
+        alias_match = alias_after_close.match(sql, close_index + 1)
+        if alias_match:
+            _add_alias(aliases, alias_match.group(1))
+    return aliases
+
+
 def _collect_known_aliases(sql: str, known_objects: Set[str]) -> Set[str]:
     """Collect table, CTE, derived table, and update correlation aliases."""
     aliases: Set[str] = set()
@@ -406,14 +448,7 @@ def _collect_known_aliases(sql: str, known_objects: Set[str]) -> Set[str]:
     for match in re_cte_alias.finditer(sql):
         _add_alias(aliases, match.group(1))
 
-    # Derived table aliases, e.g. FROM (SELECT ...) AS BCS.
-    re_derived_alias = re.compile(
-        r"(?:\bFROM\b|\bJOIN\b|,)\s*\(.*?\)\s+(?:AS\s+)?"
-        r"([A-Za-z_][A-Za-z0-9_]*)",
-        re.IGNORECASE | re.DOTALL,
-    )
-    for match in re_derived_alias.finditer(sql):
-        _add_alias(aliases, match.group(1))
+    aliases.update(_collect_balanced_derived_aliases(sql))
 
     # Aliases from UPDATE target.
     re_update_alias = re.compile(

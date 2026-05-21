@@ -188,6 +188,48 @@ class TestFindDbReferences:
         assert "BCS" not in refs
         assert "DT" not in refs
 
+    def test_excludes_nested_derived_table_aliases(self):
+        """Derived aliases after nested expressions must not infer grants."""
+        sql = textwrap.dedent("""
+            REPLACE VIEW GDEV1V_OPR.GCFR_RV_SLAProcGroupByCtl AS
+            SELECT
+                sRV_ProcByCtlSumByBusDate.Calendar_date
+                , RV_SLA.SLA_Object
+                , sRV_ProcessSumByBusDate.Process_State
+            FROM GDEV1V_OPR.GCFR_RV_SLA RV_SLA
+            LEFT JOIN (
+                SELECT
+                    Calendar_date
+                    , SLA_Object
+                    , CASE
+                        WHEN Min(sRV_ProcessSumByBusDate.Process_State) IS NULL
+                        THEN NULL
+                        WHEN Min(sRV_ProcessSumByBusDate.Process_State)=99
+                        THEN 1
+                        ELSE 0
+                      END AS Group_Processing_Flag
+                FROM (
+                    SELECT
+                        CAL.Calendar_date
+                        , RV_SLA.SLA_Object
+                        , RV_ProcessSumByBusDate.Process_State
+                    FROM SYS_CALENDAR.CALENDAR CAL
+                    CROSS JOIN GDEV1V_OPR.GCFR_RV_SLA RV_SLA
+                    LEFT JOIN GDEV1V_OPR.GCFR_RV_ProcessSumByBusDate RV_ProcessSumByBusDate
+                        ON CAL.Calendar_date = RV_ProcessSumByBusDate.Business_Date
+                ) sRV_ProcessSumByBusDate
+                GROUP BY Calendar_date, SLA_Object
+            ) sRV_ProcByCtlSumByBusDate
+                ON sRV_ProcByCtlSumByBusDate.SLA_Object = RV_SLA.SLA_Object;
+        """)
+
+        refs = find_all_db_references(sql, tokens_only=False)
+
+        assert "GDEV1V_OPR" in refs
+        assert "SYS_CALENDAR" in refs
+        assert "sRV_ProcessSumByBusDate" not in refs
+        assert "sRV_ProcByCtlSumByBusDate" not in refs
+
     def test_excludes_object_names_as_correlation_names(self):
         """
         Unqualified table names used as correlation names
