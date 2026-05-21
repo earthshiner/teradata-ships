@@ -284,13 +284,19 @@ def find_all_db_references(sql: str, tokens_only: bool = True) -> Set[str]:
         # Object names from tokenised references
         for match in RE_TOKEN_REF.finditer(sql):
             known_objects.add(match.group(2).upper())
+        for match in RE_LITERAL_REF.finditer(sql):
+            known_objects.add(match.group(2).upper())
 
         # Table/view aliases from FROM, JOIN, USING clauses
         re_alias = re.compile(
             r"\b(?:FROM|JOIN|USING)\s+"
-            r"(?:\{\{[A-Z][A-Z0-9_]*\}\}\s*\.\s*)?"
+            r"(?:"
+            r"\{\{[A-Z][A-Z0-9_]*\}\}"
+            r"|[A-Z][A-Z0-9_]{1,127}"
+            r")"
+            r"\s*\.\s*"
             r"[A-Za-z_][A-Za-z0-9_]*"
-            r"\s+([A-Za-z_][A-Za-z0-9_]*)",
+            r"\s+(?:AS\s+)?([A-Za-z_][A-Za-z0-9_]*)",
             re.IGNORECASE,
         )
         sql_keywords = {

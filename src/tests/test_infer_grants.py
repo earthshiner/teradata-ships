@@ -134,6 +134,21 @@ class TestFindDbReferences:
         assert "p" not in refs
         assert "dq" not in refs
 
+    def test_excludes_literal_database_object_aliases(self):
+        """Literal Database.Object aliases must not be inferred as databases."""
+        sql = textwrap.dedent("""
+            REPLACE VIEW GDEV1V_OPR.Some_View AS
+            SELECT BD.Business_Date
+            FROM GDEV1T_OPR.Business_Date AS BD
+            INNER JOIN GDEV1T_OPR.Calendar C ON BD.Calendar_Id = C.Calendar_Id;
+        """)
+
+        refs = find_all_db_references(sql, tokens_only=False)
+
+        assert "GDEV1T_OPR" in refs
+        assert "BD" not in refs
+        assert "C" not in refs
+
     def test_excludes_object_names_as_correlation_names(self):
         """
         Unqualified table names used as correlation names
