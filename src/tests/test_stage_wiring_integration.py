@@ -448,6 +448,28 @@ class TestGenerateStageRecording:
         stage = gen_run["stages"][0]
         assert "locking_views_written" in stage["outputs"]
         assert "business_views_rewritten" in stage["outputs"]
+        assert "config_files" in stage["outputs"]
+
+    def test_generate_reports_filename_convention_and_config_files(
+        self, tmp_path, capsys
+    ):
+        project = _make_project(tmp_path)
+        self._seed_table(project)
+
+        args = _make_generate_args(project, dry_run=True)
+        _run(_cmd_generate, args)
+
+        out = capsys.readouterr().out
+        assert "Convention:       payload filename convention (*_T → *_V)" in out
+        assert "object placement: found, not read here" in out
+        assert "inspect rules: found, not read here" in out
+
+        d = _read_decisions(project)
+        gen_run = next(r for r in d["runs"] if r["stages"][0]["stage"] == "generate")
+        config = gen_run["stages"][0]["config_resolved"]
+        assert "object_placement_config" in config
+        assert "inspect_config" in config
+        assert "token_map" in config
 
     def test_generate_no_tables_emits_error_issue(self, tmp_path):
         """No tables in payload → generator errors; GENERATE_ERROR emitted."""
