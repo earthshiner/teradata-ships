@@ -1567,6 +1567,19 @@ def _resolve_repackage_package_dir(package_dir: str) -> str:
     return package_root or package_dir
 
 
+def _repackage_output_group_dir(package_dir: str, manifest: BuildManifest) -> str:
+    """Return the release-group directory that should receive the archive."""
+    package_parent = os.path.dirname(package_dir)
+    if os.path.basename(package_parent).lower() == ".ships-work":
+        release_group_dir = os.path.dirname(package_parent)
+        if (
+            not manifest.release_group
+            or os.path.basename(release_group_dir) == manifest.release_group
+        ):
+            return release_group_dir
+    return package_parent
+
+
 def _read_manifest_from_package_dir(pkg_dir: str) -> BuildManifest:
     """Read context/ships.build.json from an extracted package directory."""
     manifest_path = _package_manifest_path(pkg_dir)
@@ -1733,7 +1746,7 @@ def repackage_package_dir(
     generate_package_report(package_dir, manifest.__dict__)
     _generate_integrity_file(package_dir)
 
-    group_dir = os.path.dirname(package_dir)
+    group_dir = _repackage_output_group_dir(package_dir, manifest)
     archive_format = (
         "tar.gz" if manifest.package_filename.endswith(".tar.gz") else "zip"
     )
@@ -1744,7 +1757,11 @@ def repackage_package_dir(
     if os.path.exists(checksum_path):
         os.remove(checksum_path)
 
-    archive_path = _archive_package(package_dir, archive_format)
+    local_archive_path = _archive_package(package_dir, archive_format)
+    if os.path.abspath(local_archive_path) != os.path.abspath(archive_path):
+        shutil.move(local_archive_path, archive_path)
+    else:
+        archive_path = local_archive_path
     _generate_checksum(archive_path)
 
     release_group = manifest.release_group or os.path.basename(group_dir)
