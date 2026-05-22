@@ -1023,7 +1023,7 @@ def _cmd_bootstrap_env_config(args):
 # ---------------------------------------------------------------
 
 
-def _add_github_source_args(parser) -> None:
+def _add_github_source_args(parser, mutually_exclusive_with: str = "--source") -> None:
     """Add --source-github / --source-ref / --github-token to a subparser."""
     parser.add_argument(
         "--source-github",
@@ -1033,7 +1033,7 @@ def _add_github_source_args(parser) -> None:
         help="Fetch DDL source from a GitHub repository (e.g. 'myorg/myrepo'). "
         "Downloads the repository tarball for --source-ref via the GitHub "
         "REST API — no local git clone required.  Mutually exclusive with "
-        "--project for package, or --source for process.",
+        f"{mutually_exclusive_with}.",
     )
     parser.add_argument(
         "--source-ref",
@@ -4323,7 +4323,7 @@ def _build_parser():
         default=None,
         help="SHIPS project directory.  Mutually exclusive with --source-github.",
     )
-    _add_github_source_args(bp)
+    _add_github_source_args(bp, mutually_exclusive_with="--project")
     bp.add_argument(
         "--env",
         required=True,
