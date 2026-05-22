@@ -49,8 +49,23 @@ def _normalise_identifier(value: str) -> str:
 
 def _strip_sql_comments(text: str) -> str:
     """Remove SQL comments before checking deployable placeholder state."""
-    without_blocks = _SQL_BLOCK_COMMENT_RE.sub("", text)
+    without_blocks = _SQL_BLOCK_COMMENT_RE.sub(
+        lambda match: "\n" * match.group(0).count("\n"),
+        text,
+    )
     return _SQL_LINE_COMMENT_RE.sub("", without_blocks)
+
+
+def _placeholder_scan_files(base: Path) -> Iterable[Path]:
+    """Yield deployable payload files that can contain DBA placeholders."""
+    for path in base.rglob("*"):
+        if not path.is_file():
+            continue
+        if path.name.startswith((".", "_")):
+            continue
+        if path.suffix.lower() not in _PLACEHOLDER_SCAN_SUFFIXES:
+            continue
+        yield path
 
 
 def _parse_perm_bytes(value_str: str, suffix: str) -> int:
@@ -287,28 +302,32 @@ def write_environment_prereq_payload(
 
 def has_dba_placeholders(package_dir: str) -> bool:
     """Return True when generated DBA placeholders remain in deployable SQL."""
+    return bool(find_dba_placeholders(package_dir))
+
+
+def find_dba_placeholders(package_dir: str) -> list[tuple[str, int, str]]:
+    """Return executable DBA placeholder locations as path, line and marker."""
     root = Path(package_dir)
     # Only deployable payload controls the blocked/unblocked package state.
     # The review script under context/prerequisites may intentionally retain
     # explanatory placeholder examples.
     base = root / "payload"
     if not base.exists():
-        return False
-    for path in base.rglob("*"):
-        if not path.is_file():
-            continue
-        if path.name.startswith((".", "_")):
-            continue
-        if path.suffix.lower() not in _PLACEHOLDER_SCAN_SUFFIXES:
-            continue
+        return []
+
+    findings: list[tuple[str, int, str]] = []
+    for path in _placeholder_scan_files(base):
         try:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
         executable_sql = _strip_sql_comments(text)
-        if any(marker in executable_sql for marker in _DBA_PLACEHOLDERS):
-            return True
-    return False
+        relative_path = str(path.relative_to(root)).replace("\\", "/")
+        for line_no, line in enumerate(executable_sql.splitlines(), start=1):
+            for marker in _DBA_PLACEHOLDERS:
+                if marker in line:
+                    findings.append((relative_path, line_no, marker))
+    return findings
 
 
 def write_environment_prereq_context(
