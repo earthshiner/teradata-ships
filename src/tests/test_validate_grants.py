@@ -76,6 +76,10 @@ def _dcl_dir(project: Path) -> Path:
     return project / "payload" / "database" / "DCL" / "inter_db"
 
 
+def _role_dcl_dir(project: Path) -> Path:
+    return project / "payload" / "database" / "DCL" / "roles"
+
+
 # ===================================================================
 # Lifecycle: missing → fix → consistent → drift → orphan
 # ===================================================================
@@ -184,14 +188,12 @@ class TestLifecycle:
         # And still flagged in the post-fix result
         assert len(result.orphaned) == 1
 
-    def test_database_role_grant_file_is_not_orphaned(self, project):
-        """Database-to-role DCL is intentional package access DCL."""
-        dcl = _dcl_dir(project)
+    def test_database_role_grant_file_lives_under_roles(self, project):
+        """Database-to-role DCL belongs under DCL/roles."""
+        dcl = _role_dcl_dir(project)
         dcl.mkdir(parents=True)
         (dcl / "{{DB_DOMAIN_T}}.dcl").write_text(
             (
-                "GRANT SELECT ON {{DB_DOMAIN_T}} "
-                "TO {{DB_DOMAIN_T}}_READ_ROLE;\n"
                 "GRANT SELECT, INSERT, UPDATE, DELETE ON {{DB_DOMAIN_T}} "
                 "TO {{DB_DOMAIN_T}}_WRITE_ROLE;\n"
             ),
@@ -205,12 +207,10 @@ class TestLifecycle:
 
     def test_fix_creates_missing_role_files_for_role_grants(self, project):
         """Role grantees in DCL are materialised as package role DDL."""
-        dcl = _dcl_dir(project)
+        dcl = _role_dcl_dir(project)
         dcl.mkdir(parents=True)
         (dcl / "{{DB_DOMAIN_T}}.dcl").write_text(
             (
-                "GRANT SELECT ON {{DB_DOMAIN_T}} "
-                "TO {{DB_DOMAIN_T}}_READ_ROLE;\n"
                 "GRANT SELECT, INSERT, UPDATE, DELETE ON {{DB_DOMAIN_T}} "
                 "TO {{DB_DOMAIN_T}}_WRITE_ROLE;\n"
             ),
@@ -221,13 +221,29 @@ class TestLifecycle:
 
         role_dir = project / "payload" / "database" / "system" / "roles"
         assert result.passed
-        assert files_written == 2
-        assert (role_dir / "{{DB_DOMAIN_T}}_READ_ROLE.rol").read_text(
-            encoding="utf-8"
-        ) == "CREATE ROLE {{DB_DOMAIN_T}}_READ_ROLE;\n"
+        assert files_written == 1
         assert (role_dir / "{{DB_DOMAIN_T}}_WRITE_ROLE.rol").read_text(
             encoding="utf-8"
         ) == "CREATE ROLE {{DB_DOMAIN_T}}_WRITE_ROLE;\n"
+
+    def test_existing_grt_file_satisfies_inter_db_grant(self, project):
+        """Legacy/generated .grt files are accepted as DCL scripts."""
+        _add_view(
+            project,
+            "{{DOM_V}}.Customer.viw",
+            _make_view_ddl("{{DOM_V}}", "{{DOM_T}}"),
+        )
+        dcl = _dcl_dir(project)
+        dcl.mkdir(parents=True)
+        (dcl / "{{DOM_V}}.grt").write_text(
+            "GRANT SELECT ON {{DOM_T}} TO {{DOM_V}} WITH GRANT OPTION;\n",
+            encoding="utf-8",
+        )
+
+        result = validate_grants(project)
+
+        assert result.passed
+        assert result.consistent[0].file_path.name == "{{DOM_V}}.grt"
 
 
 # ===================================================================

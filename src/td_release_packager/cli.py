@@ -65,6 +65,22 @@ from td_release_packager.validate_grants import (
 
 logger = logging.getLogger(__name__)
 
+_ANSI_GREEN = "\033[32m"
+_ANSI_RED = "\033[31m"
+_ANSI_RESET = "\033[0m"
+
+
+def _colour(text: str, colour: str) -> str:
+    """Colour terminal status glyphs when output is a TTY."""
+    if not getattr(sys.stdout, "isatty", lambda: False)():
+        return text
+    return f"{colour}{text}{_ANSI_RESET}"
+
+
+def _status_icon(ok: bool) -> str:
+    """Return a coloured pass/fail icon for terminal status lines."""
+    return _colour("✓", _ANSI_GREEN) if ok else _colour("✗", _ANSI_RED)
+
 # -- Graph format registry (name → file extension) ---------------
 _GRAPH_FORMATS = {
     "dot": ".gv",
@@ -175,12 +191,12 @@ def _format_grant_recap(grant_result, max_items: int = 10) -> str:
     for status in missing:
         if shown >= max_items:
             break
-        lines.append(f"      {status.grantee}  [missing .grt]")
+        lines.append(f"      {status.grantee}  [missing DCL]")
         shown += 1
     for status in orphaned:
         if shown >= max_items:
             break
-        lines.append(f"      {status.grantee}  [orphaned .grt]")
+        lines.append(f"      {status.grantee}  [orphaned DCL]")
         shown += 1
 
     if shown < total:
@@ -1017,7 +1033,7 @@ def _add_github_source_args(parser) -> None:
         help="Fetch DDL source from a GitHub repository (e.g. 'myorg/myrepo'). "
         "Downloads the repository tarball for --source-ref via the GitHub "
         "REST API — no local git clone required.  Mutually exclusive with "
-        "--source.",
+        "--project for package, or --source for process.",
     )
     parser.add_argument(
         "--source-ref",
@@ -1863,7 +1879,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
         token_findings = scan_malformed_tokens_in_directory(payload_dir)
         token_ok = not token_findings
 
-        token_icon = "✓" if token_ok else "✗"
+        token_icon = _status_icon(token_ok)
         token_status = "PASSED" if token_ok else "FAILED"
 
         print(f"\n{'=' * 64}")
@@ -1934,7 +1950,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
             strict=args.strict,
         )
 
-        lint_icon = "✓" if lint_result.passed else "✗"
+        lint_icon = _status_icon(lint_result.passed)
         lint_status = "PASSED" if lint_result.passed else "FAILED"
         mode = " (strict)" if args.strict else ""
 
@@ -2014,7 +2030,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
                 verbose=args.verbose,
             )
 
-            grant_icon = "✓" if grant_result.passed else "✗"
+            grant_icon = _status_icon(grant_result.passed)
             grant_status = "PASSED" if grant_result.passed else "FAILED"
 
             print(f"\n{'=' * 64}")
@@ -2033,7 +2049,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
                 verbose=args.verbose,
             )
 
-            grant_icon = "✓" if grant_result.passed else "✗"
+            grant_icon = _status_icon(grant_result.passed)
             grant_status = "PASSED" if grant_result.passed else "FAILED"
 
             print(f"\n{'=' * 64}")
@@ -2053,7 +2069,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
 
         hierarchy_result = analyse_hierarchy_perm_capacity(payload_dir)
         hierarchy_ok = hierarchy_result.passed
-        hierarchy_icon = "✓" if hierarchy_ok else "✗"
+        hierarchy_icon = _status_icon(hierarchy_ok)
         hierarchy_status = "PASSED" if hierarchy_ok else "FAILED"
 
         print(f"\n{'=' * 64}")
@@ -2083,7 +2099,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
         grant_ok = grant_result.passed if grant_result else True
         overall_ok = token_ok and lint_ok and grant_ok and hierarchy_ok
 
-        overall_icon = "✓" if overall_ok else "✗"
+        overall_icon = _status_icon(overall_ok)
         overall_status = "PASSED" if overall_ok else "FAILED"
 
         print(f"\n{'=' * 64}")
@@ -3716,6 +3732,23 @@ def _cmd_scan(args):
                     issue_codes.PROPERTIES_NOT_FOUND,
                     f"Config file not found: {cfg_path}",
                 )
+                has_any_error = True
+            except ValueError as exc:
+                message = (
+                    "[ConfigError] Could not read environment config "
+                    f"{cfg_path}.\n\n{exc}\n\n"
+                    "Suggested action: check for merged KEY=VALUE lines, "
+                    "unresolved {{TOKEN}} references, or copied values with "
+                    "stray braces."
+                )
+                env_results[env_name] = {
+                    "config": cfg_path,
+                    "undefined": [],
+                    "orphans": [],
+                    "status": "error",
+                    "error": message,
+                }
+                stage.add_issue("error", issue_codes.PROPERTIES_INVALID, message)
                 has_any_error = True
 
         stage.set_inputs(scan_directory=scan_dir, files_with_tokens=len(usage))

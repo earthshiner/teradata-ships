@@ -176,6 +176,10 @@ class TestScanMalformedTokensInDirectory:
         (tmp_path / ".hidden.sql").write_text("{{ BAD }}", encoding="utf-8")
         assert scan_malformed_tokens_in_directory(str(tmp_path)) == {}
 
+    def test_skips_backup_files(self, tmp_path):
+        (tmp_path / "grant.dcl.bak").write_text("{{ BROKEN", encoding="utf-8")
+        assert scan_malformed_tokens_in_directory(str(tmp_path)) == {}
+
     def test_recurses_into_subdirectories(self, tmp_path):
         sub = tmp_path / "sub"
         sub.mkdir()

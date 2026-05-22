@@ -80,7 +80,11 @@ def _validate_property_values(
             prefix = value.split("=", 1)[0].strip()
             # Only flag if the prefix looks like a token name:
             # all uppercase, underscores, digits — e.g. STD_DATABASE
-            if prefix and re.fullmatch(r"[A-Z][A-Z0-9_]*", prefix):
+            if prefix and (
+                re.fullmatch(r"[A-Z][A-Z0-9_]*", prefix)
+                or "{{" in prefix
+                or "}}" in prefix
+            ):
                 errors.append(
                     f"Token '{name}': value contains '=' — likely "
                     f"two properties lines merged. "
@@ -438,6 +442,8 @@ def scan_tokens_in_directory(directory: str) -> Dict[str, Set[str]]:
                 continue
             if filename.endswith(".sample"):
                 continue
+            if filename.endswith(".bak"):
+                continue
             file_path = os.path.join(root, filename)
             try:
                 tokens = scan_tokens_in_file(file_path)
@@ -549,6 +555,8 @@ def scan_malformed_tokens_in_directory(
             if filename.startswith(".") or filename.startswith("_"):
                 continue
             if filename.endswith(".sample"):
+                continue
+            if filename.endswith(".bak"):
                 continue
             file_path = os.path.join(root, filename)
             try:
