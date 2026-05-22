@@ -800,13 +800,13 @@ Generate view-layer DDL from harvested tables (SHIPS topology projects).
 ```bash
 python -m td_release_packager generate \
     --project C:\Projects\OMR \
-    --modules DOM,SEM
+    --modules DB_CUSTOMER,DB_ORDER
 ```
 
 | Flag | Required | Description |
 |---|---|---|
 | `--project` | Yes | SHIPS project directory containing the harvested payload |
-| `--modules` | No | Comma-separated modules to generate (default: all) |
+| `--modules` | No | Comma-separated token groups to generate (default: all) |
 | `--dry-run` | No | Validate without writing files |
 
 ---

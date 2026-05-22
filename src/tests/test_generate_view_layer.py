@@ -144,6 +144,9 @@ class TestTokenHelpers:
             "T",
         )
 
+    def test_parse_non_database_t_token(self):
+        assert parse_module_token("{{DB_DOMAIN_T}}") == ("DB_DOMAIN", "T")
+
     def test_parse_invalid_returns_none(self):
         assert parse_module_token("{{DOM_DATABASE}}") is None
         assert parse_module_token("DOM_DATABASE_T") is None
@@ -154,6 +157,9 @@ class TestTokenHelpers:
 
     def test_companion_v_to_t(self):
         assert companion_token("{{SEM_DATABASE_V}}") == "{{SEM_DATABASE_T}}"
+
+    def test_companion_non_database_token(self):
+        assert companion_token("{{DB_DOMAIN_T}}") == "{{DB_DOMAIN_V}}"
 
     def test_companion_invalid_returns_none(self):
         assert companion_token("{{NOT_A_TOKEN}}") is None
@@ -471,6 +477,12 @@ class TestTablesToViewsRewrite:
         assert new == "FROM {{DOM_DATABASE_V}}.Mortgage m"
         assert count == 1
 
+    def test_non_database_token_rewrite(self):
+        sql = "FROM {{DB_DOMAIN_T}}.Call_H c"
+        new, count = rewrite_tables_to_views(sql, [], "x.viw")
+        assert new == "FROM {{DB_DOMAIN_V}}.Call_H c"
+        assert count == 1
+
     def test_multiple_modules(self):
         sql = "FROM {{DOM_DATABASE_T}}.A INNER JOIN {{SEM_DATABASE_T}}.B ON A.id = B.id"
         new, count = rewrite_tables_to_views(sql, [], "x.viw")
@@ -691,6 +703,51 @@ class TestEndToEnd:
         assert "SELECT *" not in enhanced
         assert "{{DOM_DATABASE_T}}" not in enhanced
         assert "{{DOM_DATABASE_V}}.Mortgage" in enhanced
+
+    def test_full_pipeline_accepts_generic_t_v_tokens(self, tmp_path):
+        root = tmp_path / "Project"
+        _make_ships_project(root)
+        _write(
+            root,
+            "payload/database/DDL/tables/{{DB_DOMAIN_T}}.Agent_H.tbl",
+            MORTGAGE_TBL.replace("{{DOM_DATABASE_T}}", "{{DB_DOMAIN_T}}").replace(
+                "Mortgage", "Agent_H"
+            ),
+        )
+        _write(
+            root,
+            "payload/database/DDL/views/{{DB_DOMAIN_V}}.Agent_Current.viw",
+            (
+                "CREATE VIEW {{DB_DOMAIN_V}}.Agent_Current AS\n"
+                "SELECT *\n"
+                "FROM {{DB_DOMAIN_T}}.Agent_H a\n;"
+            ),
+        )
+
+        result = run(root, requested_modules=None, dry_run=False)
+
+        assert result.errors == []
+        locking_view = (
+            root
+            / "payload/database/DDL/views"
+            / "{{DB_DOMAIN_V}}.Agent_H.viw"
+        )
+        assert locking_view.exists()
+        assert "CREATE VIEW {{DB_DOMAIN_V}}.Agent_H" in locking_view.read_text()
+
+        business_view = (
+            root
+            / "payload/database/DDL/views"
+            / "{{DB_DOMAIN_V}}.Agent_Current.viw"
+        ).read_text()
+        assert "SELECT *" not in business_view
+        assert "{{DB_DOMAIN_T}}" not in business_view
+        assert "FROM {{DB_DOMAIN_V}}.Agent_H a" in business_view
+
+        grant = (
+            root / "payload/database/DCL/inter_db" / "{{DB_DOMAIN_V}}.grt"
+        ).read_text()
+        assert "GRANT SELECT ON {{DB_DOMAIN_T}} TO {{DB_DOMAIN_V}}" in grant
 
     def test_database_files_generated(self, ships_project):
         run(ships_project, requested_modules=None, dry_run=False)
