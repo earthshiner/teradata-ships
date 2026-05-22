@@ -149,6 +149,7 @@ def ships_harvest(
     token_map: Optional[str] = None,
     auto_tokenise: bool = False,
     env_prefix: Optional[str] = None,
+    remove_view_type_affixes: bool = False,
 ) -> dict:
     """Harvest raw DDL files from a source directory into a SHIPS project.
 
@@ -164,6 +165,9 @@ def ships_harvest(
                        (no manual review step). Combine with env_prefix.
         env_prefix: Environment prefix to strip when deriving token names
                     (e.g. 'A_D01' turns 'A_D01_OMR_STD' into '{{OMR_STD}}').
+        remove_view_type_affixes: Remove redundant view object affixes
+                                  (leading v_ and trailing _v) and update
+                                  qualified references during harvest.
 
     Returns:
         {"classified": int, "unclassified": int, "files_placed": int,
@@ -187,6 +191,7 @@ def ships_harvest(
                 detect_tokens=True,
                 apply_tokens=None,
                 legacy_migration_rules=legacy_migration_rules,
+                remove_view_type_affixes=remove_view_type_affixes,
             )
             if detect.token_candidates:
                 apply_tokens = generate_token_map(detect.token_candidates, env_prefix)
@@ -197,6 +202,7 @@ def ships_harvest(
             detect_tokens=True,
             apply_tokens=apply_tokens,
             legacy_migration_rules=legacy_migration_rules,
+            remove_view_type_affixes=remove_view_type_affixes,
         )
         return {
             "success": True,
@@ -207,6 +213,9 @@ def ships_harvest(
             "multiset_injected": result.multiset_injected,
             "legacy_migration_files": result.legacy_migration_files,
             "legacy_migration_substitutions": result.legacy_migration_substitutions,
+            "placement_index_dir": result.placement_index_dir,
+            "placement_index_files": result.placement_index_files,
+            "view_type_affix_renames": result.view_type_affix_renames,
             "warnings": result.warnings,
             "classification_warnings": result.classification_warnings,
             "unclassified_files": result.unclassified_files,

@@ -40,6 +40,14 @@ python -m td_release_packager harvest \
     --token-map config/token_map.conf \
     --force
 
+# Optional legacy cleanup: remove redundant view object affixes
+# (v_Customer → Customer, Customer_V → Customer) and update references
+python -m td_release_packager harvest \
+    --source /raw/ddl/ \
+    --project ./projects/MyProject \
+    --token-map config/token_map.conf \
+    --remove-view-type-affixes
+
 # Generate the Object Placement Standard view layer
 # (1:1 locking views, business view rewrites, _V databases, consolidated grants)
 python tools/generate_view_layer.py --project ./projects/MyProject --modules ALL

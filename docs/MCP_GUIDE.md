@@ -279,8 +279,9 @@ Harvest raw DDL files from a source directory into a SHIPS project. Classifies e
 | `token_map` | string | no | Path to `token_map.conf` for substitution |
 | `auto_tokenise` | bool | no | Detect and apply tokens in one pass |
 | `env_prefix` | string | no | Env prefix to strip (e.g. `A_D01`) |
+| `remove_view_type_affixes` | bool | no | Remove redundant view object affixes (`v_` prefix and `_v` suffix) and update qualified references |
 
-**Returns:** `{"success": bool, "classified": int, "unclassified": int, "files_placed": int, "token_candidates": int, "warnings": list, "unclassified_files": list}`
+**Returns:** `{"success": bool, "classified": int, "unclassified": int, "files_placed": int, "token_candidates": int, "placement_index_dir": str, "placement_index_files": int, "view_type_affix_renames": int, "warnings": list, "unclassified_files": list}`
 
 **Example (auto-tokenise):**
 ```

@@ -1482,6 +1482,106 @@ INSERT INTO x.log_two (id) VALUES (2);
             "with clean_payload=False, orphaned files must survive"
         )
 
+    def test_harvest_placement_mirror_flags_view_in_table_layer(
+        self, tmp_path, tmp_project
+    ):
+        """Harvest writes a human-facing mirror grouped by database/token
+        with plain-English hints for common table/view placement mistakes."""
+        src = tmp_path / "source"
+        src.mkdir()
+        (src / "v_Cookbook_Active.viw").write_text(
+            "REPLACE VIEW {{DB_MEMORY_T}}.v_Cookbook_Active AS\n"
+            "SELECT cookbook_id FROM {{DB_MEMORY_T}}.Query_Cookbook;\n",
+            encoding="utf-8",
+        )
+
+        result = ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        assert result.placement_index_dir == os.path.join(
+            ".ships", "harvest", "by_database"
+        )
+        assert result.placement_index_files == 1
+
+        readme = (
+            tmp_project
+            / ".ships"
+            / "harvest"
+            / "by_database"
+            / "README.md"
+        ).read_text(encoding="utf-8")
+
+        assert (
+            "- {{DB_MEMORY_T}} / views / {{DB_MEMORY_T}}.v_Cookbook_Active.viw"
+            in readme
+        )
+        assert (
+            "view is currently owned by a table-layer database; move the view "
+            "owner to the matching _V token if this is a business view"
+            in readme
+        )
+
+    def test_remove_view_type_affixes_renames_views_and_references(
+        self, tmp_path, tmp_project
+    ):
+        src = tmp_path / "source"
+        src.mkdir()
+        (src / "v_Cookbook_Active.viw").write_text(
+            "REPLACE VIEW {{DB_MEMORY_V}}.v_Cookbook_Active AS\n"
+            "SELECT cookbook_id FROM {{DB_MEMORY_T}}.Query_Cookbook;\n",
+            encoding="utf-8",
+        )
+        (src / "Consumer.viw").write_text(
+            "REPLACE VIEW {{DB_MEMORY_V}}.Consumer AS\n"
+            "SELECT cookbook_id FROM {{DB_MEMORY_V}}.v_Cookbook_Active;\n",
+            encoding="utf-8",
+        )
+
+        result = ingest_directory(
+            str(src),
+            str(tmp_project),
+            detect_tokens=False,
+            remove_view_type_affixes=True,
+        )
+
+        assert result.classified == 2
+        assert result.view_type_affix_renames == 1
+        views_dir = tmp_project / "payload" / "database" / "DDL" / "views"
+        renamed = views_dir / "{{DB_MEMORY_V}}.Cookbook_Active.viw"
+        consumer = views_dir / "{{DB_MEMORY_V}}.Consumer.viw"
+
+        assert renamed.exists()
+        assert not (views_dir / "{{DB_MEMORY_V}}.v_Cookbook_Active.viw").exists()
+        assert "REPLACE VIEW {{DB_MEMORY_V}}.Cookbook_Active AS" in renamed.read_text(
+            encoding="utf-8"
+        )
+        assert "{{DB_MEMORY_V}}.Cookbook_Active" in consumer.read_text(
+            encoding="utf-8"
+        )
+        assert "{{DB_MEMORY_V}}.v_Cookbook_Active" not in consumer.read_text(
+            encoding="utf-8"
+        )
+
+    def test_remove_view_type_affixes_handles_trailing_suffix(
+        self, tmp_path, tmp_project
+    ):
+        src = tmp_path / "source"
+        src.mkdir()
+        (src / "Cookbook_Active_V.viw").write_text(
+            "REPLACE VIEW {{DB_MEMORY_V}}.Cookbook_Active_V AS\n"
+            "SELECT cookbook_id FROM {{DB_MEMORY_T}}.Query_Cookbook;\n",
+            encoding="utf-8",
+        )
+
+        ingest_directory(
+            str(src),
+            str(tmp_project),
+            detect_tokens=False,
+            remove_view_type_affixes=True,
+        )
+
+        views_dir = tmp_project / "payload" / "database" / "DDL" / "views"
+        assert (views_dir / "{{DB_MEMORY_V}}.Cookbook_Active.viw").exists()
+
     # -----------------------------------------------------------
     # Output quality fixes (issues observed against
     # mortgage-ai-data-product-demo)
