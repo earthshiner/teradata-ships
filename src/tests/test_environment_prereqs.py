@@ -274,6 +274,54 @@ def test_repackage_unblocks_reviewed_environment_payload(tmp_project, tmp_path):
     assert "<DBA_REVIEWED_PERM>" not in rebuilt
 
 
+def test_repackage_accepts_payload_subdirectory(tmp_project, tmp_path):
+    """DBA can repackage from the edited payload subtree inside a package."""
+    import shutil
+
+    from td_release_packager.builder import repackage_package_dir
+
+    payload = tmp_project / "payload" / "database"
+    _write(
+        payload / "pre-requisites" / "databases" / "GDEV1_BASE.db",
+        "create database GDEV1_BASE from GCFR_MAIN as perm = 0;\n",
+    )
+    _write(
+        payload / "DDL" / "tables" / "GDEV1_BASE.Customer.tbl",
+        "create multiset table GDEV1_BASE.Customer (Id integer) primary index (Id);\n",
+    )
+
+    cfg = BuildConfig(
+        source_dir=str(tmp_project),
+        environment="DEV",
+        package_name="GCFR",
+        env_config_file=str(_properties_for("DEV", tmp_path)),
+        build_number=1,
+        output_dir=str(tmp_path),
+    )
+
+    (main_pair, _prereqs_pair) = build_package(cfg)
+    release_group = main_pair[1].release_group
+    group_dir = tmp_path / release_group
+    env_archive = group_dir / f"{release_group}_00_environment_prereqs.zip"
+    shutil.unpack_archive(str(env_archive), str(group_dir))
+
+    env_pkg_dir = group_dir / f"{release_group}_00_environment_prereqs"
+    dba_payload = env_pkg_dir / "payload/01_pre_requisites/databases/GCFR_MAIN.db"
+    dba_payload.write_text(
+        dba_payload.read_text(encoding="utf-8")
+        .replace("<DBA_SELECTED_PARENT>", "DBC")
+        .replace("<DBA_REVIEWED_PERM>", "50G"),
+        encoding="utf-8",
+    )
+
+    payload_subdir = env_pkg_dir / "payload" / "01_pre_requisites"
+    archive_path, manifest = repackage_package_dir(str(payload_subdir), strict=True)
+
+    assert Path(archive_path).is_file()
+    assert manifest.trust["label"] == "READY_WITH_CAVEATS"
+    assert Path(archive_path).parent == env_pkg_dir.parent
+
+
 def test_environment_prereqs_zip_contains_dba_instructions(tmp_project, tmp_path):
     """DBA remediation instructions are package-local and include shell commands."""
     payload = tmp_project / "payload" / "database"

@@ -1542,13 +1542,45 @@ def _build_manifest_from_dict(data: dict) -> BuildManifest:
     )
 
 
+def _package_manifest_path(pkg_dir: str) -> str:
+    """Return the canonical manifest path for an extracted package root."""
+    return os.path.join(pkg_dir, CONTEXT_DIR, "ships.build.json")
+
+
+def _find_package_root_ancestor(path: str) -> str | None:
+    """Find the nearest ancestor that looks like an extracted package root."""
+    current = os.path.abspath(path)
+    while True:
+        if os.path.isfile(_package_manifest_path(current)):
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+
+
+def _resolve_repackage_package_dir(package_dir: str) -> str:
+    """Resolve a user-supplied repackage path to the extracted package root."""
+    package_dir = os.path.abspath(package_dir)
+    package_root = _find_package_root_ancestor(package_dir)
+    return package_root or package_dir
+
+
 def _read_manifest_from_package_dir(pkg_dir: str) -> BuildManifest:
     """Read context/ships.build.json from an extracted package directory."""
-    manifest_path = os.path.join(pkg_dir, CONTEXT_DIR, "ships.build.json")
+    manifest_path = _package_manifest_path(pkg_dir)
     if not os.path.isfile(manifest_path):
+        package_root = _find_package_root_ancestor(pkg_dir)
+        hint = ""
+        if package_root:
+            hint = (
+                f" Use the extracted package root instead: {package_root}."
+            )
         raise FileNotFoundError(
             f"Package manifest not found: {manifest_path}. "
-            "Expected an extracted SHIPS package directory."
+            "Expected an extracted SHIPS package directory containing "
+            f"{CONTEXT_DIR}/ships.build.json, not a payload subdirectory."
+            f"{hint}"
         )
     with open(manifest_path, "r", encoding="utf-8") as f:
         return _build_manifest_from_dict(json.load(f))
@@ -1663,7 +1695,7 @@ def repackage_package_dir(
     Returns:
         Tuple of archive path and refreshed BuildManifest.
     """
-    package_dir = os.path.abspath(package_dir)
+    package_dir = _resolve_repackage_package_dir(package_dir)
     if not os.path.isdir(package_dir):
         raise FileNotFoundError(f"Package directory does not exist: {package_dir}")
 
