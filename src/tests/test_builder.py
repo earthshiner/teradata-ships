@@ -107,6 +107,7 @@ def test_single_package_archive_uses_context_metadata_only(
         env_config_file=str(sample_env_config_file),
         build_number=1,
         output_dir=str(tmp_path),
+        allow_dirty=True,
     )
 
     ((archive_path, _manifest), companion) = build_package(config)
@@ -182,6 +183,7 @@ def test_inferred_grants_are_packaged_as_dcl(
         env_config_file=str(sample_env_config_file),
         build_number=1,
         output_dir=str(tmp_path),
+        allow_dirty=True,
     )
 
     ((archive_path, _manifest), companion) = build_package(config)
@@ -203,6 +205,105 @@ def test_inferred_grants_are_packaged_as_dcl(
         assert "GRANT SELECT, DELETE ON DATA_DB TO APP_V WITH GRANT OPTION;" in view_dcl
 
     assert not source_dcl.exists()
+
+
+def test_role_grantees_are_packaged_as_role_ddl(
+    tmp_path, tmp_project, sample_env_config_file
+):
+    """Package build materialises missing CREATE ROLE scripts for role grants."""
+    dcl = tmp_project / "payload" / "database" / "DCL" / "roles" / "APP_DB.dcl"
+    dcl.write_text(
+        "GRANT SELECT ON APP_DB TO APP_DB_READ_ROLE;\n",
+        encoding="utf-8",
+    )
+
+    config = BuildConfig(
+        source_dir=str(tmp_project),
+        environment="DEV",
+        package_name="Pkg",
+        env_config_file=str(sample_env_config_file),
+        build_number=1,
+        output_dir=str(tmp_path),
+        allow_dirty=True,
+    )
+
+    ((archive_path, _manifest), companion) = build_package(config)
+    assert companion is None
+
+    with zipfile.ZipFile(archive_path) as archive:
+        names = [name.replace("\\", "/") for name in archive.namelist()]
+        role_name = next(
+            name
+            for name in names
+            if name.endswith("payload/00_system/roles/APP_DB_READ_ROLE.rol")
+        )
+        assert archive.read(role_name).decode("utf-8").splitlines() == [
+            "CREATE ROLE APP_DB_READ_ROLE;"
+        ]
+
+    assert not (
+        tmp_project
+        / "payload"
+        / "database"
+        / "system"
+        / "roles"
+        / "APP_DB_READ_ROLE.rol"
+    ).exists()
+
+
+def test_generated_write_role_is_inserted_into_system_waves(
+    tmp_path, tmp_project, sample_env_config_file
+):
+    """Generated role DDL must not be invisible to wave-based deploy."""
+    existing_role = (
+        tmp_project
+        / "payload"
+        / "database"
+        / "system"
+        / "roles"
+        / "APP_DB_READ_ROLE.rol"
+    )
+    existing_role.write_text("CREATE ROLE APP_DB_READ_ROLE;\n", encoding="utf-8")
+    (tmp_project / "_waves.txt").write_text(
+        "\n".join(
+            [
+                "# _waves.txt",
+                "payload/database/system/roles/APP_DB_READ_ROLE.rol",
+                "---",
+                "payload/database/DCL/roles/APP_DB.dcl",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    dcl = tmp_project / "payload" / "database" / "DCL" / "roles" / "APP_DB.dcl"
+    dcl.write_text(
+        "GRANT SELECT ON APP_DB TO APP_DB_WRITE_ROLE;\n",
+        encoding="utf-8",
+    )
+
+    config = BuildConfig(
+        source_dir=str(tmp_project),
+        environment="DEV",
+        package_name="Pkg",
+        env_config_file=str(sample_env_config_file),
+        build_number=1,
+        output_dir=str(tmp_path),
+        allow_dirty=True,
+    )
+
+    ((archive_path, _manifest), companion) = build_package(config)
+    assert companion is None
+
+    with zipfile.ZipFile(archive_path) as archive:
+        waves_name = next(
+            name for name in archive.namelist() if name.endswith("00_system/_waves.txt")
+        )
+        waves = archive.read(waves_name).decode("utf-8")
+        first_wave = waves.split("---", 1)[0]
+
+    assert "roles/APP_DB_READ_ROLE.rol" in first_wave
+    assert "roles/APP_DB_WRITE_ROLE.rol" in first_wave
 
 
 # ---------------------------------------------------------------

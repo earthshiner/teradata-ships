@@ -1263,7 +1263,7 @@ def _generate_waves_txt(
         "# wave N+1 begins.",
         "#",
         "# Regenerate with:",
-        "#   python -m td_release_packager analyze --source <project>",
+        "#   python -m td_release_packager analyze --project <project>",
         "",
     ]
 

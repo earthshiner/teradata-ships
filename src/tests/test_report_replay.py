@@ -20,6 +20,8 @@ from database_package_deployer.models import (
     ObjectDeployResult,
     ObjectType,
     PackageDeployResult,
+    PreflightCheck,
+    PreflightResult,
 )
 from database_package_deployer.provenance import (
     ProvenanceChain,
@@ -207,6 +209,37 @@ class TestActionItemsOnReplay:
         )
         html = _html_action_items(result)
         assert "all objects deployed successfully" in html
+
+    def test_preflight_failure_has_action_items(self):
+        """A preflight parse failure must not claim all objects deployed."""
+        result = PackageDeployResult(
+            deployment_id="preflight_failed",
+            manifest_path="",
+            total=90,
+            failed=1,
+            results=[],
+            preflight_result=PreflightResult(
+                passed=False,
+                errors=1,
+                checks=[
+                    PreflightCheck(
+                        check_name="parse",
+                        passed=False,
+                        database="UNKNOWN",
+                        message=(
+                            "Failed to parse DB.BadView.viw: DDL does not "
+                            "include a database qualifier."
+                        ),
+                    )
+                ],
+            ),
+        )
+
+        html = _html_action_items(result)
+
+        assert "Pre-flight failed" in html
+        assert "DB.BadView.viw" in html
+        assert "all objects deployed successfully" not in html
 
     def test_normal_deploy_unchanged(self):
         """A successful run with no failures/skips uses the default message."""
