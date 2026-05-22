@@ -37,11 +37,20 @@ _DEFAULT_KNOWN_EXTERNAL_PARENTS = frozenset({"DBC"})
 _DBA_PARENT_PLACEHOLDER = "<DBA_SELECTED_PARENT>"
 _DBA_PERM_PLACEHOLDER = "<DBA_REVIEWED_PERM>"
 _DBA_PLACEHOLDERS = frozenset({_DBA_PARENT_PLACEHOLDER, _DBA_PERM_PLACEHOLDER})
+_SQL_LINE_COMMENT_RE = re.compile(r"--.*?$", re.MULTILINE)
+_SQL_BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+_PLACEHOLDER_SCAN_SUFFIXES = frozenset({".db", ".usr"})
 
 
 def _normalise_identifier(value: str) -> str:
     """Normalise a Teradata identifier for case-insensitive comparison."""
     return value.strip().strip("'\"").upper()
+
+
+def _strip_sql_comments(text: str) -> str:
+    """Remove SQL comments before checking deployable placeholder state."""
+    without_blocks = _SQL_BLOCK_COMMENT_RE.sub("", text)
+    return _SQL_LINE_COMMENT_RE.sub("", without_blocks)
 
 
 def _parse_perm_bytes(value_str: str, suffix: str) -> int:
@@ -277,7 +286,7 @@ def write_environment_prereq_payload(
 
 
 def has_dba_placeholders(package_dir: str) -> bool:
-    """Return True when generated DBA placeholders remain in package files."""
+    """Return True when generated DBA placeholders remain in deployable SQL."""
     root = Path(package_dir)
     # Only deployable payload controls the blocked/unblocked package state.
     # The review script under context/prerequisites may intentionally retain
@@ -288,11 +297,16 @@ def has_dba_placeholders(package_dir: str) -> bool:
     for path in base.rglob("*"):
         if not path.is_file():
             continue
+        if path.name.startswith((".", "_")):
+            continue
+        if path.suffix.lower() not in _PLACEHOLDER_SCAN_SUFFIXES:
+            continue
         try:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
-        if any(marker in text for marker in _DBA_PLACEHOLDERS):
+        executable_sql = _strip_sql_comments(text)
+        if any(marker in executable_sql for marker in _DBA_PLACEHOLDERS):
             return True
     return False
 

@@ -8,6 +8,7 @@ from pathlib import Path
 from td_release_packager.builder import build_package
 from td_release_packager.environment_prereqs import (
     analyse_environment_parent_requirements,
+    has_dba_placeholders,
 )
 from td_release_packager.models import BuildConfig
 
@@ -172,6 +173,52 @@ def test_environment_prereqs_zip_contains_deployable_payload(tmp_project, tmp_pa
         "payload/01_pre_requisites/databases/GCFR_MAIN.db"
         in requirements["deployable_payload"]
     )
+
+
+def test_has_dba_placeholders_ignores_comment_placeholders(tmp_path):
+    """Review guidance comments do not keep a DBA-reviewed package blocked."""
+    pkg = tmp_path / "pkg"
+    _write(
+        pkg / "payload" / "01_pre_requisites" / "databases" / "GCFR_MAIN.db",
+        """-- Replace placeholders before approving/repackaging this package:
+--   <DBA_SELECTED_PARENT>
+--   <DBA_REVIEWED_PERM>
+/* DBA note: <DBA_SELECTED_PARENT> */
+create database GCFR_MAIN
+from DBC
+as perm = 50G;
+""",
+    )
+
+    assert has_dba_placeholders(str(pkg)) is False
+
+
+def test_has_dba_placeholders_ignores_backup_files(tmp_path):
+    """Backup files beside reviewed DBA payload do not affect package state."""
+    pkg = tmp_path / "pkg"
+    _write(
+        pkg / "payload" / "01_pre_requisites" / "databases" / "GCFR_MAIN.db",
+        "create database GCFR_MAIN from DBC as perm = 50G;\n",
+    )
+    _write(
+        pkg / "payload" / "01_pre_requisites" / "databases" / "GCFR_MAIN.db.bak",
+        "create database GCFR_MAIN from <DBA_SELECTED_PARENT> "
+        "as perm = <DBA_REVIEWED_PERM>;\n",
+    )
+
+    assert has_dba_placeholders(str(pkg)) is False
+
+
+def test_has_dba_placeholders_detects_executable_placeholders(tmp_path):
+    """Executable placeholders keep an environment prerequisite package blocked."""
+    pkg = tmp_path / "pkg"
+    _write(
+        pkg / "payload" / "01_pre_requisites" / "databases" / "GCFR_MAIN.db",
+        "create database GCFR_MAIN from <DBA_SELECTED_PARENT> "
+        "as perm = <DBA_REVIEWED_PERM>;\n",
+    )
+
+    assert has_dba_placeholders(str(pkg)) is True
 
 
 def test_repackage_unblocks_reviewed_environment_payload(tmp_project, tmp_path):
