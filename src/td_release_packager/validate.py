@@ -803,6 +803,7 @@ _GENERATED_DIR_NAMES = frozenset(
     {
         ".git",
         ".pytest_cache",
+        ".ships",
         ".ships-work",
         "__pycache__",
         "_rollback",
