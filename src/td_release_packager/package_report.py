@@ -964,14 +964,17 @@ def _environment_prereq_banner(manifest_dict: dict) -> str:
     """Return a prominent DBA action banner for environment prereq packages."""
     if str(manifest_dict.get("role") or "") != "environment_prereqs":
         return ""
-    return """
+    package_filename = str(manifest_dict.get("package_filename") or "<package>.zip")
+    package_dir = package_filename.rsplit(".", 1)[0]
+    return f"""
 <div class="action-banner">
   <h2>ACTION REQUIRED — DBA REVIEW NEEDED</h2>
   <p>This <strong>_00_environment_prereqs</strong> package is blocked until DBA-approved parent and PERM values are supplied.</p>
-  <p><strong>Read:</strong> <code>context/prerequisites/DBA_INSTRUCTIONS.md</code></p>
-  <p><strong>Amend generated payload:</strong> <code>payload/01_pre_requisites/</code></p>
-  <p><strong>Then run:</strong> <code>python -m td_release_packager repackage --package-dir "&lt;extracted_00_environment_prereqs_dir&gt;" --strict</code></p>
-  <p>Do not edit the project payload or the _01_prereqs package for this environment parent prerequisite.</p>
+  <p><strong>Do not edit:</strong> the source project <code>payload/database/pre-requisites</code>, the zip file directly, or the <strong>_01_prereqs</strong> package.</p>
+  <p><strong>1. Extract this package zip:</strong> <code>{package_filename}</code> to a working folder such as <code>.ships-work/</code>.</p>
+  <p><strong>2. Amend generated payload inside the extracted package:</strong> <code>.ships-work/{package_dir}/payload/01_pre_requisites/</code></p>
+  <p><strong>3. Repackage the extracted package root:</strong> <code>python -m td_release_packager repackage --package-dir ".ships-work/{package_dir}" --strict</code></p>
+  <p><strong>Full instructions:</strong> <code>.ships-work/{package_dir}/context/prerequisites/DBA_INSTRUCTIONS.md</code></p>
 </div>
 """
 

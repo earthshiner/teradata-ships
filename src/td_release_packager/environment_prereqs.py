@@ -321,10 +321,11 @@ def write_environment_prereq_context(
         "deployable_payload": payload_paths or [],
         "dba_action_required": [
             "Review context/prerequisites/create_missing_parents.review.sql",
-            "Edit the generated payload .db/.usr files under payload/01_pre_requisites",
+            "Extract the _00_environment_prereqs zip before editing",
+            "Edit the generated payload .db/.usr files under the extracted package's payload/01_pre_requisites",
             "Replace <DBA_SELECTED_PARENT> and <DBA_REVIEWED_PERM>",
             "Read context/prerequisites/DBA_INSTRUCTIONS.md",
-            "Run: python -m td_release_packager repackage --package-dir <extracted_00_environment_prereqs_dir> --strict",
+            "Run: python -m td_release_packager repackage --package-dir <path-to-extracted-_00_environment_prereqs-package-root> --strict",
         ],
         "missing_parents": [req.to_dict() for req in requirements],
         "execution_policy": {
@@ -416,10 +417,10 @@ Primary file to amend:
 
 ## Required DBA action
 
-1. Extract the `_00_environment_prereqs` package.
-2. Edit the generated `.db` / `.usr` payload file(s).
+1. Extract the `_00_environment_prereqs` zip to a working directory.
+2. Edit the generated `.db` / `.usr` payload file(s) inside the extracted package.
 3. Replace `<DBA_SELECTED_PARENT>` and `<DBA_REVIEWED_PERM>` with approved values.
-4. Repackage the edited package using SHIPS.
+4. Repackage the edited package root using SHIPS.
 5. Deploy the release group in order: `_00_environment_prereqs`, `_01_prereqs`, `_02_main`.
 
 ## PowerShell
@@ -430,7 +431,8 @@ $PackageName = "{package_name}"
 $EnvZip = "$ReleaseGroup\\$PackageName.zip"
 $PackageDir = "$ReleaseGroup\\$PackageName"
 
-Expand-Archive -Path $EnvZip -DestinationPath $ReleaseGroup -Force
+Expand-Archive -Path $EnvZip -DestinationPath "$ReleaseGroup\\.ships-work" -Force
+$PackageDir = "$ReleaseGroup\\.ships-work\\$PackageName"
 
 notepad "$PackageDir\\{first_payload.replace("/", "\\")}"
 
@@ -447,7 +449,8 @@ PackageName="{package_name}"
 EnvZip="$ReleaseGroup/$PackageName.zip"
 PackageDir="$ReleaseGroup/$PackageName"
 
-unzip -o "$EnvZip" -d "$ReleaseGroup"
+unzip -o "$EnvZip" -d "$ReleaseGroup/.ships-work"
+PackageDir="$ReleaseGroup/.ships-work/$PackageName"
 
 ${{EDITOR:-vi}} "$PackageDir/{first_payload}"
 
@@ -487,7 +490,7 @@ The package can be unblocked only after:
 - the generated payload file exists inside the extracted `_00_environment_prereqs` package;
 - `<DBA_SELECTED_PARENT>` has been replaced;
 - `<DBA_REVIEWED_PERM>` has been replaced;
-- `python -m td_release_packager repackage --package-dir "<package-dir>" --strict` completes successfully;
+- `python -m td_release_packager repackage --package-dir "<path-to-extracted-_00_environment_prereqs-package-root>" --strict` completes successfully;
 - the regenerated `.zip` and `.sha256` sidecar are used for deployment.
 """
 
