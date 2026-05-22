@@ -594,7 +594,7 @@ def _build_package_impl(
         if undefined:
             print()
             print("  ERRORS — tokens referenced in DDL but not defined")
-            print("  in properties (must be resolved before packaging):")
+            print("  in the env config (must be resolved before packaging):")
             print()
 
             for token in undefined:
