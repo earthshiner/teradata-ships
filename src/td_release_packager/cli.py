@@ -37,6 +37,7 @@ import sys
 import tarfile
 import tempfile
 import zipfile
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from td_release_packager.builder import build_package
@@ -3438,26 +3439,33 @@ def _run_generate(args, stage, issue_codes) -> int:
     Returns:
         0 on success, 1 if the generator reported errors.
     """
-    from pathlib import Path
-
     from td_release_packager.view_layer_generator import run as generate_views
 
     source_dir = args.project
     dry_run = getattr(args, "dry_run", False)
     modules_arg = getattr(args, "modules", None)
+    project_path = Path(source_dir)
     requested_modules = (
         {m.strip().upper() for m in modules_arg.split(",") if m.strip()}
         if modules_arg
         else None
     )
+    config_files = _resolve_generate_config_files(project_path)
 
     stage.set_config_resolved("source", source_dir, "layer-5", "cli")
     stage.set_config_resolved("dry_run", dry_run, "layer-5", "cli")
     stage.set_config_resolved("modules", modules_arg or "(all)", "layer-5", "cli")
+    for config_file in config_files:
+        stage.set_config_resolved(
+            config_file["key"],
+            config_file["path"] if config_file["exists"] else None,
+            config_file["source"],
+            config_file["source_path"],
+        )
     stage.set_inputs(source_dir=source_dir)
 
     result = generate_views(
-        project_root=Path(source_dir),
+        project_root=project_path,
         requested_modules=requested_modules,
         dry_run=dry_run,
     )
@@ -3469,6 +3477,7 @@ def _run_generate(args, stage, issue_codes) -> int:
         business_views_unchanged=result.business_views_unchanged,
         databases_written=result.databases_written,
         grants_written=result.grants_written,
+        config_files=config_files,
     )
 
     for w in result.warnings:
@@ -3484,6 +3493,15 @@ def _run_generate(args, stage, issue_codes) -> int:
         print("  Mode:             DRY RUN — no files written")
     if requested_modules:
         print(f"  Modules:          {', '.join(sorted(requested_modules))}")
+    print("  Convention:       payload filename convention (*_T → *_V)")
+    print("  Configuration:")
+    for config_file in config_files:
+        status = "found" if config_file["exists"] else "missing"
+        used = "used here" if config_file["used_by_generate"] else "not read here"
+        print(
+            f"    - {config_file['label']}: {status}, {used}"
+            f" — {config_file['path']}"
+        )
 
     print(
         f"  Locking views:    {result.locking_views_written} written"
@@ -3509,6 +3527,60 @@ def _run_generate(args, stage, issue_codes) -> int:
     print(f"{'=' * 64}\n")
 
     return 1 if result.errors else 0
+
+
+def _resolve_generate_config_files(project_path: Path) -> list[dict[str, object]]:
+    """
+    Return config-file provenance shown by ``generate`` and recorded
+    in ships.decisions.json.
+
+    ``generate`` is intentionally payload-driven: it uses the payload
+    filename convention to derive table/view companions, for example
+    ``{{DB_DOMAIN_T}}`` and ``{{DB_DOMAIN_V}}``. The neighbouring config
+    files still matter to users because they govern how those payload files
+    are harvested and validated, so the banner names them explicitly.
+    """
+    candidates = [
+        {
+            "key": "object_placement_config",
+            "label": "object placement",
+            "path": project_path / "object_placement.yaml",
+            "source": "layer-3",
+            "source_path": "project/object_placement.yaml",
+            "used_by_generate": False,
+            "purpose": "Placement policy used by inspect; generate uses payload filename convention.",
+        },
+        {
+            "key": "inspect_config",
+            "label": "inspect rules",
+            "path": project_path / "config" / "inspect.conf",
+            "source": "layer-3",
+            "source_path": "project/config/inspect.conf",
+            "used_by_generate": False,
+            "purpose": "Validation rule severities used by inspect after generation.",
+        },
+        {
+            "key": "token_map",
+            "label": "token map",
+            "path": project_path / "config" / "token_map.conf",
+            "source": "layer-3",
+            "source_path": "project/config/token_map.conf",
+            "used_by_generate": False,
+            "purpose": "Harvest token substitutions; re-harvest after changing it.",
+        },
+    ]
+    resolved: list[dict[str, object]] = []
+    for candidate in candidates:
+        path = candidate["path"]
+        assert isinstance(path, Path)
+        resolved.append(
+            {
+                **candidate,
+                "path": str(path),
+                "exists": path.is_file(),
+            }
+        )
+    return resolved
 
 
 def _cmd_scan(args):
