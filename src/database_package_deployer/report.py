@@ -918,6 +918,34 @@ def _html_action_items(
     total = len(failed_items) + len(skipped_items)
 
     if total == 0:
+        preflight = getattr(result, "preflight_result", None)
+        if preflight is not None and not preflight.passed:
+            error_rows = []
+            for check in preflight.checks:
+                if check.passed or check.severity != "ERROR":
+                    continue
+                error_rows.append(
+                    f'<div class="action-item err">'
+                    f"<strong>PRE-FLIGHT:</strong> "
+                    f"[{check.database}] {_shorten_path(check.message)}"
+                    f"</div>"
+                )
+            if not error_rows:
+                error_rows.append(
+                    f'<div class="action-item err">'
+                    f"<strong>PRE-FLIGHT:</strong> "
+                    f"{preflight.errors} blocking error"
+                    f"{'s' if preflight.errors != 1 else ''} detected."
+                    f"</div>"
+                )
+            return (
+                '<div class="action-items has-errors">'
+                f'<h3>Action Items ({len(error_rows)})</h3>'
+                f'<details class="action-group" open>'
+                f'<summary class="err">✗ Pre-flight failed — requires attention</summary>'
+                + "\n".join(error_rows)
+                + "</details></div>"
+            )
         if getattr(result, "is_noop_redeploy", False):
             prior_count = len(getattr(result, "prior_completed", []))
             return (
