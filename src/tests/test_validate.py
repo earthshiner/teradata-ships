@@ -585,6 +585,22 @@ class TestCheckOneObject:
         assert len(issues) == 1
         assert issues[0].rule == "one_object"
 
+    def test_multiple_dcl_statements_allowed_in_dcl_file(self):
+        """DCL files can intentionally group related grants."""
+        ddl = (
+            "GRANT SELECT ON MyDB.TableA TO AppRole;\n"
+            "GRANT SELECT ON MyDB.TableB TO AppRole;\n"
+        )
+        assert _check_one_object("inter_db/AppRole.dcl", ddl) == []
+
+    def test_multiple_grant_statements_allowed_in_grt_file(self):
+        """Generated grant files follow the same grouping convention."""
+        ddl = (
+            "GRANT SELECT ON MyDB.TableA TO AppRole;\n"
+            "GRANT SELECT ON MyDB.TableB TO AppRole;\n"
+        )
+        assert _check_one_object("inter_db/AppRole.grt", ddl) == []
+
 
 # ---------------------------------------------------------------
 # _check_eponymous

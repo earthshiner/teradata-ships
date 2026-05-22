@@ -1338,11 +1338,18 @@ def _check_one_object(rel_path: str, content: str) -> List[ValidationIssue]:
     """
     Check that the file contains only one DDL statement.
 
+    DCL/grant files are intentionally grouped by grantee or
+    deployment concern, so multiple GRANT / REVOKE statements in a
+    ``.dcl`` or ``.grt`` file are valid and useful.
+
     Counts top-level DDL/DCL verbs (CREATE / REPLACE / DROP /
     GRANT / REVOKE / ALTER). DML verbs like INSERT / UPDATE /
     DELETE / MERGE are NOT counted — they appear legitimately
     inside procedure and trigger bodies.
     """
+    if os.path.splitext(rel_path)[1].lower() in {".dcl", ".grt"}:
+        return []
+
     matches = _STATEMENT_START_RE.findall(content)
     if len(matches) > 1:
         return [
