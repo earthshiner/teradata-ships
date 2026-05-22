@@ -2005,3 +2005,26 @@ class TestCheckViewColumnList:
         vcl_issues = [i for i in result.issues if i.rule == "view_column_list"]
         assert len(vcl_issues) == 1
         assert vcl_issues[0].severity == "WARNING"
+
+    def test_generated_ships_directory_is_not_validated(self, tmp_path):
+        """Generated helper mirrors under .ships are not payload source."""
+        mirror_dir = (
+            tmp_path
+            / ".ships"
+            / "harvest"
+            / "by_database"
+            / "DB_DOMAIN_V"
+            / "views"
+        )
+        mirror_dir.mkdir(parents=True)
+        (mirror_dir / "{{DB_DOMAIN_V}}.Agent_Current.viw").write_text(
+            "REPLACE VIEW {{DB_DOMAIN_V}}.Agent_Current AS SELECT 1 AS Dummy;",
+            encoding="utf-8",
+        )
+
+        rules = dict(DEFAULT_RULES)
+        rules["view_column_list"] = "WARNING"
+        result = validate_directory(str(tmp_path), rules_config=rules)
+
+        assert result.files_scanned == 0
+        assert [i for i in result.issues if i.rule == "view_column_list"] == []
