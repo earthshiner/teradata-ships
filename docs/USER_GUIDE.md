@@ -647,6 +647,7 @@ python -m td_release_packager process \
     [--skip-generate]       # skip view-layer generation
     [--pause]               # pause after each stage for interactive review
     [--auto-tokenise]       # detect and apply tokens in one pass
+    [--remove-view-type-affixes]  # remove v_ / _v from view object names
 ```
 
 **Package stage is optional.** If you omit `--env`, `--env-config`, and `--name`, the pipeline stops after analyse. Use this for a quick lint-and-dependency-check without building a package.
@@ -788,8 +789,14 @@ python -m td_release_packager harvest \
 | `--generate-token-map` | No | Scan and write `config/token_map.conf` |
 | `--env-prefix` | No | Prefix to strip when deriving token names |
 | `--auto-tokenise` | No | Detect and apply tokens in one pass (no manual review) |
+| `--remove-view-type-affixes` | No | Remove redundant view object affixes (`v_` prefix and `_v` suffix) and update qualified references during harvest |
 | `--keep-existing` | No | Overlay new files without wiping payload first |
 | `--force` | No | Overwrite collisions in overlay mode |
+
+Use `--remove-view-type-affixes` during legacy onboarding when view names encode
+their type, such as `v_Customer_Current` or `Customer_Current_V`. SHIPS removes
+only those explicit type affixes and updates qualified references before writing
+the payload; meaningful names containing the letter `v` are left unchanged.
 
 ---
 
@@ -899,6 +906,7 @@ python -m td_release_packager process \
 | `--token-map` | No | Token substitution map |
 | `--auto-tokenise` | No | Detect and apply tokens in one pass |
 | `--env-prefix` | No | Env prefix for auto-tokenise derivation |
+| `--remove-view-type-affixes` | No | Harvest stage: remove redundant view object affixes and update qualified references |
 | `--skip-generate` | No | Skip the generate stage |
 | `--env` | No | Target environment (package stage requires this) |
 | `--env-config` | No | Environment config file (package stage requires this) |

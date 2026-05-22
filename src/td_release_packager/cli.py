@@ -1353,6 +1353,9 @@ def _run_ingest(args, stage, issue_codes, apply_tokens) -> int:
             force=args.force,
             clean_payload=not getattr(args, "keep_existing", False),
             legacy_migration_rules=legacy_migration_rules,
+            remove_view_type_affixes=getattr(
+                args, "remove_view_type_affixes", False
+            ),
         )
         if detection.token_candidates:
             env_prefix = getattr(args, "env_prefix", None)
@@ -1398,6 +1401,12 @@ def _run_ingest(args, stage, issue_codes, apply_tokens) -> int:
         "layer-3" if legacy_migration_rules else "default",
         "project config" if legacy_migration_rules else "none",
     )
+    stage.set_config_resolved(
+        "remove_view_type_affixes",
+        getattr(args, "remove_view_type_affixes", False),
+        "layer-5",
+        "cli",
+    )
 
     result = ingest_directory(
         source_dir=args.source,
@@ -1407,6 +1416,7 @@ def _run_ingest(args, stage, issue_codes, apply_tokens) -> int:
         force=args.force,
         clean_payload=not args.keep_existing,
         legacy_migration_rules=legacy_migration_rules,
+        remove_view_type_affixes=getattr(args, "remove_view_type_affixes", False),
     )
 
     # -- Record inputs and outputs --
@@ -1424,6 +1434,9 @@ def _run_ingest(args, stage, issue_codes, apply_tokens) -> int:
         binaries_placed=len(result.binaries_placed),
         legacy_migration_files=result.legacy_migration_files,
         legacy_migration_substitutions=result.legacy_migration_substitutions,
+        placement_index_dir=result.placement_index_dir,
+        placement_index_files=result.placement_index_files,
+        view_type_affix_renames=result.view_type_affix_renames,
     )
 
     # -- Record issues --
@@ -1463,11 +1476,19 @@ def _run_ingest(args, stage, issue_codes, apply_tokens) -> int:
     print(f"  MULTISET inject:  {result.multiset_injected}")
     if result.multi_table_targets:
         print(f"  Multi-table DML:  {len(result.multi_table_targets)} file(s)")
+    if result.view_type_affix_renames:
+        print(f"  View affix clean: {result.view_type_affix_renames} rename(s)")
     if result.legacy_migration_substitutions:
         print(
             "  Legacy migrated: "
             f"{result.legacy_migration_substitutions} substitution(s) "
             f"in {result.legacy_migration_files} file(s)"
+        )
+    if result.placement_index_dir:
+        print(f"  Placement mirror: {result.placement_index_dir}")
+        print(
+            "                    grouped by owning database/token with "
+            "plain-English placement hints"
         )
 
     if apply_tokens:
@@ -4164,6 +4185,14 @@ def _build_parser():
         "mode when speed matters more than reviewing every token.",
     )
     ig.add_argument(
+        "--remove-view-type-affixes",
+        action="store_true",
+        dest="remove_view_type_affixes",
+        help="Remove redundant view object type affixes during harvest "
+        "(leading v_ and trailing _v) and update qualified references "
+        "before writing payload files.",
+    )
+    ig.add_argument(
         "--reconcile",
         action="store_true",
         help="Run interactive reconciliation: detect literal/tokenised "
@@ -4684,6 +4713,14 @@ def _build_parser():
         "--env-prefix",
         default=None,
         help="Env prefix for auto-tokenise token derivation.",
+    )
+    pr.add_argument(
+        "--remove-view-type-affixes",
+        action="store_true",
+        dest="remove_view_type_affixes",
+        default=False,
+        help="Harvest stage: remove redundant view object type affixes "
+        "(leading v_ and trailing _v) and update qualified references.",
     )
     pr.add_argument(
         "--skip-generate",

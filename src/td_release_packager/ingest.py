@@ -23,6 +23,7 @@ Usage:
 import logging
 import os
 import re
+import shutil
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -266,6 +267,12 @@ class IngestResult:
     #: caller-supplied migration rule set.
     legacy_migration_files: int = 0
     legacy_migration_substitutions: int = 0
+    #: Human-facing harvest mirror grouped by database/token. This is
+    #: generated outside payload so deploy/package stages keep using the
+    #: canonical SHIPS tree.
+    placement_index_dir: Optional[str] = None
+    placement_index_files: int = 0
+    view_type_affix_renames: int = 0
 
 
 def ingest_directory(
@@ -277,6 +284,7 @@ def ingest_directory(
     force: bool = False,
     clean_payload: bool = True,
     legacy_migration_rules: Optional[List[MigrationRule]] = None,
+    remove_view_type_affixes: bool = False,
 ) -> IngestResult:
     """
     Ingest raw DDL files from a source directory into a project.
@@ -300,6 +308,7 @@ def ingest_directory(
             force=force,
             clean_payload=clean_payload,
             legacy_migration_rules=legacy_migration_rules,
+            remove_view_type_affixes=remove_view_type_affixes,
         )
         _span.set_attribute("ships.files_total", result.total_files)
         _span.set_attribute("ships.files_classified", result.classified)
@@ -318,6 +327,7 @@ def _ingest_directory_impl(
     force: bool = False,
     clean_payload: bool = True,
     legacy_migration_rules: Optional[List[MigrationRule]] = None,
+    remove_view_type_affixes: bool = False,
 ) -> IngestResult:
     """
     Ingest raw DDL files from a source directory into a project.
@@ -362,6 +372,11 @@ def _ingest_directory_impl(
                         ``{{TOKEN}}`` form in memory before
                         classification, naming, token scanning, and
                         payload writing.
+        remove_view_type_affixes:
+                        If True, remove redundant view object name affixes
+                        (leading ``v_`` and trailing ``_v``) from view
+                        definitions and qualified references before payload
+                        placement.
 
     Returns:
         IngestResult with per-file outcomes and token candidates.
@@ -409,6 +424,13 @@ def _ingest_directory_impl(
     kind_index: Optional[Dict[str, str]] = None
     if apply_tokens:
         kind_index = _build_source_kind_index(source_files)
+
+    view_affix_renames: Dict[Tuple[str, str], str] = {}
+    if remove_view_type_affixes:
+        view_affix_renames = _build_view_type_affix_renames(
+            source_files, legacy_migration_rules
+        )
+        result.view_type_affix_renames = len(view_affix_renames)
 
     # -- Track all database names seen (for token detection) --
     all_db_names: Dict[str, List[str]] = defaultdict(list)
@@ -466,6 +488,11 @@ def _ingest_directory_impl(
                     f"(.IF/.GOTO flow control) — SHIPS deploys "
                     f"SQL directly and handles errors through its "
                     f"own mechanisms."
+                )
+
+            if view_affix_renames:
+                raw_content = _apply_view_type_affix_renames(
+                    raw_content, view_affix_renames
                 )
 
             # -- Split multi-statement files into individual DDL --
@@ -857,6 +884,10 @@ def _ingest_directory_impl(
                     f"the source DDL to enable automatic ordering."
                 )
 
+    result.placement_index_dir, result.placement_index_files = (
+        _emit_database_placement_mirror(project_dir, result.files_placed)
+    )
+
     logger.info(
         "Ingest complete: %d classified, %d unclassified, "
         "%d overwritten, %d skipped (existing), "
@@ -1102,6 +1133,141 @@ def _clean_payload_tree(payload_base: str) -> int:
             except OSError as exc:
                 logger.warning("Could not remove %s: %s", fpath, exc)
     return removed
+
+
+def _emit_database_placement_mirror(
+    project_dir: str,
+    files_placed: List[Tuple[str, str, str]],
+) -> Tuple[Optional[str], int]:
+    """
+    Build a human-facing copy of harvested files grouped by database/token.
+
+    The canonical deployable payload remains unchanged under
+    ``payload/database/...``. This mirror lives under
+    ``.ships/harvest/by_database`` so developers can quickly spot
+    placement mistakes such as authored views landing in ``*_T`` table
+    databases without changing package semantics.
+
+    Returns:
+        Tuple of ``(relative mirror directory, files copied)``. The
+        directory is returned even when no files are copied so callers can
+        surface a stable location.
+    """
+    project_root = Path(project_dir)
+    mirror_root = project_root / ".ships" / "harvest" / "by_database"
+
+    if mirror_root.exists():
+        shutil.rmtree(mirror_root)
+    mirror_root.mkdir(parents=True, exist_ok=True)
+
+    copied = 0
+    index_lines = [
+        "# Harvest Placement Mirror",
+        "",
+        "Generated by harvest. Do not edit these copies; fix source and re-harvest.",
+        "",
+    ]
+
+    for _src_rel, dest_rel, obj_type in files_placed:
+        db_name = _database_from_payload_relpath(dest_rel)
+        if not db_name:
+            continue
+
+        source_path = project_root / dest_rel
+        if not source_path.is_file():
+            continue
+
+        db_dir = mirror_root / _placement_dir_name(db_name)
+        kind_dir = db_dir / _placement_kind_dir(obj_type)
+        kind_dir.mkdir(parents=True, exist_ok=True)
+
+        dest_path = kind_dir / source_path.name
+        shutil.copy2(source_path, dest_path)
+        copied += 1
+
+        kind_dir_name = _placement_kind_dir(obj_type)
+        interpretation = _placement_interpretation(db_name, obj_type)
+        index_lines.append(
+            f"- {db_name} / {kind_dir_name} / {source_path.name} "
+            f"-> {dest_rel.replace(os.sep, '/')}"
+            f" — {interpretation}"
+        )
+
+    (mirror_root / "README.md").write_text("\n".join(index_lines) + "\n", encoding="utf-8")
+
+    return os.path.relpath(mirror_root, project_dir), copied
+
+
+def _database_from_payload_relpath(rel_path: str) -> Optional[str]:
+    """Extract the database/token component from an eponymous payload filename."""
+    filename = Path(rel_path).name
+    if filename.startswith("{{"):
+        end = filename.find("}}.")
+        if end != -1:
+            return filename[: end + 2]
+
+    if "." not in filename:
+        return None
+    return filename.split(".", 1)[0]
+
+
+def _placement_dir_name(database_name: str) -> str:
+    """Return a filesystem-safe directory name for a database/token."""
+    name = database_name.strip('"')
+    if name.startswith("{{") and name.endswith("}}"):
+        name = name[2:-2]
+    return re.sub(r'[<>:"/\\|?*]', "_", name)
+
+
+def _placement_kind_dir(obj_type: str) -> str:
+    """Map a SHIPS object type to a readable mirror subdirectory."""
+    mapping = {
+        "TABLE": "tables",
+        "VIEW": "views",
+        "MACRO": "macros",
+        "PROCEDURE": "procedures",
+        "FUNCTION": "functions",
+        "TRIGGER": "triggers",
+        "JOIN_INDEX": "indexes",
+        "HASH_INDEX": "indexes",
+        "STATISTICS": "statistics",
+        "COMMENT": "comments",
+        "DML": "dml",
+        "GRANT": "dcl",
+        "REVOKE": "dcl",
+        "DATABASE": "databases",
+        "USER": "users",
+    }
+    return mapping.get(obj_type, obj_type.lower())
+
+
+def _placement_interpretation(database_name: str, obj_type: str) -> str:
+    """
+    Return a plain-English placement hint for the harvest mirror index.
+
+    These hints are advisory only. They intentionally focus on common OPS
+    table/view-layer mistakes rather than trying to validate every possible
+    site-specific placement convention.
+    """
+    token = database_name.strip()
+    is_tables_db = token.endswith("_T}}") or token.upper().endswith("_T")
+    is_views_db = token.endswith("_V}}") or token.upper().endswith("_V")
+
+    if obj_type == "VIEW" and is_tables_db:
+        return (
+            "view is currently owned by a table-layer database; move the "
+            "view owner to the matching _V token if this is a business view"
+        )
+    if obj_type == "VIEW" and is_views_db:
+        return "view is owned by a view-layer database"
+    if obj_type == "TABLE" and is_tables_db:
+        return "table is owned by a table-layer database"
+    if obj_type == "TABLE" and is_views_db:
+        return (
+            "table is currently owned by a view-layer database; check whether "
+            "the owner token should be the matching _T token"
+        )
+    return "placement grouped by owning database/token"
 
 
 # ---------------------------------------------------------------
@@ -1952,6 +2118,115 @@ def _build_token_candidates(
         candidates[db_name] = files
 
     return candidates
+
+
+# ---------------------------------------------------------------
+# Internal — View name affix normalisation
+# ---------------------------------------------------------------
+
+
+def _remove_view_type_affix(object_name: str) -> str:
+    """
+    Remove redundant view type affixes from an object name.
+
+    Only the explicit type affixes are removed:
+      - leading ``v_`` / ``V_``
+      - trailing ``_v`` / ``_V``
+
+    Meaningful domain text containing ``v`` is left alone.
+    """
+    cleaned = re.sub(r"^v_", "", object_name, count=1, flags=re.IGNORECASE)
+    cleaned = re.sub(r"_v$", "", cleaned, count=1, flags=re.IGNORECASE)
+    return cleaned or object_name
+
+
+def _build_view_type_affix_renames(
+    source_files: List[str],
+    legacy_migration_rules: Optional[List[MigrationRule]],
+) -> Dict[Tuple[str, str], str]:
+    """
+    Build view object rename rules from source definitions.
+
+    The result maps ``(database, old_object_name)`` to ``new_object_name``.
+    Only VIEW definitions participate; table/procedure/etc. objects are
+    deliberately out of scope.
+    """
+    from td_release_packager.classifier import classify, base_type
+
+    renames: Dict[Tuple[str, str], str] = {}
+    for src_path in source_files:
+        raw_content = _read_file(src_path)
+        if raw_content is None:
+            continue
+        if legacy_migration_rules:
+            raw_content, _hits = apply_migration_rules_to_text(
+                raw_content, legacy_migration_rules
+            )
+        raw_content, _n_bteq = _strip_bteq_commands(raw_content)
+        clean_file = _strip_comments(raw_content)
+        if not (
+            _HAS_REPLACE_VIEW_RE.search(clean_file)
+            or _CREATE_VIEW_RE.search(clean_file)
+        ):
+            continue
+        try:
+            statements = _split_multi_sqlj_jar_script(
+                raw_content, src_path
+            ) or _split_multi_statement(raw_content, src_path)
+        except Exception:
+            statements = [raw_content]
+
+        for statement in statements:
+            clean = _strip_comments(statement)
+            try:
+                classification = classify(path=src_path, content=clean)
+                if base_type(classification.type) != "VIEW":
+                    continue
+            except Exception:
+                continue
+
+            db_name, obj_name = _extract_qualified_name(clean)
+            if not db_name or not obj_name:
+                continue
+            new_name = _remove_view_type_affix(obj_name)
+            if new_name != obj_name:
+                renames[(db_name, obj_name)] = new_name
+
+    return renames
+
+
+def _apply_view_type_affix_renames(
+    content: str,
+    renames: Dict[Tuple[str, str], str],
+) -> str:
+    """
+    Apply qualified view object renames outside comments and string literals.
+    """
+    if not renames:
+        return content
+
+    from td_release_packager.sql_text import strip_comments_and_string_literals
+
+    scan = strip_comments_and_string_literals(content)
+    replacements: List[Tuple[int, int, str]] = []
+
+    for (db_name, old_obj), new_obj in renames.items():
+        pattern = re.compile(
+            rf"(?<![A-Za-z0-9_]){re.escape(db_name)}\s*\.\s*"
+            rf"{re.escape(old_obj)}(?![A-Za-z0-9_])",
+            re.IGNORECASE,
+        )
+        for match in pattern.finditer(scan):
+            replacements.append((match.start(), match.end(), f"{db_name}.{new_obj}"))
+
+    if not replacements:
+        return content
+
+    replacements.sort(key=lambda item: item[0], reverse=True)
+    out = content
+    for start, end, replacement in replacements:
+        out = out[:start] + replacement + out[end:]
+    return out
 
 
 # ---------------------------------------------------------------
