@@ -8,6 +8,7 @@ from pathlib import Path
 from td_release_packager.builder import build_package
 from td_release_packager.environment_prereqs import (
     analyse_environment_parent_requirements,
+    find_dba_placeholders,
     has_dba_placeholders,
 )
 from td_release_packager.models import BuildConfig
@@ -219,6 +220,32 @@ def test_has_dba_placeholders_detects_executable_placeholders(tmp_path):
     )
 
     assert has_dba_placeholders(str(pkg)) is True
+
+
+def test_find_dba_placeholders_reports_executable_locations(tmp_path):
+    """Strict repackage can explain the remaining executable placeholders."""
+    pkg = tmp_path / "pkg"
+    _write(
+        pkg / "payload" / "01_pre_requisites" / "databases" / "GCFR_MAIN.db",
+        """-- <DBA_SELECTED_PARENT> in guidance only
+create database GCFR_MAIN
+from <DBA_SELECTED_PARENT>
+as perm = <DBA_REVIEWED_PERM>;
+""",
+    )
+
+    assert find_dba_placeholders(str(pkg)) == [
+        (
+            "payload/01_pre_requisites/databases/GCFR_MAIN.db",
+            3,
+            "<DBA_SELECTED_PARENT>",
+        ),
+        (
+            "payload/01_pre_requisites/databases/GCFR_MAIN.db",
+            4,
+            "<DBA_REVIEWED_PERM>",
+        ),
+    ]
 
 
 def test_repackage_unblocks_reviewed_environment_payload(tmp_project, tmp_path):

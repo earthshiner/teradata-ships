@@ -68,6 +68,7 @@ from database_package_deployer.provenance import (
 from td_release_packager.context_artifacts import write_context_artifacts
 from td_release_packager.environment_prereqs import (
     analyse_environment_parent_requirements,
+    find_dba_placeholders,
     has_dba_placeholders,
     write_environment_prereq_context,
     write_environment_prereq_payload,
@@ -1707,9 +1708,21 @@ def repackage_package_dir(
 
     _refresh_environment_prereq_trust(package_dir, manifest)
     if strict and manifest.trust.get("label") == "BLOCKED":
+        placeholders = find_dba_placeholders(package_dir)
+        details = ""
+        if placeholders:
+            rendered = "\n".join(
+                f"  - {path}:{line_no} contains {marker}"
+                for path, line_no, marker in placeholders[:10]
+            )
+            remaining = len(placeholders) - 10
+            if remaining > 0:
+                rendered += f"\n  - ... and {remaining} more"
+            details = f"\nExecutable placeholders still present:\n{rendered}"
         raise ValueError(
             "Package remains BLOCKED. Replace DBA placeholders in the generated "
             "environment prerequisite payload, then run repackage again."
+            f"{details}"
         )
 
     _write_manifest_json(package_dir, manifest)
