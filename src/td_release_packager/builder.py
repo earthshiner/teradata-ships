@@ -1148,6 +1148,11 @@ def _create_environment_prereqs_package_if_needed(
     payload_summary = (
         ", ".join(payload_paths) if payload_paths else "payload/01_pre_requisites/"
     )
+    extracted_payload_summary = ", ".join(
+        os.path.join(env_pkg_dir, p.replace("/", os.sep)) for p in payload_paths
+    )
+    if not extracted_payload_summary:
+        extracted_payload_summary = os.path.join(env_pkg_dir, "payload", "01_pre_requisites")
     print(
         "\n"
         "================================================================\n"
@@ -1155,7 +1160,9 @@ def _create_environment_prereqs_package_if_needed(
         "================================================================\n"
         f"  Package: {env_archive_filename}\n"
         f"  DBA instructions: {instruction_path}\n"
-        f"  DBA must amend: {payload_summary}\n"
+        f"  DBA must amend inside extracted package: {extracted_payload_summary}\n"
+        f"  Package-local payload path(s): {payload_summary}\n"
+        "  Do not edit the source project payload or the zip file directly.\n"
         "  Then run:\n"
         f'    python -m td_release_packager repackage --package-dir "{env_pkg_dir}" --strict\n'
         "================================================================\n"

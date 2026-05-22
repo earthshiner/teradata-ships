@@ -536,6 +536,19 @@ class TestGeneratePackageReport:
         assert "Summary" in html
         assert "REPLACE/MACRO" in html
 
+    def test_environment_prereq_banner_names_extracted_package_dir(self, tmp_path):
+        manifest = _minimal_manifest()
+        manifest["role"] = "environment_prereqs"
+        manifest["package_filename"] = "DEV_APP_BUILD_0001_00_environment_prereqs.zip"
+
+        generate_package_report(str(tmp_path), manifest)
+
+        html = (tmp_path / "package_report.html").read_text(encoding="utf-8")
+        assert "Do not edit" in html
+        assert "source project" in html
+        assert ".ships-work/DEV_APP_BUILD_0001_00_environment_prereqs" in html
+        assert "--package-dir" in html
+
     def test_invalid_utf8_payload_still_writes_report(self, tmp_path):
         file_path = tmp_path / "payload" / "03_ddl" / "procedures" / "DB.Native.spl"
         file_path.parent.mkdir(parents=True)

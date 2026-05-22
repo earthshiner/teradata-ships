@@ -260,6 +260,8 @@ def test_environment_prereqs_zip_contains_dba_instructions(tmp_project, tmp_path
     assert "PowerShell" in instructions
     assert "Bash / Git Bash / Linux shell" in instructions
     assert "python -m td_release_packager repackage" in instructions
+    assert ".ships-work" in instructions
+    assert "extracted package" in instructions
     assert "payload/01_pre_requisites/databases/GCFR_MAIN.db" in instructions
     assert "<DBA_SELECTED_PARENT>" in instructions
     assert "<DBA_REVIEWED_PERM>" in instructions
