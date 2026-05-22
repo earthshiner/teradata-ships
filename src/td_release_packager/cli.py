@@ -2241,14 +2241,20 @@ def _run_inspect(args, stage, issue_codes) -> int:
 def _cmd_repackage(args):
     """Rebuild an edited extracted package directory."""
     try:
-        from td_release_packager.builder import repackage_package_dir
+        from td_release_packager.builder import (
+            _resolve_repackage_package_dir,
+            repackage_package_dir,
+        )
 
+        resolved_package_dir = _resolve_repackage_package_dir(args.package_dir)
         archive_path, manifest = repackage_package_dir(
             args.package_dir,
             strict=getattr(args, "strict", False),
         )
         print("\nSHIPS repackage complete")
-        print(f"  Package dir: {args.package_dir}")
+        print(f"  Package dir: {resolved_package_dir}")
+        if resolved_package_dir != args.package_dir:
+            print(f"  Input path:  {args.package_dir}")
         print(f"  Archive:     {archive_path}")
         print(f"  Checksum:    {archive_path}.sha256")
         print(f"  Trust:       {manifest.trust.get('label', 'UNKNOWN')}")
