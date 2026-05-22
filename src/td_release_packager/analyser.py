@@ -790,6 +790,14 @@ _SPECIFIC_RE = re.compile(
     re.IGNORECASE,
 )
 
+_PREREQ_PARENT_RE = re.compile(
+    r"^\s*CREATE\s+(?:DATABASE|USER)\s+"
+    r"(" + _QUAL_NAME + r")"
+    r"\s+FROM\s+"
+    r"(" + _QUAL_NAME + r")",
+    re.IGNORECASE | re.MULTILINE,
+)
+
 
 def _classify(content: str) -> Optional[str]:
     """Classify a DDL file by object type."""
@@ -809,6 +817,14 @@ def _extract_name(content: str) -> Tuple[Optional[str], Optional[str]]:
     if len(parts) == 2:
         return (parts[0].strip(), parts[1].strip())
     return (None, parts[0].strip() if parts else None)
+
+
+def _extract_prereq_parent_name(content: str) -> Optional[str]:
+    """Extract the parent from CREATE DATABASE/USER ... FROM <parent>."""
+    match = _PREREQ_PARENT_RE.search(_strip_noise(content))
+    if not match:
+        return None
+    return _normalise_qualified_name(match.group(2)).strip()
 
 
 def _extract_function_base_name(content: str) -> Optional[str]:
@@ -956,6 +972,12 @@ def _analyse_project_impl(project_dir: str) -> AnalysisResult:
             name_index[base_upper] = set()
         name_index[base_upper].update(specifics)
 
+    prereq_container_index: dict[str, set[str]] = defaultdict(set)
+    for qn, obj in result.objects.items():
+        if obj.object_type in {"DATABASE", "USER"} and "." in qn:
+            _prefix, name = qn.split(".", 1)
+            prereq_container_index[name.upper()].add(qn)
+
     # -- Phase 3: Scan references and build edges --
     for qn, obj in result.objects.items():
         internal_refs, ext_refs = _scan_references(
@@ -984,6 +1006,13 @@ def _analyse_project_impl(project_dir: str) -> AnalysisResult:
             if qn not in result.external_deps:
                 result.external_deps[qn] = set()
             result.external_deps[qn].update(ext_refs)
+
+        if obj.object_type in {"DATABASE", "USER"}:
+            parent_name = _extract_prereq_parent_name(obj.ddl_text)
+            if parent_name:
+                for parent_qn in prereq_container_index.get(parent_name.upper(), set()):
+                    if parent_qn != qn:
+                        result.dependencies[qn].add(parent_qn)
 
     # -- Phase 3b: Post-process — statistics objects inherit index dependencies --
     #
