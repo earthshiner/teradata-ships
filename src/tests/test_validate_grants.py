@@ -184,6 +184,51 @@ class TestLifecycle:
         # And still flagged in the post-fix result
         assert len(result.orphaned) == 1
 
+    def test_database_role_grant_file_is_not_orphaned(self, project):
+        """Database-to-role DCL is intentional package access DCL."""
+        dcl = _dcl_dir(project)
+        dcl.mkdir(parents=True)
+        (dcl / "{{DB_DOMAIN_T}}.dcl").write_text(
+            (
+                "GRANT SELECT ON {{DB_DOMAIN_T}} "
+                "TO {{DB_DOMAIN_T}}_READ_ROLE;\n"
+                "GRANT SELECT, INSERT, UPDATE, DELETE ON {{DB_DOMAIN_T}} "
+                "TO {{DB_DOMAIN_T}}_WRITE_ROLE;\n"
+            ),
+            encoding="utf-8",
+        )
+
+        result = validate_grants(project)
+
+        assert result.passed
+        assert result.orphaned == []
+
+    def test_fix_creates_missing_role_files_for_role_grants(self, project):
+        """Role grantees in DCL are materialised as package role DDL."""
+        dcl = _dcl_dir(project)
+        dcl.mkdir(parents=True)
+        (dcl / "{{DB_DOMAIN_T}}.dcl").write_text(
+            (
+                "GRANT SELECT ON {{DB_DOMAIN_T}} "
+                "TO {{DB_DOMAIN_T}}_READ_ROLE;\n"
+                "GRANT SELECT, INSERT, UPDATE, DELETE ON {{DB_DOMAIN_T}} "
+                "TO {{DB_DOMAIN_T}}_WRITE_ROLE;\n"
+            ),
+            encoding="utf-8",
+        )
+
+        result, files_written = fix_grants(project)
+
+        role_dir = project / "payload" / "database" / "system" / "roles"
+        assert result.passed
+        assert files_written == 2
+        assert (role_dir / "{{DB_DOMAIN_T}}_READ_ROLE.rol").read_text(
+            encoding="utf-8"
+        ) == "CREATE ROLE {{DB_DOMAIN_T}}_READ_ROLE;\n"
+        assert (role_dir / "{{DB_DOMAIN_T}}_WRITE_ROLE.rol").read_text(
+            encoding="utf-8"
+        ) == "CREATE ROLE {{DB_DOMAIN_T}}_WRITE_ROLE;\n"
+
 
 # ===================================================================
 # .grt parser — _parse_grt_content
@@ -233,6 +278,10 @@ class TestParser:
 
     def test_only_comments(self):
         assert _parse_grt_content("/* nothing */\n-- empty file\n") == {}
+
+    def test_token_with_role_suffix_grantee_is_parsed(self):
+        content = "GRANT SELECT ON {{DB_DOMAIN_T}} TO {{DB_DOMAIN_T}}_READ_ROLE;\n"
+        assert _parse_grt_content(content) == {"{{DB_DOMAIN_T}}": {"SELECT"}}
 
 
 # ===================================================================

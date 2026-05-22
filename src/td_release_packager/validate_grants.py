@@ -89,7 +89,7 @@ def _resolve_dcl_dir(project_dir: Path, dcl_dir: Optional[Path]) -> Path:
 # ---------------------------------------------------------------------------
 
 # Identifier shape — accepts tokens, quoted ids, and bare ids.
-_GRANT_IDENT = r'(?:\{\{[A-Za-z_]\w*\}\}|"[^"]+"|[A-Za-z_]\w*)'
+_GRANT_IDENT = r'(?:\{\{[A-Za-z_]\w*\}\}(?:[A-Za-z_]\w*)?|"[^"]+"|[A-Za-z_]\w*)'
 
 # A GRANT statement of the canonical form produced by infer_grants:
 #   GRANT priv1, priv2, ... ON <grantor> TO <grantee> [WITH GRANT OPTION];
@@ -138,14 +138,26 @@ def _parse_grt_content(content: str) -> Dict[str, Set[str]]:
     mapping.
     """
     grants: Dict[str, Set[str]] = {}
-    cleaned = strip_sql_comments(content)
 
-    for match in _GRANT_STMT_RE.finditer(cleaned):
-        grantor = match.group("grantor").strip()
-        privs = _split_privileges(match.group("privileges"))
+    for grantor, _grantee, privs in _iter_grant_statements(content):
         grants.setdefault(grantor, set()).update(privs)
 
     return grants
+
+
+def _iter_grant_statements(content: str) -> List[Tuple[str, str, Set[str]]]:
+    """Return ``(grantor, grantee, privileges)`` tuples from DCL content."""
+    cleaned = strip_sql_comments(content)
+    statements: List[Tuple[str, str, Set[str]]] = []
+    for match in _GRANT_STMT_RE.finditer(cleaned):
+        statements.append(
+            (
+                match.group("grantor").strip(),
+                match.group("grantee").strip(),
+                _split_privileges(match.group("privileges")),
+            )
+        )
+    return statements
 
 
 def _read_grt_file(path: Path) -> Optional[Dict[str, Set[str]]]:
@@ -159,6 +171,86 @@ def _read_grt_file(path: Path) -> Optional[Dict[str, Set[str]]]:
         logger.warning("Cannot read %s: %s", path, e)
         return None
     return _parse_grt_content(content)
+
+
+def _normalise_identifier(identifier: str) -> str:
+    """Normalise an identifier for filename/content comparisons."""
+    text = identifier.strip()
+    if text.startswith('"') and text.endswith('"'):
+        text = text[1:-1]
+    return text.upper()
+
+
+def _is_role_identifier(identifier: str) -> bool:
+    """True when a grant target is clearly a role name."""
+    return _normalise_identifier(identifier).endswith("_ROLE")
+
+
+def _role_grantees_in_file(path: Path) -> Set[str]:
+    """Return role grantees referenced by a DCL file."""
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        logger.warning("Cannot read %s: %s", path, e)
+        return set()
+    return {
+        grantee
+        for _grantor, grantee, _privs in _iter_grant_statements(content)
+        if _is_role_identifier(grantee)
+    }
+
+
+def _is_database_role_grant_file(path: Path) -> bool:
+    """
+    True when a DCL file grants the database named by the file to roles.
+
+    These files are intentional package artefacts, commonly used for
+    READ/WRITE role access to a package database, so they are not
+    orphaned merely because no DDL object owner implies them.
+    """
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        logger.warning("Cannot read %s: %s", path, e)
+        return False
+
+    statements = _iter_grant_statements(content)
+    if not statements:
+        return False
+
+    file_grantor = _normalise_identifier(path.stem)
+    return all(
+        _normalise_identifier(grantor) == file_grantor
+        and _is_role_identifier(grantee)
+        for grantor, grantee, _privs in statements
+    )
+
+
+def _write_missing_role_files(dcl_dir: Path, project_dir: Path) -> int:
+    """Create missing role DDL for role grantees found in DCL files."""
+    if not dcl_dir.is_dir():
+        return 0
+
+    roles: Set[str] = set()
+    for entry in sorted(dcl_dir.iterdir()):
+        if entry.is_file() and entry.suffix.lower() in {".dcl", ".grt"}:
+            roles.update(_role_grantees_in_file(entry))
+
+    if not roles:
+        return 0
+
+    role_dir = project_dir / "payload" / "database" / "system" / "roles"
+    role_dir.mkdir(parents=True, exist_ok=True)
+
+    files_written = 0
+    for role in sorted(roles, key=_normalise_identifier):
+        role_file = role_dir / f"{role}.rol"
+        if role_file.exists():
+            continue
+        role_file.write_text(f"CREATE ROLE {role};\n", encoding="utf-8")
+        files_written += 1
+
+    return files_written
 
 
 # ---------------------------------------------------------------------------
@@ -321,6 +413,8 @@ def _find_orphans(
         grantee_from_filename = entry.stem
         if grantee_from_filename in expected_grantees:
             continue
+        if _is_database_role_grant_file(entry):
+            continue
 
         actual = _read_grt_file(entry) or {}
         orphans.append(
@@ -439,8 +533,9 @@ def fix_grants(
 ) -> Tuple[GrantValidationResult, int]:
     """
     Repair grant drift by writing expected .dcl files for every
-    missing or drifted grantee. Orphaned files are reported but NOT
-    deleted.
+    missing or drifted grantee, and creating missing role DDL for
+    role grantees referenced by existing DCL files. Orphaned files
+    are reported but NOT deleted.
 
     Args:
         project_dir: Root of the SHIPS project to scan.
@@ -491,6 +586,8 @@ def fix_grants(
             actual_grants=expected,
         )
         statuses.append(post_status)
+
+    files_written += _write_missing_role_files(dcl_dir, project_dir)
 
     # Orphans are not touched — surface them in the result
     orphans = _find_orphans(set(consolidated.keys()), dcl_dir)
