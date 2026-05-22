@@ -753,6 +753,59 @@ class TestAnalyseProject:
             < wave_for["{{OPR_V}}.GCFR_RV_Row_Count"]
         )
 
+    def test_database_parent_child_prereqs_produce_ordered_waves(self, tmp_project):
+        """CREATE DATABASE child FROM parent creates a wave dependency."""
+        databases_dir = (
+            tmp_project / "payload" / "database" / "pre-requisites" / "databases"
+        )
+
+        (databases_dir / "BionicCC.db").write_text(
+            "CREATE DATABASE BionicCC FROM DBC AS PERM=0;",
+            encoding="utf-8",
+        )
+        (databases_dir / "BionicCC_DOM_STD.db").write_text(
+            "CREATE DATABASE BionicCC_DOM_STD FROM BionicCC AS PERM=0;",
+            encoding="utf-8",
+        )
+
+        result = analyse_project(str(tmp_project))
+
+        assert result.dependencies["$DATABASE.BionicCC_DOM_STD"] == {
+            "$DATABASE.BionicCC"
+        }
+        wave_for = {
+            qn: idx
+            for idx, wave in enumerate(result.waves, start=1)
+            for qn in wave
+        }
+        assert wave_for["$DATABASE.BionicCC"] < wave_for["$DATABASE.BionicCC_DOM_STD"]
+
+    def test_user_parent_prereq_produces_ordered_waves(self, tmp_project):
+        """CREATE USER child FROM parent database creates a wave dependency."""
+        prereq_dir = tmp_project / "payload" / "database" / "pre-requisites"
+        databases_dir = prereq_dir / "databases"
+        users_dir = prereq_dir / "users"
+        users_dir.mkdir(parents=True, exist_ok=True)
+
+        (databases_dir / "ParentDB.db").write_text(
+            "CREATE DATABASE ParentDB FROM DBC AS PERM=0;",
+            encoding="utf-8",
+        )
+        (users_dir / "ChildUser.usr").write_text(
+            "CREATE USER ChildUser FROM ParentDB AS PERM=0;",
+            encoding="utf-8",
+        )
+
+        result = analyse_project(str(tmp_project))
+
+        assert result.dependencies["$USER.ChildUser"] == {"$DATABASE.ParentDB"}
+        wave_for = {
+            qn: idx
+            for idx, wave in enumerate(result.waves, start=1)
+            for qn in wave
+        }
+        assert wave_for["$DATABASE.ParentDB"] < wave_for["$USER.ChildUser"]
+
     def test_external_dependency_flagged(self, tmp_project):
         """Reference to an unknown database is flagged as external."""
         views_dir = tmp_project / "payload" / "database" / "DDL" / "views"
