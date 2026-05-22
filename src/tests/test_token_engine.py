@@ -144,6 +144,17 @@ class TestReadProperties:
         with pytest.raises(ValueError, match=r"after token resolution"):
             read_env_config(str(props))
 
+    def test_merged_line_error_points_to_missing_line_break(self, tmp_path):
+        """A merged KEY=VALUE line gets a human-actionable error."""
+        props = tmp_path / "test.conf"
+        props.write_text(
+            "DB_DOMAIN_V=D01_DOM_STDDB_MEMORY_BUS_V=D01_DOM_BUS_V\n",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match=r"missing line break"):
+            read_env_config(str(props))
+
 
 # ---------------------------------------------------------------
 # _resolve_internal_references

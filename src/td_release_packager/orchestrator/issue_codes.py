@@ -49,6 +49,9 @@ TOKEN_UNUSED = "TOKEN_UNUSED"
 #: Config file path was provided but the file does not exist.
 PROPERTIES_NOT_FOUND = "PROPERTIES_NOT_FOUND"
 
+#: Config file exists but contains invalid token values or syntax.
+PROPERTIES_INVALID = "PROPERTIES_INVALID"
+
 
 # ---------------------------------------------------------------
 # Inspect domain (build-order item 4 — inspect rollout)
@@ -211,6 +214,11 @@ ISSUE_CODES: Dict[str, str] = {
     PROPERTIES_NOT_FOUND: (
         "The --env-config path was supplied but the file does not "
         "exist on disc. Check the path and re-run."
+    ),
+    PROPERTIES_INVALID: (
+        "The --env-config file exists but contains invalid token "
+        "values or syntax. Check for merged KEY=VALUE lines, "
+        "unresolved {{TOKEN}} references, and stray braces."
     ),
     INSPECT_TOKEN_MALFORMED: (
         "A {{TOKEN}} marker is malformed — typically stray whitespace "

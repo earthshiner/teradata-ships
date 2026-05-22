@@ -71,10 +71,11 @@ logger = logging.getLogger(__name__)
 # Default DCL directory
 # ---------------------------------------------------------------------------
 
-# Where infer_grants.py writes by default and where existing .dcl files
-# are expected to live. Mirrored here so a None dcl_dir resolves
-# consistently between validation and inference.
+# Where database-to-database grant scripts live by default. DCL is
+# split by grantee class: roles/, users/, and inter_db/.
 _DEFAULT_DCL_SUBPATH = ("payload", "database", "DCL", "inter_db")
+_DEFAULT_ROLE_DCL_SUBPATH = ("payload", "database", "DCL", "roles")
+_DEFAULT_USER_DCL_SUBPATH = ("payload", "database", "DCL", "users")
 
 
 def _resolve_dcl_dir(project_dir: Path, dcl_dir: Optional[Path]) -> Path:
@@ -82,6 +83,16 @@ def _resolve_dcl_dir(project_dir: Path, dcl_dir: Optional[Path]) -> Path:
     if dcl_dir is not None:
         return dcl_dir
     return project_dir.joinpath(*_DEFAULT_DCL_SUBPATH)
+
+
+def _resolve_role_dcl_dir(project_dir: Path) -> Path:
+    """Resolve the role grants directory."""
+    return project_dir.joinpath(*_DEFAULT_ROLE_DCL_SUBPATH)
+
+
+def _resolve_user_dcl_dir(project_dir: Path) -> Path:
+    """Resolve the user grants directory."""
+    return project_dir.joinpath(*_DEFAULT_USER_DCL_SUBPATH)
 
 
 # ---------------------------------------------------------------------------
@@ -226,15 +237,19 @@ def _is_database_role_grant_file(path: Path) -> bool:
     )
 
 
-def _write_missing_role_files(dcl_dir: Path, project_dir: Path) -> int:
+def _write_missing_role_files(project_dir: Path) -> int:
     """Create missing role DDL for role grantees found in DCL files."""
-    if not dcl_dir.is_dir():
+    role_dcl_dir = _resolve_role_dcl_dir(project_dir)
+    user_dcl_dir = _resolve_user_dcl_dir(project_dir)
+    dcl_dirs = [path for path in (role_dcl_dir, user_dcl_dir) if path.is_dir()]
+    if not dcl_dirs:
         return 0
 
     roles: Set[str] = set()
-    for entry in sorted(dcl_dir.iterdir()):
-        if entry.is_file() and entry.suffix.lower() in {".dcl", ".grt"}:
-            roles.update(_role_grantees_in_file(entry))
+    for dcl_dir in dcl_dirs:
+        for entry in sorted(dcl_dir.iterdir()):
+            if entry.is_file() and entry.suffix.lower() in {".dcl", ".grt"}:
+                roles.update(_role_grantees_in_file(entry))
 
     if not roles:
         return 0
@@ -363,7 +378,7 @@ def _classify_grantee(
     Classify one grantee by comparing inferred grants against the
     persisted .dcl file (if any).
     """
-    file_path = dcl_dir / grantee_filename(grantee)
+    file_path = _grant_file_path(dcl_dir, grantee)
     status = GranteeStatus(
         grantee=grantee,
         file_path=file_path,
@@ -393,13 +408,30 @@ def _classify_grantee(
     return status
 
 
+def _grant_file_path(dcl_dir: Path, grantee: str) -> Path:
+    """
+    Resolve a grantee grant file, accepting canonical .dcl and legacy .grt.
+
+    ``.dcl`` is the preferred extension for DCL scripts. Older view-layer
+    generation emitted ``.grt``; accepting both keeps existing packages
+    valid while new fixes can write ``.dcl``.
+    """
+    dcl_path = dcl_dir / grantee_filename(grantee)
+    grt_path = dcl_path.with_suffix(".grt")
+    if dcl_path.exists():
+        return dcl_path
+    if grt_path.exists():
+        return grt_path
+    return dcl_path
+
+
 def _find_orphans(
     expected_grantees: Set[str],
     dcl_dir: Path,
 ) -> List[GranteeStatus]:
     """
-    Identify persisted DCL grant files in dcl_dir whose grantee is not in the
-    inferred set. These are reported but not auto-deleted.
+    Identify persisted inter-db DCL grant files whose grantee is not in
+    the inferred database-grantee set.
     """
     if not dcl_dir.is_dir():
         return []
@@ -412,8 +444,6 @@ def _find_orphans(
         # Recover the grantee from the filename: '{{TOK}}.dcl' → '{{TOK}}'
         grantee_from_filename = entry.stem
         if grantee_from_filename in expected_grantees:
-            continue
-        if _is_database_role_grant_file(entry):
             continue
 
         actual = _read_grt_file(entry) or {}
@@ -587,7 +617,7 @@ def fix_grants(
         )
         statuses.append(post_status)
 
-    files_written += _write_missing_role_files(dcl_dir, project_dir)
+    files_written += _write_missing_role_files(project_dir)
 
     # Orphans are not touched — surface them in the result
     orphans = _find_orphans(set(consolidated.keys()), dcl_dir)
