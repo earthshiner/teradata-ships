@@ -192,6 +192,23 @@ _ALIAS_STOPLIST = frozenset(
         "NEXT",
         "ROWS",
         "ONLY",
+        # -- Teradata SQL syntax shortcuts that are illegal as aliases --
+        # These are Teradata-specific abbreviations the parser treats as
+        # reserved commands.  Using them as aliases causes a syntax error
+        # (Teradata Error 3706) because the parser reads them as commands
+        # rather than identifiers.  The rule is: if you have to double-quote
+        # it to make it work, it is wrong — use a meaningful alias instead.
+        "CT",    # CREATE TABLE
+        "BT",    # BEGIN TRANSACTION
+        "ET",    # END TRANSACTION
+        "DEL",   # DELETE
+        "INS",   # INSERT
+        "SEL",   # SELECT
+        "UPD",   # UPDATE
+        "CV",    # CREATE VIEW
+        "CM",    # CREATE MACRO
+        "CP",    # CREATE PROCEDURE
+        "CS",    # CASESPECIFIC
     }
 )
 
