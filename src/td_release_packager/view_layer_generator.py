@@ -502,6 +502,44 @@ def parse_table_columns(ddl_text: str) -> List[str]:
         ):
             continue
 
+
+        # Skip bare SQL keyword entries that are column *definition*
+        # continuation clauses rather than column names.  The most
+        # common case is a DEFAULT value clause that was split from
+        # the preceding column definition by _split_top_level when
+        # the default literal itself contains a comma (e.g.
+        # ``DEFAULT TIMESTAMP '9999-12-31 23:59:59.999999+00:00'``).
+        # Without this guard the keyword is mistakenly emitted as a
+        # column name in the generated view, causing Teradata Error
+        # 3707 ("expected something like '(' between the 'DEFAULT'
+        # keyword and ','").
+        #
+        # The full set of SQL keywords that can legally appear as the
+        # first token of a column-definition continuation clause (and
+        # therefore can never be a valid unquoted column name in this
+        # position) is listed here.  Column names that happen to
+        # share these spellings must be double-quoted in the DDL
+        # source; the parser will still recognise them via the
+        # quoted-name branch of the regex below.
+        _CLAUSE_KEYWORDS = frozenset({
+            "DEFAULT",
+            "GENERATED",
+            "NOT",
+            "NULL",
+            "WITH",
+            "FORMAT",
+            "TITLE",
+            "COMPRESS",
+            "CASESPECIFIC",
+            "UPPERCASE",
+            "LATIN",
+            "UNICODE",
+            "CHARACTER",
+        })
+        first_word = upper.split()[0] if upper.split() else ""
+        if first_word in _CLAUSE_KEYWORDS:
+            continue
+
         # Match: optional quoted name, otherwise bare identifier.
         match = re.match(r'\s*("[^"]+"|[A-Za-z_]\w*)', entry)
         if not match:

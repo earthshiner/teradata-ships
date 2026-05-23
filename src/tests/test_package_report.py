@@ -587,6 +587,7 @@ class TestGeneratePackageReport:
             env_config_file=str(props),
             build_number=1,
             output_dir=str(tmp_path),
+            allow_dirty=True,
         )
         (main_pair, _) = build_package(config)
         archive_path, _ = main_pair
