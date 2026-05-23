@@ -689,7 +689,7 @@ def _build_package_impl(
         phase_inventory[DeployPhase.SYSTEM.value] = (
             phase_inventory.get(DeployPhase.SYSTEM.value, 0) + generated_roles
         )
-        _ensure_system_role_waves_include_package_roles(pkg_dir)
+    _ensure_system_role_waves_include_package_roles(pkg_dir)
 
     # -- Phase 7: Embed deployment engine --
     _embed_deployer(pkg_dir)

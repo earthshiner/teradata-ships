@@ -951,7 +951,12 @@ def _discover_files(
             if f.startswith(".") or f.startswith("_"):
                 continue
             ext = os.path.splitext(f)[1].lower()
-            if not extensions or ext in extensions:
+            # Strict whitelist: only process files with a known extension.
+            # An empty extension set is treated as "nothing passes" rather
+            # than "everything passes" — the latter would silently harvest
+            # .exclude, .bak, and other bypass files if the resolver ever
+            # returned an empty set due to a misconfiguration.
+            if ext in extensions:
                 files.append(os.path.join(root, f))
     return files
 

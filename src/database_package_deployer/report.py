@@ -1507,7 +1507,8 @@ _WAVE_GRAPH_JS = r"""(function () {
       var x = bx + (i + 1) * bw / (n + 1);
       svg.appendChild(svgEl('line', {
         x1: x, y1: y1 + 2, x2: x, y2: y2 - 10,
-        stroke: color, 'stroke-width': 1.5,
+        stroke: color, 'stroke-width': 4,
+        'stroke-linecap': 'round',
         'marker-end': 'url(#wg-arrowhead)',
       }));
     }
@@ -1528,10 +1529,11 @@ _WAVE_GRAPH_JS = r"""(function () {
   // Arrowhead marker
   var defs   = svgEl('defs', {});
   var marker = svgEl('marker', {
-    id: 'wg-arrowhead', markerWidth: 8, markerHeight: 6,
-    refX: 7, refY: 3, orient: 'auto',
+    id: 'wg-arrowhead', markerWidth: 12, markerHeight: 10,
+    refX: 11, refY: 5, orient: 'auto',
+    markerUnits: 'strokeWidth',
   });
-  marker.appendChild(svgEl('path', {d: 'M0,0 L8,3 L0,6 Z', fill: ORANGE}));
+  marker.appendChild(svgEl('path', {d: 'M0,0 L12,5 L0,10 Z', fill: ORANGE}));
   defs.appendChild(marker);
   svg.appendChild(defs);
 

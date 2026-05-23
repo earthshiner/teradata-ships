@@ -22,7 +22,7 @@ Validation:
 import logging
 import os
 import re
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -419,30 +419,47 @@ def scan_tokens_in_file(file_path: str) -> Set[str]:
     return set(_TOKEN_RE.findall(content))
 
 
-def scan_tokens_in_directory(directory: str) -> Dict[str, Set[str]]:
+def scan_tokens_in_directory(
+    directory: str,
+    project_dir: Optional[str] = None,
+) -> Dict[str, Set[str]]:
     """
     Scan all payload files in a directory tree for token references.
 
-    Skips files starting with '_' or '.' (scaffolding samples,
-    hidden files) and non-text extensions.
+    Only files whose extension appears in the resolved harvest-extension
+    whitelist (``discovery.resolve_harvest_extensions``) are considered.
+    This prevents files with non-DDL extensions — such as ``.exclude``,
+    ``.bak``, ``.sample``, or any other bypass convention — from being
+    scanned and producing spurious unresolved-token errors.
+
+    Files starting with ``'.'`` or ``'_'`` are also skipped (hidden files
+    and scaffolding samples).
 
     Args:
-        directory: Root directory to scan.
+        directory:   Root directory to scan.
+        project_dir: Optional project root used to resolve
+                     ``ships.yaml``'s ``discovery.extensions``
+                     overrides.  Pass ``None`` to use canonical
+                     defaults only.
 
     Returns:
         Dictionary of file_path → set of token names found.
     """
+    from td_release_packager.discovery import resolve_harvest_extensions
+
+    allowed_extensions = resolve_harvest_extensions(project_dir=project_dir)
+
     results = {}
     for root, dirs, files in os.walk(directory):
-        # Skip hidden directories
+        # Skip hidden directories.
         dirs[:] = [d for d in dirs if not d.startswith(".")]
-        for filename in files:
-            # Skip hidden files, underscore-prefixed files, sample files
+        for filename in sorted(files):
+            # Skip hidden and underscore-prefixed files.
             if filename.startswith(".") or filename.startswith("_"):
                 continue
-            if filename.endswith(".sample"):
-                continue
-            if filename.endswith(".bak"):
+            # Whitelist check — only process known DDL extensions.
+            ext = os.path.splitext(filename)[1].lower()
+            if ext not in allowed_extensions:
                 continue
             file_path = os.path.join(root, filename)
             try:
@@ -450,7 +467,7 @@ def scan_tokens_in_directory(directory: str) -> Dict[str, Set[str]]:
                 if tokens:
                     results[file_path] = tokens
             except (UnicodeDecodeError, PermissionError):
-                # Skip binary files or unreadable files
+                # Skip binary files or unreadable files.
                 pass
     return results
 
@@ -532,31 +549,47 @@ def find_malformed_tokens(content: str) -> List[Dict]:
 
 def scan_malformed_tokens_in_directory(
     directory: str,
+    project_dir: Optional[str] = None,
 ) -> Dict[str, List[Dict]]:
     """
     Scan a directory tree for files containing malformed tokens.
 
-    Mirrors :func:`scan_tokens_in_directory` — same skip rules for
-    hidden/underscore-prefixed/sample files. Used by the build flow
-    as a hard-fail check before packaging.
+    Only files whose extension appears in the resolved harvest-extension
+    whitelist (``discovery.resolve_harvest_extensions``) are considered.
+    This mirrors the behaviour of :func:`scan_tokens_in_directory` and
+    ensures that non-DDL files — such as ``.exclude``, ``.bak``,
+    ``.sample``, or any other bypass convention — are never scanned,
+    preventing spurious malformed-token errors from files that are
+    intentionally excluded from the build.
+
+    Used by the build flow as a hard-fail check before packaging.
 
     Args:
-        directory: Root directory to scan.
+        directory:   Root directory to scan.
+        project_dir: Optional project root used to resolve
+                     ``ships.yaml``'s ``discovery.extensions``
+                     overrides.  Pass ``None`` to use canonical
+                     defaults only.
 
     Returns:
         Dictionary of ``file_path → list of issue dicts``. Files
         with no malformed tokens are omitted, so an empty result
         means the tree is clean.
     """
+    from td_release_packager.discovery import resolve_harvest_extensions
+
+    allowed_extensions = resolve_harvest_extensions(project_dir=project_dir)
+
     results: Dict[str, List[Dict]] = {}
     for root, dirs, files in os.walk(directory):
         dirs[:] = [d for d in dirs if not d.startswith(".")]
-        for filename in files:
+        for filename in sorted(files):
+            # Skip hidden and underscore-prefixed files.
             if filename.startswith(".") or filename.startswith("_"):
                 continue
-            if filename.endswith(".sample"):
-                continue
-            if filename.endswith(".bak"):
+            # Whitelist check — only process known DDL extensions.
+            ext = os.path.splitext(filename)[1].lower()
+            if ext not in allowed_extensions:
                 continue
             file_path = os.path.join(root, filename)
             try:
