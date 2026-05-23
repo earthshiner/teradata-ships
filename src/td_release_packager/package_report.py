@@ -778,14 +778,16 @@ def _waves_tab(records: List[Dict]) -> str:
             ay = margin + col_h // 2
             svg_parts.append(
                 f'<line x1="{ax}" y1="{ay}" x2="{ax + arrow_w}" y2="{ay}" '
-                f'stroke="{_ORANGE}" stroke-width="2" marker-end="url(#arr)"/>'
+                f'stroke="{_ORANGE}" stroke-width="4" stroke-linecap="round" '
+                f'marker-end="url(#arr)"/>'
             )
 
     # Arrow marker
     svg_parts.insert(
         1,
-        '<defs><marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">'
-        f'<path d="M0,0 L0,6 L8,3 z" fill="{_ORANGE}"/></marker></defs>',
+        '<defs><marker id="arr" markerWidth="12" markerHeight="10" refX="11" refY="5" '
+        'orient="auto" markerUnits="strokeWidth">'
+        f'<path d="M0,0 L12,5 L0,10 z" fill="{_ORANGE}"/></marker></defs>',
     )
 
     svg_parts.append("</svg>")

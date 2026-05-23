@@ -180,6 +180,40 @@ class TestScanMalformedTokensInDirectory:
         (tmp_path / "grant.dcl.bak").write_text("{{ BROKEN", encoding="utf-8")
         assert scan_malformed_tokens_in_directory(str(tmp_path)) == {}
 
+    def test_skips_exclude_files(self, tmp_path):
+        """Files renamed to .exclude must not be scanned.
+
+        A common workflow is renaming ``<db>.<obj>.tbl`` to
+        ``<db>.<obj>.tbl.exclude`` to suppress deployment of a DDL
+        that uses an unsupported data type.  The harvester must
+        ignore the file entirely — not attempt token substitution,
+        which would raise a spurious unresolved-token error.
+        """
+        (tmp_path / "{{DB_PREDICTION_T}}.model_prediction.tbl.exclude").write_text(
+            "CREATE MULTISET TABLE {{DB_PREDICTION_T}}.model_prediction "
+            "(id INTEGER, payload JSON);",
+            encoding="utf-8",
+        )
+        assert scan_malformed_tokens_in_directory(str(tmp_path)) == {}
+
+    def test_skips_unknown_extensions_not_on_whitelist(self, tmp_path):
+        """Any file extension absent from the harvest whitelist is ignored,
+        regardless of whether it contains malformed or unresolved tokens.
+        The whitelist is the single gate — not a per-extension blacklist.
+        """
+        (tmp_path / "notes.txt").write_text("{{ OOPS }}", encoding="utf-8")
+        (tmp_path / "readme.md").write_text("{{ NOT_A_TOKEN }}", encoding="utf-8")
+        (tmp_path / "data.csv").write_text("{{ DB }},value", encoding="utf-8")
+        assert scan_malformed_tokens_in_directory(str(tmp_path)) == {}
+
+    def test_whitelisted_extension_is_still_scanned(self, tmp_path):
+        """Sanity-check that a genuine .sql file with a malformed token
+        is still caught after the whitelist gate is in place.
+        """
+        (tmp_path / "bad.sql").write_text("{{ BROKEN TOKEN }}", encoding="utf-8")
+        result = scan_malformed_tokens_in_directory(str(tmp_path))
+        assert len(result) == 1
+
     def test_recurses_into_subdirectories(self, tmp_path):
         sub = tmp_path / "sub"
         sub.mkdir()

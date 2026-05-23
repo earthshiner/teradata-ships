@@ -44,30 +44,30 @@ ERR_DELETE_FAILED = "E_DELETE_FAILED"
 ERR_DIFF_READ = "E_DIFF_READ"
 
 # File extensions recognised as DDL artefacts in the harvested tree.
-# Mirrors the TypeAbbr table from Rule 42 in the coding discipline.
-_DDL_EXTENSIONS: Tuple[str, ...] = (
-    ".viw",
-    ".tbl",
-    ".grt",
-    ".mcr",
-    ".trg",
-    ".jix",
-    ".hix",
-    ".stat",
-    ".cmt",
-    ".rol",
-    ".prf",
-    ".bteq",
-    ".spl",
-    ".cmpl",
-    ".fnc",
-    ".udt",
-    ".db",
-    ".usr",
-    ".fk",
-    ".fsvr",
-    ".auth",
-)
+#
+# NOTE: Do NOT extend this list here.  The canonical extension set lives in
+# ``td_release_packager.discovery.DEFAULT_HARVEST_EXTENSIONS`` and is
+# project-overridable via ``ships.yaml``'s ``discovery.extensions`` block.
+# This local constant is kept only as a fast-path cache populated at
+# import time from the canonical source, so that ``_iter_ddl_files`` does
+# not re-resolve on every call inside a tight walk loop.
+#
+# If a new extension is needed, add it to ``discovery.DEFAULT_HARVEST_EXTENSIONS``.
+def _build_ddl_extensions() -> frozenset:
+    """Return the canonical harvest-extension set from ``discovery``.
+
+    Resolved once at module import time and cached as ``_DDL_EXTENSIONS``.
+    Falls back to an empty frozenset on import error so that the module
+    remains loadable in minimal test environments.
+    """
+    try:
+        from td_release_packager.discovery import resolve_harvest_extensions
+        return resolve_harvest_extensions()
+    except Exception:  # noqa: BLE001
+        return frozenset()
+
+
+_DDL_EXTENSIONS: frozenset = _build_ddl_extensions()
 
 # Tokens conform to {{IDENTIFIER}} where IDENTIFIER is the same shape
 # enforced by token_engine: alpha + alphanumerics/underscore/hyphen.

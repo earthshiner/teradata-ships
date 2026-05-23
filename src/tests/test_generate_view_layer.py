@@ -842,3 +842,97 @@ class TestArgParserProg:
     def test_shim_prog_propagates_to_usage_text(self):
         parser = _build_arg_parser(prog="python tools/generate_view_layer.py")
         assert "python tools/generate_view_layer.py" in parser.format_usage()
+
+
+# ===========================================================================
+# Regression — DEFAULT keyword must not appear as a column name
+# ===========================================================================
+
+
+class TestDefaultKeywordNotEmittedAsColumn:
+    """Regression tests for Teradata Error 3707.
+
+    When a column has a DEFAULT clause whose literal value contains a
+    comma (e.g. ``DEFAULT TIMESTAMP '9999-12-31 23:59:59.999999+00:00'``),
+    the ``_split_top_level`` splitter treats the continuation line as a
+    separate entry.  ``parse_table_columns`` must recognise that ``DEFAULT``
+    is a SQL keyword continuation clause, not a column name, and skip it.
+
+    Without the fix, the generated view contained a bare ``DEFAULT`` entry
+    in both its column list and SELECT clause, which Teradata 20 rejects
+    with Error 3707: "expected something like '(' between the 'DEFAULT'
+    keyword and ','".
+    """
+
+    _TEMPORAL_TABLE = (
+        "CREATE MULTISET TABLE {{DB_DOMAIN_T}}.Agent_H (\n"
+        "    agent_id        INTEGER NOT NULL\n"
+        "   ,agent_name      VARCHAR(200) NOT NULL\n"
+        "   ,valid_from_dts  TIMESTAMP(6) WITH TIME ZONE NOT NULL\n"
+        "   ,valid_to_dts    TIMESTAMP(6) WITH TIME ZONE NOT NULL\n"
+        "                    DEFAULT TIMESTAMP '9999-12-31 23:59:59.999999+00:00'\n"
+        "   ,is_current      BYTEINT NOT NULL DEFAULT 1\n"
+        "   ,is_deleted      BYTEINT NOT NULL DEFAULT 0\n"
+        ") PRIMARY INDEX (agent_id);\n"
+    )
+
+    def test_default_keyword_not_in_columns(self):
+        """parse_table_columns must not return 'DEFAULT' as a column name."""
+        cols = parse_table_columns(self._TEMPORAL_TABLE)
+        assert "DEFAULT" not in [c.upper() for c in cols], (
+            "parse_table_columns emitted 'DEFAULT' as a column name — "
+            "the DEFAULT continuation clause was mistakenly split into a "
+            "separate column entry."
+        )
+
+    def test_correct_columns_returned(self):
+        """All real column names are returned and nothing spurious is added."""
+        cols = parse_table_columns(self._TEMPORAL_TABLE)
+        assert cols == [
+            "agent_id",
+            "agent_name",
+            "valid_from_dts",
+            "valid_to_dts",
+            "is_current",
+            "is_deleted",
+        ]
+
+    def test_generated_view_has_no_default_column(self, tmp_path):
+        """The generated locking view DDL must not contain a bare DEFAULT column."""
+        from pathlib import Path as _Path
+
+        tbl_path = tmp_path / "{{DB_DOMAIN_T}}.Agent_H.tbl"
+        tbl_path.write_text(self._TEMPORAL_TABLE, encoding="utf-8")
+
+        cols = parse_table_columns(self._TEMPORAL_TABLE)
+        spec = TableSpec(
+            file_path=tbl_path,
+            database_token="{{DB_DOMAIN_T}}",
+            module="DB_DOMAIN",
+            object_name="Agent_H",
+            columns=cols,
+        )
+        ddl = generate_locking_view_ddl(spec)
+
+        # Neither the column-list section nor the SELECT list should
+        # contain a bare DEFAULT identifier.
+        import re as _re
+        # Match ', DEFAULT' or '  DEFAULT' as a standalone column reference
+        # (not part of a longer name like 'default_value').
+        bare_default = _re.search(
+            r'(?:,\s*|\bSELECT\s+)\bDEFAULT\b(?!\s*\w)',
+            ddl,
+            _re.IGNORECASE,
+        )
+        assert bare_default is None, (
+            f"Generated view DDL contains a bare DEFAULT column reference:\n{ddl}"
+        )
+
+    def test_inline_default_integer_not_mistaken(self):
+        """Inline DEFAULT without a comma (e.g. DEFAULT 1) on the same line
+        as the column definition must not cause the column to be skipped.
+        """
+        cols = parse_table_columns(self._TEMPORAL_TABLE)
+        # is_current and is_deleted both have inline DEFAULT on the same line
+        assert "is_current" in cols
+        assert "is_deleted" in cols

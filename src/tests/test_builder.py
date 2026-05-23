@@ -306,6 +306,60 @@ def test_generated_write_role_is_inserted_into_system_waves(
     assert "roles/APP_DB_WRITE_ROLE.rol" in first_wave
 
 
+def test_existing_write_role_is_inserted_into_system_waves(
+    tmp_path, tmp_project, sample_env_config_file
+):
+    """Existing role files must also be reconciled into package waves."""
+    role_dir = tmp_project / "payload" / "database" / "system" / "roles"
+    (role_dir / "APP_DB_READ_ROLE.rol").write_text(
+        "CREATE ROLE APP_DB_READ_ROLE;\n",
+        encoding="utf-8",
+    )
+    (role_dir / "APP_DB_WRITE_ROLE.rol").write_text(
+        "CREATE ROLE APP_DB_WRITE_ROLE;\n",
+        encoding="utf-8",
+    )
+    (tmp_project / "_waves.txt").write_text(
+        "\n".join(
+            [
+                "# _waves.txt",
+                "payload/database/system/roles/APP_DB_READ_ROLE.rol",
+                "---",
+                "payload/database/DCL/roles/APP_DB.dcl",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    dcl = tmp_project / "payload" / "database" / "DCL" / "roles" / "APP_DB.dcl"
+    dcl.write_text(
+        "GRANT SELECT ON APP_DB TO APP_DB_WRITE_ROLE;\n",
+        encoding="utf-8",
+    )
+
+    config = BuildConfig(
+        source_dir=str(tmp_project),
+        environment="DEV",
+        package_name="Pkg",
+        env_config_file=str(sample_env_config_file),
+        build_number=1,
+        output_dir=str(tmp_path),
+        allow_dirty=True,
+    )
+
+    ((archive_path, _manifest), companion) = build_package(config)
+    assert companion is None
+
+    with zipfile.ZipFile(archive_path) as archive:
+        waves_name = next(
+            name for name in archive.namelist() if name.endswith("00_system/_waves.txt")
+        )
+        first_wave = archive.read(waves_name).decode("utf-8").split("---", 1)[0]
+
+    assert "roles/APP_DB_READ_ROLE.rol" in first_wave
+    assert "roles/APP_DB_WRITE_ROLE.rol" in first_wave
+
+
 # ---------------------------------------------------------------
 # _check_working_tree
 # ---------------------------------------------------------------
