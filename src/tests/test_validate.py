@@ -1267,13 +1267,18 @@ class TestReadInspectConfig:
     def test_all_default_severities_are_valid(self):
         """Every default severity in DEFAULT_RULES is one of the
         recognised values. Derives from _VALID_SEVERITIES so the test
-        stays correct when new severity levels are added."""
-        from td_release_packager.validate import _VALID_SEVERITIES
+        stays correct when new severity levels are added.
+
+        Domain-value rules (e.g. comma_style, warn_extra_grants,
+        warn_orphan_grants) store non-severity values by design and
+        are excluded from this check."""
+        from td_release_packager.validate import _VALID_SEVERITIES, _DOMAIN_VALUE_RULES
 
         invalid = {
             rule: sev
             for rule, sev in DEFAULT_RULES.items()
             if sev not in _VALID_SEVERITIES
+            and rule not in _DOMAIN_VALUE_RULES
         }
         assert not invalid, (
             f"Rules in DEFAULT_RULES with invalid severities "
@@ -2142,3 +2147,77 @@ class TestCheckNonAsciiLiterals:
             "containing an em-dash, but none were reported."
         )
         assert all(i.severity == "ERROR" for i in nas_issues)
+
+
+# ---------------------------------------------------------------
+# Tests for warn_extra_grants and warn_orphan_grants in inspect.conf
+# ---------------------------------------------------------------
+
+
+from td_release_packager.validate import read_bool_from_inspect_config
+
+
+class TestWarnGrantFlags:
+    """
+    Tests for the ``warn_extra_grants`` and ``warn_orphan_grants`` options
+    in ``inspect.conf``, including their defaults, parsing, and the
+    ``read_bool_from_inspect_config`` helper.
+    """
+
+    def test_defaults_are_false(self):
+        """Both flags default to false in DEFAULT_RULES."""
+        assert DEFAULT_RULES["warn_extra_grants"] == "false"
+        assert DEFAULT_RULES["warn_orphan_grants"] == "false"
+
+    def test_read_bool_returns_false_for_missing_key(self):
+        """read_bool_from_inspect_config returns False when key is absent."""
+        assert read_bool_from_inspect_config({}, "warn_extra_grants") is False
+
+    def test_read_bool_returns_false_for_string_false(self):
+        """read_bool_from_inspect_config returns False for value 'false'."""
+        assert read_bool_from_inspect_config({"warn_extra_grants": "false"}, "warn_extra_grants") is False
+
+    def test_read_bool_returns_true_for_string_true(self):
+        """read_bool_from_inspect_config returns True for value 'true'."""
+        assert read_bool_from_inspect_config({"warn_extra_grants": "true"}, "warn_extra_grants") is True
+
+    def test_read_bool_is_case_insensitive(self):
+        """read_bool_from_inspect_config handles mixed case."""
+        assert read_bool_from_inspect_config({"warn_extra_grants": "TRUE"}, "warn_extra_grants") is True
+        assert read_bool_from_inspect_config({"warn_orphan_grants": "True"}, "warn_orphan_grants") is True
+
+    def test_warn_extra_grants_parsed_from_conf(self, tmp_path):
+        """warn_extra_grants=true is correctly parsed from inspect.conf."""
+        conf = tmp_path / "inspect.conf"
+        conf.write_text("warn_extra_grants=true\n", encoding="utf-8")
+        rules = read_inspect_config(str(conf))
+        assert read_bool_from_inspect_config(rules, "warn_extra_grants") is True
+
+    def test_warn_orphan_grants_parsed_from_conf(self, tmp_path):
+        """warn_orphan_grants=true is correctly parsed from inspect.conf."""
+        conf = tmp_path / "inspect.conf"
+        conf.write_text("warn_orphan_grants=true\n", encoding="utf-8")
+        rules = read_inspect_config(str(conf))
+        assert read_bool_from_inspect_config(rules, "warn_orphan_grants") is True
+
+    def test_both_flags_false_by_default_in_conf(self, tmp_path):
+        """An empty inspect.conf gives false for both flags via DEFAULT_RULES merge."""
+        conf = tmp_path / "inspect.conf"
+        conf.write_text("# empty\n", encoding="utf-8")
+        rules = read_inspect_config(str(conf))
+        assert read_bool_from_inspect_config(rules, "warn_extra_grants") is False
+        assert read_bool_from_inspect_config(rules, "warn_orphan_grants") is False
+
+    def test_invalid_value_falls_back_to_default(self, tmp_path):
+        """An invalid value for warn_extra_grants is ignored (falls back to default)."""
+        conf = tmp_path / "inspect.conf"
+        conf.write_text("warn_extra_grants=yes\n", encoding="utf-8")
+        rules = read_inspect_config(str(conf))
+        # 'yes' is not in _VALID_BOOLS so the line is skipped; default applies
+        assert read_bool_from_inspect_config(rules, "warn_extra_grants") is False
+
+    def test_generate_default_config_includes_both_flags(self):
+        """generate_default_config() includes both warn grant flags with false defaults."""
+        cfg = generate_default_config()
+        assert "warn_extra_grants=false" in cfg
+        assert "warn_orphan_grants=false" in cfg

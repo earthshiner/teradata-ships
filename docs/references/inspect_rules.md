@@ -55,6 +55,50 @@ Rules are configured via `inspect.conf` in the project root.
 | `public_grant_on_tables`   | WARNING          | `GRANT … TO PUBLIC` on a tables database bypasses the placement architecture.|
 | `review_unmapped_grants`   | WARNING          | GRANT targets a database not in the placement map.                           |
 
+### Cross-file grant validation (Step 2 of Inspect)
+
+Step 2 compares the grants *implied* by the package's DDL against the `.dcl` files persisted under `payload/database/DCL/inter_db/`. Three outcomes are possible per grantee:
+
+| Outcome   | Severity | Meaning                                                              |
+|-----------|----------|----------------------------------------------------------------------|
+| Consistent | —       | Persisted `.dcl` matches what the DDL implies. No action needed.     |
+| Drifted   | ERROR    | `.dcl` exists but its privilege set differs from the DDL implication. Run `--fix-grants` to repair. |
+| Missing   | ERROR    | DDL implies a grant but no `.dcl` file exists. Run `--fix-grants` to create it. |
+| Orphaned  | ERROR *  | A `.dcl` file exists for a grantee that no DDL in the package implies. |
+
+\* **Orphaned grants can be downgraded to warnings** — see `inspect.warn_orphan_grants` below.
+
+#### `warn_extra_grants` — extra manual privileges treated as warnings
+
+Set in `config/inspect.conf`:
+
+```
+warn_extra_grants=true   # default: false
+```
+
+When `false` (the default), any `.dcl` file whose privilege set does not exactly match what SHIPS inferred from the DDL is treated as drift — a hard error that blocks the package.
+
+When `true`, drifted grantees whose `.dcl` files contain only *extra* privileges (grants you added manually beyond what SHIPS infers) are reported as **warnings** only and do not block packaging. This is the correct posture when you explicitly grant database access to roles, reporting users, or external consumers directly in the `.dcl` files.
+
+**Important:** this flag only applies to *extra* privileges. If a `.dcl` file is *missing* a privilege that SHIPS inferred from the DDL (i.e. the DDL is referencing access that has not been granted), that remains a hard error regardless of this setting.
+
+#### `warn_orphan_grants` — configurable orphan severity
+
+Set in `config/inspect.conf`:
+
+```
+warn_orphan_grants=true   # default: false
+```
+
+When `false` (the default), orphaned DCL files cause the package to be **BLOCKED**. This is the strict posture appropriate for fully self-contained packages.
+
+When `true`, orphaned DCL files are reported as **warnings** only. The package receives `READY` or `READY-WITH-CAVEATS` rather than `BLOCKED`. This is the correct posture when:
+
+- A role is granted database access *within* the package (e.g. `GRANT SELECT ON {{DB_T}} TO {{READ_ROLE}}`), but the corresponding `GRANT ROLE … TO USER` statement is managed *outside* the package — for example, by a DBA, an IGA system, or an autonomous agent.
+- The package deliberately pre-provisions access rights that a downstream process will activate.
+
+Both flags can be set independently in `inspect.conf`. Missing grants (inferred by SHIPS but absent from the `.dcl` file) and missing `.dcl` files entirely remain hard errors regardless of either setting.
+
 ---
 
 ## Cross-File Structural Rules

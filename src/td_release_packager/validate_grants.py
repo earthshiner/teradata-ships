@@ -322,6 +322,35 @@ class GrantValidationResult:
         return [s for s in self.statuses if s.drifted]
 
     @property
+    def drifted_extra_only(self) -> List[GranteeStatus]:
+        """
+        Drifted grantees whose .dcl file contains only *extra* privileges
+        — grants present in the file but not implied by the DDL.
+        There are no missing privileges (i.e. every grant SHIPS inferred
+        is already present in the file).
+
+        These are typically intentional manual additions: grants to roles,
+        reporting users, or external consumers that SHIPS cannot infer from
+        DDL alone.  They are safe to downgrade to warnings when
+        ``warn_extra_grants`` is enabled in ships.yaml.
+        """
+        return [
+            s for s in self.statuses
+            if s.drifted and s.extra_privs and not s.missing_privs
+        ]
+
+    @property
+    def drifted_missing_privs(self) -> List[GranteeStatus]:
+        """
+        Drifted grantees that have at least one *missing* privilege —
+        a grant that SHIPS inferred from the DDL but is absent from the
+        .dcl file.  These are always hard errors regardless of any
+        warn_* setting, because the DDL is referencing access that has
+        not been granted.
+        """
+        return [s for s in self.statuses if s.drifted and s.missing_privs]
+
+    @property
     def missing(self) -> List[GranteeStatus]:
         return [s for s in self.statuses if s.missing]
 
@@ -334,6 +363,50 @@ class GrantValidationResult:
         """True iff every grantee is consistent (no drift, no missing,
         no orphans). Used by cli.py to set the overall exit code."""
         return all(s.consistent for s in self.statuses)
+
+    def passed_ignoring_orphans(self) -> bool:
+        """
+        True iff every non-orphaned grantee is consistent.
+
+        Use this when ``warn_orphan_grants`` is enabled in ships.yaml —
+        orphaned DCL files are reported as warnings rather than errors,
+        so they must not block packaging.
+        """
+        return all(s.consistent for s in self.statuses if not s.orphaned)
+
+    def passed_ignoring_extra_grants(self) -> bool:
+        """
+        True iff no grantee has missing privileges and no grantee is
+        missing its .dcl file entirely.
+
+        Use this when ``warn_extra_grants`` is enabled in ships.yaml.
+        Grantees whose .dcl files contain only extra privileges (grants
+        you added manually that SHIPS did not infer) are downgraded to
+        warnings and do not block packaging.  Grantees with missing
+        privileges (the DDL implies a grant that is absent from the
+        .dcl file) remain hard errors.
+        """
+        for s in self.statuses:
+            if s.missing:
+                return False
+            if s.drifted and s.missing_privs:
+                return False
+        return True
+
+    def passed_ignoring_extra_grants_and_orphans(self) -> bool:
+        """
+        Combined check for when both ``warn_extra_grants`` and
+        ``warn_orphan_grants`` are enabled in ships.yaml.
+
+        Only missing .dcl files and drifted grantees that have missing
+        privileges cause a hard failure.
+        """
+        for s in self.statuses:
+            if s.missing:
+                return False
+            if s.drifted and s.missing_privs:
+                return False
+        return True
 
 
 # ---------------------------------------------------------------------------

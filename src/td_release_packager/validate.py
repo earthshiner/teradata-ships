@@ -127,6 +127,11 @@ DEFAULT_RULES: Dict[str, str] = {
     # LATIN character set (the server default).  Replace em-dashes, bullets,
     # arrows, and box-drawing characters with ASCII equivalents.
     "non_ascii": "ERROR",
+    # Grant validation behaviour flags (boolean domain values).
+    # Default false — strict mode.  Set to true in inspect.conf to
+    # downgrade the relevant grant findings to warnings.
+    "warn_extra_grants": "false",
+    "warn_orphan_grants": "false",
 }
 
 # -- Valid severity values --
@@ -160,8 +165,20 @@ _VALID_COMMA_STYLES = {"leading", "trailing", "as-per-source"}
 
 # Keys in inspect.conf that take domain values rather than severities.
 # read_inspect_config handles these separately from severity rules.
+_VALID_BOOLS = {"true", "false"}
+
 _DOMAIN_VALUE_RULES: Dict[str, set] = {
     "comma_style": _VALID_COMMA_STYLES,
+    # Grant validation behaviour flags.
+    # warn_extra_grants: when true, drifted grantees whose .dcl files contain
+    #   only *extra* privileges (manually added grants SHIPS did not infer) are
+    #   reported as warnings rather than errors.  Grantees with missing inferred
+    #   privileges remain hard errors.  Default: false.
+    "warn_extra_grants": _VALID_BOOLS,
+    # warn_orphan_grants: when true, orphaned DCL grant files (whose grantee is
+    #   not implied by any DDL in the package) are reported as warnings rather
+    #   than errors.  Default: false.
+    "warn_orphan_grants": _VALID_BOOLS,
 }
 
 # Maps a domain-value rule name to the severity key that controls
@@ -258,6 +275,26 @@ def read_inspect_config(config_path: str) -> Dict[str, str]:
     return rules
 
 
+def read_bool_from_inspect_config(rules: Dict[str, str], key: str) -> bool:
+    """
+    Read a boolean domain-value key from a parsed inspect.conf rules dict.
+
+    Keys such as ``warn_extra_grants`` and ``warn_orphan_grants`` are stored
+    as the strings ``"true"`` or ``"false"`` (case-insensitive) in the rules
+    dict returned by ``read_inspect_config``.  This helper converts them to
+    a Python bool, defaulting to ``False`` when the key is absent.
+
+    Args:
+        rules:  Dict returned by ``read_inspect_config`` (or ``DEFAULT_RULES``).
+        key:    The rule key to look up (e.g. ``"warn_extra_grants"``).
+
+    Returns:
+        ``True`` if the key is present and its value is ``"true"``
+        (case-insensitive), ``False`` otherwise.
+    """
+    return rules.get(key, "false").lower() == "true"
+
+
 def generate_default_config() -> str:
     """
     Generate the default inspect.conf content.
@@ -341,6 +378,23 @@ def generate_default_config() -> str:
         "# external service, etc.). System databases (DBC, SYSLIB,",
         "# TDStats, etc.) are auto-excluded.",
         f"review_unmapped_grants={DEFAULT_RULES['review_unmapped_grants']}",
+        "#",
+        "# Grant validation behaviour flags",
+        "# warn_extra_grants: when true, drifted grantees whose .dcl files contain",
+        "# only *extra* privileges (grants you added manually beyond what SHIPS",
+        "# infers from the DDL) are reported as warnings rather than errors.",
+        "# Any grant that SHIPS inferred but is ABSENT from the .dcl file remains",
+        "# a hard error regardless — the DDL is referencing access not yet granted.",
+        "# Set to true when you explicitly grant database access to roles, reporting",
+        "# users, or external consumers directly in your .dcl files.",
+        f"warn_extra_grants={DEFAULT_RULES['warn_extra_grants']}",
+        "#",
+        "# warn_orphan_grants: when true, a .dcl file whose grantee is not implied",
+        "# by any DDL in the package is reported as a warning rather than an error.",
+        "# Set to true when roles are intentionally granted database access within",
+        "# the package but GRANT ROLE ... TO USER is managed outside the package",
+        "# (e.g. by a DBA or an autonomous agent).",
+        f"warn_orphan_grants={DEFAULT_RULES['warn_orphan_grants']}",
         "",
         "",
         "# Security rules (GAP-003, GAP-008)",

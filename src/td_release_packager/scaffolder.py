@@ -16,6 +16,7 @@ Produces:
     ├── .build_counter                  ← auto-incremented by builder
     ├── .gitignore
     ├── README.md
+    ├── ships.yaml                      ← project master config
     ├── config/
     │   └── env/
     │       ├── DEV.conf
@@ -122,6 +123,7 @@ def scaffold_project(
         skip_existing=repair,
     )
     _generate_inspect_config(project_dir)  # Already skips existing
+    _generate_ships_yaml(project_dir, project_name, environments, skip_existing=repair)
     _generate_object_placement_yaml(project_dir, skip_existing=repair)
     _generate_build_counter(project_dir, skip_existing=repair)
     _generate_gitignore(project_dir, skip_existing=repair)
@@ -352,6 +354,76 @@ def _generate_inspect_config(project_dir: str):
         f.write(generate_default_config())
 
     logger.info("Generated: %s", config_path)
+
+
+def _generate_ships_yaml(
+    project_dir: str,
+    project_name: str,
+    environments: List[str],
+    skip_existing: bool = False,
+):
+    """
+    Generate the project's ``ships.yaml`` master config file.
+
+    ``ships.yaml`` is the single entry point for project-level
+    pipeline configuration: project name, target environments,
+    pointers to the other config files, and per-stage settings.
+    It is read by every SHIPS stage (inspect, package, ship, etc.)
+    at runtime to resolve project-wide options.
+
+    The generated file is the minimum required — all omitted settings
+    fall back to Layer 1 defaults (developer-friendly: lenient
+    strictness, continue on error).  The ``inspect`` block is included
+    with its key options commented out so developers can see what is
+    available without having to consult the documentation.
+
+    Args:
+        project_dir:    Project root directory.
+        project_name:   Logical project name.
+        environments:   List of target environment names.
+        skip_existing:  If True, do not overwrite an existing file.
+    """
+    ships_yaml_path = os.path.join(project_dir, "ships.yaml")
+
+    if skip_existing and os.path.exists(ships_yaml_path):
+        logger.info("ships.yaml exists — skipping: %s", ships_yaml_path)
+        return
+
+    env_list = ", ".join(f'"{e}"' for e in environments)
+
+    content = f"""\
+# ships.yaml — SHIPS project master configuration
+#
+# This file is the single entry point for project-level pipeline
+# settings.  All omitted values fall back to built-in defaults.
+#
+# Reference: docs/SHIPS_MODULE_ARGS.md
+
+project: {project_name}
+version: "1.0"
+environments: [{env_list}]
+
+# ---- Config file pointers ----
+# Defaults shown — only override if you move the files.
+#
+# config:
+#   inspect:   config/inspect.conf
+#   placement: config/object_placement.yaml
+#   tokens:    config/token_map.conf
+
+# ---- Inspect-stage options ----
+# Grant validation behaviour is configured in config/inspect.conf:
+#
+#   warn_extra_grants=false   # set to true to downgrade extra manual
+#                             # grants to warnings rather than errors
+#   warn_orphan_grants=false  # set to true to downgrade orphaned DCL
+#                             # grantees to warnings rather than errors
+"""
+
+    with open(ships_yaml_path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+    logger.info("Generated: %s", ships_yaml_path)
 
 
 def _generate_object_placement_yaml(

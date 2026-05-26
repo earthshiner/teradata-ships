@@ -619,3 +619,299 @@ class TestFormatReport:
         report = format_report(result)
         assert "1 consistent" in report
         assert "1 missing" in report
+
+
+# -------------------------------------------------------------------
+# Tests for passed_ignoring_orphans() — the warn_orphan_grants mode
+# -------------------------------------------------------------------
+
+
+class TestPassedIgnoringOrphans:
+    """
+    Covers the ``passed_ignoring_orphans()`` helper on
+    GrantValidationResult, which supports the
+    ``inspect.warn_orphan_grants`` ships.yaml option.
+
+    When that option is enabled the inspect command uses
+    ``passed_ignoring_orphans()`` rather than ``passed`` to
+    determine whether the grant step blocks packaging.  Orphaned
+    DCL files are still detected and reported (as warnings), but
+    they do NOT cause a hard failure.
+    """
+
+    def test_no_orphans_passes_same_as_passed(self, project):
+        """With no orphans, passed_ignoring_orphans() == passed."""
+        _add_view(
+            project,
+            "{{DOM_V}}.Sales.viw",
+            _make_view_ddl("{{DOM_V}}", "{{DOM_T}}"),
+        )
+        fix_grants(project)
+        result = validate_grants(project)
+        assert result.passed
+        assert result.passed_ignoring_orphans()
+
+    def test_orphan_only_passes_ignoring_orphans(self, project):
+        """
+        A result with only orphaned entries — no drift, no missing —
+        fails ``passed`` but passes ``passed_ignoring_orphans()``.
+
+        This is the canonical scenario: a role is granted database
+        access within the package, but the GRANT ROLE … TO USER is
+        managed outside the package.
+        """
+        _add_view(
+            project,
+            "{{DOM_V}}.Orders.viw",
+            _make_view_ddl("{{DOM_V}}", "{{DOM_T}}"),
+        )
+        fix_grants(project)
+        # Inject an orphaned DCL whose grantee has no DDL backing
+        orphan = _dcl_dir(project) / "{{EXTERNAL_ROLE}}.dcl"
+        orphan.write_text(
+            "GRANT SELECT ON {{DOM_T}} TO {{EXTERNAL_ROLE}};\n",
+            encoding="utf-8",
+        )
+        result = validate_grants(project)
+        # Strict mode (default) — should fail
+        assert not result.passed
+        assert len(result.orphaned) == 1
+        # Warn mode — orphan does not block
+        assert result.passed_ignoring_orphans()
+
+    def test_drift_still_fails_ignoring_orphans(self, project):
+        """
+        Drift (mismatched privileges) must still cause a hard failure
+        even when warn_orphan_grants is enabled.
+        """
+        _add_view(
+            project,
+            "{{DOM_V}}.Items.viw",
+            _make_view_ddl("{{DOM_V}}", "{{DOM_T}}"),
+        )
+        fix_grants(project)
+        # Corrupt the DCL to introduce drift
+        dcl_file = _dcl_dir(project) / "{{DOM_V}}.dcl"
+        dcl_file.write_text(
+            "GRANT INSERT ON {{DOM_T}} TO {{DOM_V}};\n",
+            encoding="utf-8",
+        )
+        # Also add an orphan so both conditions coexist
+        orphan = _dcl_dir(project) / "{{EXTERNAL_ROLE}}.dcl"
+        orphan.write_text(
+            "GRANT SELECT ON {{DOM_T}} TO {{EXTERNAL_ROLE}};\n",
+            encoding="utf-8",
+        )
+        result = validate_grants(project)
+        assert not result.passed
+        assert len(result.drifted) == 1
+        assert len(result.orphaned) == 1
+        # Drift is still a hard failure even in warn mode
+        assert not result.passed_ignoring_orphans()
+
+    def test_missing_still_fails_ignoring_orphans(self, project):
+        """
+        Missing DCL files (inferred but not persisted) must still
+        cause a hard failure even when warn_orphan_grants is enabled.
+        """
+        _add_view(
+            project,
+            "{{DOM_V}}.Products.viw",
+            _make_view_ddl("{{DOM_V}}", "{{DOM_T}}"),
+        )
+        # Do NOT call fix_grants — the DCL file is intentionally absent
+        # Also add an orphan so both conditions coexist
+        dcl = _dcl_dir(project)
+        dcl.mkdir(parents=True)
+        orphan = dcl / "{{EXTERNAL_ROLE}}.dcl"
+        orphan.write_text(
+            "GRANT SELECT ON {{DOM_T}} TO {{EXTERNAL_ROLE}};\n",
+            encoding="utf-8",
+        )
+        result = validate_grants(project)
+        assert not result.passed
+        assert len(result.missing) == 1
+        assert len(result.orphaned) == 1
+        # Missing is still a hard failure even in warn mode
+        assert not result.passed_ignoring_orphans()
+
+    def test_empty_result_passes_ignoring_orphans(self, project):
+        """An empty project (no grants anywhere) passes trivially."""
+        result = validate_grants(project)
+        assert result.passed
+        assert result.passed_ignoring_orphans()
+
+
+# -------------------------------------------------------------------
+# Tests for drifted_extra_only / drifted_missing_privs /
+# passed_ignoring_extra_grants() — the warn_extra_grants mode
+# -------------------------------------------------------------------
+
+
+class TestPassedIgnoringExtraGrants:
+    """
+    Covers the ``drifted_extra_only``, ``drifted_missing_privs``, and
+    ``passed_ignoring_extra_grants()`` / ``passed_ignoring_extra_grants_and_orphans()``
+    helpers on GrantValidationResult, which support the
+    ``inspect.warn_extra_grants`` ships.yaml option.
+
+    When enabled, drifted grantees whose .dcl files contain only *extra*
+    privileges (grants you added manually beyond what SHIPS infers) are
+    downgraded to warnings.  Grantees with *missing* inferred privileges
+    remain hard errors — the DDL is referencing access that has not been
+    granted.
+    """
+
+    def _setup_consistent_project(self, project: Path) -> Path:
+        """Helper: create a view + matching .dcl so baseline is consistent."""
+        _add_view(
+            project,
+            "{{DOM_V}}.Sales.viw",
+            _make_view_ddl("{{DOM_V}}", "{{DOM_T}}"),
+        )
+        fix_grants(project)
+        return _dcl_dir(project) / "{{DOM_V}}.dcl"
+
+    def test_extra_only_drift_classified_correctly(self, project):
+        """
+        A .dcl with all inferred grants PLUS extra manual grants →
+        drifted_extra_only, not drifted_missing_privs.
+        """
+        dcl_file = self._setup_consistent_project(project)
+        # Append an extra grant not implied by any DDL
+        existing = dcl_file.read_text(encoding="utf-8")
+        dcl_file.write_text(
+            existing + "\nGRANT INSERT ON {{DOM_T}} TO {{DOM_V}};\n",
+            encoding="utf-8",
+        )
+        result = validate_grants(project)
+        assert not result.passed
+        assert len(result.drifted) == 1
+        assert len(result.drifted_extra_only) == 1
+        assert len(result.drifted_missing_privs) == 0
+
+    def test_missing_privs_drift_classified_correctly(self, project):
+        """
+        A .dcl that is MISSING an inferred grant → drifted_missing_privs,
+        not drifted_extra_only.
+        """
+        _add_view(
+            project,
+            "{{DOM_V}}.Items.viw",
+            _make_view_ddl("{{DOM_V}}", "{{DOM_T}}"),
+        )
+        fix_grants(project)
+        # Overwrite with a different privilege — removes inferred SELECT
+        dcl_file = _dcl_dir(project) / "{{DOM_V}}.dcl"
+        dcl_file.write_text(
+            "GRANT INSERT ON {{DOM_T}} TO {{DOM_V}};\n",
+            encoding="utf-8",
+        )
+        result = validate_grants(project)
+        assert not result.passed
+        assert len(result.drifted_missing_privs) == 1
+        assert len(result.drifted_extra_only) == 0
+
+    def test_extra_only_passes_ignoring_extra_grants(self, project):
+        """
+        Extra-only drift does not block when warn_extra_grants is enabled.
+        """
+        dcl_file = self._setup_consistent_project(project)
+        existing = dcl_file.read_text(encoding="utf-8")
+        dcl_file.write_text(
+            existing + "\nGRANT INSERT ON {{DOM_T}} TO {{DOM_V}};\n",
+            encoding="utf-8",
+        )
+        result = validate_grants(project)
+        assert not result.passed
+        assert result.passed_ignoring_extra_grants()
+
+    def test_missing_privs_still_fails_ignoring_extra_grants(self, project):
+        """
+        Missing inferred privileges remain a hard error even when
+        warn_extra_grants is enabled.
+        """
+        _add_view(
+            project,
+            "{{DOM_V}}.Products.viw",
+            _make_view_ddl("{{DOM_V}}", "{{DOM_T}}"),
+        )
+        fix_grants(project)
+        dcl_file = _dcl_dir(project) / "{{DOM_V}}.dcl"
+        # Replace the inferred grant with something else entirely
+        dcl_file.write_text(
+            "GRANT INSERT ON {{DOM_T}} TO {{DOM_V}};\n",
+            encoding="utf-8",
+        )
+        result = validate_grants(project)
+        assert not result.passed
+        assert not result.passed_ignoring_extra_grants()
+
+    def test_missing_dcl_file_still_fails_ignoring_extra_grants(self, project):
+        """
+        A completely absent .dcl file is still a hard error even when
+        warn_extra_grants is enabled (nothing was granted at all).
+        """
+        _add_view(
+            project,
+            "{{DOM_V}}.Orders.viw",
+            _make_view_ddl("{{DOM_V}}", "{{DOM_T}}"),
+        )
+        # Do NOT call fix_grants — the .dcl file is intentionally absent
+        result = validate_grants(project)
+        assert not result.passed
+        assert not result.passed_ignoring_extra_grants()
+
+    def test_combined_extra_grants_and_orphans(self, project):
+        """
+        Both extra-only drift AND orphaned entries present.
+        passed_ignoring_extra_grants_and_orphans() returns True;
+        passed_ignoring_extra_grants() alone also returns True since
+        orphans have no missing_privs.
+        """
+        dcl_file = self._setup_consistent_project(project)
+        # Extra manual grant on the consistent grantee
+        existing = dcl_file.read_text(encoding="utf-8")
+        dcl_file.write_text(
+            existing + "\nGRANT INSERT ON {{DOM_T}} TO {{DOM_V}};\n",
+            encoding="utf-8",
+        )
+        # Orphaned DCL for a grantee with no DDL backing
+        orphan = _dcl_dir(project) / "{{EXTERNAL_ROLE}}.dcl"
+        orphan.write_text(
+            "GRANT SELECT ON {{DOM_T}} TO {{EXTERNAL_ROLE}};\n",
+            encoding="utf-8",
+        )
+        result = validate_grants(project)
+        assert not result.passed
+        assert len(result.drifted_extra_only) == 1
+        assert len(result.orphaned) == 1
+        assert result.passed_ignoring_extra_grants_and_orphans()
+
+    def test_missing_privs_blocks_combined_check(self, project):
+        """
+        Even with both warn flags active, missing inferred privileges
+        remain a hard failure.
+        """
+        _add_view(
+            project,
+            "{{DOM_V}}.Accounts.viw",
+            _make_view_ddl("{{DOM_V}}", "{{DOM_T}}"),
+        )
+        fix_grants(project)
+        dcl_file = _dcl_dir(project) / "{{DOM_V}}.dcl"
+        # Replace the inferred grant entirely — creates missing_privs
+        dcl_file.write_text(
+            "GRANT INSERT ON {{DOM_T}} TO {{DOM_V}};\n",
+            encoding="utf-8",
+        )
+        result = validate_grants(project)
+        assert not result.passed_ignoring_extra_grants_and_orphans()
+
+    def test_no_drift_passes_ignoring_extra_grants(self, project):
+        """Clean project — both helpers agree with passed."""
+        self._setup_consistent_project(project)
+        result = validate_grants(project)
+        assert result.passed
+        assert result.passed_ignoring_extra_grants()
+        assert result.passed_ignoring_extra_grants_and_orphans()
