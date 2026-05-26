@@ -2154,70 +2154,68 @@ class TestCheckNonAsciiLiterals:
 # ---------------------------------------------------------------
 
 
-from td_release_packager.validate import read_bool_from_inspect_config
+from td_release_packager.validate import read_severity_from_inspect_config
 
 
-class TestWarnGrantFlags:
+class TestWarnGrantSeverities:
     """
-    Tests for the ``warn_extra_grants`` and ``warn_orphan_grants`` options
-    in ``inspect.conf``, including their defaults, parsing, and the
-    ``read_bool_from_inspect_config`` helper.
+    Tests for the ``warn_extra_grants`` and ``warn_orphan_grants`` severity
+    settings in ``inspect.conf``.
     """
 
-    def test_defaults_are_false(self):
-        """Both flags default to false in DEFAULT_RULES."""
-        assert DEFAULT_RULES["warn_extra_grants"] == "false"
-        assert DEFAULT_RULES["warn_orphan_grants"] == "false"
+    def test_defaults_are_error(self):
+        """Both grant drift settings default to ERROR in DEFAULT_RULES."""
+        assert DEFAULT_RULES["warn_extra_grants"] == "ERROR"
+        assert DEFAULT_RULES["warn_orphan_grants"] == "ERROR"
 
-    def test_read_bool_returns_false_for_missing_key(self):
-        """read_bool_from_inspect_config returns False when key is absent."""
-        assert read_bool_from_inspect_config({}, "warn_extra_grants") is False
+    def test_read_severity_defaults_to_error_for_missing_key(self):
+        """Absent grant severity keys default to ERROR."""
+        assert read_severity_from_inspect_config({}, "warn_extra_grants") == "ERROR"
 
-    def test_read_bool_returns_false_for_string_false(self):
-        """read_bool_from_inspect_config returns False for value 'false'."""
-        assert read_bool_from_inspect_config({"warn_extra_grants": "false"}, "warn_extra_grants") is False
+    def test_read_severity_accepts_off(self):
+        """OFF suppresses the configured grant finding."""
+        assert read_severity_from_inspect_config({"warn_extra_grants": "OFF"}, "warn_extra_grants") == "OFF"
 
-    def test_read_bool_returns_true_for_string_true(self):
-        """read_bool_from_inspect_config returns True for value 'true'."""
-        assert read_bool_from_inspect_config({"warn_extra_grants": "true"}, "warn_extra_grants") is True
+    def test_read_severity_accepts_warning_and_warn_alias(self):
+        """WARNING and WARN both normalize to WARNING."""
+        assert read_severity_from_inspect_config({"warn_extra_grants": "WARNING"}, "warn_extra_grants") == "WARNING"
+        assert read_severity_from_inspect_config({"warn_orphan_grants": "WARN"}, "warn_orphan_grants") == "WARNING"
 
-    def test_read_bool_is_case_insensitive(self):
-        """read_bool_from_inspect_config handles mixed case."""
-        assert read_bool_from_inspect_config({"warn_extra_grants": "TRUE"}, "warn_extra_grants") is True
-        assert read_bool_from_inspect_config({"warn_orphan_grants": "True"}, "warn_orphan_grants") is True
+    def test_read_severity_accepts_error(self):
+        """ERROR blocks the configured grant finding."""
+        assert read_severity_from_inspect_config({"warn_extra_grants": "ERROR"}, "warn_extra_grants") == "ERROR"
 
-    def test_warn_extra_grants_parsed_from_conf(self, tmp_path):
-        """warn_extra_grants=true is correctly parsed from inspect.conf."""
+    def test_warn_extra_grants_off_parsed_from_conf(self, tmp_path):
+        """warn_extra_grants=OFF is correctly parsed from inspect.conf."""
         conf = tmp_path / "inspect.conf"
-        conf.write_text("warn_extra_grants=true\n", encoding="utf-8")
+        conf.write_text("warn_extra_grants=OFF\n", encoding="utf-8")
         rules = read_inspect_config(str(conf))
-        assert read_bool_from_inspect_config(rules, "warn_extra_grants") is True
+        assert read_severity_from_inspect_config(rules, "warn_extra_grants") == "OFF"
 
-    def test_warn_orphan_grants_parsed_from_conf(self, tmp_path):
-        """warn_orphan_grants=true is correctly parsed from inspect.conf."""
+    def test_warn_orphan_grants_warn_parsed_from_conf(self, tmp_path):
+        """warn_orphan_grants=WARN is parsed as WARNING from inspect.conf."""
         conf = tmp_path / "inspect.conf"
-        conf.write_text("warn_orphan_grants=true\n", encoding="utf-8")
+        conf.write_text("warn_orphan_grants=WARN\n", encoding="utf-8")
         rules = read_inspect_config(str(conf))
-        assert read_bool_from_inspect_config(rules, "warn_orphan_grants") is True
+        assert read_severity_from_inspect_config(rules, "warn_orphan_grants") == "WARNING"
 
-    def test_both_flags_false_by_default_in_conf(self, tmp_path):
-        """An empty inspect.conf gives false for both flags via DEFAULT_RULES merge."""
+    def test_both_settings_error_by_default_in_conf(self, tmp_path):
+        """An empty inspect.conf gives ERROR for both grant severity settings."""
         conf = tmp_path / "inspect.conf"
         conf.write_text("# empty\n", encoding="utf-8")
         rules = read_inspect_config(str(conf))
-        assert read_bool_from_inspect_config(rules, "warn_extra_grants") is False
-        assert read_bool_from_inspect_config(rules, "warn_orphan_grants") is False
+        assert read_severity_from_inspect_config(rules, "warn_extra_grants") == "ERROR"
+        assert read_severity_from_inspect_config(rules, "warn_orphan_grants") == "ERROR"
 
     def test_invalid_value_falls_back_to_default(self, tmp_path):
-        """An invalid value for warn_extra_grants is ignored (falls back to default)."""
+        """An invalid grant severity is ignored and the default ERROR applies."""
         conf = tmp_path / "inspect.conf"
         conf.write_text("warn_extra_grants=yes\n", encoding="utf-8")
         rules = read_inspect_config(str(conf))
-        # 'yes' is not in _VALID_BOOLS so the line is skipped; default applies
-        assert read_bool_from_inspect_config(rules, "warn_extra_grants") is False
+        assert read_severity_from_inspect_config(rules, "warn_extra_grants") == "ERROR"
 
-    def test_generate_default_config_includes_both_flags(self):
-        """generate_default_config() includes both warn grant flags with false defaults."""
+    def test_generate_default_config_includes_both_settings(self):
+        """generate_default_config() includes both grant settings with ERROR defaults."""
         cfg = generate_default_config()
-        assert "warn_extra_grants=false" in cfg
-        assert "warn_orphan_grants=false" in cfg
+        assert "warn_extra_grants=ERROR" in cfg
+        assert "warn_orphan_grants=ERROR" in cfg

@@ -127,11 +127,15 @@ DEFAULT_RULES: Dict[str, str] = {
     # LATIN character set (the server default).  Replace em-dashes, bullets,
     # arrows, and box-drawing characters with ASCII equivalents.
     "non_ascii": "ERROR",
-    # Grant validation behaviour flags (boolean domain values).
-    # Default false — strict mode.  Set to true in inspect.conf to
-    # downgrade the relevant grant findings to warnings.
-    "warn_extra_grants": "false",
-    "warn_orphan_grants": "false",
+    # Grant validation severities.
+    # ERROR blocks packaging/deployment trust, WARNING/WARN reports but does
+    # not block, and OFF suppresses the finding.
+    #
+    # warn_extra_grants applies only to drift entries that contain extra
+    # privileges and no missing inferred privileges. Missing inferred grants
+    # remain hard errors because required access is absent from the DCL.
+    "warn_extra_grants": "ERROR",
+    "warn_orphan_grants": "ERROR",
 }
 
 # -- Valid severity values --
@@ -143,7 +147,7 @@ DEFAULT_RULES: Dict[str, str] = {
 # (e.g. "comma_style=as-per-source: consistency not enforced") that
 # appears in the report and is recorded in ships.decisions.json so the
 # policy is auditable. OFF is completely silent.
-_VALID_SEVERITIES = {"ERROR", "WARNING", "INFO", "OFF"}
+_VALID_SEVERITIES = {"ERROR", "WARNING", "WARN", "INFO", "OFF"}
 
 # -- Comma style configuration --
 # Two orthogonal keys control comma placement inspection:
@@ -165,20 +169,8 @@ _VALID_COMMA_STYLES = {"leading", "trailing", "as-per-source"}
 
 # Keys in inspect.conf that take domain values rather than severities.
 # read_inspect_config handles these separately from severity rules.
-_VALID_BOOLS = {"true", "false"}
-
 _DOMAIN_VALUE_RULES: Dict[str, set] = {
     "comma_style": _VALID_COMMA_STYLES,
-    # Grant validation behaviour flags.
-    # warn_extra_grants: when true, drifted grantees whose .dcl files contain
-    #   only *extra* privileges (manually added grants SHIPS did not infer) are
-    #   reported as warnings rather than errors.  Grantees with missing inferred
-    #   privileges remain hard errors.  Default: false.
-    "warn_extra_grants": _VALID_BOOLS,
-    # warn_orphan_grants: when true, orphaned DCL grant files (whose grantee is
-    #   not implied by any DDL in the package) are reported as warnings rather
-    #   than errors.  Default: false.
-    "warn_orphan_grants": _VALID_BOOLS,
 }
 
 # Maps a domain-value rule name to the severity key that controls
@@ -256,11 +248,13 @@ def read_inspect_config(config_path: str) -> Dict[str, str]:
                 continue
 
             value = value.strip().upper()
+            if value == "WARN":
+                value = "WARNING"
 
             if value not in _VALID_SEVERITIES:
                 logger.warning(
                     "inspect.conf line %d: invalid severity '%s' "
-                    "for rule '%s' — expected ERROR, WARNING, or OFF. "
+                    "for rule '%s' — expected ERROR, WARNING/WARN, INFO, or OFF. "
                     "Using default.",
                     lineno,
                     value,
@@ -275,24 +269,48 @@ def read_inspect_config(config_path: str) -> Dict[str, str]:
     return rules
 
 
-def read_bool_from_inspect_config(rules: Dict[str, str], key: str) -> bool:
+def read_severity_from_inspect_config(
+    rules: Dict[str, str],
+    key: str,
+    default: str = "ERROR",
+    *,
+    strict: bool = False,
+) -> str:
     """
-    Read a boolean domain-value key from a parsed inspect.conf rules dict.
+    Read a severity-valued key from a parsed inspect.conf rules dict.
 
-    Keys such as ``warn_extra_grants`` and ``warn_orphan_grants`` are stored
-    as the strings ``"true"`` or ``"false"`` (case-insensitive) in the rules
-    dict returned by ``read_inspect_config``.  This helper converts them to
-    a Python bool, defaulting to ``False`` when the key is absent.
+    The returned value is normalized to one of ``ERROR``, ``WARNING``,
+    ``INFO``, or ``OFF``. ``WARN`` is accepted as an alias for ``WARNING``.
 
     Args:
-        rules:  Dict returned by ``read_inspect_config`` (or ``DEFAULT_RULES``).
-        key:    The rule key to look up (e.g. ``"warn_extra_grants"``).
+        rules:   Dict returned by ``read_inspect_config``.
+        key:     Rule key to look up, such as ``warn_extra_grants``.
+        default: Default severity to use when the key is absent.
+        strict:  When true, promote ``WARNING`` to ``ERROR`` to match
+                 the normal inspect ``--strict`` behaviour.
 
     Returns:
-        ``True`` if the key is present and its value is ``"true"``
-        (case-insensitive), ``False`` otherwise.
+        Normalized severity string.
     """
-    return rules.get(key, "false").lower() == "true"
+    value = rules.get(key, default)
+    severity = str(value).strip().upper()
+    if severity == "WARN":
+        severity = "WARNING"
+    if severity not in {"ERROR", "WARNING", "INFO", "OFF"}:
+        severity = default.strip().upper()
+    if strict and severity == "WARNING":
+        return "ERROR"
+    return severity
+
+
+def read_bool_from_inspect_config(rules: Dict[str, str], key: str) -> bool:
+    """
+    Deprecated compatibility wrapper for older callers.
+
+    Prefer ``read_severity_from_inspect_config`` for new code. This returns
+    true only when the configured severity is ``WARNING``/``WARN``.
+    """
+    return read_severity_from_inspect_config(rules, key) == "WARNING"
 
 
 def generate_default_config() -> str:
@@ -379,21 +397,17 @@ def generate_default_config() -> str:
         "# TDStats, etc.) are auto-excluded.",
         f"review_unmapped_grants={DEFAULT_RULES['review_unmapped_grants']}",
         "#",
-        "# Grant validation behaviour flags",
-        "# warn_extra_grants: when true, drifted grantees whose .dcl files contain",
-        "# only *extra* privileges (grants you added manually beyond what SHIPS",
-        "# infers from the DDL) are reported as warnings rather than errors.",
-        "# Any grant that SHIPS inferred but is ABSENT from the .dcl file remains",
-        "# a hard error regardless — the DDL is referencing access not yet granted.",
-        "# Set to true when you explicitly grant database access to roles, reporting",
-        "# users, or external consumers directly in your .dcl files.",
+        "# Grant validation severities",
+        "# warn_extra_grants: controls drift entries where the .dcl file contains",
+        "# only *extra* privileges that SHIPS did not infer from DDL.",
+        "# Values: ERROR, WARNING/WARN, OFF.",
+        "# Missing inferred grants remain hard errors because required access is",
+        "# absent from the DCL and cannot safely be treated as extra-only drift.",
         f"warn_extra_grants={DEFAULT_RULES['warn_extra_grants']}",
         "#",
-        "# warn_orphan_grants: when true, a .dcl file whose grantee is not implied",
-        "# by any DDL in the package is reported as a warning rather than an error.",
-        "# Set to true when roles are intentionally granted database access within",
-        "# the package but GRANT ROLE ... TO USER is managed outside the package",
-        "# (e.g. by a DBA or an autonomous agent).",
+        "# warn_orphan_grants: controls .dcl files whose grantee is not implied",
+        "# by any DDL in the package.",
+        "# Values: ERROR, WARNING/WARN, OFF.",
         f"warn_orphan_grants={DEFAULT_RULES['warn_orphan_grants']}",
         "",
         "",

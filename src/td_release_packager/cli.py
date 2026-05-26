@@ -164,7 +164,12 @@ def _format_lint_recap(lint_result, max_items: int = 5) -> str:
     return "\n".join(lines)
 
 
-def _format_grant_recap(grant_result, max_items: int = 10) -> str:
+def _format_grant_recap(
+    grant_result,
+    max_items: int = 10,
+    extra_grants_severity: str = "ERROR",
+    orphan_grants_severity: str = "ERROR",
+) -> str:
     """
     Produce a recap of grant validation failures. Returns empty
     string if grant_result is None or all grantees are consistent.
@@ -172,9 +177,21 @@ def _format_grant_recap(grant_result, max_items: int = 10) -> str:
     if grant_result is None or grant_result.passed:
         return ""
 
-    drifted = grant_result.drifted
+    extra_grants_severity = extra_grants_severity.upper()
+    orphan_grants_severity = orphan_grants_severity.upper()
+
+    drifted = [
+        status
+        for status in grant_result.drifted
+        if status.missing_privs
+        or extra_grants_severity != "OFF"
+    ]
     missing = grant_result.missing
-    orphaned = grant_result.orphaned
+    orphaned = (
+        []
+        if orphan_grants_severity == "OFF"
+        else grant_result.orphaned
+    )
     total = len(drifted) + len(missing) + len(orphaned)
 
     if total == 0:
@@ -2020,51 +2037,68 @@ def _run_inspect(args, stage, issue_codes) -> int:
         project_dir = Path(args.project).resolve()
         grant_result = None
 
-        # Read warn_* flags from inspect.conf (both default false).
+        # Read grant-drift severities from inspect.conf. These are severity
+        # settings, not booleans:
+        #   ERROR        blocks package trust
+        #   WARNING/WARN reports but does not block
+        #   OFF          suppresses the finding
         #
-        # warn_orphan_grants: orphaned DCL files (grantee has no DDL backing)
-        #   are reported as warnings rather than errors.  Use when roles are
-        #   granted database access inside the package but GRANT ROLE … TO USER
-        #   is managed outside the package by a DBA or an agent.
-        #
-        # warn_extra_grants: drifted grantees whose .dcl file contains only
-        #   *extra* privileges (manually added grants SHIPS did not infer)
-        #   are reported as warnings rather than errors.  Grantees that are
-        #   missing inferred privileges remain hard errors regardless.
-        from td_release_packager.validate import read_bool_from_inspect_config
-        warn_orphan_grants = read_bool_from_inspect_config(rules_config, "warn_orphan_grants")
-        warn_extra_grants = read_bool_from_inspect_config(rules_config, "warn_extra_grants")
+        # warn_extra_grants applies only to extra-only drift. Drift that also
+        # has missing inferred privileges remains a hard error because required
+        # access is absent from the DCL.
+        from td_release_packager.validate import read_severity_from_inspect_config
+
+        warn_orphan_grants_severity = read_severity_from_inspect_config(
+            rules_config,
+            "warn_orphan_grants",
+            strict=getattr(args, "strict", False),
+        )
+        warn_extra_grants_severity = read_severity_from_inspect_config(
+            rules_config,
+            "warn_extra_grants",
+            strict=getattr(args, "strict", False),
+        )
+
+        def _grant_issue_enabled(severity: str) -> bool:
+            """Return true when a configured grant severity should be emitted."""
+            return severity != "OFF"
+
+        def _grant_issue_blocks(severity: str) -> bool:
+            """Return true when a configured grant severity should block trust."""
+            return severity == "ERROR"
 
         def _effective_grant_passed(result) -> bool:
-            """
-            Compute grant_ok honouring both warn_* flags.
-
-            Four combinations:
-              neither flag  → result.passed  (strict)
-              orphans only  → passed_ignoring_orphans()
-              extra only    → passed_ignoring_extra_grants()
-              both          → passed_ignoring_extra_grants_and_orphans()
-            """
-            if warn_extra_grants and warn_orphan_grants:
-                return result.passed_ignoring_extra_grants_and_orphans()
-            if warn_extra_grants:
-                return result.passed_ignoring_extra_grants()
-            if warn_orphan_grants:
-                return result.passed_ignoring_orphans()
-            return result.passed
+            """Compute grant_ok using severity-valued grant drift settings."""
+            for status in result.statuses:
+                # Missing .dcl files and missing inferred privileges are always
+                # hard errors. The warn_* settings control extra-only drift and
+                # orphaned DCL files only.
+                if status.missing:
+                    return False
+                if status.drifted and status.missing_privs:
+                    return False
+                if (
+                    status.drifted
+                    and status.extra_privs
+                    and _grant_issue_blocks(warn_extra_grants_severity)
+                ):
+                    return False
+                if status.orphaned and _grant_issue_blocks(warn_orphan_grants_severity):
+                    return False
+            return True
 
         def _grant_suffix(result) -> str:
-            """Build a parenthetical suffix describing any active warn modes."""
+            """Build a parenthetical suffix describing non-error grant modes."""
             parts = []
-            if warn_extra_grants and result.drifted_extra_only:
+            if result.drifted_extra_only and warn_extra_grants_severity != "ERROR":
                 parts.append(
                     f"{len(result.drifted_extra_only)} extra-only drift "
-                    f"(warn — warn_extra_grants enabled)"
+                    f"({warn_extra_grants_severity.lower()} — warn_extra_grants)"
                 )
-            if warn_orphan_grants and result.orphaned:
+            if result.orphaned and warn_orphan_grants_severity != "ERROR":
                 parts.append(
                     f"{len(result.orphaned)} orphaned "
-                    f"(warn — warn_orphan_grants enabled)"
+                    f"({warn_orphan_grants_severity.lower()} — warn_orphan_grants)"
                 )
             return f"  [{', '.join(parts)}]" if parts else ""
 
@@ -2089,7 +2123,13 @@ def _run_inspect(args, stage, issue_codes) -> int:
             )
             print(f"{'=' * 64}")
             print(f"  .grt files written: {files_written}")
-            print(format_grant_report(grant_result))
+            print(
+                format_grant_report(
+                    grant_result,
+                    extra_grants_severity=warn_extra_grants_severity,
+                    orphan_grants_severity=warn_orphan_grants_severity,
+                )
+            )
             print(f"{'=' * 64}")
         else:
             # -- Validate mode: compare and report --
@@ -2109,7 +2149,13 @@ def _run_inspect(args, stage, issue_codes) -> int:
                 f"{_grant_suffix(grant_result)}"
             )
             print(f"{'=' * 64}")
-            print(format_grant_report(grant_result))
+            print(
+                format_grant_report(
+                    grant_result,
+                    extra_grants_severity=warn_extra_grants_severity,
+                    orphan_grants_severity=warn_orphan_grants_severity,
+                )
+            )
             print(f"{'=' * 64}")
 
         # ==============================================================
@@ -2198,9 +2244,14 @@ def _run_inspect(args, stage, issue_codes) -> int:
             suffix = _grant_suffix(grant_result) if grant_result else ""
             print(f"  Step 2 (Grants): PASSED — {n} grantees consistent{suffix}")
         else:
-            d = len(grant_result.drifted)
+            d = len([
+                status
+                for status in grant_result.drifted
+                if status.missing_privs
+                or warn_extra_grants_severity != "OFF"
+            ])
             m = len(grant_result.missing)
-            o = len(grant_result.orphaned)
+            o = 0 if warn_orphan_grants_severity == "OFF" else len(grant_result.orphaned)
             print(f"  Step 2 (Grants): FAILED — {d} drifted, {m} missing, {o} orphaned")
 
         # -- Step 3 line
@@ -2224,7 +2275,11 @@ def _run_inspect(args, stage, issue_codes) -> int:
                 print(recap)
 
         if not grant_ok:
-            recap = _format_grant_recap(grant_result)
+            recap = _format_grant_recap(
+                grant_result,
+                extra_grants_severity=warn_extra_grants_severity,
+                orphan_grants_severity=warn_orphan_grants_severity,
+            )
             if recap:
                 print()
                 print(recap)
@@ -2243,20 +2298,21 @@ def _run_inspect(args, stage, issue_codes) -> int:
             # extra-only (manually added grants) or includes missing privs
             # (inferred grants absent from the .dcl file).
             for entry in grant_result.drifted:
-                if warn_extra_grants and not entry.missing_privs:
-                    # Extra-only drift: manually added grants that SHIPS did
-                    # not infer.  Downgraded to warning when warn_extra_grants
-                    # is enabled — these are intentional and must not block.
-                    _drift_severity = "warning"
-                else:
+                if entry.missing_privs:
                     # Missing-privs drift: the DDL implies a grant that is
-                    # absent from the .dcl file.  Always a hard error.
-                    _drift_severity = "error"
-                stage.add_issue(
-                    _drift_severity,
-                    issue_codes.INSPECT_GRANT_VIOLATION,
-                    f"Drifted grant: {entry}",
-                )
+                    # absent from the .dcl file. Always a hard error.
+                    stage.add_issue(
+                        "error",
+                        issue_codes.INSPECT_GRANT_VIOLATION,
+                        f"Drifted grant: {entry}",
+                    )
+                elif _grant_issue_enabled(warn_extra_grants_severity):
+                    # Extra-only drift is controlled by warn_extra_grants.
+                    stage.add_issue(
+                        warn_extra_grants_severity.lower(),
+                        issue_codes.INSPECT_GRANT_VIOLATION,
+                        f"Drifted grant: {entry}",
+                    )
             for entry in grant_result.missing:
                 stage.add_issue(
                     "error",
@@ -2264,14 +2320,12 @@ def _run_inspect(args, stage, issue_codes) -> int:
                     f"Missing grant (intent has it, .grt does not): {entry}",
                 )
             for entry in grant_result.orphaned:
-                # Orphaned grants are downgraded to warnings when
-                # warn_orphan_grants is enabled in inspect.conf.
-                _orphan_severity = "warning" if warn_orphan_grants else "error"
-                stage.add_issue(
-                    _orphan_severity,
-                    issue_codes.INSPECT_GRANT_VIOLATION,
-                    f"Orphaned grant (.grt has it, intent does not): {entry}",
-                )
+                if _grant_issue_enabled(warn_orphan_grants_severity):
+                    stage.add_issue(
+                        warn_orphan_grants_severity.lower(),
+                        issue_codes.INSPECT_GRANT_VIOLATION,
+                        f"Orphaned grant (.grt has it, intent does not): {entry}",
+                    )
 
         stage.set_inputs(
             source_dir=args.project,

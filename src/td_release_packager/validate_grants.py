@@ -52,6 +52,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
+from typing import Iterable, List, Mapping
 
 from td_release_packager.infer_grants import (
     PRIV_ORDER,
@@ -731,21 +732,70 @@ def _format_grants_block(
         lines.append(f"{indent}{grantor}: {_format_priv_set(grants[grantor])}")
     return "\n".join(lines)
 
+def _format_missing_grant_statements(
+    grantee: str,
+    grants: Mapping[str, Iterable[str]],
+) -> str:
+    """
+    Format missing inferred grants as executable Teradata GRANT statements.
 
-def format_report(result: GrantValidationResult) -> str:
+    This is used for inspect output so the user can copy the required
+    statement directly into the relevant .dcl file.
+    """
+    lines: List[str] = []
+
+    for object_name in sorted(grants):
+        privileges = sorted(str(p).upper() for p in grants[object_name])
+        for privilege in privileges:
+            lines.append(
+                f"      GRANT {privilege} ON {object_name} TO {grantee} WITH GRANT OPTION;"
+            )
+
+    return "\n".join(lines)
+
+
+def format_report(
+    result: GrantValidationResult,
+    extra_grants_severity: str = "ERROR",
+    orphan_grants_severity: str = "ERROR",
+) -> str:
     """
     Render a human-readable summary of a GrantValidationResult.
 
     Used by cli.py for both validate and fix flows. Produces a
-    multi-line string suitable for terminal output.
-    """
-    lines: List[str] = []
+    multi-line string suitable for terminal output. Severity arguments
+    control which configured non-blocking grant findings are visible:
 
-    total = len(result.statuses)
-    consistent_n = len(result.consistent)
-    drifted_n = len(result.drifted)
-    missing_n = len(result.missing)
-    orphaned_n = len(result.orphaned)
+    * extra_grants_severity=OFF suppresses extra-only drift entries.
+    * orphan_grants_severity=OFF suppresses orphaned DCL entries.
+
+    Missing inferred privileges are always shown because they are
+    package-blocking errors.
+    """
+    extra_grants_severity = extra_grants_severity.upper()
+    orphan_grants_severity = orphan_grants_severity.upper()
+
+    def _should_show(status: GranteeStatus) -> bool:
+        if status.orphaned and orphan_grants_severity == "OFF":
+            return False
+        if (
+            status.drifted
+            and status.extra_privs
+            and not status.missing_privs
+            and extra_grants_severity == "OFF"
+        ):
+            return False
+        return True
+
+    visible_statuses = [s for s in result.statuses if _should_show(s)]
+
+    total = len(visible_statuses)
+    consistent_n = len([s for s in visible_statuses if s.consistent])
+    drifted_n = len([s for s in visible_statuses if s.drifted])
+    missing_n = len([s for s in visible_statuses if s.missing])
+    orphaned_n = len([s for s in visible_statuses if s.orphaned])
+
+    lines: List[str] = []
 
     lines.append(
         f"  Grantees: {total} total — "
@@ -758,20 +808,19 @@ def format_report(result: GrantValidationResult) -> str:
 
     if total == 0:
         lines.append("")
-        lines.append("  No cross-database grants inferred from this project.")
+        lines.append("  No grant findings are visible with the current inspect.conf settings.")
         return "\n".join(lines)
 
-    # Per-grantee detail
-    for status in result.statuses:
+    for status in visible_statuses:
         if status.consistent:
             lines.append(f"\n  ✓ {status.grantee}: clean")
         elif status.drifted:
             lines.append(f"\n  ✗ {status.grantee}: drift detected")
             lines.append(f"      File: {status.file_path}")
             if status.missing_privs:
-                lines.append("      Missing from .dcl file:")
-                lines.append(_format_grants_block(status.missing_privs))
-            if status.extra_privs:
+                lines.append("      Required grant missing from .dcl file:")
+                lines.append(_format_missing_grant_statements(status.grantee, status.missing_privs))
+            if status.extra_privs and extra_grants_severity != "OFF":
                 lines.append("      Extra in .dcl file (not implied by DDL):")
                 lines.append(_format_grants_block(status.extra_privs))
         elif status.missing:
