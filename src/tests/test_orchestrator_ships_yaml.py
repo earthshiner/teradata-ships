@@ -336,3 +336,11 @@ class TestModuleInvariants:
         for stage in STAGES:
             assert LAYER_1_DEFAULTS["stages"][stage]["strict"] is False
             assert LAYER_1_DEFAULTS["stages"][stage]["on_error"] == "continue"
+
+
+# ---------------------------------------------------------------
+# Tests for inspect.warn_orphan_grants
+# ---------------------------------------------------------------
+
+
+

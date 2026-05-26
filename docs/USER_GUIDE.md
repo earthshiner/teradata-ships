@@ -593,11 +593,11 @@ Notes:
 
 ## How to: work with grants
 
-SHIPS infers grants from your DDL. If you have a view `{{STD_DATABASE}}.CustomerSummary`, SHIPS can generate a grant to the appropriate role automatically via the `generate` command.
+SHIPS infers inter-database grants from your DDL. If a view in `{{STD_DATABASE_V}}` reads from `{{STD_DATABASE_T}}`, inspect can infer the required database-to-database grant.
 
-If you want to manage grants explicitly, place them as `.dcl` files in `payload/database/DCL/inter_db/`.
+Database-to-database grants belong in `.dcl` files under `payload/database/DCL/inter_db/`. Role grants belong under `payload/database/DCL/roles/`; Teradata roles must not be granted privileges `WITH GRANT OPTION`.
 
-The inspect rule `skip_grants` is `true` by default in the `process` command — grant validation is advisory. In a stricter pipeline, run inspect with `--fix-grants` to generate missing grants.
+The inspect rule `skip_grants` is `true` by default in the `process` command — grant validation is advisory. In a stricter pipeline, run inspect with `--fix-grants` to create missing grant files or append missing inferred grants to existing `.dcl` files. The repair is conservative: it does not delete, move, or remove extra/orphaned grants automatically.
 
 ---
 
@@ -832,7 +832,7 @@ python -m td_release_packager inspect --project C:\Projects\OMR
 | `--config` | No | Path to `inspect.conf` (default: auto-detect in project) |
 | `--strict` | No | Promote all WARNING rules to ERROR |
 | `--skip-grants` | No | Skip grant validation |
-| `--fix-grants` | No | Re-generate missing grant files |
+| `--fix-grants` | No | Create missing grant files and append missing inferred grants to existing DCL files |
 
 ---
 
