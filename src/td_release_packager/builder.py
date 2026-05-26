@@ -3780,16 +3780,23 @@ def _rmtree_robust(path: str, retries: int = 5, delay: float = 0.2) -> None:
 
 
 def _archive_package(pkg_dir: str, archive_format: str) -> str:
-    """
-    Archive the package directory as .zip or .tar.gz.
+    """Archive the package directory as .zip or .tar.gz.
 
-    The archive is created alongside the package directory,
-    and the unarchived directory is removed after successful
-    archiving.
+    For zip format this uses :mod:`zipfile` directly rather than
+    :func:`shutil.make_archive` so that every directory entry is written
+    with POSIX-style forward-slash separators.  This is important on
+    Windows where shutil.make_archive can produce zip entries with
+    backslash separators or inconsistent directory metadata that causes
+    :meth:`zipfile.ZipFile.extractall` to fail when the target path
+    traverses a dot-prefixed directory such as .ships-work — a
+    documented SHIPS DBA workflow directory.
+
+    The archive is created alongside the package directory, and the
+    unarchived directory is removed after successful archiving.
 
     Args:
         pkg_dir:        Path to the package directory.
-        archive_format: 'zip' or 'tar.gz'.
+        archive_format: zip or tar.gz.
 
     Returns:
         Path to the archive file.
@@ -3802,12 +3809,38 @@ def _archive_package(pkg_dir: str, archive_format: str) -> str:
             base_dir=os.path.basename(pkg_dir),
         )
     else:
-        archive_path = shutil.make_archive(
-            base_name=pkg_dir,
-            format="zip",
-            root_dir=os.path.dirname(pkg_dir),
-            base_dir=os.path.basename(pkg_dir),
-        )
+        import pathlib
+        import zipfile as _zipfile
+
+        archive_path = pkg_dir + ".zip"
+        root_dir = os.path.dirname(pkg_dir)
+
+        # Suffixes excluded from the archive — these match _package_copy_ignore
+        # and _generate_integrity_file exclusions.  __pycache__ directories are
+        # pruned from the os.walk in-place so their contents are never visited.
+        _SKIP_DIRS = {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
+        _SKIP_SUFFIXES = (".pyc", ".pyo", ".bak", ".tmp", ".old", ".orig", ".rej", ".swp", ".swo")
+
+        with _zipfile.ZipFile(archive_path, "w", _zipfile.ZIP_DEFLATED) as zf:
+            for current_root, dirs, files in os.walk(pkg_dir):
+                # Prune excluded directories in-place so os.walk skips them.
+                dirs[:] = sorted(d for d in dirs if d not in _SKIP_DIRS and not d.startswith("~"))
+
+                # Write a directory entry with a POSIX-style path so that
+                # extractall() on any platform — including Windows paths that
+                # traverse dot-named directories such as .ships-work — can
+                # recreate the full directory tree before writing file content.
+                rel_dir = pathlib.Path(current_root).relative_to(root_dir)
+                dir_entry = rel_dir.as_posix() + "/"
+                if dir_entry != "./":
+                    zf.mkdir(dir_entry)
+
+                for fname in sorted(files):
+                    if fname.startswith("~") or fname.lower().endswith(_SKIP_SUFFIXES):
+                        continue
+                    fpath = os.path.join(current_root, fname)
+                    arcname = (rel_dir / fname).as_posix()
+                    zf.write(fpath, arcname)
 
     # Remove the unarchived directory robustly — on Windows a bare
     # shutil.rmtree can race with antivirus or search-index handles.
