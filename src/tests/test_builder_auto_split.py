@@ -194,15 +194,33 @@ class TestIsAutoSplitNeeded:
         )
         assert _is_auto_split_needed(str(pkg_dir)) is True
 
-    def test_prereqs_plus_system_splits(self, tmp_path):
-        """SYSTEM (00) counts as a dependant for split purposes — it
-        deploys after PRE_REQUISITES under the standard phase order."""
+    def test_prereqs_plus_system_only_no_split(self, tmp_path):
+        """SYSTEM (00) is part of the prereqs side of a split.
+
+        A package with only 00_system and 01_pre_requisites has no main
+        payload, so splitting would produce an empty _02_main archive.
+        """
         pkg_dir = self._empty_payload(tmp_path)
         (pkg_dir / "payload" / "01_pre_requisites" / "MyDB.db").write_text(
             "CREATE DATABASE MyDB;", encoding="utf-8"
         )
         (pkg_dir / "payload" / "00_system" / "MyRole.rol").write_text(
             "CREATE ROLE MyRole;", encoding="utf-8"
+        )
+        assert _is_auto_split_needed(str(pkg_dir)) is False
+
+    def test_system_plus_dependants_splits(self, tmp_path):
+        """SYSTEM (00) counts as prereqs for split purposes.
+
+        System artefacts such as roles must be deployed before main DCL/DDL
+        waves, even when there are no database/user pre-requisites.
+        """
+        pkg_dir = self._empty_payload(tmp_path)
+        (pkg_dir / "payload" / "00_system" / "MyRole.rol").write_text(
+            "CREATE ROLE MyRole;", encoding="utf-8"
+        )
+        (pkg_dir / "payload" / "03_ddl" / "MyDB.T.tbl").write_text(
+            "CREATE MULTISET TABLE MyDB.T (Id INT);", encoding="utf-8"
         )
         assert _is_auto_split_needed(str(pkg_dir)) is True
 
@@ -305,6 +323,10 @@ class TestBuildPackageAutoSplit:
         _write(
             payload / "pre-requisites" / "databases" / "MyDB.db",
             "CREATE DATABASE MyDB AS PERMANENT = 1024 SPOOL = 1024;\n",
+        )
+        _write(
+            payload / "system" / "roles" / "MyAppRole.rol",
+            "CREATE ROLE MyAppRole;\n",
         )
         _write(
             payload / "DDL" / "tables" / "MyDB.Customer.tbl",
@@ -412,11 +434,13 @@ class TestBuildPackageAutoSplit:
         )
 
         # Main: dependants only.
+        assert "00_system" not in main_manifest.phase_inventory
         assert "01_pre_requisites" not in main_manifest.phase_inventory
         assert main_manifest.phase_inventory.get("03_ddl", 0) >= 1
 
-        # Prereqs: prereq phase only.
+        # Prereqs: system + prereq phases only.
         assert "03_ddl" not in prereqs_manifest.phase_inventory
+        assert prereqs_manifest.phase_inventory.get("00_system", 0) >= 1
         assert prereqs_manifest.phase_inventory.get("01_pre_requisites", 0) >= 1
 
     def test_archive_contents_partitioned(self, split_config):
@@ -424,13 +448,16 @@ class TestBuildPackageAutoSplit:
         live in the prereqs zip, dependant files in the main zip."""
         ((main_archive, _), (prereqs_archive, _)) = build_package(split_config)
 
-        prereqs_files = _list_zip_phase_files(prereqs_archive, "01_pre_requisites")
+        prereqs_db_files = _list_zip_phase_files(prereqs_archive, "01_pre_requisites")
+        prereqs_system_files = _list_zip_phase_files(prereqs_archive, "00_system")
         main_files = _list_zip_phase_files(main_archive, "03_ddl")
         # Each archive's "wrong half" is empty.
+        assert _list_zip_phase_files(main_archive, "00_system") == []
         assert _list_zip_phase_files(main_archive, "01_pre_requisites") == []
         assert _list_zip_phase_files(prereqs_archive, "03_ddl") == []
         # And the right half has the expected files.
-        assert any("MyDB.db" in name for name in prereqs_files)
+        assert any("MyDB.db" in name for name in prereqs_db_files)
+        assert any("MyAppRole.rol" in name for name in prereqs_system_files)
         assert any("MyDB.Customer.tbl" in name for name in main_files)
 
     def test_both_archives_have_full_infrastructure(self, split_config):
