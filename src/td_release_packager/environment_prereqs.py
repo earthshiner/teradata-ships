@@ -456,10 +456,18 @@ Primary file to amend:
 4. Repackage the edited package root using SHIPS.
 5. Deploy the release group in order: `_00_environment_prereqs`, `_01_prereqs`, `_02_main`.
 
+## Windows path-length note
+
+On Windows, extraction may fail with a misleading `FileNotFoundError`, `The system cannot find the path specified`, or similar error if the release directory is too deeply nested. This is usually caused by the legacy Windows path-length limit rather than by a missing file in the zip.
+
+If that happens, copy the whole release group folder to a short path such as `C:\\ships\\{release_group}` and use that shorter directory for the extract, edit, and repackage steps. Do not edit the zip directly.
+
 ## PowerShell
 
 ```powershell
-$ReleaseGroup = "C:\\path\\to\\releases\\{release_group}"
+# Prefer a short path on Windows to avoid legacy MAX_PATH failures during extraction.
+# Example: copy the whole release group folder to C:\\ships\\{release_group} first.
+$ReleaseGroup = "C:\\ships\\{release_group}"
 $PackageName = "{package_name}"
 $EnvZip = "$ReleaseGroup\\$PackageName.zip"
 $PackageDir = "$ReleaseGroup\\$PackageName"

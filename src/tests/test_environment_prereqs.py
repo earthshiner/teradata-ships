@@ -379,6 +379,7 @@ def test_repackage_from_ships_work_updates_release_group_archive(tmp_project, tm
     group_dir = tmp_path / release_group
     env_archive = group_dir / f"{release_group}_00_environment_prereqs.zip"
     work_dir = group_dir / ".ships-work"
+    work_dir.mkdir(parents=True, exist_ok=True)
     shutil.unpack_archive(str(env_archive), str(work_dir))
 
     env_pkg_dir = work_dir / f"{release_group}_00_environment_prereqs"
