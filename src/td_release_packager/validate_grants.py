@@ -52,7 +52,6 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
-from typing import Iterable, List, Mapping
 
 from td_release_packager.infer_grants import (
     PRIV_ORDER,
@@ -139,19 +138,38 @@ def _split_privileges(privs_str: str) -> Set[str]:
     return {_normalise_privilege(p) for p in parts if p.strip()}
 
 
-def _parse_grt_content(content: str) -> Dict[str, Set[str]]:
+def _parse_grt_content(
+    content: str,
+    expected_grantee: Optional[str] = None,
+) -> Dict[str, Set[str]]:
     """
     Parse a .dcl file's content into ``{grantor: set_of_privileges}``.
 
     Comments are stripped before parsing so commented-out GRANTs are
     correctly ignored. Multiple GRANT statements with the same grantor
-    are merged (union of privilege sets). The grantee is implicit from
-    the file's filename context; the caller is responsible for that
-    mapping.
+    are merged (union of privilege sets). Unknown privileges are preserved
+    so they surface as drift rather than being silently discarded.
+
+    When ``expected_grantee`` is supplied, only statements whose actual
+    ``TO`` grantee matches that value are included. This keeps
+    ``DCL/inter_db`` strict: a file named ``{{DB_X_V}}.dcl`` may only
+    satisfy grants whose SQL says ``TO {{DB_X_V}}``. Misplaced role grants
+    or grants to a different user/database are ignored for inter-db drift
+    comparison and are therefore not treated as valid database-to-database
+    grants.
     """
     grants: Dict[str, Set[str]] = {}
+    expected_key = (
+        _normalise_identifier(expected_grantee)
+        if expected_grantee is not None
+        else None
+    )
 
-    for grantor, _grantee, privs in _iter_grant_statements(content):
+    for grantor, grantee, privs in _iter_grant_statements(content):
+        if expected_key is not None:
+            actual_key = _normalise_identifier(grantee)
+            if actual_key != expected_key:
+                continue
         grants.setdefault(grantor, set()).update(privs)
 
     return grants
@@ -172,17 +190,24 @@ def _iter_grant_statements(content: str) -> List[Tuple[str, str, Set[str]]]:
     return statements
 
 
-def _read_grt_file(path: Path) -> Optional[Dict[str, Set[str]]]:
+def _read_grt_file(
+    path: Path,
+    expected_grantee: Optional[str] = None,
+) -> Optional[Dict[str, Set[str]]]:
     """
-    Read and parse a .dcl file. Returns None if the file cannot be
-    read (does not exist, permission denied, encoding error).
+    Read and parse a .dcl file. Returns None if the file cannot be read.
+
+    Supply ``expected_grantee`` when reading ``DCL/inter_db`` files so the
+    parser only counts statements whose actual ``TO`` grantee matches the
+    filename-derived grantee. This prevents role grants from being counted
+    as inter-database grants.
     """
     try:
         content = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
         logger.warning("Cannot read %s: %s", path, e)
         return None
-    return _parse_grt_content(content)
+    return _parse_grt_content(content, expected_grantee=expected_grantee)
 
 
 def _normalise_identifier(identifier: str) -> str:
@@ -463,7 +488,7 @@ def _classify_grantee(
         status.missing = True
         return status
 
-    actual = _read_grt_file(file_path)
+    actual = _read_grt_file(file_path, expected_grantee=grantee)
     if actual is None:
         # Treat unreadable file as missing — caller will overwrite
         status.missing = True
@@ -520,7 +545,7 @@ def _find_orphans(
         if grantee_from_filename in expected_grantees:
             continue
 
-        actual = _read_grt_file(entry) or {}
+        actual = _read_grt_file(entry, expected_grantee=grantee_from_filename) or {}
         orphans.append(
             GranteeStatus(
                 grantee=grantee_from_filename,
@@ -732,25 +757,39 @@ def _format_grants_block(
         lines.append(f"{indent}{grantor}: {_format_priv_set(grants[grantor])}")
     return "\n".join(lines)
 
+
+def _grant_statement_requires_grant_option(grantee: str) -> bool:
+    """Return True when the generated GRANT statement may use grant option."""
+    return not _is_role_identifier(grantee)
+
+
 def _format_missing_grant_statements(
     grantee: str,
-    grants: Mapping[str, Iterable[str]],
+    grants: Dict[str, Set[str]],
+    indent: str = "      ",
 ) -> str:
     """
     Format missing inferred grants as executable Teradata GRANT statements.
 
-    This is used for inspect output so the user can copy the required
-    statement directly into the relevant .dcl file.
+    Role grants never include ``WITH GRANT OPTION`` because Teradata does
+    not allow grant option when granting privileges to a role. Inter-db
+    grants keep grant option so a view/database can pass access through to
+    downstream consumers.
     """
-    lines: List[str] = []
+    if not grants:
+        return f"{indent}(none)"
 
-    for object_name in sorted(grants):
-        privileges = sorted(str(p).upper() for p in grants[object_name])
+    suffix = " WITH GRANT OPTION" if _grant_statement_requires_grant_option(grantee) else ""
+    lines: List[str] = []
+    for grantor in sorted(grants):
+        privileges = sorted(
+            grants[grantor],
+            key=lambda p: PRIV_ORDER.index(p) if p in PRIV_ORDER else 999,
+        )
         for privilege in privileges:
             lines.append(
-                f"      GRANT {privilege} ON {object_name} TO {grantee} WITH GRANT OPTION;"
+                f"{indent}GRANT {privilege} ON {grantor} TO {grantee}{suffix};"
             )
-
     return "\n".join(lines)
 
 
@@ -811,6 +850,7 @@ def format_report(
         lines.append("  No grant findings are visible with the current inspect.conf settings.")
         return "\n".join(lines)
 
+    # Per-grantee detail
     for status in visible_statuses:
         if status.consistent:
             lines.append(f"\n  ✓ {status.grantee}: clean")
@@ -819,7 +859,12 @@ def format_report(
             lines.append(f"      File: {status.file_path}")
             if status.missing_privs:
                 lines.append("      Required grant missing from .dcl file:")
-                lines.append(_format_missing_grant_statements(status.grantee, status.missing_privs))
+                lines.append(
+                    _format_missing_grant_statements(
+                        status.grantee,
+                        status.missing_privs,
+                    )
+                )
             if status.extra_privs and extra_grants_severity != "OFF":
                 lines.append("      Extra in .dcl file (not implied by DDL):")
                 lines.append(_format_grants_block(status.extra_privs))
