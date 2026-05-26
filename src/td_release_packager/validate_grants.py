@@ -16,7 +16,7 @@ orchestrator that:
     2. Reads the *actual* .dcl files persisted in dcl_dir.
     3. Compares semantically (set of grantor → privilege-set per
        grantee), producing a structured GrantValidationResult.
-    4. Optionally writes missing/drifted files (fix mode).
+    4. Optionally adds missing inferred grants (fix mode).
 
 Public API (matches what cli.py imports):
 
@@ -24,8 +24,9 @@ Public API (matches what cli.py imports):
         Read-only audit. Returns a GrantValidationResult.
 
     fix_grants(project_dir, dcl_dir=None, verbose=False)
-        Writes expected files for any missing or drifted grantees.
-        Does NOT delete orphaned files — manual review required.
+        Adds missing inferred grants to the correct DCL file. Missing
+        files are created; existing drifted files are repaired
+        additively. Extra and orphaned grants are never removed.
         Returns (GrantValidationResult, files_written: int).
 
     format_report(result)
@@ -138,29 +139,68 @@ def _split_privileges(privs_str: str) -> Set[str]:
     return {_normalise_privilege(p) for p in parts if p.strip()}
 
 
-def _parse_grt_content(content: str) -> Dict[str, Set[str]]:
+def _parse_grt_content(
+    content: str,
+    expected_grantee: Optional[str] = None,
+) -> Dict[str, Set[str]]:
     """
     Parse a .dcl file's content into ``{grantor: set_of_privileges}``.
 
     Comments are stripped before parsing so commented-out GRANTs are
     correctly ignored. Multiple GRANT statements with the same grantor
-    are merged (union of privilege sets). The grantee is implicit from
-    the file's filename context; the caller is responsible for that
-    mapping.
+    are merged (union of privilege sets). Unknown privileges are preserved
+    so they surface as drift rather than being silently discarded.
+
+    When ``expected_grantee`` is supplied, only statements whose actual
+    ``TO`` grantee matches that value are included. This keeps
+    ``DCL/inter_db`` strict: a file named ``{{DB_X_V}}.dcl`` may only
+    satisfy grants whose SQL says ``TO {{DB_X_V}}``. Misplaced role grants
+    or grants to a different user/database are ignored for inter-db drift
+    comparison and are therefore not treated as valid database-to-database
+    grants.
     """
     grants: Dict[str, Set[str]] = {}
+    expected_key = (
+        _normalise_identifier(expected_grantee)
+        if expected_grantee is not None
+        else None
+    )
 
-    for grantor, _grantee, privs in _iter_grant_statements(content):
+    for grantor, grantee, privs in _iter_grant_statements(content):
+        if expected_key is not None:
+            actual_key = _normalise_identifier(grantee)
+            if actual_key != expected_key:
+                continue
         grants.setdefault(grantor, set()).update(privs)
 
     return grants
 
 
+def _mask_sql_comments_preserving_length(sql: str) -> str:
+    """Mask SQL comments with whitespace while preserving string length.
+
+    This lets grant statement regex match spans be mapped back to the
+    original text for safe statement relocation/removal. Newlines are
+    preserved so the surrounding file layout remains stable.
+    """
+
+    def _blank(match: re.Match) -> str:
+        return "".join("\n" if ch == "\n" else " " for ch in match.group(0))
+
+    masked = re.sub(r"/\*.*?\*/", _blank, sql, flags=re.DOTALL)
+    masked = re.sub(r"--[^\n]*", _blank, masked)
+    return masked
+
+
+def _iter_grant_statement_matches(content: str) -> List[re.Match]:
+    """Return regex matches for executable GRANT statements in DCL content."""
+    return list(_GRANT_STMT_RE.finditer(_mask_sql_comments_preserving_length(content)))
+
+
 def _iter_grant_statements(content: str) -> List[Tuple[str, str, Set[str]]]:
     """Return ``(grantor, grantee, privileges)`` tuples from DCL content."""
-    cleaned = strip_sql_comments(content)
     statements: List[Tuple[str, str, Set[str]]] = []
-    for match in _GRANT_STMT_RE.finditer(cleaned):
+    for match in _iter_grant_statement_matches(content):
         statements.append(
             (
                 match.group("grantor").strip(),
@@ -171,17 +211,24 @@ def _iter_grant_statements(content: str) -> List[Tuple[str, str, Set[str]]]:
     return statements
 
 
-def _read_grt_file(path: Path) -> Optional[Dict[str, Set[str]]]:
+def _read_grt_file(
+    path: Path,
+    expected_grantee: Optional[str] = None,
+) -> Optional[Dict[str, Set[str]]]:
     """
-    Read and parse a .dcl file. Returns None if the file cannot be
-    read (does not exist, permission denied, encoding error).
+    Read and parse a .dcl file. Returns None if the file cannot be read.
+
+    Supply ``expected_grantee`` when reading ``DCL/inter_db`` files so the
+    parser only counts statements whose actual ``TO`` grantee matches the
+    filename-derived grantee. This prevents role grants from being counted
+    as inter-database grants.
     """
     try:
         content = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
         logger.warning("Cannot read %s: %s", path, e)
         return None
-    return _parse_grt_content(content)
+    return _parse_grt_content(content, expected_grantee=expected_grantee)
 
 
 def _normalise_identifier(identifier: str) -> str:
@@ -193,8 +240,15 @@ def _normalise_identifier(identifier: str) -> str:
 
 
 def _is_role_identifier(identifier: str) -> bool:
-    """True when a grant target is clearly a role name."""
-    return _normalise_identifier(identifier).endswith("_ROLE")
+    """True when a grant target is clearly a role name.
+
+    Handles both literal role names, such as ``BIONIC_READ_ROLE``, and
+    tokenised role names, such as ``{{READ_ROLE}}``.
+    """
+    normalised = _normalise_identifier(identifier)
+    if normalised.startswith("{{") and normalised.endswith("}}"):
+        normalised = normalised[2:-2]
+    return normalised.endswith("_ROLE")
 
 
 def _role_grantees_in_file(path: Path) -> Set[str]:
@@ -322,6 +376,35 @@ class GrantValidationResult:
         return [s for s in self.statuses if s.drifted]
 
     @property
+    def drifted_extra_only(self) -> List[GranteeStatus]:
+        """
+        Drifted grantees whose .dcl file contains only *extra* privileges
+        — grants present in the file but not implied by the DDL.
+        There are no missing privileges (i.e. every grant SHIPS inferred
+        is already present in the file).
+
+        These are typically intentional manual additions: grants to roles,
+        reporting users, or external consumers that SHIPS cannot infer from
+        DDL alone.  They are safe to downgrade to warnings when
+        ``warn_extra_grants`` is enabled in ships.yaml.
+        """
+        return [
+            s for s in self.statuses
+            if s.drifted and s.extra_privs and not s.missing_privs
+        ]
+
+    @property
+    def drifted_missing_privs(self) -> List[GranteeStatus]:
+        """
+        Drifted grantees that have at least one *missing* privilege —
+        a grant that SHIPS inferred from the DDL but is absent from the
+        .dcl file.  These are always hard errors regardless of any
+        warn_* setting, because the DDL is referencing access that has
+        not been granted.
+        """
+        return [s for s in self.statuses if s.drifted and s.missing_privs]
+
+    @property
     def missing(self) -> List[GranteeStatus]:
         return [s for s in self.statuses if s.missing]
 
@@ -334,6 +417,50 @@ class GrantValidationResult:
         """True iff every grantee is consistent (no drift, no missing,
         no orphans). Used by cli.py to set the overall exit code."""
         return all(s.consistent for s in self.statuses)
+
+    def passed_ignoring_orphans(self) -> bool:
+        """
+        True iff every non-orphaned grantee is consistent.
+
+        Use this when ``warn_orphan_grants`` is enabled in ships.yaml —
+        orphaned DCL files are reported as warnings rather than errors,
+        so they must not block packaging.
+        """
+        return all(s.consistent for s in self.statuses if not s.orphaned)
+
+    def passed_ignoring_extra_grants(self) -> bool:
+        """
+        True iff no grantee has missing privileges and no grantee is
+        missing its .dcl file entirely.
+
+        Use this when ``warn_extra_grants`` is enabled in ships.yaml.
+        Grantees whose .dcl files contain only extra privileges (grants
+        you added manually that SHIPS did not infer) are downgraded to
+        warnings and do not block packaging.  Grantees with missing
+        privileges (the DDL implies a grant that is absent from the
+        .dcl file) remain hard errors.
+        """
+        for s in self.statuses:
+            if s.missing:
+                return False
+            if s.drifted and s.missing_privs:
+                return False
+        return True
+
+    def passed_ignoring_extra_grants_and_orphans(self) -> bool:
+        """
+        Combined check for when both ``warn_extra_grants`` and
+        ``warn_orphan_grants`` are enabled in ships.yaml.
+
+        Only missing .dcl files and drifted grantees that have missing
+        privileges cause a hard failure.
+        """
+        for s in self.statuses:
+            if s.missing:
+                return False
+            if s.drifted and s.missing_privs:
+                return False
+        return True
 
 
 # ---------------------------------------------------------------------------
@@ -389,7 +516,7 @@ def _classify_grantee(
         status.missing = True
         return status
 
-    actual = _read_grt_file(file_path)
+    actual = _read_grt_file(file_path, expected_grantee=grantee)
     if actual is None:
         # Treat unreadable file as missing — caller will overwrite
         status.missing = True
@@ -446,7 +573,7 @@ def _find_orphans(
         if grantee_from_filename in expected_grantees:
             continue
 
-        actual = _read_grt_file(entry) or {}
+        actual = _read_grt_file(entry, expected_grantee=grantee_from_filename) or {}
         orphans.append(
             GranteeStatus(
                 grantee=grantee_from_filename,
@@ -556,66 +683,275 @@ def validate_grants(
     return result
 
 
+def _subtract_grants(
+    required: Dict[str, Set[str]],
+    actual: Dict[str, Set[str]],
+) -> Dict[str, Set[str]]:
+    """Return grant privileges present in required but absent from actual."""
+    missing: Dict[str, Set[str]] = {}
+    for grantor, privileges in required.items():
+        absent = set(privileges) - actual.get(grantor, set())
+        if absent:
+            missing[grantor] = absent
+    return missing
+
+
+def _collapse_excess_blank_lines(content: str) -> str:
+    """Keep relocated DCL readable after statement removal."""
+    return re.sub(r"\n{3,}", "\n\n", content).strip() + "\n"
+
+
+def _remove_spans(content: str, spans: List[Tuple[int, int]]) -> str:
+    """Remove non-overlapping spans from content, processing from the end."""
+    updated = content
+    for start, end in sorted(spans, reverse=True):
+        line_start = updated.rfind("\n", 0, start) + 1
+        line_end = updated.find("\n", end)
+        if line_end == -1:
+            line_end = len(updated)
+        else:
+            line_end += 1
+        prefix = updated[line_start:start]
+        # If the statement occupied the whole physical line, remove the line.
+        if not prefix.strip():
+            start, end = line_start, line_end
+        updated = updated[:start] + updated[end:]
+    return _collapse_excess_blank_lines(updated)
+
+
+def _relocate_role_grants_from_inter_db(
+    project_dir: Path,
+    inter_db_dcl_dir: Path,
+) -> int:
+    """Move role-targeted GRANT statements from DCL/inter_db to DCL/roles.
+
+    Earlier SHIPS builds could leave GRANT ... TO <role> statements under
+    ``DCL/inter_db``.  That folder is reserved for database-to-database
+    grants.  In fix mode, relocation is safe because the statement itself
+    identifies a role grantee and Teradata role grants must not include
+    ``WITH GRANT OPTION``.
+    """
+    if not inter_db_dcl_dir.is_dir():
+        return 0
+
+    role_dcl_dir = _resolve_role_dcl_dir(project_dir)
+    files_written = 0
+
+    for entry in sorted(inter_db_dcl_dir.iterdir()):
+        if not entry.is_file() or entry.suffix.lower() not in {".dcl", ".grt"}:
+            continue
+
+        try:
+            content = entry.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            logger.warning("Cannot read %s: %s", entry, e)
+            continue
+
+        grants_by_role: Dict[str, Dict[str, Set[str]]] = {}
+        spans_to_remove: List[Tuple[int, int]] = []
+
+        for match in _iter_grant_statement_matches(content):
+            grantor = match.group("grantor").strip()
+            grantee = match.group("grantee").strip()
+            if not _is_role_identifier(grantee):
+                continue
+
+            grants_by_role.setdefault(grantee, {}).setdefault(grantor, set()).update(
+                _split_privileges(match.group("privileges"))
+            )
+            spans_to_remove.append(match.span())
+
+        if not grants_by_role:
+            continue
+
+        for role, grants in sorted(
+            grants_by_role.items(),
+            key=lambda item: _normalise_identifier(item[0]),
+        ):
+            role_file = role_dcl_dir / grantee_filename(role)
+            actual = (
+                _read_grt_file(role_file, expected_grantee=role)
+                if role_file.exists()
+                else {}
+            ) or {}
+            missing = _subtract_grants(grants, actual)
+            if not missing:
+                continue
+
+            if role_file.exists():
+                if _append_missing_grants_to_file(role_file, role, missing):
+                    files_written += 1
+            else:
+                if _write_full_expected_grants_file(
+                    role_file,
+                    role,
+                    missing,
+                    [],
+                    project_dir.name,
+                ):
+                    files_written += 1
+
+        updated_content = _remove_spans(content, spans_to_remove)
+        if updated_content != content:
+            entry.write_text(updated_content, encoding="utf-8")
+            files_written += 1
+
+    return files_written
+
+
+def _target_dcl_dir_for_grantee(
+    project_dir: Path,
+    default_inter_db_dcl_dir: Path,
+    grantee: str,
+) -> Path:
+    """Resolve the DCL directory that owns grants for ``grantee``.
+
+    Inferred database-to-database grants are written under ``DCL/inter_db``.
+    Role grants, if ever supplied to this repair path, are written under
+    ``DCL/roles`` and must not use ``WITH GRANT OPTION``.
+    """
+    if _is_role_identifier(grantee):
+        return _resolve_role_dcl_dir(project_dir)
+    return default_inter_db_dcl_dir
+
+
+def _write_full_expected_grants_file(
+    file_path: Path,
+    grantee: str,
+    expected: Dict[str, Set[str]],
+    sources: List[Dict],
+    project_name: str,
+) -> bool:
+    """Create or replace a missing/unreadable DCL file from expected grants."""
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    content = generate_grt_content(grantee, expected, sources, project_name)
+
+    if not _grant_statement_requires_grant_option(grantee):
+        content = content.replace(" WITH GRANT OPTION;", ";")
+
+    existing = file_path.read_text(encoding="utf-8") if file_path.exists() else None
+    if existing == content:
+        return False
+
+    file_path.write_text(content, encoding="utf-8")
+    return True
+
+
+def _render_missing_grant_append_block(
+    grantee: str,
+    missing_grants: Dict[str, Set[str]],
+) -> str:
+    """Render only the missing grants as appendable DCL statements."""
+    statements = _format_missing_grant_statements(
+        grantee,
+        missing_grants,
+        indent="",
+    )
+    if not statements.strip():
+        return ""
+
+    return "\n".join(
+        [
+            "",
+            "/* SHIPS --fix-grants: missing inferred grants appended */",
+            statements,
+            "",
+        ]
+    )
+
+
+def _append_missing_grants_to_file(
+    file_path: Path,
+    grantee: str,
+    missing_grants: Dict[str, Set[str]],
+) -> bool:
+    """Append missing inferred grants to an existing DCL file.
+
+    Existing content is preserved. Extra grants are not removed or moved;
+    they remain visible to normal validation unless suppressed by
+    inspect.conf severity settings.
+    """
+    if not missing_grants:
+        return False
+
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    existing = file_path.read_text(encoding="utf-8") if file_path.exists() else ""
+    block = _render_missing_grant_append_block(grantee, missing_grants)
+    if not block:
+        return False
+
+    separator = "" if not existing or existing.endswith(("\n", "\r")) else "\n"
+    file_path.write_text(f"{existing}{separator}{block}", encoding="utf-8")
+    return True
+
+
 def fix_grants(
     project_dir: Path,
     dcl_dir: Optional[Path] = None,
     verbose: bool = False,
 ) -> Tuple[GrantValidationResult, int]:
     """
-    Repair grant drift by writing expected .dcl files for every
-    missing or drifted grantee, and creating missing role DDL for
-    role grantees referenced by existing DCL files. Orphaned files
-    are reported but NOT deleted.
+    Repair grant drift by adding missing inferred grants.
+
+    Missing DCL files are created from the inferred grant set. Existing
+    drifted DCL files are repaired additively by appending only missing
+    inferred grants. Extra grants and orphaned files are deliberately left
+    untouched for human review. Role grants, if routed through this path,
+    are written under ``DCL/roles`` and never include ``WITH GRANT OPTION``.
 
     Args:
         project_dir: Root of the SHIPS project to scan.
-        dcl_dir:     Directory containing .dcl files. Defaults to
+        dcl_dir:     Directory containing inter-db .dcl files. Defaults to
                      ``project_dir/payload/database/DCL/inter_db``.
         verbose:     Forwarded to infer_grants for diagnostic output.
 
     Returns:
         ``(result, files_written)`` where:
-            result:         The post-fix GrantValidationResult — drifted
-                            and missing entries have been re-classified
-                            as consistent (since they were just written).
-            files_written:  Count of .dcl files actually written.
+            result:         The post-fix GrantValidationResult. If a file
+                            also contains extra grants, it may still be
+                            reported as drifted after missing grants are
+                            appended.
+            files_written:  Count of DCL/role DDL files created or updated.
     """
     project_dir = Path(project_dir).resolve()
     dcl_dir = _resolve_dcl_dir(project_dir, dcl_dir)
 
+    files_written = _relocate_role_grants_from_inter_db(project_dir, dcl_dir)
+
     consolidated, raw_results, ddl_count = _infer_expected_grants(project_dir, verbose)
 
     project_name = project_dir.name
-    files_written = 0
     statuses: List[GranteeStatus] = []
-
-    # Ensure target directory exists before any writes
-    if consolidated:
-        dcl_dir.mkdir(parents=True, exist_ok=True)
 
     for grantee in sorted(consolidated.keys()):
         expected = consolidated[grantee]
-        pre_status = _classify_grantee(grantee, expected, dcl_dir)
+        target_dcl_dir = _target_dcl_dir_for_grantee(project_dir, dcl_dir, grantee)
+        pre_status = _classify_grantee(grantee, expected, target_dcl_dir)
 
         if pre_status.consistent:
             statuses.append(pre_status)
             continue
 
-        # Drift or missing → write the expected file
         sources = [r for r in raw_results if r["grantee"] == grantee]
-        content = generate_grt_content(grantee, expected, sources, project_name)
-        pre_status.file_path.write_text(content, encoding="utf-8")
-        files_written += 1
 
-        # Mark as consistent in the post-fix result
-        post_status = GranteeStatus(
-            grantee=grantee,
-            file_path=pre_status.file_path,
-            consistent=True,
-            expected_grants=expected,
-            actual_grants=expected,
-        )
-        statuses.append(post_status)
+        if pre_status.missing:
+            if _write_full_expected_grants_file(
+                pre_status.file_path,
+                grantee,
+                expected,
+                sources,
+                project_name,
+            ):
+                files_written += 1
+        elif pre_status.drifted and pre_status.missing_privs:
+            if _append_missing_grants_to_file(
+                pre_status.file_path,
+                grantee,
+                pre_status.missing_privs,
+            ):
+                files_written += 1
+
+        statuses.append(_classify_grantee(grantee, expected, target_dcl_dir))
 
     files_written += _write_missing_role_files(project_dir)
 
@@ -646,6 +982,22 @@ def _format_priv_set(privs: Set[str]) -> str:
     return ", ".join(ordered)
 
 
+def _render_grant_statement(
+    grantor: str,
+    grantee: str,
+    privileges: Set[str],
+    with_grant_option: bool,
+) -> str:
+    """Render a canonical Teradata GRANT statement."""
+    ordered = sorted(
+        privileges,
+        key=lambda p: PRIV_ORDER.index(p) if p in PRIV_ORDER else 999,
+    )
+    privilege_text = ", ".join(ordered)
+    suffix = " WITH GRANT OPTION" if with_grant_option else ""
+    return f"GRANT {privilege_text} ON {grantor} TO {grantee}{suffix};"
+
+
 def _format_grants_block(
     grants: Dict[str, Set[str]],
     indent: str = "      ",
@@ -659,20 +1011,83 @@ def _format_grants_block(
     return "\n".join(lines)
 
 
-def format_report(result: GrantValidationResult) -> str:
+def _grant_statement_requires_grant_option(grantee: str) -> bool:
+    """Return True when the generated GRANT statement may use grant option."""
+    return not _is_role_identifier(grantee)
+
+
+def _format_missing_grant_statements(
+    grantee: str,
+    grants: Dict[str, Set[str]],
+    indent: str = "      ",
+) -> str:
+    """
+    Format missing inferred grants as executable Teradata GRANT statements.
+
+    Role grants never include ``WITH GRANT OPTION`` because Teradata does
+    not allow grant option when granting privileges to a role. Inter-db
+    grants keep grant option so a view/database can pass access through to
+    downstream consumers.
+    """
+    if not grants:
+        return f"{indent}(none)"
+
+    with_grant_option = _grant_statement_requires_grant_option(grantee)
+    lines: List[str] = []
+    for grantor in sorted(grants):
+        for privilege in sorted(
+            grants[grantor],
+            key=lambda p: PRIV_ORDER.index(p) if p in PRIV_ORDER else 999,
+        ):
+            lines.append(
+                f"{indent}"
+                f"{_render_grant_statement(grantor, grantee, {privilege}, with_grant_option)}"
+            )
+    return "\n".join(lines)
+
+
+def format_report(
+    result: GrantValidationResult,
+    extra_grants_severity: str = "ERROR",
+    orphan_grants_severity: str = "ERROR",
+) -> str:
     """
     Render a human-readable summary of a GrantValidationResult.
 
     Used by cli.py for both validate and fix flows. Produces a
-    multi-line string suitable for terminal output.
-    """
-    lines: List[str] = []
+    multi-line string suitable for terminal output. Severity arguments
+    control which configured non-blocking grant findings are visible:
 
-    total = len(result.statuses)
-    consistent_n = len(result.consistent)
-    drifted_n = len(result.drifted)
-    missing_n = len(result.missing)
-    orphaned_n = len(result.orphaned)
+    * extra_grants_severity=OFF suppresses extra-only drift entries.
+    * orphan_grants_severity=OFF suppresses orphaned DCL entries.
+
+    Missing inferred privileges are always shown because they are
+    package-blocking errors.
+    """
+    extra_grants_severity = extra_grants_severity.upper()
+    orphan_grants_severity = orphan_grants_severity.upper()
+
+    def _should_show(status: GranteeStatus) -> bool:
+        if status.orphaned and orphan_grants_severity == "OFF":
+            return False
+        if (
+            status.drifted
+            and status.extra_privs
+            and not status.missing_privs
+            and extra_grants_severity == "OFF"
+        ):
+            return False
+        return True
+
+    visible_statuses = [s for s in result.statuses if _should_show(s)]
+
+    total = len(visible_statuses)
+    consistent_n = len([s for s in visible_statuses if s.consistent])
+    drifted_n = len([s for s in visible_statuses if s.drifted])
+    missing_n = len([s for s in visible_statuses if s.missing])
+    orphaned_n = len([s for s in visible_statuses if s.orphaned])
+
+    lines: List[str] = []
 
     lines.append(
         f"  Grantees: {total} total — "
@@ -685,20 +1100,28 @@ def format_report(result: GrantValidationResult) -> str:
 
     if total == 0:
         lines.append("")
-        lines.append("  No cross-database grants inferred from this project.")
+        if result.statuses:
+            lines.append("  No grant findings are visible with the current inspect.conf settings.")
+        else:
+            lines.append("  No cross-database grants inferred from this project.")
         return "\n".join(lines)
 
     # Per-grantee detail
-    for status in result.statuses:
+    for status in visible_statuses:
         if status.consistent:
             lines.append(f"\n  ✓ {status.grantee}: clean")
         elif status.drifted:
             lines.append(f"\n  ✗ {status.grantee}: drift detected")
             lines.append(f"      File: {status.file_path}")
             if status.missing_privs:
-                lines.append("      Missing from .dcl file:")
-                lines.append(_format_grants_block(status.missing_privs))
-            if status.extra_privs:
+                lines.append("      Required grant missing from .dcl file:")
+                lines.append(
+                    _format_missing_grant_statements(
+                        status.grantee,
+                        status.missing_privs,
+                    )
+                )
+            if status.extra_privs and extra_grants_severity != "OFF":
                 lines.append("      Extra in .dcl file (not implied by DDL):")
                 lines.append(_format_grants_block(status.extra_privs))
         elif status.missing:

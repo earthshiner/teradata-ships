@@ -472,3 +472,8 @@ def _deep_copy_dict(data: Any) -> Any:
     if isinstance(data, list):
         return [_deep_copy_dict(v) for v in data]
     return data
+
+
+# ---------------------------------------------------------------
+# Inspect-config readers
+# ---------------------------------------------------------------

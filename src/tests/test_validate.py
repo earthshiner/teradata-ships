@@ -1267,13 +1267,18 @@ class TestReadInspectConfig:
     def test_all_default_severities_are_valid(self):
         """Every default severity in DEFAULT_RULES is one of the
         recognised values. Derives from _VALID_SEVERITIES so the test
-        stays correct when new severity levels are added."""
-        from td_release_packager.validate import _VALID_SEVERITIES
+        stays correct when new severity levels are added.
+
+        Domain-value rules (e.g. comma_style, warn_extra_grants,
+        warn_orphan_grants) store non-severity values by design and
+        are excluded from this check."""
+        from td_release_packager.validate import _VALID_SEVERITIES, _DOMAIN_VALUE_RULES
 
         invalid = {
             rule: sev
             for rule, sev in DEFAULT_RULES.items()
             if sev not in _VALID_SEVERITIES
+            and rule not in _DOMAIN_VALUE_RULES
         }
         assert not invalid, (
             f"Rules in DEFAULT_RULES with invalid severities "
@@ -2142,3 +2147,75 @@ class TestCheckNonAsciiLiterals:
             "containing an em-dash, but none were reported."
         )
         assert all(i.severity == "ERROR" for i in nas_issues)
+
+
+# ---------------------------------------------------------------
+# Tests for warn_extra_grants and warn_orphan_grants in inspect.conf
+# ---------------------------------------------------------------
+
+
+from td_release_packager.validate import read_severity_from_inspect_config
+
+
+class TestWarnGrantSeverities:
+    """
+    Tests for the ``warn_extra_grants`` and ``warn_orphan_grants`` severity
+    settings in ``inspect.conf``.
+    """
+
+    def test_defaults_are_error(self):
+        """Both grant drift settings default to ERROR in DEFAULT_RULES."""
+        assert DEFAULT_RULES["warn_extra_grants"] == "ERROR"
+        assert DEFAULT_RULES["warn_orphan_grants"] == "ERROR"
+
+    def test_read_severity_defaults_to_error_for_missing_key(self):
+        """Absent grant severity keys default to ERROR."""
+        assert read_severity_from_inspect_config({}, "warn_extra_grants") == "ERROR"
+
+    def test_read_severity_accepts_off(self):
+        """OFF suppresses the configured grant finding."""
+        assert read_severity_from_inspect_config({"warn_extra_grants": "OFF"}, "warn_extra_grants") == "OFF"
+
+    def test_read_severity_accepts_warning_and_warn_alias(self):
+        """WARNING and WARN both normalize to WARNING."""
+        assert read_severity_from_inspect_config({"warn_extra_grants": "WARNING"}, "warn_extra_grants") == "WARNING"
+        assert read_severity_from_inspect_config({"warn_orphan_grants": "WARN"}, "warn_orphan_grants") == "WARNING"
+
+    def test_read_severity_accepts_error(self):
+        """ERROR blocks the configured grant finding."""
+        assert read_severity_from_inspect_config({"warn_extra_grants": "ERROR"}, "warn_extra_grants") == "ERROR"
+
+    def test_warn_extra_grants_off_parsed_from_conf(self, tmp_path):
+        """warn_extra_grants=OFF is correctly parsed from inspect.conf."""
+        conf = tmp_path / "inspect.conf"
+        conf.write_text("warn_extra_grants=OFF\n", encoding="utf-8")
+        rules = read_inspect_config(str(conf))
+        assert read_severity_from_inspect_config(rules, "warn_extra_grants") == "OFF"
+
+    def test_warn_orphan_grants_warn_parsed_from_conf(self, tmp_path):
+        """warn_orphan_grants=WARN is parsed as WARNING from inspect.conf."""
+        conf = tmp_path / "inspect.conf"
+        conf.write_text("warn_orphan_grants=WARN\n", encoding="utf-8")
+        rules = read_inspect_config(str(conf))
+        assert read_severity_from_inspect_config(rules, "warn_orphan_grants") == "WARNING"
+
+    def test_both_settings_error_by_default_in_conf(self, tmp_path):
+        """An empty inspect.conf gives ERROR for both grant severity settings."""
+        conf = tmp_path / "inspect.conf"
+        conf.write_text("# empty\n", encoding="utf-8")
+        rules = read_inspect_config(str(conf))
+        assert read_severity_from_inspect_config(rules, "warn_extra_grants") == "ERROR"
+        assert read_severity_from_inspect_config(rules, "warn_orphan_grants") == "ERROR"
+
+    def test_invalid_value_falls_back_to_default(self, tmp_path):
+        """An invalid grant severity is ignored and the default ERROR applies."""
+        conf = tmp_path / "inspect.conf"
+        conf.write_text("warn_extra_grants=yes\n", encoding="utf-8")
+        rules = read_inspect_config(str(conf))
+        assert read_severity_from_inspect_config(rules, "warn_extra_grants") == "ERROR"
+
+    def test_generate_default_config_includes_both_settings(self):
+        """generate_default_config() includes both grant settings with ERROR defaults."""
+        cfg = generate_default_config()
+        assert "warn_extra_grants=ERROR" in cfg
+        assert "warn_orphan_grants=ERROR" in cfg
