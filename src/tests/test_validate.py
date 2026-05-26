@@ -33,6 +33,7 @@ from td_release_packager.validate import (
     _check_leading_commas,
     _check_intra_package_dependency,
     _check_view_column_list,
+    _check_non_ascii_literals,
     _collect_package_prereqs,
     validate_directory,
     read_inspect_config,
@@ -2044,3 +2045,100 @@ class TestCheckViewColumnList:
 
         assert result.files_scanned == 0
         assert [i for i in result.issues if i.rule == "view_column_list"] == []
+
+
+# ---------------------------------------------------------------
+# _check_non_ascii_literals  (Rule NAS-001)
+# ---------------------------------------------------------------
+
+
+class TestCheckNonAsciiLiterals:
+    """Tests for the non-ASCII character check (NAS-001).
+
+    Teradata databases created with a LATIN character set reject string
+    literals containing characters outside the Latin-1 code page with
+    Error 6706 "The string contains an untranslatable character".
+    The check must catch em-dashes, bullets, arrows, box-drawing characters,
+    and any other non-ASCII characters in SQL source files.
+    """
+
+    def test_clean_ascii_file_has_no_issues(self):
+        """A file containing only ASCII characters must produce no issues."""
+        sql = (
+            "INSERT INTO {{DB_MEMORY_T}}.Business_Glossary\n"
+            "( term, definition )\n"
+            "VALUES ( 'Call Duration', 'Total seconds from start to end.' )\n"
+            ";\n"
+        )
+        issues = _check_non_ascii_literals("test.dml", sql)
+        assert issues == []
+
+    def test_em_dash_flagged_as_error(self):
+        """Em-dash (U+2014) in a string literal must be flagged as ERROR."""
+        sql = "VALUES ( 'Session strategy \u2014 persistent session.' );"
+        issues = _check_non_ascii_literals("seed.dml", sql)
+        assert len(issues) >= 1
+        assert all(i.severity == "ERROR" for i in issues)
+        assert all("U+2014" in i.message for i in issues)
+        assert all("non_ascii" == i.rule for i in issues)
+
+    def test_bullet_flagged(self):
+        """Bullet (U+2022) must be flagged."""
+        sql = "-- \u2022 58 scoring dimensions\nSELECT 1;"
+        issues = _check_non_ascii_literals("seed.dml", sql)
+        assert any("U+2022" in i.message for i in issues)
+
+    def test_right_arrow_flagged(self):
+        """Right arrow (U+2192) must be flagged."""
+        sql = "VALUES ( 'Deploy order: Memory \u2192 Domain.' );"
+        issues = _check_non_ascii_literals("seed.dml", sql)
+        assert any("U+2192" in i.message for i in issues)
+
+    def test_box_drawing_flagged(self):
+        """Box-drawing horizontal (U+2500) must be flagged."""
+        sql = "-- \u2500\u2500 Change Log \u2500\u2500\nSELECT 1;"
+        issues = _check_non_ascii_literals("seed.dml", sql)
+        assert any("U+2500" in i.message for i in issues)
+
+    def test_suggestion_included_for_em_dash(self):
+        """Error message must include a suggested ASCII replacement."""
+        sql = "VALUES ( 'Call strategy \u2014 notes.' );"
+        issues = _check_non_ascii_literals("seed.dml", sql)
+        assert issues
+        assert any("--" in i.message for i in issues)
+
+    def test_line_number_reported(self):
+        """The line number of the non-ASCII character must be recorded."""
+        sql = "SELECT 1;\nVALUES ( 'ok' );\nVALUES ( 'bad \u2014 char' );"
+        issues = _check_non_ascii_literals("seed.dml", sql)
+        assert issues
+        assert issues[0].line == 3
+
+    def test_multiple_non_ascii_chars_all_reported(self):
+        """Each unique non-ASCII character on each line must produce an issue."""
+        sql = (
+            "VALUES ( 'em \u2014 dash' );\n"
+            "VALUES ( 'bullet \u2022 point' );\n"
+            "VALUES ( 'arrow \u2192 here' );\n"
+        )
+        issues = _check_non_ascii_literals("seed.dml", sql)
+        codes = {i.line for i in issues}
+        assert codes == {1, 2, 3}
+
+    def test_integrate_non_ascii_caught_in_validate_directory(self, tmp_path):
+        """validate_directory must surface NAS-001 issues for DML files."""
+        dml = tmp_path / "{{DB_MEMORY_T}}.Business_Glossary.dml"
+        dml.write_text(
+            "INSERT INTO {{DB_MEMORY_T}}.Business_Glossary\n"
+            "( term, definition )\n"
+            "VALUES ( 'Session strategy \u2014 persistent session.' )\n"
+            ";\n",
+            encoding="utf-8",
+        )
+        result = validate_directory(str(tmp_path))
+        nas_issues = [i for i in result.issues if i.rule == "non_ascii"]
+        assert nas_issues, (
+            "Expected NAS-001 issues from validate_directory for a DML file "
+            "containing an em-dash, but none were reported."
+        )
+        assert all(i.severity == "ERROR" for i in nas_issues)

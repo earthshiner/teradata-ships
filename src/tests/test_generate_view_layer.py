@@ -402,6 +402,80 @@ def two_table_index():
     }
 
 
+
+class TestTeradataAliasBlocklist:
+    """Regression tests — Teradata syntax shortcuts must be rejected as aliases.
+
+    Teradata treats certain two- and three-letter identifiers as command
+    shortcuts (e.g. CT = CREATE TABLE, CS = CASESPECIFIC).  Using them as
+    table aliases causes Error 3706 ("expected something between ',' and the
+    'CT' keyword").  The ``_ALIAS_STOPLIST`` must include all known shortcuts
+    so that ``_alias_or_blank`` strips them and ``parse_from_clause`` records
+    the source without an alias, preventing the generator from producing
+    invalid SQL.
+    """
+
+    _SHORTCUTS = {
+        "CT": "CREATE TABLE",
+        "BT": "BEGIN TRANSACTION",
+        "ET": "END TRANSACTION",
+        "DEL": "DELETE",
+        "INS": "INSERT",
+        "SEL": "SELECT",
+        "UPD": "UPDATE",
+        "CV": "CREATE VIEW",
+        "CM": "CREATE MACRO",
+        "CP": "CREATE PROCEDURE",
+        "CS": "CASESPECIFIC",
+    }
+
+    def test_all_shortcuts_in_stoplist(self):
+        """Every known Teradata syntax shortcut must be in _ALIAS_STOPLIST."""
+        from td_release_packager.view_layer_generator import _ALIAS_STOPLIST
+
+        missing = [s for s in self._SHORTCUTS if s not in _ALIAS_STOPLIST]
+        assert not missing, (
+            f"Teradata syntax shortcuts missing from _ALIAS_STOPLIST: {missing}. "
+            f"These would be accepted as table aliases, causing Teradata Error 3706."
+        )
+
+    def test_ct_alias_treated_as_no_alias(self):
+        """CT used as an alias must be stripped — it is CREATE TABLE in Teradata."""
+        sql = (
+            "SELECT ct.topic "
+            "FROM {{DB_V}}.Call_Topic_Current ct "
+            "LEFT JOIN {{DB_V}}.Call_Current c ON c.call_id = ct.call_id"
+        )
+        result = parse_from_clause(sql)
+        # CT should have been stripped; the source is recorded with an empty alias.
+        ct_entries = [
+            spec for spec in result
+            if spec.object_name == "Call_Topic_Current"
+        ]
+        assert ct_entries, "Call_Topic_Current not found in parsed FROM clause"
+        assert ct_entries[0].alias == "", (
+            f"Expected alias '' for Call_Topic_Current (CT is a reserved shortcut), "
+            f"got {ct_entries[0].alias!r}"
+        )
+
+    def test_cs_alias_treated_as_no_alias(self):
+        """CS used as an alias must be stripped — it is CASESPECIFIC in Teradata."""
+        sql = (
+            "SELECT cs.conversation_summary "
+            "FROM {{DB_V}}.Call_Summary_Current cs"
+        )
+        result = parse_from_clause(sql)
+        cs_entries = [
+            spec for spec in result
+            if spec.object_name == "Call_Summary_Current"
+        ]
+        assert cs_entries, "Call_Summary_Current not found in parsed FROM clause"
+        assert cs_entries[0].alias == "", (
+            f"Expected alias '' for Call_Summary_Current (CS is a reserved shortcut), "
+            f"got {cs_entries[0].alias!r}"
+        )
+
+
 class TestSelectStarExpansion:
     """expand_select_star."""
 

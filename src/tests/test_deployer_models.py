@@ -756,6 +756,69 @@ class TestExecuteDdl:
         stmts = self._run("INSERT INTO t VALUES (1)")
         assert len(stmts) == 1
 
+
+
+    def test_double_hyphen_inside_string_literal_not_treated_as_comment(self):
+        """A '--' sequence inside a string literal must not be treated as a
+        SQL single-line comment.
+
+        Regression test for the sanitisation order bug: when comments were
+        blanked BEFORE string literals, a '--' inside a quoted string caused
+        the comment stripper to swallow the rest of the line including the
+        closing quote, leaving the string unterminated (Teradata Error 3760
+        "String not terminated before end of text").
+
+        The correct order is: blank string literals first, then comments.
+        """
+        sql = (
+            "INSERT INTO {{DB_MEMORY_T}}.Design_Decision\n"
+            "( decision_id, title )\n"
+            "VALUES\n"
+            "( 'DD-001', 'Session strategy - persistent sessions' );\n"
+            "\n"
+            "INSERT INTO {{DB_MEMORY_T}}.Design_Decision\n"
+            "( decision_id, title )\n"
+            "VALUES\n"
+            "( 'DD-002', 'Retention policy - 90 day sessions' );\n"
+        )
+        stmts = self._run(sql)
+        assert len(stmts) == 2, (
+            f"Expected 2 statements but got {len(stmts)}: "
+            f"the '--' inside the string literal was incorrectly treated "
+            f"as a SQL comment, swallowing the closing quote."
+        )
+        assert "Session strategy - persistent sessions" in stmts[0]
+        assert "Retention policy - 90 day sessions" in stmts[1]
+
+    def test_semicolon_inside_multiline_string_literal_not_split(self):
+        """A semicolon inside a multi-line string literal (e.g. a stored SQL
+        template in a Query_Cookbook seed row) must not split the statement.
+
+        The sql_template column stores complete SQL queries as string values.
+        Without correct sanitisation order, the semicolon terminating the
+        embedded query closes the INSERT prematurely, causing Error 3760.
+        """
+        sql = (
+            "INSERT INTO {{DB_MEMORY_T}}.Query_Cookbook\n"
+            "( recipe_id, sql_template )\n"
+            "VALUES\n"
+            "( 'QC-001'\n"
+            ", 'SELECT a.agent_name\n"
+            "  FROM {{DB_DOMAIN_BUS_V}}.Agent_Current a\n"
+            "  ORDER BY a.agent_name;'\n"
+            ");\n"
+        )
+        stmts = self._run(sql)
+        assert len(stmts) == 1, (
+            f"Expected 1 statement but got {len(stmts)}: "
+            f"the semicolon inside the multi-line sql_template string was "
+            f"incorrectly treated as a statement terminator."
+        )
+        assert "ORDER BY a.agent_name;" in stmts[0]
+
+
+    
+
     def test_split_disabled_keeps_procedure_body_as_one_request(self):
         """Stored procedure bodies contain semicolons inside one DDL request."""
         from database_package_deployer.deployer import _execute_ddl

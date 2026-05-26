@@ -835,7 +835,24 @@ def _connect(args):
 
     try:
         conn = teradatasql.connect(**params)
-        return conn.cursor()
+        cursor = conn.cursor()
+        # Set the Teradata session character set to UNICODE so that
+        # UTF-8 content in DML string literals — em-dashes, bullets,
+        # arrows, and other non-ASCII characters — is stored correctly.
+        #
+        # Background: teradatasql always transmits SQL text as UTF-8
+        # bytes on the wire (the driver has no charset= parameter).
+        # However, Teradata's *server-side* session default is LATIN,
+        # which causes it to misinterpret incoming multi-byte UTF-8
+        # sequences as Latin-1 characters, producing mojibake such as
+        # em-dash "—" being stored as "â€"".
+        #
+        # SET SESSION CHARACTER SET UNICODE instructs the server to
+        # treat the current session's string data as Unicode.  This is
+        # a session-scoped statement and does not affect other sessions
+        # or require elevated privileges.
+        cursor.execute("SET SESSION CHARACTER SET UNICODE")
+        return cursor
     except Exception as e:
         # Strip the Go stack trace from teradatasql errors.
         # Show user-friendly message with just the Teradata
