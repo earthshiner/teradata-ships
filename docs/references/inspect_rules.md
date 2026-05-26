@@ -57,52 +57,49 @@ Rules are configured via `inspect.conf` in the project root.
 
 ### Cross-file grant validation (Step 2 of Inspect)
 
-Step 2 compares the grants *implied* by the package's DDL against the `.dcl` files persisted under `payload/database/DCL/inter_db/`. Three outcomes are possible per grantee:
+Step 2 compares the grants *implied* by the package's DDL against the `.dcl` files persisted under `payload/database/DCL/inter_db/`. That directory is reserved for database-to-database grants. Role grants belong under `payload/database/DCL/roles/` and must not use `WITH GRANT OPTION` because Teradata does not allow grant option for roles. Three outcomes are possible per grantee:
 
 | Outcome   | Severity | Meaning                                                              |
 |-----------|----------|----------------------------------------------------------------------|
 | Consistent | —       | Persisted `.dcl` matches what the DDL implies. No action needed.     |
-| Drifted   | ERROR    | `.dcl` exists but its privilege set differs from the DDL implication. Run `--fix-grants` to repair. |
+| Drifted   | ERROR    | `.dcl` exists but its privilege set differs from the DDL implication. Run `--fix-grants` to append missing inferred grants. Extra grants are not removed automatically. |
 | Missing   | ERROR    | DDL implies a grant but no `.dcl` file exists. Run `--fix-grants` to create it. |
-| Orphaned  | `warn_orphan_grants` * | A `.dcl` file exists for a grantee that no DDL in the package implies. |
+| Orphaned  | ERROR *  | A `.dcl` file exists for a grantee that no DDL in the package implies. |
 
 \* **Orphaned grants can be downgraded to warnings** — see `inspect.warn_orphan_grants` below.
 
-#### `warn_extra_grants` — severity for extra manual privileges
-
-Set in `config/inspect.conf` using the standard `ERROR` / `WARNING` / `OFF` vocabulary:
-
-```
-warn_extra_grants=WARNING   # default: ERROR
-```
-
-| Value | Behaviour |
-|---|---|
-| `ERROR` (default) | Extra privileges in a `.dcl` file block the package. |
-| `WARNING` | Extra privileges are reported but do not block the package. |
-| `OFF` | Extra privileges are suppressed entirely. |
-
-Use `WARNING` or `OFF` when you explicitly grant database access to roles, reporting users, or external consumers directly in your `.dcl` files beyond what SHIPS infers from DDL cross-references. Those extra grants are intentional and should not block packaging.
-
-**Important:** this setting only applies to *extra* privileges. If a `.dcl` file is *missing* a privilege that SHIPS inferred from the DDL (i.e. the DDL is referencing access that has not been granted), that remains `ERROR` regardless of this setting.
-
-#### `warn_orphan_grants` — severity for orphaned DCL files
+#### `warn_extra_grants` — extra manual privileges treated as warnings
 
 Set in `config/inspect.conf`:
 
 ```
-warn_orphan_grants=WARNING   # default: ERROR
+warn_extra_grants=ERROR   # default: ERROR
+# also supports WARNING, WARN, and OFF
 ```
 
-| Value | Behaviour |
-|---|---|
-| `ERROR` (default) | Orphaned DCL files block the package (Trust Score: `BLOCKED`). |
-| `WARNING` | Orphaned DCL files are reported but do not block the package. |
-| `OFF` | Orphaned DCL files are suppressed entirely. |
+When `ERROR` (the default), any `.dcl` file whose privilege set does not exactly match what SHIPS inferred from the DDL is treated as drift — a hard error that blocks the package.
 
-Use `WARNING` or `OFF` when roles are intentionally granted database access within the package but the corresponding `GRANT ROLE … TO USER` is managed outside the package — for example, by a DBA, an IGA system, or an autonomous agent.
+When `WARNING` or `WARN`, drifted grantees whose `.dcl` files contain only *extra* privileges (grants you added manually beyond what SHIPS infers) are reported as warnings only and do not block packaging. When `OFF`, extra-only grant drift is suppressed. Role grants should normally live in `DCL/roles`, not in `DCL/inter_db`.
 
-Both settings can be configured independently in `inspect.conf`. Missing grants (inferred by SHIPS but absent from the `.dcl` file) and missing `.dcl` files entirely remain `ERROR` regardless of either setting.
+**Important:** this flag only applies to *extra* privileges. If a `.dcl` file is *missing* a privilege that SHIPS inferred from the DDL (i.e. the DDL is referencing access that has not been granted), that remains a hard error regardless of this setting.
+
+#### `warn_orphan_grants` — configurable orphan severity
+
+Set in `config/inspect.conf`:
+
+```
+warn_orphan_grants=ERROR   # default: ERROR
+# also supports WARNING, WARN, and OFF
+```
+
+When `ERROR` (the default), orphaned DCL files cause the package to be **BLOCKED**. This is the strict posture appropriate for fully self-contained packages.
+
+When `WARNING` or `WARN`, orphaned DCL files are reported as warnings only. When `OFF`, orphaned DCL files are suppressed. This is the correct posture when:
+
+- A role is granted database access *within* the package (e.g. `GRANT SELECT ON {{DB_T}} TO {{READ_ROLE}}`), but the corresponding `GRANT ROLE … TO USER` statement is managed *outside* the package — for example, by a DBA, an IGA system, or an autonomous agent.
+- The package deliberately pre-provisions access rights that a downstream process will activate.
+
+Both settings can be set independently in `inspect.conf`. Missing grants (inferred by SHIPS but absent from the `.dcl` file) and missing `.dcl` files entirely remain hard errors regardless of either setting. Use `--fix-grants` to repair missing inferred grants additively: SHIPS appends the required `GRANT` statements to the correct `.dcl` file and leaves extra/orphaned grants untouched for review.
 
 ---
 

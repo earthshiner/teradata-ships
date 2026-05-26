@@ -374,7 +374,7 @@ Arguments:
 
 | Argument | Explanation |
 |---|---|
-| `--fix-grants` | Writes inferred `.grt` files under `payload\database\DCL\inter_db\`. |
+| `--fix-grants` | Creates missing inter-db `.dcl` files and appends missing inferred grants to existing files under `payload\database\DCL\inter_db\`. Extra/orphaned grants are not removed automatically. |
 | `--graph` | Directory for dependency graph exports. |
 | `--formats` | Graph export formats. |
 

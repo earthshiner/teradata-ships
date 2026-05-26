@@ -87,27 +87,27 @@ usage: td_release_packager inspect [-h] --source SOURCE [--config CONFIG]
 | `--skip-tokens` | no | `False` | `` | Disable hardcoded name checks (legacy; prefer inspect.conf). |
 | `--skip-keywords` | no | `False` | `` | Disable keyword case checks (legacy; prefer inspect.conf). |
 | `--skip-commas` | no | `False` | `` | Disable leading comma checks (legacy; prefer inspect.conf). |
-| `--fix-grants` | no | `False` | `` | Generate or update .grt files in dcl/ to match the inferred grant set from DDL intent analysis. Existing .grt files are overwritten. |
+| `--fix-grants` | no | `False` | `` | Create missing `.dcl` files and append missing inferred grants to existing DCL files. Existing extra/orphaned grants are not removed automatically. |
 | `--skip-grants` | no | `False` | `` | Skip cross-database grant validation entirely. |
-| `--dcl-dir` | no | `` | `` | Directory containing inter-database .grt files. Defaults to <source>/payload/database/DCL/inter_db/. The DCL directory has three subdirectories: roles/ (grants to roles), users/ (grants to users), inter_db/ (grants between databases). |
+| `--dcl-dir` | no | `` | `` | Directory containing inter-database `.dcl` files. Defaults to `<source>/payload/database/DCL/inter_db/`. The DCL directory has three subdirectories: `roles/` grants to roles, `users/` grants to users, and `inter_db/` grants between databases. |
 
 #### Grant validation behaviour flags (`config/inspect.conf`)
 
 Both flags are set in `config/inspect.conf` alongside all other inspect rules:
 
 ```
-# Downgrade extra manual grants to warnings (default: false)
-warn_extra_grants=WARNING
+# Control extra manual grants: ERROR, WARNING/WARN, or OFF
+warn_extra_grants=ERROR
 
-# Downgrade orphaned DCL grantees to warnings (default: false)
-warn_orphan_grants=WARNING
+# Control orphaned DCL grantees: ERROR, WARNING/WARN, or OFF
+warn_orphan_grants=ERROR
 ```
 
-**`warn_extra_grants`** — By default, any `.dcl` file whose privilege set does not exactly match what SHIPS inferred from the DDL is flagged as drift and blocks the package. Use `WARNING` or `OFF` when you explicitly grant database access to roles, reporting users, or external consumers directly in your `.dcl` files. Grantees with *missing* inferred privileges are always `ERROR` regardless.
+**`warn_extra_grants`** — By default, any `.dcl` file whose privilege set does not exactly match what SHIPS inferred from the DDL is flagged as drift and blocks the package. Set to `WARNING`/`WARN` to downgrade drifted grantees whose `.dcl` files contain only *extra* privileges to warnings, or `OFF` to suppress extra-only drift. Role grants belong under `DCL/roles`, not `DCL/inter_db`. Grantees with *missing* inferred privileges remain hard errors regardless.
 
-**`warn_orphan_grants`** — By default, a `.dcl` file whose grantee is not implied by any DDL in the package is classified as orphaned and blocks the package (Trust Score: `BLOCKED`). Use `WARNING` or `OFF` when roles are intentionally granted database access within the package but the corresponding `GRANT ROLE … TO USER` is managed outside the package by a DBA or an agent.
+**`warn_orphan_grants`** — By default, a `.dcl` file whose grantee is not implied by any DDL in the package is classified as orphaned and blocks the package (Trust Score: `BLOCKED`). Set to `WARNING`/`WARN` to downgrade orphaned grants to warnings, or `OFF` to suppress them.
 
-Both flags can be set independently and are additive. Missing `.dcl` files and missing inferred privileges remain hard errors regardless of either setting.
+Both settings can be set independently and are additive. Missing `.dcl` files and missing inferred privileges remain hard errors regardless of either setting. `--fix-grants` repairs missing inferred privileges additively by appending required `GRANT` statements and does not remove, move, or delete extra/orphaned grants.
 
 ### `package`
 
