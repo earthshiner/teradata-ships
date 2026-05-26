@@ -122,6 +122,11 @@ DEFAULT_RULES: Dict[str, str] = {
     # Defaults to ERROR because a package should not proceed when the
     # statement boundary is unclear.
     "ddl_terminator": "ERROR",
+    # non_ascii: non-ASCII characters in SQL source files cause Teradata
+    # Error 6706 ("untranslatable character") on databases created with a
+    # LATIN character set (the server default).  Replace em-dashes, bullets,
+    # arrows, and box-drawing characters with ASCII equivalents.
+    "non_ascii": "ERROR",
 }
 
 # -- Valid severity values --
@@ -391,6 +396,13 @@ def generate_default_config() -> str:
         "# deployment scripting, and downstream agent hand-off ambiguous.",
         "# Defaults to ERROR. Set to WARNING for gradual adoption or OFF to disable.",
         f"ddl_terminator={DEFAULT_RULES['ddl_terminator']}",
+        "#",
+        "# non_ascii: non-ASCII characters in SQL source files cause Teradata",
+        "# Error 6706 on databases created with a LATIN character set (the server",
+        "# default). Replace em-dashes, bullets, arrows, and box-drawing characters",
+        "# with ASCII equivalents before packaging.",
+        "# Defaults to ERROR because the failure is silent until deploy time.",
+        f"non_ascii={DEFAULT_RULES['non_ascii']}",
     ]
     return "\n".join(lines) + "\n"
 
@@ -1051,6 +1063,7 @@ def _validate_directory_impl(
             _check_intra_package_dependency(rel_path, clean, file_path, package_prereqs)
         )
         file_issues.extend(_check_view_column_list(rel_path, clean))
+        file_issues.extend(_check_non_ascii_literals(rel_path, content))
 
         # -- Apply rule config: remap severity or drop OFF rules --
         # INFO issues are informational and not configurable —
@@ -2239,6 +2252,87 @@ def _check_intra_package_dependency(
 
 
 # ---------------------------------------------------------------
+def _check_non_ascii_literals(rel_path: str, content: str) -> List[ValidationIssue]:
+    """Detect non-ASCII characters in SQL source files (Rule NAS-001).
+
+    Teradata databases created with a LATIN character set (the server default)
+    reject any string literal that contains a character outside the Latin-1
+    code page with Error 6706 "The string contains an untranslatable character".
+    This includes common Unicode punctuation that word processors and rich-text
+    editors silently introduce:
+
+      - Em-dash (U+2014, "\u2014")  ->  use  " - "  (not " -- " which creates a SQL comment)
+      - Bullet   (U+2022, "\u2022")  ->  use  "-"
+      - Right arrow (U+2192, "\u2192")  ->  use  "->"
+      - Box-drawing horizontal (U+2500, "\u2500")  ->  use  "-"
+
+    The check runs on the *original* content (before comment stripping) so
+    that characters in both comments and string literals are caught.
+
+    Non-ASCII characters inside SQL comments are safe to deploy (the Teradata
+    server never parses them), but they create a maintenance hazard: if a
+    comment line is later moved into a string literal it will silently break
+    the DML.  The check therefore flags them at WARNING severity in comments
+    and ERROR severity inside string literals.
+
+    Args:
+        rel_path: Relative file path (for error messages).
+        content:  Raw file content, read as UTF-8 before comment stripping.
+
+    Returns:
+        List of ValidationIssue, one per non-ASCII character occurrence.
+    """
+    issues: List[ValidationIssue] = []
+
+    # Fast-path: ASCII-only files need no further processing.
+    try:
+        content.encode("ascii")
+        return issues
+    except UnicodeEncodeError:
+        pass
+
+    # Suggested ASCII replacements for the characters most commonly
+    # introduced by rich-text editors and word processors.
+    _SUGGESTIONS: dict = {
+        "\\u2014": '" - " (em-dash -> hyphen; do NOT use -- which creates a SQL comment)',
+        "\\u2022": '"-" (bullet -> hyphen)',
+        "\\u2192": '"->" (right arrow -> ASCII arrow)',
+        "\\u2500": '"-" (box-drawing -> hyphen)',
+    }
+
+    for line_no, line in enumerate(content.splitlines(), start=1):
+        try:
+            line.encode("ascii")
+            continue  # line is clean
+        except UnicodeEncodeError:
+            pass
+
+        for char in set(line):
+            if ord(char) <= 127:
+                continue
+            # Build lookup key matching the format used in _SUGGESTIONS dict
+            char_key = "\\u{:04x}".format(ord(char))
+            suggestion = _SUGGESTIONS.get(
+                char_key,
+                "replace with an ASCII equivalent",
+            )
+            issues.append(
+                ValidationIssue(
+                    rule="non_ascii",
+                    severity="ERROR",
+                    file=rel_path,
+                    line=line_no,
+                    message=(
+                        f"Non-ASCII character U+{ord(char):04X} {repr(char)} "
+                        f"in SQL source -- Teradata Error 6706 on LATIN databases. "
+                        f"Suggestion: {suggestion}"
+                    ),
+                )
+            )
+
+    return issues
+
+
 # Security rules dispatcher (GAP-003, GAP-008)
 # ---------------------------------------------------------------
 

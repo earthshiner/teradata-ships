@@ -622,6 +622,11 @@ def ships_deploy(
             logmech=logmech,
             encryptdata=True,
         ).cursor()
+        # Instruct Teradata to treat this session's string data as
+        # Unicode so that UTF-8 content in DML seed files is stored
+        # correctly.  Without this the server-side LATIN default causes
+        # mojibake for any non-ASCII characters (e.g. em-dashes).
+        cursor.execute("SET SESSION CHARACTER SET UNICODE")
         try:
             all_waves, all_files, use_waves = _collect_package_files(package_dir)
             logs_dir = os.path.join(package_dir, "logs")
@@ -682,6 +687,11 @@ def ships_deploy_explain(
             logmech=logmech,
             encryptdata=True,
         ).cursor()
+        # Instruct Teradata to treat this session's string data as
+        # Unicode so that UTF-8 content in DML seed files is stored
+        # correctly.  Without this the server-side LATIN default causes
+        # mojibake for any non-ASCII characters (e.g. em-dashes).
+        cursor.execute("SET SESSION CHARACTER SET UNICODE")
         try:
             all_waves, all_files, use_waves = _collect_package_files(package_dir)
             logs_dir = os.path.join(package_dir, "logs")
@@ -747,6 +757,11 @@ def ships_rollback(
                 logmech=logmech,
                 encryptdata=True,
             ).cursor()
+            # Instruct Teradata to treat this session's string data as
+            # Unicode so that UTF-8 content in DML seed files is stored
+            # correctly.  Without this the server-side LATIN default
+            # causes mojibake for any non-ASCII characters (e.g. em-dashes).
+            cursor.execute("SET SESSION CHARACTER SET UNICODE")
 
         try:
             result = rollback_package(

@@ -3899,7 +3899,30 @@ def _execute_ddl(cursor, ddl_text: str, *, split_statements: bool = True):
         # positions so offsets map back to the original text exactly.
         stripped = ddl_text
 
-        # Replace block comments with same-length whitespace
+        # Sanitisation order is critical:
+        #
+        #   1. String literals first  — a "--" sequence inside a quoted string
+        #      is NOT a comment; blanking it before comment detection prevents
+        #      the comment stripper from swallowing the rest of the string and
+        #      leaving the closing quote unmatched (Teradata Error 3760 "String
+        #      not terminated before end of text").
+        #   2. Block comments second  — /**/ may span multiple lines and may
+        #      contain what looks like a single-quoted string.
+        #   3. Single-line comments last — "--" to end-of-line.
+        #
+        # Each replacement is same-length whitespace so that character offsets
+        # in the sanitised copy map exactly back to the original text.
+
+        # Step 1: Replace string literals (Teradata single-quoted, doubled-quote
+        # escape: '' is a literal single quote, not a string terminator).
+        for match in re.finditer(r"'(?:[^']|'')*'", stripped, flags=re.DOTALL):
+            stripped = (
+                stripped[: match.start()]
+                + " " * len(match.group())
+                + stripped[match.end() :]
+            )
+
+        # Step 2: Replace block comments with same-length whitespace.
         for match in re.finditer(r"/\*.*?\*/", stripped, flags=re.DOTALL):
             stripped = (
                 stripped[: match.start()]
@@ -3907,21 +3930,8 @@ def _execute_ddl(cursor, ddl_text: str, *, split_statements: bool = True):
                 + stripped[match.end() :]
             )
 
-        # Replace single-line comments with same-length whitespace
+        # Step 3: Replace single-line comments with same-length whitespace.
         for match in re.finditer(r"--[^\n]*", stripped):
-            stripped = (
-                stripped[: match.start()]
-                + " " * len(match.group())
-                + stripped[match.end() :]
-            )
-
-        # Replace string literals with same-length whitespace so that a
-        # semicolon inside a VALUES string (e.g. 'Fixed rate; stable payments')
-        # is not mistaken for a statement terminator.
-        # Pattern mirrors sql_text._STRING_LITERAL_RE (Teradata single-quoted,
-        # doubled-quote escape). Comments are already blanked above, so any
-        # stray quote inside a comment won't start a spurious literal match.
-        for match in re.finditer(r"'(?:[^']|'')*'", stripped, flags=re.DOTALL):
             stripped = (
                 stripped[: match.start()]
                 + " " * len(match.group())
