@@ -419,7 +419,7 @@ class TestTeradataAliasBlocklist:
         "CT": "CREATE TABLE",
         "BT": "BEGIN TRANSACTION",
         "ET": "END TRANSACTION",
-        "DL": "DELETE",
+        "DEL": "DELETE",
         "INS": "INSERT",
         "SEL": "SELECT",
         "UPD": "UPDATE",
