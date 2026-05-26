@@ -875,19 +875,22 @@ def _build_package_impl(
 # also has files. When both are true, split. When either is empty,
 # the original single-zip path is preserved with zero overhead.
 
-# Phases that go in the prereqs zip when a split happens. Currently
-# only DATABASE / USER (01_pre_requisites). ROLE and other system-
-# scope objects stay with the dependants in the main zip — Phase 1
-# does not flag role-grant intra-package deps yet, so Phase 2 does
-# not split on them either.
-_PREREQ_PHASES = ("01_pre_requisites",)
+# Phases that go in the prereqs zip when a split happens.
+#
+# ``00_system`` is foundational platform/application setup: roles,
+# profiles, maps, authorizations, foreign servers, and similar system-
+# scope artefacts. These must exist before any DCL or DDL waves run.
+# ``01_pre_requisites`` contains application-owned databases/users.
+_PREREQ_PHASES = (
+    "00_system",
+    "01_pre_requisites",
+)
 
 # Phases that stay in the main zip on a split. Listed explicitly
 # rather than computed-by-exclusion so a future phase added to
 # DeployPhase doesn't silently change split behaviour — adding it
 # here is a deliberate decision.
 _MAIN_PHASES = (
-    "00_system",
     "02_dcl",
     "03_ddl",
     "04_dml",
@@ -917,12 +920,13 @@ def _phase_has_files(payload_dir: str, phase_name: str) -> bool:
 def _is_auto_split_needed(pkg_dir: str) -> bool:
     """Decide whether the populated package warrants an auto-split.
 
-    Split when ``payload/01_pre_requisites/`` is populated AND at
-    least one other phase directory is populated. Either condition
+    Split when any prerequisite phase (``00_system`` or
+    ``01_pre_requisites``) is populated AND at least one main phase
+    directory is populated. Either condition
     alone keeps the original single-zip flow:
 
-      - No prereqs in the package    → nothing to split off.
-      - No dependants in the package → splitting would leave an
+      - No prereqs/system in package → nothing to split off.
+      - No main payload in package   → splitting would leave an
                                        empty main zip.
 
     Both conditions together → emit a paired prereqs + main bundle.
@@ -1194,8 +1198,8 @@ def _split_into_paired_packages(
     Both halves get a complete copy of the package infrastructure
     (config/, lib/, deploy.py, README.txt) so each is independently
     deployable. Only the payload phases are partitioned: the prereqs
-    zip keeps ``01_pre_requisites`` and empties every other phase;
-    the main zip does the inverse.
+    zip keeps ``00_system`` and ``01_pre_requisites`` and empties the
+    main phases; the main zip does the inverse.
 
     Both context/ships.build.json manifests are rewritten to:
       - share the same ``release_group`` (= the main archive basename)

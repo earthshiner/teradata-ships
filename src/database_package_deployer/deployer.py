@@ -622,15 +622,33 @@ def _deploy_package_impl(
     """
 
     # -- Determine file list --
+    serial_prefix_files: List[str] = []
     if waves is not None:
-        ddl_files = [f for wave in waves for f in wave]
+        # ``ordered_files`` acts as a serial prefix when waves are supplied.
+        # SHIPS uses this for system-scope artefacts (roles, profiles, maps,
+        # authorizations, foreign servers, etc.) that must be fully deployed
+        # before any wave-parallel work begins.  These files deliberately do
+        # not receive a wave_number in the manifest/report.
+        serial_prefix_files = list(ordered_files or [])
+        wave_files = [f for wave in waves for f in wave]
+        ddl_files = serial_prefix_files + wave_files
         preserve_order = True
-        logger.info(
-            "Wave-parallel mode: %d waves, %d objects, %d streams",
-            len(waves),
-            len(ddl_files),
-            num_streams,
-        )
+        if serial_prefix_files:
+            logger.info(
+                "Wave-parallel mode: %d serial system object(s), "
+                "%d waves, %d wave object(s), %d streams",
+                len(serial_prefix_files),
+                len(waves),
+                len(wave_files),
+                num_streams,
+            )
+        else:
+            logger.info(
+                "Wave-parallel mode: %d waves, %d objects, %d streams",
+                len(waves),
+                len(wave_files),
+                num_streams,
+            )
     elif ordered_files is not None:
         ddl_files = ordered_files
         preserve_order = True
@@ -929,8 +947,55 @@ def _deploy_package_impl(
         )
 
     # -- Execute --
-    if waves is not None and num_streams > 1 and not dry_run:
-        results, wave_summaries = _execute_waves_parallel(
+    results = []
+    wave_summaries = []
+
+    if waves is not None and serial_prefix_files:
+        serial_parsed = [
+            parsed_by_path[path]
+            for path in serial_prefix_files
+            if path in parsed_by_path
+        ]
+        logger.info(
+            "Executing %d system-scope object(s) serially before waves",
+            len(serial_parsed),
+        )
+        results.extend(
+            _execute_sequential(
+                cursor,
+                serial_parsed,
+                manifest,
+                stop_on_failure,
+                dry_run,
+                baseline_dir=baseline_dir,
+                on_drift=on_drift,
+                table_trigger_action=table_trigger_action,
+            )
+        )
+
+    serial_failed = any(r.state == DeployState.FAILED for r in results)
+
+    if waves is not None and serial_failed and stop_on_failure:
+        from database_package_deployer.models import WaveSummary
+
+        for wave_idx, wave_files in enumerate(waves):
+            wave_summaries.append(
+                WaveSummary(
+                    wave_number=wave_idx + 1,
+                    total=len(wave_files),
+                    skipped=len(wave_files),
+                )
+            )
+            for fpath in wave_files:
+                parsed = parsed_by_path.get(fpath)
+                if parsed:
+                    manifest.update_state(
+                        parsed.qualified_name,
+                        DeployState.SKIPPED,
+                        error="Skipped — serial system phase failed.",
+                    )
+    elif waves is not None and num_streams > 1 and not dry_run:
+        wave_results, wave_summaries = _execute_waves_parallel(
             cursor,
             waves,
             parsed_by_path,
@@ -942,8 +1007,9 @@ def _deploy_package_impl(
             on_drift=on_drift,
             table_trigger_action=table_trigger_action,
         )
+        results.extend(wave_results)
     elif waves is not None:
-        results, wave_summaries = _execute_waves_sequential(
+        wave_results, wave_summaries = _execute_waves_sequential(
             cursor,
             waves,
             parsed_by_path,
@@ -954,7 +1020,8 @@ def _deploy_package_impl(
             on_drift=on_drift,
             table_trigger_action=table_trigger_action,
         )
-    else:
+        results.extend(wave_results)
+    elif waves is None:
         results = _execute_sequential(
             cursor,
             parsed_ddls,
@@ -965,7 +1032,6 @@ def _deploy_package_impl(
             on_drift=on_drift,
             table_trigger_action=table_trigger_action,
         )
-        wave_summaries = []
 
     # -- Build result --
     # Include skipped (unclassifiable) files in results
@@ -1691,10 +1757,12 @@ def _explain_package_impl(
     logger.info("=" * 64)
 
     # -- Collect files --
-    if ordered_files:
+    if waves:
+        # When both are supplied, ordered_files is the serial pre-wave prefix
+        # (system-scope artefacts), followed by wave-scoped DCL/DDL work.
+        ddl_files = list(ordered_files or []) + [f for wave in waves for f in wave]
+    elif ordered_files:
         ddl_files = ordered_files
-    elif waves:
-        ddl_files = [f for wave in waves for f in wave]
     else:
         ddl_files = []
         build_exts = _load_build_extensions(package_dir)
