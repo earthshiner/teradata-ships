@@ -374,7 +374,7 @@ Arguments:
 
 | Argument | Explanation |
 |---|---|
-| `--fix-grants` | Creates missing inter-db `.dcl` files and appends missing inferred grants to existing files under `payload\database\DCL\inter_db\`. Extra/orphaned grants are not removed automatically. |
+| `--fix-grants` | Writes inferred `.grt` files under `payload\database\DCL\inter_db\`. |
 | `--graph` | Directory for dependency graph exports. |
 | `--formats` | Graph export formats. |
 
@@ -665,7 +665,7 @@ Arguments:
 | `deploy <target>` | Points SHIPS at a release-group directory or zip. No manual extraction is needed. |
 | `--dry-run` | Confirms trust, integrity, parseability, and pre-flight checks without executing SQL. |
 | `--host`, `--user`, `--logmech` | Forwarded to the generated package deployer. |
-| `--streams` | Runs independent wave members in parallel. DCL remains serialised. |
+| `--streams` | Runs independent wave members in parallel. System artefacts run serially before waves; DCL remains serialised. |
 
 ## Runsheet 8: Explicit DDL, DCL, And DML Project
 

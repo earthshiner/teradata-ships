@@ -593,11 +593,11 @@ Notes:
 
 ## How to: work with grants
 
-SHIPS infers inter-database grants from your DDL. If a view in `{{STD_DATABASE_V}}` reads from `{{STD_DATABASE_T}}`, inspect can infer the required database-to-database grant.
+SHIPS infers grants from your DDL. If you have a view `{{STD_DATABASE}}.CustomerSummary`, SHIPS can generate a grant to the appropriate role automatically via the `generate` command.
 
-Database-to-database grants belong in `.dcl` files under `payload/database/DCL/inter_db/`. Role grants belong under `payload/database/DCL/roles/`; Teradata roles must not be granted privileges `WITH GRANT OPTION`.
+If you want to manage grants explicitly, place them as `.dcl` files in `payload/database/DCL/inter_db/`.
 
-The inspect rule `skip_grants` is `true` by default in the `process` command — grant validation is advisory. In a stricter pipeline, run inspect with `--fix-grants` to create missing grant files or append missing inferred grants to existing `.dcl` files. The repair is conservative: it does not delete, move, or remove extra/orphaned grants automatically.
+The inspect rule `skip_grants` is `true` by default in the `process` command — grant validation is advisory. In a stricter pipeline, run inspect with `--fix-grants` to generate missing grants.
 
 ---
 
@@ -832,7 +832,7 @@ python -m td_release_packager inspect --project C:\Projects\OMR
 | `--config` | No | Path to `inspect.conf` (default: auto-detect in project) |
 | `--strict` | No | Promote all WARNING rules to ERROR |
 | `--skip-grants` | No | Skip grant validation |
-| `--fix-grants` | No | Create missing grant files and append missing inferred grants to existing DCL files |
+| `--fix-grants` | No | Re-generate missing grant files |
 
 ---
 
@@ -1126,6 +1126,19 @@ python -m td_release_packager decompose-names config/token_map.conf \
     --output-dir config
 ```
 
+
+### System artefacts and waves
+
+System-scope artefacts are not normal dependency-wave members. SHIPS deploys
+all files in `payload/database/system` serially before any wave-parallel work
+begins. This includes maps, roles, profiles, authorizations, and foreign
+servers.
+
+This ordering is important for role DCL: `CREATE ROLE` must complete before
+`GRANT ... TO role` can execute. Role grants belong under
+`payload/database/DCL/roles`; inter-database grants belong under
+`payload/database/DCL/inter_db`.
+
 ---
 
 ### `ships bootstrap-env-config`
@@ -1156,6 +1169,8 @@ MyProject/
         token_map.conf          ← Literal → {{TOKEN}} mapping
     payload/database/
         system/                 ← 00_system: maps, roles, profiles, authorisations
+                                  These are system-scope artefacts and deploy
+                                  serially before any dependency waves run.
             maps/
             roles/
             profiles/
