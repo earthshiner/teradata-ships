@@ -374,7 +374,7 @@ Arguments:
 
 | Argument | Explanation |
 |---|---|
-| `--fix-grants` | Creates missing inter-db `.dcl` files and appends missing inferred grants to existing files under `payload\database\DCL\inter_db\`. Extra/orphaned grants are not removed automatically. |
+| `--fix-grants` | Writes inferred `.grt` files under `payload\database\DCL\inter_db\`. |
 | `--graph` | Directory for dependency graph exports. |
 | `--formats` | Graph export formats. |
 
@@ -665,7 +665,7 @@ Arguments:
 | `deploy <target>` | Points SHIPS at a release-group directory or zip. No manual extraction is needed. |
 | `--dry-run` | Confirms trust, integrity, parseability, and pre-flight checks without executing SQL. |
 | `--host`, `--user`, `--logmech` | Forwarded to the generated package deployer. |
-| `--streams` | Runs independent wave members in parallel. DCL remains serialised. |
+| `--streams` | Runs independent wave members in parallel. System artefacts are packaged in `_01_prereqs` and run serially before any main-package waves; DCL remains serialised. |
 
 ## Runsheet 8: Explicit DDL, DCL, And DML Project
 
@@ -1087,3 +1087,14 @@ Checklist:
 | Privilege preflight fails | Deploying user lacks required CREATE/DROP/GRANT rights. | Use the generated grant script in the deployment report, then resume. |
 | DML needs rollback | SHIPS does not capture row-level undo for DML. | Use application recovery scripts or restore from backup; avoid irreversible DML in high-risk deploys. |
 | Release group has multiple zips | Environment prereqs or application prereqs were split out. | Deploy the release-group directory; SHIPS reads `release_group.json` and runs the required packages in order. |
+
+
+## System artefacts in split packages
+
+When SHIPS creates a split release group, `00_system` payload is treated as prerequisite payload and is placed in the `_01_prereqs` archive, not `_02_main`. This keeps system-level objects such as roles, profiles, maps, authorizations, and foreign servers ahead of role grants and other main-package DCL/DDL waves.
+
+The deployment order is therefore:
+
+1. `_00_environment_prereqs` — DBA-reviewed external parent containers, when required.
+2. `_01_prereqs` — `00_system` followed by `01_pre_requisites`, executed serially.
+3. `_02_main` — DCL, DDL, DML, and post-install payload, using dependency waves where available.

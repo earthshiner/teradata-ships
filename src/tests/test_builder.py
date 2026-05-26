@@ -227,8 +227,9 @@ def test_role_grantees_are_packaged_as_role_ddl(
         allow_dirty=True,
     )
 
-    ((archive_path, _manifest), companion) = build_package(config)
-    assert companion is None
+    ((_main_archive, _manifest), companion) = build_package(config)
+    assert companion is not None
+    archive_path, _prereqs_manifest = companion
 
     with zipfile.ZipFile(archive_path) as archive:
         names = [name.replace("\\", "/") for name in archive.namelist()]
@@ -292,8 +293,9 @@ def test_generated_write_role_is_inserted_into_system_waves(
         allow_dirty=True,
     )
 
-    ((archive_path, _manifest), companion) = build_package(config)
-    assert companion is None
+    ((_main_archive, _manifest), companion) = build_package(config)
+    assert companion is not None
+    archive_path, _prereqs_manifest = companion
 
     with zipfile.ZipFile(archive_path) as archive:
         waves_name = next(
@@ -347,8 +349,9 @@ def test_existing_write_role_is_inserted_into_system_waves(
         allow_dirty=True,
     )
 
-    ((archive_path, _manifest), companion) = build_package(config)
-    assert companion is None
+    ((_main_archive, _manifest), companion) = build_package(config)
+    assert companion is not None
+    archive_path, _prereqs_manifest = companion
 
     with zipfile.ZipFile(archive_path) as archive:
         waves_name = next(
