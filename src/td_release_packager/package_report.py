@@ -672,13 +672,27 @@ def _summary_tab(records: List[Dict]) -> str:
 </section>
 """
 
+    # System and Pre-requisites are deployment prerequisites, so they are
+    # placed first (left-to-right reading order mirrors execution order).
+    priority_categories = ["System", "Pre-requisites"]
     ordered_categories = ["DCL", "DDL", "DML"]
-    extra_categories = sorted(k for k in summary if k not in ordered_categories)
-    sections = "\n".join(
+    known_categories = set(priority_categories + ordered_categories)
+    extra_categories = sorted(k for k in summary if k not in known_categories)
+    display_order = priority_categories + ordered_categories + extra_categories
+    rendered = [
         render_category(category, summary[category])
-        for category in ordered_categories + extra_categories
+        for category in display_order
         if summary.get(category)
-    )
+    ]
+    sections = "\n".join(rendered)
+
+    # Fix the grid column count explicitly to the number of visible panels so
+    # that CSS auto-fit cannot wrap a panel (e.g. System) onto a second row
+    # when the viewport happens to be narrower than 5 × 260 px.  Panels are
+    # still responsive: the grid collapses gracefully on narrow screens because
+    # minmax(0,1fr) allows each column to shrink freely.
+    col_count = max(len(rendered), 1)
+
     flag_html = ""
     if flags:
         flag_items = "".join(f"<li>{_h(flag)}</li>" for flag in flags)
@@ -694,7 +708,7 @@ def _summary_tab(records: List[Dict]) -> str:
   Script intent is inferred from the top-level statement verbs in each packaged file.
 </p>
 {flag_html}
-<div class="summary-grid">
+<div class="summary-grid" style="grid-template-columns:repeat({col_count},minmax(0,1fr))">
 {sections}
 </div>
 """
@@ -779,22 +793,33 @@ def _waves_tab(records: List[Dict]) -> str:
                 f'font-size="11" fill="#6C757D">… {len(items) - 40} more</text>'
             )
 
-        # Arrow to next column
+        # Arrow to next column — slim line with a small, tight arrowhead.
+        # The shaft starts/ends a few px off the column edges so the head
+        # lands exactly at the boundary without overlapping the column border.
         if ci < len(columns) - 1:
-            ax = x + cell_w
-            ay = margin + col_h // 2
+            ax_start = x + cell_w + 5       # small gap off the right column edge
+            ax_end   = x + cell_w + arrow_w - 5  # tip just before the next column
+            ay       = margin + col_h // 2
             svg_parts.append(
-                f'<line x1="{ax}" y1="{ay}" x2="{ax + arrow_w}" y2="{ay}" '
-                f'stroke="{_ORANGE}" stroke-width="4" stroke-linecap="round" '
+                f'<line x1="{ax_start}" y1="{ay}" x2="{ax_end}" y2="{ay}" '
+                f'stroke="{_ORANGE}" stroke-width="1.5" stroke-linecap="round" '
                 f'marker-end="url(#arr)"/>'
             )
 
-    # Arrow marker
+    # Open-chevron arrowhead — matches the SHIPS report design language.
+    # markerUnits="userSpaceOnUse" keeps the head a fixed 10×10 px regardless
+    # of stroke width.  context-stroke inherits the line colour automatically
+    # so there is never a colour mismatch between shaft and head.
     svg_parts.insert(
         1,
-        '<defs><marker id="arr" markerWidth="12" markerHeight="10" refX="11" refY="5" '
-        'orient="auto" markerUnits="strokeWidth">'
-        f'<path d="M0,0 L12,5 L0,10 z" fill="{_ORANGE}"/></marker></defs>',
+        '<defs>'
+        '<marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" '
+        'markerWidth="10" markerHeight="10" orient="auto-start-reverse" '
+        'markerUnits="userSpaceOnUse">'
+        '<path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" '
+        'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>'
+        '</marker>'
+        '</defs>',
     )
 
     svg_parts.append("</svg>")
@@ -930,6 +955,11 @@ def _deploy_tab(manifest_dict: dict) -> str:
         "Dry run (recommended first)",
         "python deploy.py --host &lt;host&gt; --user &lt;user&gt; --dry-run",
         "Validates the pipeline and runs pre-flight checks. No DDL is executed.",
+    )
+    blocks += cmd_block(
+        "Explain deployment plan",
+        "python deploy.py --host &lt;host&gt; --user &lt;user&gt; --explain",
+        "Prints the full wave execution plan — objects, phases, and ordering — without connecting to the database.",
     )
     blocks += cmd_block(
         "Standard deployment",
@@ -1073,7 +1103,7 @@ pre {{ white-space: pre-wrap; word-break: break-all; }}
 .action-banner h2 {{ color: #7a3b00; font-size: 18px; margin-bottom: 8px; }}
 .action-banner p {{ margin: 6px 0; color: #3b2a00; }}
 .action-banner code {{ background: rgba(255,255,255,.8); padding: 2px 5px; border-radius: 4px; }}
-.summary-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }}
+.summary-grid {{ display: grid; gap: 16px; align-items: start; }}
 .summary-section {{ border: 1px solid {_BORDER}; border-radius: 6px; overflow: hidden; background: #fff; }}
 .summary-section h3 {{ background: {_NAVY}; color: {_WHITE}; padding: 9px 12px; font-size: 14px; }}
 .summary-table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
