@@ -937,7 +937,10 @@ def find_ddl_files(project_dir: Path) -> List[Path]:
     Recursively find all DDL files in a SHIPS project directory.
 
     Scans for files with extensions matching SCANNABLE_EXTENSIONS
-    (.viw, .spl, .mcr, .trg, .fnc).
+    (.viw, .spl, .mcr, .trg, .fnc).  In a full SHIPS project the canonical
+    grant-inference source is ``payload/``.  Hidden build/harvest artefacts
+    such as ``.ships/`` may contain resolved copies of the same DDL and must
+    not contribute additional physical-name grants during inspect --fix-grants.
 
     Args:
         project_dir: Root directory of the SHIPS project.
@@ -945,8 +948,18 @@ def find_ddl_files(project_dir: Path) -> List[Path]:
     Returns:
         Sorted list of Path objects for each DDL file found.
     """
+    scan_root = project_dir / "payload"
+    if not scan_root.is_dir():
+        scan_root = project_dir
+
     ddl_files = []
-    for root, _dirs, files in os.walk(project_dir):
+    for root, dirs, files in os.walk(scan_root):
+        dirs[:] = [
+            dirname
+            for dirname in dirs
+            if not dirname.startswith(".")
+            and dirname not in {"releases", "graphs", "__pycache__"}
+        ]
         for fname in files:
             ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else ""
             if ext in SCANNABLE_EXTENSIONS:

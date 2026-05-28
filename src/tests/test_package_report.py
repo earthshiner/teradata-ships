@@ -626,7 +626,23 @@ class TestDeployTab:
         m = _minimal_manifest()
         m["requires"] = ["OMR_prereqs_DEV_BUILD_0001.zip"]
         html = _deploy_tab(m)
-        assert "companion" in html.lower() or "Deploy the companion" in html
+        assert "Associated packages" in html
+        assert "OMR_prereqs_DEV_BUILD_0001.zip" in html
+
+    def test_release_group_recommendation_when_requires_set(self):
+        m = _minimal_manifest(pkg_name="BIONICCC_17", build_no="0038")
+        m["package_filename"] = "DEV_BIONICCC_17_BUILD_0038_02_main.zip"
+        m["release_group"] = "DEV_BIONICCC_17_BUILD_0038"
+        m["requires"] = ["DEV_BIONICCC_17_BUILD_0038_01_prereqs.zip"]
+
+        html = _deploy_tab(m)
+
+        assert "Recommended" in html
+        assert "deploy_release.py" in html
+        assert "python deploy_release.py --host" in html
+        assert "Single-package commands" in html
+        assert "Associated packages" in html
+        assert "DEV_BIONICCC_17_BUILD_0038_01_prereqs.zip" in html
 
     def test_copy_buttons_present(self):
         html = _deploy_tab(_minimal_manifest())
