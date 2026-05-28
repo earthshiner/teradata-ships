@@ -81,6 +81,10 @@ DEFAULT_HARVEST_EXTENSIONS: frozenset = frozenset(
         # project via ``ships.yaml``'s ``discovery.extensions``.
         ".bteq",
         ".btq",
+        # COMMENT ON … IS '…' files. These are harvested alongside
+        # DDL and must be linted for the 254-character Teradata
+        # limit (Error 5550) before packaging.
+        ".cmt",
     }
 )
 

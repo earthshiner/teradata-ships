@@ -34,6 +34,7 @@ from td_release_packager.validate import (
     _check_intra_package_dependency,
     _check_view_column_list,
     _check_non_ascii_literals,
+    _check_comment_length,
     _collect_package_prereqs,
     validate_directory,
     read_inspect_config,
@@ -2219,3 +2220,197 @@ class TestWarnGrantSeverities:
         cfg = generate_default_config()
         assert "warn_extra_grants=ERROR" in cfg
         assert "warn_orphan_grants=ERROR" in cfg
+
+
+# ---------------------------------------------------------------
+# _check_comment_length  (Rule: comment_length)
+# ---------------------------------------------------------------
+
+
+class TestCheckCommentLength:
+    """Tests for the COMMENT ON ... IS '...' length check (Error 5550).
+
+    Teradata rejects COMMENT strings longer than 254 characters at deploy
+    time with Error 5550.  The rule must catch this during Inspect so that
+    the failure surfaces before packaging.
+    """
+
+    # -- Pass cases --
+
+    def test_comment_exactly_at_limit_passes(self):
+        """A comment body of exactly 254 characters must produce no issues."""
+        body = "A" * 254
+        content = "COMMENT ON TABLE {{DB_T}}.MyTable IS '" + body + "';\n"
+        issues = _check_comment_length("comments/MyTable.cmt", content)
+        assert issues == []
+
+    def test_comment_well_under_limit_passes(self):
+        """A typical short comment must pass."""
+        content = "COMMENT ON TABLE {{DB_T}}.MyTable IS 'A short description.';\n"
+        issues = _check_comment_length("comments/MyTable.cmt", content)
+        assert issues == []
+
+    def test_empty_comment_passes(self):
+        """An empty comment string must pass."""
+        content = "COMMENT ON TABLE {{DB_T}}.MyTable IS '';\n"
+        issues = _check_comment_length("comments/MyTable.cmt", content)
+        assert issues == []
+
+    def test_comment_on_column_under_limit_passes(self):
+        """COMMENT ON COLUMN with a short value must pass."""
+        content = "COMMENT ON COLUMN {{DB_T}}.MyTable.col1 IS 'A column.';\n"
+        issues = _check_comment_length("comments/MyTable.cmt", content)
+        assert issues == []
+
+    def test_non_cmt_extension_is_skipped(self):
+        """Files with extensions other than .cmt must be silently skipped."""
+        body = "B" * 300
+        content = "COMMENT ON TABLE {{DB_T}}.MyTable IS '" + body + "';\n"
+        issues = _check_comment_length("database/DDL/MyTable.tbl", content)
+        assert issues == [], "Checker must skip files that are not .cmt"
+
+    def test_severity_off_suppresses_violation(self):
+        """Setting comment_length=OFF must suppress all findings."""
+        body = "C" * 300
+        content = "COMMENT ON TABLE {{DB_T}}.MyTable IS '" + body + "';\n"
+        issues = _check_comment_length(
+            "comments/MyTable.cmt", content, rules_config={"comment_length": "OFF"}
+        )
+        assert issues == []
+
+    def test_sql_escaped_apostrophe_counted_as_two_chars(self):
+        """Embedded '' (SQL-escaped apostrophe) counts as two characters.
+
+        A body of 253 normal chars plus two apostrophes (SQL escape) gives a
+        raw body length of 255, which exceeds 254 and must fire.
+        """
+        body = "A" * 253 + "''"
+        content = "COMMENT ON TABLE {{DB_T}}.MyTable IS '" + body + "';\n"
+        issues = _check_comment_length("comments/MyTable.cmt", content)
+        assert len(issues) == 1
+        assert issues[0].rule == "comment_length"
+
+    # -- Fail cases --
+
+    def test_comment_one_over_limit_fires(self):
+        """A comment of 255 characters (one over) must produce one ERROR."""
+        body = "D" * 255
+        content = "COMMENT ON TABLE {{DB_T}}.MyTable IS '" + body + "';\n"
+        issues = _check_comment_length("comments/MyTable.cmt", content)
+        assert len(issues) == 1
+        issue = issues[0]
+        assert issue.rule == "comment_length"
+        assert issue.severity == "ERROR"
+        assert "255" in issue.message
+        assert "254" in issue.message
+        assert "5550" in issue.message
+
+    def test_comment_far_over_limit_reports_actual_length(self):
+        """The violation message must report the actual character count."""
+        body = "E" * 400
+        content = "COMMENT ON TABLE {{DB_T}}.MyTable IS '" + body + "';\n"
+        issues = _check_comment_length("comments/MyTable.cmt", content)
+        assert len(issues) == 1
+        assert "400" in issues[0].message
+
+    def test_violation_carries_correct_file_path(self):
+        """The violation must carry the exact rel_path supplied to the checker."""
+        body = "F" * 260
+        content = "COMMENT ON TABLE {{DB_T}}.call_searchable_text IS '" + body + "';\n"
+        rel = "database/DDL/comments/CallCentre_SCH_STD_T.call_searchable_text.cmt"
+        issues = _check_comment_length(rel, content)
+        assert issues[0].file == rel
+
+    def test_violation_line_number_single_line_file(self):
+        """Line number must be 1 when the COMMENT is on the first line."""
+        body = "G" * 260
+        content = "COMMENT ON TABLE {{DB_T}}.MyTable IS '" + body + "';\n"
+        issues = _check_comment_length("comments/MyTable.cmt", content)
+        assert issues[0].line == 1
+
+    def test_violation_line_number_multiline_file(self):
+        """Line number must reflect the actual line of the COMMENT ON keyword."""
+        body = "H" * 260
+        content = (
+            "-- Auto-generated by view_layer_generator.py\n"
+            "\n"
+            "COMMENT ON TABLE {{DB_T}}.MyTable IS '" + body + "';\n"
+        )
+        issues = _check_comment_length("comments/MyTable.cmt", content)
+        assert issues[0].line == 3
+
+    def test_multiple_violations_in_one_file(self):
+        """Every over-length COMMENT statement must produce its own issue."""
+        body1 = "I" * 260
+        body2 = "J" * 300
+        content = (
+            "COMMENT ON TABLE {{DB_T}}.T IS '" + body1 + "';\n"
+            "COMMENT ON COLUMN {{DB_T}}.T.col IS '" + body2 + "';\n"
+        )
+        issues = _check_comment_length("comments/T.cmt", content)
+        assert len(issues) == 2
+        assert all(i.rule == "comment_length" for i in issues)
+
+    def test_mixed_short_and_long_only_long_flagged(self):
+        """Only over-length statements are flagged; short ones in the same file pass."""
+        short = "K" * 100
+        long_ = "L" * 260
+        content = (
+            "COMMENT ON TABLE {{DB_T}}.T IS '" + short + "';\n"
+            "COMMENT ON COLUMN {{DB_T}}.T.col IS '" + long_ + "';\n"
+        )
+        issues = _check_comment_length("comments/T.cmt", content)
+        assert len(issues) == 1
+        assert "260" in issues[0].message
+
+    def test_severity_warning_propagated(self):
+        """When comment_length=WARNING in rules_config, severity must be WARNING."""
+        body = "M" * 260
+        content = "COMMENT ON TABLE {{DB_T}}.T IS '" + body + "';\n"
+        issues = _check_comment_length(
+            "comments/T.cmt", content, rules_config={"comment_length": "WARNING"}
+        )
+        assert len(issues) == 1
+        assert issues[0].severity == "WARNING"
+
+    def test_case_insensitive_keyword_matching(self):
+        """The COMMENT keyword match must be case-insensitive."""
+        body = "N" * 260
+        content = "comment on table {{DB_T}}.T is '" + body + "';\n"
+        issues = _check_comment_length("comments/T.cmt", content)
+        assert len(issues) == 1
+
+    def test_default_rule_is_error(self):
+        """DEFAULT_RULES must declare comment_length as ERROR."""
+        assert DEFAULT_RULES["comment_length"] == "ERROR"
+
+    def test_generate_default_config_includes_comment_length(self):
+        """generate_default_config() must include a comment_length entry."""
+        cfg = generate_default_config()
+        assert "comment_length=ERROR" in cfg
+
+    def test_validate_directory_catches_overlength_cmt(self, tmp_path):
+        """validate_directory must flag an over-length COMMENT in a .cmt file."""
+        db_dir = tmp_path / "database"
+        db_dir.mkdir()
+        db_file = db_dir / "MyDB.db"
+        db_file.write_text(
+            "CREATE DATABASE {{DB_T}} AS PERM = 1e9;\n", encoding="utf-8"
+        )
+
+        comments_dir = db_dir / "DDL" / "comments"
+        comments_dir.mkdir(parents=True)
+        body = "Z" * 260
+        cmt_file = comments_dir / "{{DB_T}}.MyTable.cmt"
+        cmt_file.write_text(
+            "COMMENT ON TABLE {{DB_T}}.MyTable IS '" + body + "';\n",
+            encoding="utf-8",
+        )
+
+        result = validate_directory(str(tmp_path))
+        comment_issues = [i for i in result.issues if i.rule == "comment_length"]
+        assert comment_issues, (
+            "Expected a comment_length violation from validate_directory "
+            "for a .cmt file with a 260-character comment body."
+        )
+        assert all(i.severity == "ERROR" for i in comment_issues)

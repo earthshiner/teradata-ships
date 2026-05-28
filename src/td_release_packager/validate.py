@@ -157,8 +157,8 @@ _VALID_SEVERITIES = {"ERROR", "WARNING", "WARN", "INFO", "OFF"}
 #     trailing       flag files that use leading commas
 #     as-per-source  do not enforce any convention; emit a single
 #                    INFO note so ships.decisions.json records the policy
-#                    explicitly (differs from comma_log_level=OFF
-#                    which is completely silent)
+#                    explicitly. Pair with comma_log_level=OFF to also
+#                    silence the INFO note (no output, no record).
 #
 #   comma_log_level — HOW SEVERELY to report violations (severity-valued)
 #     WARNING  (default)
@@ -362,8 +362,9 @@ def generate_default_config() -> str:
         "#   trailing               — flag files that use leading commas.",
         "#   as-per-source          — no enforcement; one INFO note is emitted",
         "#                           so ships.decisions.json records this as a deliberate",
-        "#                           policy choice (differs from comma_log_level=OFF",
-        "#                           which is completely silent with no record).",
+        "#                           policy choice. Pair with comma_log_level=OFF to",
+        "#                           silence the INFO note entirely (no screen output,",
+        "#                           no record in ships.decisions.json).",
         f"comma_style={DEFAULT_COMMA_STYLE}",
         "#",
         "# comma_log_level controls HOW SEVERELY violations are reported.",
@@ -397,17 +398,56 @@ def generate_default_config() -> str:
         "# TDStats, etc.) are auto-excluded.",
         f"review_unmapped_grants={DEFAULT_RULES['review_unmapped_grants']}",
         "#",
+        "# ---------------------------------------------------------------------------",
         "# Grant validation severities",
-        "# warn_extra_grants: controls drift entries where the .dcl file contains",
-        "# only *extra* privileges that SHIPS did not infer from DDL.",
-        "# Values: ERROR, WARNING/WARN, OFF.",
-        "# Missing inferred grants remain hard errors because required access is",
-        "# absent from the DCL and cannot safely be treated as extra-only drift.",
+        "#",
+        "# These settings control how SHIPS reacts when the cross-file grant",
+        "# validation (Step 2 of Inspect) finds a discrepancy between what the",
+        "# DDL implies should be granted and what is in the .dcl files.",
+        "#",
+        "# IMPORTANT: grants that SHIPS inferred from the DDL but are completely",
+        "# absent from the .dcl files are ALWAYS a hard error regardless of these",
+        "# settings — required access is missing and the deployment will fail.",
+        "# Run 'ships inspect --fix-grants' to append missing statements.",
+        "#",
+        "# warn_extra_grants",
+        "#   Controls .dcl files that contain privileges BEYOND what SHIPS inferred",
+        "#   from the DDL — i.e. grants you added manually to the .dcl file.",
+        "#",
+        "#   ERROR   (default) — any privilege not inferred from DDL is treated as",
+        "#                       drift and blocks packaging. Use this posture when",
+        "#                       the .dcl files should be a pure reflection of the",
+        "#                       DDL with no manual additions.",
+        "#   WARNING           — extra privileges are reported but do not block",
+        "#                       packaging. Useful when some manual grants are",
+        "#                       expected alongside the inferred set.",
+        "#   OFF               — extra privileges are silently accepted. Use when",
+        "#                       the .dcl files are intentionally richer than what",
+        "#                       SHIPS infers and you do not want any noise.",
         f"warn_extra_grants={DEFAULT_RULES['warn_extra_grants']}",
         "#",
-        "# warn_orphan_grants: controls .dcl files whose grantee is not implied",
-        "# by any DDL in the package.",
-        "# Values: ERROR, WARNING/WARN, OFF.",
+        "# warn_orphan_grants",
+        "#   Controls .dcl files for a grantee that no DDL in the package implies —",
+        "#   i.e. the file exists but SHIPS found no DDL reference that would",
+        "#   require access to be granted to that grantee.",
+        "#",
+        "#   Common legitimate causes:",
+        "#     - A role is granted database access inside this package, but",
+        "#       GRANT ROLE … TO USER is managed outside it (by a DBA, IGA",
+        "#       system, or autonomous agent).",
+        "#     - The package pre-provisions access rights that a downstream",
+        "#       process or separate package will activate.",
+        "#",
+        "#   ERROR   (default) — orphaned .dcl files block packaging. Use this",
+        "#                       posture for fully self-contained packages where",
+        "#                       every grant must be traceable to DDL in this",
+        "#                       package.",
+        "#   WARNING           — orphaned .dcl files are reported but do not",
+        "#                       block packaging.",
+        "#   OFF               — orphaned .dcl files are silently accepted.",
+        "#",
+        "# Note: orphaned .dcl files are never auto-deleted by --fix-grants.",
+        "# They require manual review and removal.",
         f"warn_orphan_grants={DEFAULT_RULES['warn_orphan_grants']}",
         "",
         "",
@@ -1138,17 +1178,17 @@ def _validate_directory_impl(
         # they pass through unchanged.
         filtered_issues = []
         for issue in file_issues:
-            if issue.severity == "INFO":
-                filtered_issues.append(issue)
-                continue
-            # For domain-value rules (e.g. comma_style), severity is
-            # controlled by a companion key (e.g. comma_log_level)
-            # rather than the rule name itself.
+            # Resolve the severity key — domain-value rules (e.g. comma_style)
+            # have a companion severity key (e.g. comma_log_level) that controls
+            # how their findings are reported, including INFO-level notes.
             severity_key = _RULE_LOG_LEVEL_KEY.get(issue.rule, issue.rule)
             configured_severity = rules_config.get(severity_key, "WARNING")
             if configured_severity == "OFF":
-                continue  # Rule is disabled — drop the issue
-            issue.severity = configured_severity
+                continue  # Rule silenced — drop the issue (including INFO notes)
+            # INFO findings are informational; keep their severity unchanged
+            # unless the rule has been explicitly set to OFF above.
+            if issue.severity != "INFO":
+                issue.severity = configured_severity
             filtered_issues.append(issue)
 
         result.issues.extend(filtered_issues)

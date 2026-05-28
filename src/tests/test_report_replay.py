@@ -399,3 +399,209 @@ class TestDeploymentReportSourceLinks:
         assert viewer.exists()
         assert '<span class="sql-keyword">CREATE</span>' in html
         assert "domain/views/BadView.viw" in html
+
+
+# ---------------------------------------------------------------
+# _html_package_trust and _load_package_trust
+# ---------------------------------------------------------------
+
+
+class TestPackageTrustSection:
+    """Tests for the build-time trust panel in the deploy report."""
+
+    def _ready_trust(self):
+        return {
+            "label": "READY",
+            "signals": {
+                "inspect_lint": {"status": "pass", "message": "No lint violations found"},
+                "inspect_token_format": {"status": "pass", "message": "No malformed token markers found"},
+                "inspect_grants": {"status": "pass", "message": "Grant validation clean"},
+                "provenance_complete": {"status": "pass", "message": "context/ships.provenance.json present"},
+                "build_reproducible": {"status": "pass", "message": "Clean working tree"},
+            },
+        }
+
+    def _blocked_trust(self):
+        return {
+            "label": "BLOCKED",
+            "signals": {
+                "inspect_lint": {
+                    "status": "fail",
+                    "message": "Coding Discipline lint violations: 2 error(s)",
+                    "issues": ["payload/03_ddl/tables/DB.T.tbl:1: [db_qualifier] Missing database qualifier"],
+                },
+                "inspect_token_format": {"status": "pass", "message": "No malformed token markers found"},
+                "inspect_grants": {"status": "pass", "message": "Grant validation clean"},
+                "provenance_complete": {"status": "pass", "message": "context/ships.provenance.json present"},
+                "build_reproducible": {"status": "warn", "message": "Built with --allow-dirty"},
+            },
+        }
+
+    def test_returns_empty_when_no_trust(self):
+        from database_package_deployer.report import _html_package_trust
+
+        assert _html_package_trust({}) == ""
+
+    def test_returns_empty_when_label_missing(self):
+        from database_package_deployer.report import _html_package_trust
+
+        assert _html_package_trust({"signals": {}}) == ""
+
+    def test_ready_label_rendered(self):
+        from database_package_deployer.report import _html_package_trust
+
+        html = _html_package_trust(self._ready_trust())
+        assert "READY" in html
+        assert "Package Trust Report" in html
+
+    def test_blocked_label_rendered_and_section_open(self):
+        from database_package_deployer.report import _html_package_trust
+
+        html = _html_package_trust(self._blocked_trust())
+        assert "BLOCKED" in html
+        # BLOCKED means auto-open — the <details> must have the open attribute
+        assert "<details open" in html or "details open" in html
+
+    def test_ready_section_is_collapsed_by_default(self):
+        from database_package_deployer.report import _html_package_trust
+
+        html = _html_package_trust(self._ready_trust())
+        # READY → no open attribute on <details>
+        assert "<details open" not in html
+
+    def test_all_signal_names_appear(self):
+        from database_package_deployer.report import _html_package_trust
+
+        html = _html_package_trust(self._ready_trust())
+        for sig in ("inspect_lint", "inspect_token_format", "inspect_grants",
+                    "provenance_complete", "build_reproducible"):
+            assert sig in html, f"{sig} missing from trust section"
+
+    def test_known_signals_have_expandable_details(self):
+        from database_package_deployer.report import _html_package_trust
+
+        html = _html_package_trust(self._ready_trust())
+        # All 5 known signals → 5 <details> elements
+        assert html.count("<details") >= 5
+
+    def test_fail_status_shows_issues(self):
+        from database_package_deployer.report import _html_package_trust
+
+        html = _html_package_trust(self._blocked_trust())
+        assert "db_qualifier" in html
+        assert "Missing database qualifier" in html
+
+    def test_warn_status_rendered(self):
+        from database_package_deployer.report import _html_package_trust
+
+        html = _html_package_trust(self._blocked_trust())
+        assert "warn" in html.lower() or "⚠" in html
+
+    def test_if_this_fails_guidance_present(self):
+        from database_package_deployer.report import _html_package_trust
+
+        html = _html_package_trust(self._ready_trust())
+        assert "If this fails" in html
+
+    def test_load_package_trust_reads_ships_build_json(self, tmp_path):
+        import json
+        from database_package_deployer.report import _load_package_trust
+
+        trust_data = {
+            "label": "READY",
+            "signals": {"inspect_lint": {"status": "pass", "message": "Clean"}},
+        }
+        ctx = tmp_path / "context"
+        ctx.mkdir()
+        (ctx / "ships.build.json").write_text(
+            json.dumps({"trust": trust_data}), encoding="utf-8"
+        )
+        result = _load_package_trust(str(tmp_path))
+        assert result["label"] == "READY"
+        assert "inspect_lint" in result["signals"]
+
+    def test_load_package_trust_walks_up_from_logs_subdir(self, tmp_path):
+        import json
+        from database_package_deployer.report import _load_package_trust
+
+        trust_data = {"label": "READY-WITH-CAVEATS", "signals": {}}
+        ctx = tmp_path / "context"
+        ctx.mkdir()
+        (ctx / "ships.build.json").write_text(
+            json.dumps({"trust": trust_data}), encoding="utf-8"
+        )
+        logs = tmp_path / "logs"
+        logs.mkdir()
+        # Call with logs/ — should find ships.build.json one level up
+        result = _load_package_trust(str(logs))
+        assert result["label"] == "READY-WITH-CAVEATS"
+
+    def test_load_package_trust_returns_empty_when_absent(self, tmp_path):
+        from database_package_deployer.report import _load_package_trust
+
+        result = _load_package_trust(str(tmp_path))
+        assert result == {}
+
+    def test_load_package_trust_returns_empty_on_corrupt_json(self, tmp_path):
+        from database_package_deployer.report import _load_package_trust
+
+        ctx = tmp_path / "context"
+        ctx.mkdir()
+        (ctx / "ships.build.json").write_text("not valid json", encoding="utf-8")
+        result = _load_package_trust(str(tmp_path))
+        assert result == {}
+
+    def test_trust_section_present_in_full_report(self, tmp_path):
+        """End-to-end: trust data from ships.build.json appears in the deploy report."""
+        import json
+        from database_package_deployer.report import generate_report
+
+        trust_data = {
+            "label": "READY",
+            "signals": {
+                "inspect_lint": {"status": "pass", "message": "No violations"},
+            },
+        }
+        ctx = tmp_path / "context"
+        ctx.mkdir()
+        (ctx / "ships.build.json").write_text(
+            json.dumps({"trust": trust_data}), encoding="utf-8"
+        )
+
+        result = PackageDeployResult(
+            deployment_id="deploy_20260528_120000",
+            manifest_path=str(tmp_path / "ships.manifest.json"),
+            total=1,
+            completed=1,
+            results=[
+                ObjectDeployResult(
+                    object_name="T",
+                    database_name="DB",
+                    object_type=ObjectType.TABLE,
+                    state=DeployState.COMPLETED,
+                    message="ok",
+                )
+            ],
+        )
+
+        report_path = generate_report(result, str(tmp_path))
+        html = open(report_path, encoding="utf-8").read()
+        assert "Package Trust Report" in html
+        assert "READY" in html
+        assert "inspect_lint" in html
+
+    def test_trust_section_absent_when_no_build_json(self, tmp_path):
+        """When ships.build.json is absent the section is silently omitted."""
+        from database_package_deployer.report import generate_report
+
+        result = PackageDeployResult(
+            deployment_id="deploy_20260528_130000",
+            manifest_path=str(tmp_path / "ships.manifest.json"),
+            total=0,
+            completed=0,
+            results=[],
+        )
+
+        report_path = generate_report(result, str(tmp_path))
+        html = open(report_path, encoding="utf-8").read()
+        assert "Package Trust Report" not in html

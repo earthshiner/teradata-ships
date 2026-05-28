@@ -2429,7 +2429,10 @@ def _deploy_table(
     qn = parsed.qualified_name
 
     # -- Check existence --
-    exists = _object_exists(cursor, db, tbl, "T")
+    # Check for both regular (TableKind="T") and NoPI (TableKind="O") tables.
+    # Without "O", NoPI tables are invisible to the existence check, causing
+    # IDEMPOTENT_DEPLOY to skip the DROP and fail with Error 3803 on CREATE.
+    exists = _object_exists(cursor, db, tbl, ("T", "O"))
 
     if not exists:
         if dry_run:
@@ -3456,7 +3459,7 @@ def _rollback_single(
 
 def _rollback_table(cursor, db, tbl, backup_name, qualified_name, manifest):
     """Roll back a table: drop new, rename backup to original."""
-    original_exists = _object_exists(cursor, db, tbl, "T")
+    original_exists = _object_exists(cursor, db, tbl, ("T", "O"))
     backup_exists = (
         _object_exists(cursor, db, backup_name, "T") if backup_name else False
     )
@@ -3490,7 +3493,7 @@ def _reconcile_table_state(cursor, qualified_name, record, manifest):
     db, tbl = parts[0], parts[1]
     backup_name = record.get("backup_table")
 
-    original_exists = _object_exists(cursor, db, tbl, "T")
+    original_exists = _object_exists(cursor, db, tbl, ("T", "O"))
     backup_exists = (
         _object_exists(cursor, db, backup_name, "T") if backup_name else False
     )
@@ -3702,17 +3705,37 @@ def _build_redeploy_checker(manifest):
 
 
 def _object_exists(
-    cursor, database_name: str, object_name: str, table_kind: str
+    cursor, database_name: str, object_name: str, table_kind
 ) -> bool:
-    """Check if an object exists in DBC.TablesV by TableKind."""
+    """Check if an object exists in DBC.TablesV by TableKind.
+
+    Args:
+        table_kind: A single TableKind code string (e.g. ``'V'`` for views)
+                    or a tuple of codes (e.g. ``('T', 'O')`` for tables,
+                    which covers both regular PI tables and NoPI tables).
+                    Teradata stores NoPI tables as TableKind ``'O'``, not
+                    ``'T'`` — callers that check for tables must pass both
+                    or they will miss NoPI tables and treat them as non-existent,
+                    causing IDEMPOTENT_DEPLOY to skip the DROP and fail with
+                    Error 3803 on the subsequent CREATE.
+    """
     if cursor is None:
         return False  # Dry-run without connection — assume not exists
     try:
-        cursor.execute(
-            "SELECT 1 FROM DBC.TablesV "
-            "WHERE DatabaseName = ? AND TableName = ? AND TableKind = ?",
-            [database_name, object_name, table_kind],
-        )
+        if isinstance(table_kind, (list, tuple)):
+            placeholders = ", ".join("?" * len(table_kind))
+            cursor.execute(
+                f"SELECT 1 FROM DBC.TablesV "
+                f"WHERE DatabaseName = ? AND TableName = ? "
+                f"AND TableKind IN ({placeholders})",
+                [database_name, object_name, *table_kind],
+            )
+        else:
+            cursor.execute(
+                "SELECT 1 FROM DBC.TablesV "
+                "WHERE DatabaseName = ? AND TableName = ? AND TableKind = ?",
+                [database_name, object_name, table_kind],
+            )
         return cursor.fetchone() is not None
     except Exception:
         return False

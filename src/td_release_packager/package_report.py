@@ -33,6 +33,12 @@ import re
 from typing import Dict, List, Optional, Tuple
 
 from td_release_packager.trust import TRUST_PASS, TRUST_WARN
+from td_release_packager.report_viewer import (
+    safe_viewer_filename as _safe_viewer_filename,
+    source_viewer_html as _source_viewer_html,
+    SIGNAL_EXPLANATIONS as _SIGNAL_EXPLANATIONS,
+    signal_name_cell as _signal_name_cell_shared,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -461,14 +467,101 @@ def _truncated(value: object, max_len: int = 28) -> str:
     return text[: max_len - 1] + "…"
 
 
-def _file_link(record: Dict) -> str:
-    """Return a package-relative hyperlink for a payload file."""
+def _file_link(record: Dict, viewer_links: Optional[Dict[str, str]] = None) -> str:
+    """Return a hyperlink for a payload file.
+
+    When ``viewer_links`` contains a pre-generated syntax-highlighted
+    viewer page for this record's path, the link points at that page
+    instead of the raw payload file.  This gives the same click-to-view
+    experience as the deploy report.
+
+    Args:
+        record:       A record dict from ``_scan_payload``.
+        viewer_links: Optional mapping of package-relative payload path
+                      to viewer-page href, as returned by
+                      ``_write_package_viewers``.  When ``None`` (or
+                      when the path is not in the map) the link falls
+                      back to the raw payload file.
+
+    Returns:
+        An HTML ``<a>`` element string.
+    """
     path = record.get("path") or record.get("file", "")
     label = record.get("file", path)
+    norm_path = path.replace("\\", "/").lstrip("./")
+    href = (viewer_links or {}).get(norm_path) or (viewer_links or {}).get(path)
+    if href is None:
+        href = path
     return (
-        f'<a href="{_a(path)}" title="{_a(path)}" '
+        f'<a href="{_a(href)}" title="{_a(path)}" '
         f'style="color:#0D6EFD;text-decoration:none">{_h(label)}</a>'
     )
+
+
+def _write_package_viewers(
+    pkg_dir: str,
+    records: List[Dict],
+) -> Dict[str, str]:
+    """Write syntax-highlighted viewer pages for every payload script.
+
+    The viewer pages are standalone HTML files written into a hidden
+    sub-directory beside the package report so the package remains
+    self-contained.  The directory name mirrors the convention used by
+    the deploy report so the two report types look and behave
+    consistently.
+
+    Args:
+        pkg_dir: Package root directory (the directory that contains the
+                 ``payload/`` tree and ``package_report.html``).
+        records: Payload records from ``_scan_payload``.  Each record
+                 must contain ``path`` (package-relative payload path)
+                 and the file content is re-read from disk via that path.
+
+    Returns:
+        Mapping of normalised package-relative payload path to the
+        report-relative href of the corresponding viewer page.  Keys
+        use forward slashes and have any leading ``./`` stripped so they
+        match the form used in ``_file_link``.  Returns an empty dict
+        when no viewers could be written.
+    """
+    viewer_dir_name = ".package_report_code"
+    viewer_dir = os.path.join(pkg_dir, viewer_dir_name)
+    links: Dict[str, str] = {}
+
+    for index, record in enumerate(records, 1):
+        raw_path = record.get("path", "")
+        if not raw_path:
+            continue
+        norm_path = raw_path.replace("\\", "/").lstrip("./")
+        abs_path = os.path.join(pkg_dir, norm_path)
+        try:
+            with open(abs_path, encoding="utf-8", errors="replace") as fh:
+                content = fh.read()
+        except OSError:
+            # File unreadable — skip; the raw payload link is the fallback.
+            continue
+
+        os.makedirs(viewer_dir, exist_ok=True)
+        viewer_name = _safe_viewer_filename(norm_path, index)
+        viewer_path = os.path.join(viewer_dir, viewer_name)
+        html = _source_viewer_html(
+            title=f"Source: {norm_path}",
+            packaged_path=norm_path,
+            source_path=record.get("file", norm_path),
+            content=content,
+        )
+        try:
+            with open(viewer_path, "w", encoding="utf-8") as fh:
+                fh.write(html)
+        except OSError as exc:
+            logger.warning(
+                "Could not write viewer page for %s: %s", norm_path, exc
+            )
+            continue
+
+        links[norm_path] = f"{viewer_dir_name}/{viewer_name}"
+
+    return links
 
 
 def _normalise_issue_path(value: object) -> str:
@@ -550,8 +643,21 @@ def _package_report_label(manifest_dict: dict) -> str:
     return "Package Report"
 
 
-def _objects_tab(records: List[Dict], trust: Optional[dict] = None) -> str:
-    """Filterable object inventory table."""
+def _objects_tab(
+    records: List[Dict],
+    trust: Optional[dict] = None,
+    viewer_links: Optional[Dict[str, str]] = None,
+) -> str:
+    """Filterable object inventory table.
+
+    Args:
+        records:      Payload records from ``_scan_payload``.
+        trust:        Trust report dict from the build manifest, used to
+                      flag objects with blocking trust issues.
+        viewer_links: Optional mapping returned by ``_write_package_viewers``.
+                      When supplied, each file link opens a syntax-highlighted
+                      viewer page rather than the raw payload file.
+    """
     type_set = sorted({r["type"] for r in records})
     issue_map = _trust_issue_map(trust or {})
 
@@ -567,7 +673,7 @@ def _objects_tab(records: List[Dict], trust: Optional[dict] = None) -> str:
         f"<td>{_type_badge(r['type'])}</td>"
         f"<td>{_h(r['phase'])}</td>"
         f"<td>{'Wave ' + str(r['wave']) if r['wave'] else '—'}</td>"
-        f"<td style='color:#6C757D;font-size:12px'>{_file_link(r)}</td>"
+        f"<td style='color:#6C757D;font-size:12px'>{_file_link(r, viewer_links)}</td>"
         "</tr>"
         for r in records
     )
@@ -844,8 +950,26 @@ def _waves_tab(records: List[Dict]) -> str:
     )
 
 
+
+def _signal_name_cell(name: str) -> str:
+    """Render a trust signal name as a collapsible explanation block.
+
+    Delegates to :func:`report_viewer.signal_name_cell` using this
+    module's brand colour constants so the package report and the deploy
+    report share identical signal explanations from a single source of truth.
+
+    Args:
+        name: The signal key, e.g. ``"inspect_lint"``.
+
+    Returns:
+        An HTML string for use inside a ``<td>`` element.
+    """
+    return _signal_name_cell_shared(name, navy=_NAVY, orange=_ORANGE)
+
+
+
 def _trust_tab(trust: dict) -> str:
-    """Trust Report signals table."""
+    """Trust Report signals table with expandable signal explanations."""
     label = trust.get("label", "UNKNOWN")
     signals = trust.get("signals", {})
     bg, fg = _trust_label_style(label)
@@ -888,7 +1012,7 @@ def _trust_tab(trust: dict) -> str:
 
         rows += (
             f"<tr>"
-            f"<td style='padding:10px 12px;font-family:monospace;font-size:13px'>{name}</td>"
+            f"<td style='padding:10px 12px;vertical-align:top'>{_signal_name_cell(name)}</td>"
             f"<td style='padding:10px 12px'>{icon} {status}</td>"
             f"<td style='padding:10px 12px;font-size:13px'>{detail}</td>"
             "</tr>"
@@ -898,8 +1022,15 @@ def _trust_tab(trust: dict) -> str:
         rows = '<tr><td colspan="3" style="padding:16px;color:#6C757D">No signals recorded.</td></tr>'
 
     return f"""
+<style>
+/* Hide the native details marker — we supply our own triangle span. */
+#trust-signals-table details > summary {{ list-style: none; }}
+#trust-signals-table details > summary::-webkit-details-marker {{ display: none; }}
+/* Rotate our triangle when the details element is open. */
+#trust-signals-table details[open] > summary > span:first-child {{ transform: rotate(90deg); display: inline-block; }}
+</style>
 {label_html}
-<table style="width:100%;border-collapse:collapse;font-size:14px">
+<table id="trust-signals-table" style="width:100%;border-collapse:collapse;font-size:14px">
   <thead>
     <tr style="background:{_NAVY};color:{_WHITE}">
       <th style="padding:8px 12px;text-align:left">Signal</th>
@@ -1036,6 +1167,7 @@ def generate_package_report(pkg_dir: str, manifest_dict: dict) -> str:
     """
     records = _scan_payload(pkg_dir)
     trust = manifest_dict.get("trust", {})
+    viewer_links = _write_package_viewers(pkg_dir, records)
 
     pkg_name = manifest_dict.get("package_name", "Package")
     report_label = _package_report_label(manifest_dict)
@@ -1151,7 +1283,7 @@ pre {{ white-space: pre-wrap; word-break: break-all; }}
 </div>
 
 <div id="tab-objects" class="tab-pane card">
-{_objects_tab(records, trust)}
+{_objects_tab(records, trust, viewer_links)}
 </div>
 
 <div id="tab-waves" class="tab-pane card">

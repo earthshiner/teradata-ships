@@ -218,6 +218,13 @@ def check_deployer_privileges(
 
     created_upper = {db.upper() for db in created_databases}
 
+    # Track databases that contain at least one IDEMPOTENT_DEPLOY table —
+    # those require DROP TABLE even if the CREATE right is sufficient for
+    # SKIP_IF_EXISTS objects.  A missing DT on an IDEMPOTENT_DEPLOY table
+    # causes Error 3803 (table already exists) at runtime because the
+    # deployer cannot drop the old table before recreating it.
+    idempotent_table_dbs: Set[str] = set()
+
     for parsed in parsed_ddls:
         db_name = parsed.database_name
         obj_type = (
@@ -241,6 +248,17 @@ def check_deployer_privileges(
         if grant_kw:
             db_requirements[db_name].add(grant_kw)
             db_object_counts[db_name][obj_type] += 1
+
+        # Record databases with IDEMPOTENT_DEPLOY tables so we can verify
+        # DT is granted even when the deploy strategy implies it is needed.
+        deploy_strategy = getattr(parsed, "deploy_strategy", None)
+        strategy_str = (
+            deploy_strategy.value
+            if hasattr(deploy_strategy, "value")
+            else str(deploy_strategy or "")
+        )
+        if obj_type == "TABLE" and "IDEMPOTENT" in strategy_str.upper():
+            idempotent_table_dbs.add(db_name)
 
     if not db_requirements:
         logger.info("No database-scoped objects to check privileges for.")
@@ -278,6 +296,22 @@ def check_deployer_privileges(
 
         # Compute delta
         missing_codes = needed_codes - existing_codes
+
+        # Extra check: if this database has IDEMPOTENT_DEPLOY tables,
+        # DROP TABLE (DT) is unconditionally required — the deployer must
+        # drop the existing table before recreating it.  CT alone is
+        # insufficient and will cause Error 3803 at runtime.
+        if db_name in idempotent_table_dbs and "DT" not in existing_codes:
+            missing_codes.add("DT")
+            logger.warning(
+                "Database '%s' has IDEMPOTENT_DEPLOY tables but deploying "
+                "user '%s' does not hold DROP TABLE (DT) — adding to "
+                "missing privileges. Without DT the deployer cannot replace "
+                "existing tables and will fail with Error 3803.",
+                db_name,
+                result.user,
+            )
+
         if missing_codes:
             missing_by_db[db_name] = missing_codes
 
@@ -387,15 +421,16 @@ def _get_user_rights(
     user_name: str,
 ) -> Set[str]:
     """
-    Query existing access rights for a user on a database.
+    Query all effective access rights for a user on a database.
 
-    Returns the set of AccessRight codes (e.g. {'CT', 'DT', 'CV'})
-    that the user holds on the specified database.
+    Combines direct user grants (DBC.AllRightsV) with rights inherited
+    via roles (DBC.RoleRightsV joined through DBC.RoleMembersV).
+    Both sources are needed because a deploying service account commonly
+    holds DDL rights through a role rather than as direct database grants.
 
-    Falls back to an empty set if the query fails (e.g. no
-    SELECT on DBC.AllRightsV), which causes the privilege check
-    to report all rights as missing — a safe default that
-    results in the full prerequisite script being generated.
+    Falls back to an empty set if both queries fail (e.g. no SELECT on
+    DBC views), which causes the privilege check to report all rights as
+    missing — a safe default that generates the full prerequisite script.
 
     Args:
         cursor:         Active Teradata cursor.
@@ -403,8 +438,11 @@ def _get_user_rights(
         user_name:      Deploying user.
 
     Returns:
-        Set of AccessRight code strings.
+        Set of AccessRight code strings combining direct and role grants.
     """
+    rights: Set[str] = set()
+
+    # -- Direct grants on the database --
     try:
         cursor.execute(
             "SELECT AccessRight "
@@ -415,16 +453,50 @@ def _get_user_rights(
             [database_name, user_name],
         )
         rows = cursor.fetchall()
-        return {row[0].strip() for row in rows if row and row[0]}
+        rights.update(row[0].strip() for row in rows if row and row[0])
     except Exception as e:
         logger.warning(
-            "Could not query rights for '%s' on '%s': %s — "
-            "assuming no rights (will generate prerequisite script).",
+            "Could not query direct rights for '%s' on '%s': %s",
             user_name,
             database_name,
             e,
         )
-        return set()
+
+    # -- Role-based grants on the database --
+    # A deploying service account often holds DDL rights through a role
+    # rather than as direct grants.  DBC.AllRightsV does NOT include
+    # role-inherited rights, so we must also check DBC.RoleRightsV.
+    try:
+        cursor.execute(
+            "SELECT RR.AccessRight "
+            "FROM DBC.RoleRightsV  AS RR "
+            "JOIN DBC.RoleMembersV AS RM "
+            "  ON RM.RoleName = RR.RoleName "
+            "WHERE RR.DatabaseName = ? "
+            "AND   RM.Grantee      = ? "
+            "AND   RR.TableName    = 'All'",
+            [database_name, user_name],
+        )
+        rows = cursor.fetchall()
+        rights.update(row[0].strip() for row in rows if row and row[0])
+    except Exception as e:
+        logger.warning(
+            "Could not query role-based rights for '%s' on '%s': %s — "
+            "role-inherited privileges will not be considered.",
+            user_name,
+            database_name,
+            e,
+        )
+
+    if not rights:
+        logger.warning(
+            "No rights found for '%s' on '%s' (direct or via roles) — "
+            "assuming no rights (will generate prerequisite script).",
+            user_name,
+            database_name,
+        )
+
+    return rights
 
 
 # ---------------------------------------------------------------
