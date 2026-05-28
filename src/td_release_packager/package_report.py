@@ -1714,17 +1714,9 @@ def _deploy_tab(manifest_dict: dict) -> str:
     build_no = manifest_dict.get("build_number", "?")
     env = manifest_dict.get("environment", "?")
     requires = manifest_dict.get("requires", [])
-
-    prereqs_note = ""
-    if requires:
-        prereqs_note = (
-            f'<div style="background:#FFF3CD;border:1px solid #FFC107;'
-            f'border-radius:4px;padding:12px 16px;margin-bottom:20px">'
-            f"<strong>⚠ Deploy the companion archive first</strong><br>"
-            f"This package requires: <code>{'</code>, <code>'.join(requires)}</code><br>"
-            f"Extract and deploy that archive before deploying this one."
-            f"</div>"
-        )
+    release_group = str(manifest_dict.get("release_group") or "").strip()
+    package_filename = str(manifest_dict.get("package_filename") or "").strip()
+    package_dir = package_filename.rsplit(".", 1)[0] if package_filename else pkg_name
 
     def cmd_block(label: str, cmd: str, note: str = "") -> str:
         cmd_id = label.replace(" ", "_").lower()
@@ -1743,9 +1735,70 @@ def _deploy_tab(manifest_dict: dict) -> str:
   </div>
 </div>"""
 
+    def release_group_panel() -> str:
+        """Render release-group deployment guidance for paired packages."""
+        if not requires and not release_group:
+            return ""
+
+        package_list = ""
+        if requires:
+            items = "\n".join(f"<li><code>{_h(name)}</code></li>" for name in requires)
+            package_list = f"""
+<div style="background:#E7F1FF;border:1px solid #9EC5FE;border-radius:6px;
+  padding:14px 18px;margin-top:14px;color:{_NAVY}">
+  <div style="font-size:16px;font-weight:700;margin-bottom:8px">
+    Associated packages — deploy these together
+  </div>
+  <p style="font-size:13px;line-height:1.5;margin-bottom:8px">
+    This package is part of a multi-package release. The following package(s)
+    must be deployed to the same environment before this package will function correctly:
+  </p>
+  <ul style="margin-left:20px;font-size:13px;line-height:1.7">{items}</ul>
+  <p style="font-size:13px;color:#555;margin-top:8px">
+    Use <code>deploy_release.py</code> from the release group directory to deploy
+    all packages in the correct order automatically.
+  </p>
+</div>"""
+
+        return f"""
+<div style="background:{_NAVY};color:{_WHITE};border-radius:6px;
+  padding:22px 24px;margin-bottom:22px">
+  <div style="font-size:12px;font-weight:700;letter-spacing:.08em;
+    color:#8ba4be;text-transform:uppercase;margin-bottom:6px">
+    Recommended — release group deployment
+  </div>
+  <div style="font-size:17px;font-weight:700;margin-bottom:10px">
+    Use <code style="background:rgba(255,255,255,.12);color:{_WHITE};
+      padding:2px 6px;border-radius:4px">deploy_release.py</code>
+    for production deployments
+  </div>
+  <p style="font-size:14px;line-height:1.6;margin-bottom:12px;color:#D7E8F7">
+    This package is part of a release group. <code style="background:rgba(255,255,255,.12);
+    color:{_WHITE};padding:2px 5px;border-radius:4px">deploy_release.py</code>
+    sits alongside all packages in the release group directory and deploys them
+    in the correct sequence automatically: pre-requisites first, then main packages.
+    You do not need to manage package order manually.
+  </p>
+  <p style="font-size:13px;color:#8ba4be;margin-bottom:8px">
+    Run from the release group directory{f" ({_h(release_group)})" if release_group else ""}:
+  </p>
+  {cmd_block(
+      "Release group deployment (recommended)",
+      "python deploy_release.py --host &lt;host&gt; --user &lt;user&gt;",
+      "Deploys all packages in this release group in dependency order.",
+  )}
+</div>
+<div style="font-weight:700;margin-bottom:4px">Single-package commands</div>
+<p style="font-size:13px;color:#666;margin-bottom:14px">
+  Run these from inside the extracted package directory
+  (<code>{_h(package_dir)}</code>). Use them for inspection, troubleshooting,
+  or when deploying a single package in isolation.
+</p>
+{package_list}
+"""
+
     blocks = ""
-    if prereqs_note:
-        blocks += prereqs_note
+    blocks += release_group_panel()
 
     blocks += cmd_block(
         "Dry run (recommended first)",

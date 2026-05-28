@@ -118,6 +118,35 @@ class TestLifecycle:
         assert result.passed
         assert (_dcl_dir(project) / "{{DOM_V}}.dcl").exists()
 
+    def test_fix_ignores_resolved_downstream_copies(self, project):
+        """--fix-grants writes DCL from tokenised payload, not .ships copies."""
+        _add_view(
+            project,
+            "{{DB_DOMAIN_V}}.Agent_Current.viw",
+            _make_view_ddl("{{DB_DOMAIN_V}}", "{{DB_DOMAIN_T}}"),
+        )
+        resolved_copy = (
+            project
+            / ".ships"
+            / "harvest"
+            / "by_database"
+            / "DB_DOMAIN_V"
+            / "views"
+            / "CallCentre_DOM_STD_V.Agent_Current.viw"
+        )
+        resolved_copy.parent.mkdir(parents=True, exist_ok=True)
+        resolved_copy.write_text(
+            _make_view_ddl("CallCentre_DOM_STD_V", "CallCentre_DOM_STD_T"),
+            encoding="utf-8",
+        )
+
+        result, files_written = fix_grants(project)
+
+        assert files_written == 1
+        assert result.passed
+        assert (_dcl_dir(project) / "{{DB_DOMAIN_V}}.dcl").exists()
+        assert not (_dcl_dir(project) / "CallCentre_DOM_STD_V.dcl").exists()
+
     def test_validate_after_fix_is_consistent(self, project):
         """Re-validate after fix — clean state."""
         _add_view(

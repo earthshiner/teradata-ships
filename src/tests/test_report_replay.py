@@ -400,6 +400,60 @@ class TestDeploymentReportSourceLinks:
         assert '<span class="sql-keyword">CREATE</span>' in html
         assert "domain/views/BadView.viw" in html
 
+    def test_source_viewer_filename_is_shortened_for_long_dml_paths(self, tmp_path):
+        logs = tmp_path / "logs"
+        final_path = (
+            "04_dml/"
+            "CallCentre_MEM_STD_T.CallCentre_naming_convention_decision.multi_table.dml"
+        )
+        payload_file = tmp_path / "payload" / final_path
+        logs.mkdir()
+        payload_file.parent.mkdir(parents=True)
+        payload_file.write_text(
+            "UPDATE CallCentre_MEM_STD_T.Module_Registry SET deployment_status = 'DEPLOYED';",
+            encoding="utf-8",
+        )
+        provenance = ProvenanceDocument(version=2)
+        chain = ProvenanceChain()
+        chain.add(
+            Stage(
+                stage="source",
+                path="DML/module_registry_seed.dml",
+                status=Status.APPLIED,
+            )
+        )
+        chain.add(
+            Stage(
+                stage="eponymous",
+                path="DML/module_registry_seed.dml",
+                status=Status.SKIPPED,
+                note="test fixture",
+            )
+        )
+        chain.add(
+            Stage(
+                stage="token_resolved",
+                path="DML/module_registry_seed.dml",
+                status=Status.SKIPPED,
+                note="test fixture",
+            )
+        )
+        chain.add(
+            Stage(
+                stage="package",
+                path=final_path,
+                status=Status.APPLIED,
+            )
+        )
+        provenance.add_chain(chain)
+
+        links = _write_source_viewers(str(logs), "deploy_20260528_033054", provenance)
+
+        href = links[final_path]
+        viewer_name = href.rsplit("/", 1)[-1]
+        assert len(viewer_name) < 96
+        assert (logs / href).is_file()
+
 
 # ---------------------------------------------------------------
 # _html_package_trust and _load_package_trust
