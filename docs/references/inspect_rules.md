@@ -18,6 +18,7 @@ Rules are configured via `inspect.conf` in the project root.
 | `type_suffix`              | ERROR            | Object names must not carry type suffixes (`_V`, `_T`, `VW_`, `SP_`, etc.). |
 | `ddl_terminator`           | ERROR            | Every DDL statement must terminate with a semi-colon (`;`). Missing terminators make statement boundaries ambiguous for deployment scripting and downstream agents. |
 | `zero_tokens`              | ERROR            | Every deployable DDL/DML object must have a database qualifier (`Database.Object` or `{{TOKEN}}.Object`). Files with no qualifier cannot be tokenised by SHIPS and cannot be safely promoted across environments. |
+| `comment_length`           | ERROR            | The text body of a `COMMENT ON … IS '…'` statement must not exceed 254 characters. Teradata raises Error 5550 ("Comment string is longer than permitted") at deploy time when this limit is breached. Applies to `.cmt` files. |
 
 ---
 

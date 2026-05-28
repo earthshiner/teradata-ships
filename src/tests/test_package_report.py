@@ -20,6 +20,7 @@ from pathlib import Path
 
 
 from td_release_packager.package_report import (
+    _file_link,
     _objects_tab,
     _parse_waves_txt,
     _scan_payload,
@@ -27,6 +28,7 @@ from td_release_packager.package_report import (
     _summary_tab,
     _trust_tab,
     _waves_tab,
+    _write_package_viewers,
     _deploy_tab,
     generate_package_report,
 )
@@ -467,6 +469,144 @@ class TestTrustTab:
 
 
 # ---------------------------------------------------------------
+# Signal name explanations
+# ---------------------------------------------------------------
+
+
+class TestSignalExplanations:
+    """Tests for the expandable signal-name explanation cells.
+
+    Covers ``_signal_name_cell`` directly and the integration through
+    ``_trust_tab``.
+    """
+
+    # -- _signal_name_cell unit tests --
+
+    def test_known_signals_render_as_details_element(self):
+        from td_release_packager.package_report import _signal_name_cell
+
+        for sig in (
+            "inspect_lint",
+            "inspect_token_format",
+            "inspect_grants",
+            "provenance_complete",
+            "build_reproducible",
+        ):
+            html = _signal_name_cell(sig)
+            assert "<details" in html, f"No <details> for {sig}"
+            assert "<summary" in html, f"No <summary> for {sig}"
+            assert sig in html, f"Signal name missing from cell for {sig}"
+
+    def test_unknown_signal_degrades_to_plain_text(self):
+        from td_release_packager.package_report import _signal_name_cell
+
+        html = _signal_name_cell("some_future_signal")
+        assert "<details" not in html
+        assert "some_future_signal" in html
+
+    def test_inspect_lint_explanation_contains_expected_concepts(self):
+        from td_release_packager.package_report import _signal_name_cell
+
+        html = _signal_name_cell("inspect_lint")
+        assert "Coding Discipline" in html
+        assert "If this fails" in html
+
+    def test_inspect_token_format_explanation_references_token_syntax(self):
+        from td_release_packager.package_report import _signal_name_cell
+
+        html = _signal_name_cell("inspect_token_format")
+        assert "{{TOKEN}}" in html or "TOKEN" in html
+        assert "If this fails" in html
+
+    def test_inspect_grants_explanation_mentions_dcl(self):
+        from td_release_packager.package_report import _signal_name_cell
+
+        html = _signal_name_cell("inspect_grants")
+        assert "GRANT" in html or "DCL" in html
+        assert "If this fails" in html
+
+    def test_provenance_complete_explanation_mentions_provenance_json(self):
+        from td_release_packager.package_report import _signal_name_cell
+
+        html = _signal_name_cell("provenance_complete")
+        assert "ships.provenance.json" in html
+        assert "If this fails" in html
+
+    def test_build_reproducible_explanation_mentions_dirty_tree(self):
+        from td_release_packager.package_report import _signal_name_cell
+
+        html = _signal_name_cell("build_reproducible")
+        assert "allow-dirty" in html or "dirty" in html
+        assert "If this fails" in html
+
+    def test_signal_name_cell_escapes_html(self):
+        from td_release_packager.package_report import _signal_name_cell
+
+        # Injects a signal name with HTML characters — must not render raw tags.
+        html = _signal_name_cell("<script>alert(1)</script>")
+        assert "<script>" not in html
+
+    # -- _trust_tab integration --
+
+    def test_trust_tab_renders_details_for_all_known_signals(self):
+        trust = {
+            "label": "READY",
+            "signals": {
+                "inspect_lint": {"status": "pass", "message": "No violations"},
+                "inspect_token_format": {"status": "pass", "message": "Clean"},
+                "inspect_grants": {"status": "pass", "message": "Clean"},
+                "provenance_complete": {"status": "pass", "message": "Present"},
+                "build_reproducible": {"status": "pass", "message": "Clean tree"},
+            },
+        }
+        html = _trust_tab(trust)
+        assert html.count("<details") == 5
+
+    def test_trust_tab_unknown_signal_has_no_details(self):
+        trust = {
+            "label": "READY",
+            "signals": {
+                "unknown_new_signal": {"status": "pass", "message": "ok"},
+            },
+        }
+        html = _trust_tab(trust)
+        assert "<details" not in html
+        assert "unknown_new_signal" in html
+
+    def test_trust_tab_includes_table_id_for_css_scoping(self):
+        html = _trust_tab({"label": "READY", "signals": {}})
+        assert "trust-signals-table" in html
+
+    def test_trust_tab_css_hides_native_details_marker(self):
+        html = _trust_tab({"label": "READY", "signals": {}})
+        assert "list-style: none" in html or "list-style:none" in html
+
+    def test_trust_tab_short_title_present_in_expansion(self):
+        trust = {
+            "label": "READY",
+            "signals": {
+                "inspect_lint": {"status": "pass", "message": "No violations"},
+            },
+        }
+        html = _trust_tab(trust)
+        assert "Coding Discipline lint" in html
+
+    def test_trust_tab_if_this_fails_guidance_present(self):
+        trust = {
+            "label": "BLOCKED",
+            "signals": {
+                "inspect_grants": {
+                    "status": "fail",
+                    "message": "Grant drift: 1 error",
+                    "issues": ["DB.table: undeclared grant"],
+                },
+            },
+        }
+        html = _trust_tab(trust)
+        assert "If this fails" in html
+
+
+# ---------------------------------------------------------------
 # _deploy_tab
 # ---------------------------------------------------------------
 
@@ -598,3 +738,335 @@ class TestGeneratePackageReport:
         assert report_entries, (
             f"package_report.html not found in archive. Files: {names[:20]}"
         )
+
+
+# ---------------------------------------------------------------
+# report_viewer — shared SQL highlighting helpers
+# ---------------------------------------------------------------
+
+
+class TestReportViewer:
+    """Tests for the shared SQL syntax-highlighting module.
+
+    Verifies that ``highlight_sql`` and ``source_viewer_html`` produce
+    correct output independently of either report module.
+    """
+
+    def test_highlight_sql_wraps_keywords(self):
+        from td_release_packager.report_viewer import highlight_sql
+
+        result = highlight_sql("CREATE TABLE DB.T (Id INTEGER);")
+        assert '<span class="sql-keyword">CREATE</span>' in result
+        assert '<span class="sql-keyword">TABLE</span>' in result
+
+    def test_highlight_sql_wraps_string_literal(self):
+        from td_release_packager.report_viewer import highlight_sql
+
+        result = highlight_sql("COMMENT ON TABLE T IS 'hello world';")
+        assert '<span class="sql-string">&#x27;hello world&#x27;</span>' in result
+
+    def test_highlight_sql_wraps_line_comment(self):
+        from td_release_packager.report_viewer import highlight_sql
+
+        result = highlight_sql("-- this is a comment\nSELECT 1;")
+        assert '<span class="sql-comment">-- this is a comment</span>' in result
+
+    def test_highlight_sql_wraps_block_comment(self):
+        from td_release_packager.report_viewer import highlight_sql
+
+        result = highlight_sql("/* block */ SELECT 1;")
+        assert '<span class="sql-comment">/* block */</span>' in result
+
+    def test_highlight_sql_does_not_match_keyword_inside_string(self):
+        from td_release_packager.report_viewer import highlight_sql
+
+        # The word CREATE inside a string literal must NOT be wrapped as a keyword.
+        result = highlight_sql("IS 'CREATE TABLE foo';")
+        # The string span wraps the whole literal — no nested keyword span inside it.
+        assert "sql-string" in result
+        # There should be exactly zero keyword spans (CREATE is inside the literal).
+        assert result.count('class="sql-keyword"') == 0
+
+    def test_highlight_sql_escapes_html_in_plain_text(self):
+        from td_release_packager.report_viewer import highlight_sql
+
+        result = highlight_sql("a < b AND b > c")
+        assert "&lt;" in result
+        assert "&gt;" in result
+
+    def test_source_viewer_html_is_complete_document(self):
+        from td_release_packager.report_viewer import source_viewer_html
+
+        html = source_viewer_html(
+            title="Test file",
+            packaged_path="payload/03_ddl/tables/DB.T.tbl",
+            source_path="C:/SCM/project/source/DB.T.tbl",
+            content="CREATE MULTISET TABLE DB.T (Id INTEGER);",
+        )
+        assert "<!DOCTYPE html>" in html
+        assert "DB.T.tbl" in html
+        assert '<span class="sql-keyword">CREATE</span>' in html
+        # Metadata lines present
+        assert "payload/03_ddl/tables/DB.T.tbl" in html
+        assert "C:/SCM/project/source/DB.T.tbl" in html
+
+    def test_source_viewer_html_escapes_title(self):
+        from td_release_packager.report_viewer import source_viewer_html
+
+        html = source_viewer_html(
+            title="<script>alert(1)</script>",
+            packaged_path="payload/x.tbl",
+            source_path="x.tbl",
+            content="SELECT 1;",
+        )
+        assert "<script>" not in html
+        assert "&lt;script&gt;" in html
+
+    def test_safe_viewer_filename_basic(self):
+        from td_release_packager.report_viewer import safe_viewer_filename
+
+        name = safe_viewer_filename("03_ddl/tables/DB.Customer.tbl", 1)
+        assert name.startswith("0001_")
+        assert name.endswith(".html")
+        # Path separators replaced with underscores
+        assert "/" not in name
+
+    def test_safe_viewer_filename_zero_padded(self):
+        from td_release_packager.report_viewer import safe_viewer_filename
+
+        assert safe_viewer_filename("x.tbl", 42).startswith("0042_")
+
+    def test_safe_viewer_filename_empty_path_uses_fallback(self):
+        from td_release_packager.report_viewer import safe_viewer_filename
+
+        name = safe_viewer_filename("", 7)
+        assert "source_7" in name
+        assert name.endswith(".html")
+
+
+# ---------------------------------------------------------------
+# _write_package_viewers and viewer link integration
+# ---------------------------------------------------------------
+
+
+class TestWritePackageViewers:
+    """Tests for viewer-page generation in the package report.
+
+    Covers the new ``_write_package_viewers`` function and the updated
+    ``_file_link`` / ``_objects_tab`` integration.
+    """
+
+    def _make_pkg(self, tmp_path: Path, files: list[tuple[str, str]]) -> Path:
+        """Write payload files and return the pkg_dir."""
+        for rel, content in files:
+            p = tmp_path / "payload" / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content, encoding="utf-8")
+        return tmp_path
+
+    # -- _write_package_viewers unit tests --
+
+    def test_writes_viewer_pages_for_each_record(self, tmp_path):
+        # _write_package_viewers imported at top of file
+
+        self._make_pkg(
+            tmp_path,
+            [
+                ("03_ddl/tables/DB.Customer.tbl", "CREATE MULTISET TABLE DB.Customer (Id INTEGER);"),
+                ("03_ddl/views/DB.v_Active.viw", "REPLACE VIEW DB.v_Active AS SELECT 1;"),
+            ],
+        )
+        records = [
+            {"path": "payload/03_ddl/tables/DB.Customer.tbl", "file": "DB.Customer.tbl"},
+            {"path": "payload/03_ddl/views/DB.v_Active.viw", "file": "DB.v_Active.viw"},
+        ]
+        links = _write_package_viewers(str(tmp_path), records)
+
+        assert len(links) == 2
+        # Each link points into the hidden viewer directory
+        for href in links.values():
+            assert href.startswith(".package_report_code/")
+            viewer_path = tmp_path / href.replace("/", os.sep)
+            assert viewer_path.exists(), f"Viewer page not written: {viewer_path}"
+
+    def test_viewer_pages_contain_highlighted_sql(self, tmp_path):
+        # _write_package_viewers imported at top of file
+
+        self._make_pkg(
+            tmp_path,
+            [("03_ddl/tables/DB.T.tbl", "CREATE MULTISET TABLE DB.T (Id INTEGER);")],
+        )
+        records = [{"path": "payload/03_ddl/tables/DB.T.tbl", "file": "DB.T.tbl"}]
+        links = _write_package_viewers(str(tmp_path), records)
+
+        assert links
+        href = next(iter(links.values()))
+        viewer_html = (tmp_path / href.replace("/", os.sep)).read_text(encoding="utf-8")
+        assert '<span class="sql-keyword">CREATE</span>' in viewer_html
+
+    def test_link_keys_use_forward_slashes_no_leading_dot(self, tmp_path):
+        # _write_package_viewers imported at top of file
+
+        self._make_pkg(
+            tmp_path,
+            [("03_ddl/tables/DB.T.tbl", "SELECT 1;")],
+        )
+        records = [{"path": "payload/03_ddl/tables/DB.T.tbl", "file": "DB.T.tbl"}]
+        links = _write_package_viewers(str(tmp_path), records)
+
+        key = next(iter(links.keys()))
+        assert "\\" not in key
+        assert not key.startswith(".")
+        assert not key.startswith("/")
+
+    def test_missing_file_skipped_gracefully(self, tmp_path):
+        # _write_package_viewers imported at top of file
+
+        # Record references a file that does not exist on disk — must not crash.
+        records = [{"path": "payload/03_ddl/tables/NonExistent.tbl", "file": "NonExistent.tbl"}]
+        links = _write_package_viewers(str(tmp_path), records)
+        assert links == {}
+
+    def test_record_with_empty_path_skipped(self, tmp_path):
+        # _write_package_viewers imported at top of file
+
+        records = [{"path": "", "file": ""}]
+        links = _write_package_viewers(str(tmp_path), records)
+        assert links == {}
+
+    # -- _file_link viewer-link integration --
+
+    def test_file_link_uses_viewer_href_when_available(self):
+        # _file_link imported at top of file
+
+        record = {"path": "payload/03_ddl/tables/DB.T.tbl", "file": "DB.T.tbl"}
+        viewer_links = {"payload/03_ddl/tables/DB.T.tbl": ".package_report_code/0001_payload_03_ddl_tables_DB.T.tbl.html"}
+        html = _file_link(record, viewer_links)
+        assert ".package_report_code/" in html
+        # The title attribute still shows the raw payload path for discoverability
+        assert 'title="payload/03_ddl/tables/DB.T.tbl"' in html
+
+    def test_file_link_falls_back_to_raw_path_without_viewer_links(self):
+        # _file_link imported at top of file
+
+        record = {"path": "payload/03_ddl/tables/DB.T.tbl", "file": "DB.T.tbl"}
+        html = _file_link(record)
+        assert 'href="payload/03_ddl/tables/DB.T.tbl"' in html
+
+    def test_file_link_falls_back_when_path_not_in_viewer_links(self):
+        # _file_link imported at top of file
+
+        record = {"path": "payload/03_ddl/tables/DB.T.tbl", "file": "DB.T.tbl"}
+        # Viewer links exist but for a different file
+        viewer_links = {"payload/03_ddl/tables/Other.tbl": ".package_report_code/0001_Other.html"}
+        html = _file_link(record, viewer_links)
+        assert 'href="payload/03_ddl/tables/DB.T.tbl"' in html
+
+    # -- _objects_tab with viewer_links --
+
+    def test_objects_tab_links_point_to_viewer_when_supplied(self):
+        # _objects_tab imported at top of file
+
+        records = [
+            {
+                "name": "DB.Customer",
+                "type": "TABLE",
+                "phase": "DDL",
+                "wave": 1,
+                "file": "DB.Customer.tbl",
+                "path": "payload/03_ddl/tables/DB.Customer.tbl",
+                "ext": ".tbl",
+                "intent": "CREATE_ONLY",
+            }
+        ]
+        viewer_links = {
+            "payload/03_ddl/tables/DB.Customer.tbl": ".package_report_code/0001_DB.Customer.tbl.html"
+        }
+        html = _objects_tab(records, viewer_links=viewer_links)
+        assert ".package_report_code/" in html
+        # Raw path must NOT be the href (it appears in title only)
+        assert 'href="payload/03_ddl/tables/DB.Customer.tbl"' not in html
+
+    def test_objects_tab_falls_back_to_raw_path_without_viewer_links(self):
+        # _objects_tab imported at top of file
+
+        records = [
+            {
+                "name": "DB.Customer",
+                "type": "TABLE",
+                "phase": "DDL",
+                "wave": 1,
+                "file": "DB.Customer.tbl",
+                "path": "payload/03_ddl/tables/DB.Customer.tbl",
+                "ext": ".tbl",
+                "intent": "CREATE_ONLY",
+            }
+        ]
+        html = _objects_tab(records)
+        assert 'href="payload/03_ddl/tables/DB.Customer.tbl"' in html
+
+    # -- generate_package_report end-to-end --
+
+    def test_generate_package_report_writes_viewer_directory(self, tmp_path):
+        _make_payload(
+            tmp_path,
+            [("03_ddl/tables/DB.Customer.tbl", "CREATE MULTISET TABLE DB.Customer (Id INTEGER);")],
+        )
+        generate_package_report(str(tmp_path), _minimal_manifest())
+        viewer_dir = tmp_path / ".package_report_code"
+        assert viewer_dir.is_dir(), "Viewer directory was not created"
+        viewer_files = list(viewer_dir.glob("*.html"))
+        assert viewer_files, "No viewer HTML files written"
+
+    def test_generate_package_report_report_links_to_viewer(self, tmp_path):
+        _make_payload(
+            tmp_path,
+            [("03_ddl/tables/DB.Customer.tbl", "CREATE MULTISET TABLE DB.Customer (Id INTEGER);")],
+        )
+        generate_package_report(str(tmp_path), _minimal_manifest())
+        report_html = (tmp_path / "package_report.html").read_text(encoding="utf-8")
+        assert ".package_report_code/" in report_html
+
+    def test_generate_package_report_viewer_contains_highlighted_sql(self, tmp_path):
+        _make_payload(
+            tmp_path,
+            [("03_ddl/tables/DB.Customer.tbl", "CREATE MULTISET TABLE DB.Customer (Id INTEGER);")],
+        )
+        generate_package_report(str(tmp_path), _minimal_manifest())
+        viewer_dir = tmp_path / ".package_report_code"
+        viewer_file = next(viewer_dir.glob("*.html"))
+        viewer_html = viewer_file.read_text(encoding="utf-8")
+        assert '<span class="sql-keyword">CREATE</span>' in viewer_html
+
+    def test_generate_package_report_viewer_contains_packaged_path_metadata(self, tmp_path):
+        _make_payload(
+            tmp_path,
+            [("03_ddl/tables/DB.Customer.tbl", "CREATE MULTISET TABLE DB.Customer (Id INTEGER);")],
+        )
+        generate_package_report(str(tmp_path), _minimal_manifest())
+        viewer_dir = tmp_path / ".package_report_code"
+        viewer_file = next(viewer_dir.glob("*.html"))
+        viewer_html = viewer_file.read_text(encoding="utf-8")
+        # Packaged path metadata line must be present
+        assert "03_ddl/tables/DB.Customer.tbl" in viewer_html
+
+    def test_generate_package_report_multiple_files_get_separate_viewers(self, tmp_path):
+        _make_payload(
+            tmp_path,
+            [
+                ("03_ddl/tables/DB.T1.tbl", "CREATE MULTISET TABLE DB.T1 (Id INTEGER);"),
+                ("03_ddl/tables/DB.T2.tbl", "CREATE MULTISET TABLE DB.T2 (Id INTEGER);"),
+                ("03_ddl/views/DB.v1.viw", "REPLACE VIEW DB.v1 AS SELECT 1;"),
+            ],
+        )
+        generate_package_report(str(tmp_path), _minimal_manifest())
+        viewer_dir = tmp_path / ".package_report_code"
+        viewer_files = list(viewer_dir.glob("*.html"))
+        assert len(viewer_files) == 3
+
+    def test_generate_package_report_empty_payload_no_viewer_dir(self, tmp_path):
+        # Empty payload — no files to view, so the viewer dir should not be created.
+        (tmp_path / "payload").mkdir()
+        generate_package_report(str(tmp_path), _minimal_manifest())
+        viewer_dir = tmp_path / ".package_report_code"
+        assert not viewer_dir.exists()

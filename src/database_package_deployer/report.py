@@ -29,6 +29,13 @@ from database_package_deployer.models import (
 )
 from database_package_deployer.provenance import ProvenanceChain, ProvenanceDocument
 from database_package_deployer.provenance_renderer import PROVENANCE_CSS, render_chain
+from database_package_deployer.report_viewer import (
+    SQL_KEYWORDS as _SQL_KEYWORDS,
+    highlight_sql as _highlight_sql,
+    safe_viewer_filename as _safe_viewer_filename,
+    source_viewer_html as _source_viewer_html,
+    signal_name_cell as _signal_name_cell,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -100,79 +107,6 @@ _STATE_BADGES = {
     DeployState.MIGRATED: ("Migrated", "#28A745", _WHITE),
 }
 
-_SQL_KEYWORDS = frozenset(
-    {
-        "ABORT",
-        "ADD",
-        "ALTER",
-        "AND",
-        "AS",
-        "BEGIN",
-        "BETWEEN",
-        "BY",
-        "CALL",
-        "CASE",
-        "COLLECT",
-        "COLUMN",
-        "COMMENT",
-        "CREATE",
-        "CURRENT_DATE",
-        "CURRENT_TIMESTAMP",
-        "DATABASE",
-        "DEFAULT",
-        "DELETE",
-        "DROP",
-        "ELSE",
-        "END",
-        "EXECUTE",
-        "EXTERNAL",
-        "FROM",
-        "FUNCTION",
-        "GRANT",
-        "GROUP",
-        "IF",
-        "IN",
-        "INDEX",
-        "INNER",
-        "INSERT",
-        "JOIN",
-        "LEFT",
-        "MACRO",
-        "MERGE",
-        "MULTISET",
-        "NOT",
-        "NULL",
-        "ON",
-        "OR",
-        "ORDER",
-        "OUT",
-        "PROCEDURE",
-        "REPLACE",
-        "REVOKE",
-        "RIGHT",
-        "ROLE",
-        "SELECT",
-        "SET",
-        "TABLE",
-        "THEN",
-        "TO",
-        "TRIGGER",
-        "UPDATE",
-        "USER",
-        "VALUES",
-        "VIEW",
-        "VOLATILE",
-        "WHEN",
-        "WHERE",
-    }
-)
-
-_SQL_TOKEN_RE = re.compile(
-    r"(--[^\r\n]*|/\*.*?\*/|'(?:''|[^'])*'|\b[A-Za-z_][A-Za-z0-9_]*\b)",
-    re.DOTALL,
-)
-
-
 def generate_report(
     result: PackageDeployResult,
     output_dir: str,
@@ -197,7 +131,12 @@ def generate_report(
         output_dir, result.deployment_id, provenance
     )
 
-    html = _build_html(result, provenance, prov_status, source_view_links)
+    # Load the trust report baked into the package at build time.
+    # This lets the DBA see the build-time quality gate result
+    # without having to open the separate package_report.html.
+    package_trust = _load_package_trust(output_dir)
+
+    html = _build_html(result, provenance, prov_status, source_view_links, package_trust)
 
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(html)
@@ -280,11 +219,47 @@ def _load_provenance(pkg_dir: str) -> Tuple[Optional[ProvenanceDocument], str]:
     )
 
 
+def _load_package_trust(pkg_dir: str) -> dict:
+    """Load the trust report from context/ships.build.json.
+
+    Walks up from ``pkg_dir`` looking for the ``context/ships.build.json``
+    file, using the same ancestor-search strategy as ``_load_provenance``
+    so the function is robust whether the report is written into the
+    package root or into a ``logs/`` subdirectory.
+
+    Args:
+        pkg_dir: Directory the deployer is using for its outputs.
+
+    Returns:
+        The ``trust`` dict from the manifest, or an empty dict when
+        the file is absent, unreadable, or contains no trust block.
+    """
+    import json
+
+    candidate = os.path.abspath(pkg_dir)
+    for _ in range(6):
+        build_json = os.path.join(candidate, "context", "ships.build.json")
+        if os.path.isfile(build_json):
+            try:
+                with open(build_json, encoding="utf-8") as fh:
+                    data = json.load(fh)
+                trust = data.get("trust", {})
+                return trust if isinstance(trust, dict) else {}
+            except Exception:
+                return {}
+        parent = os.path.dirname(candidate)
+        if parent == candidate:
+            break
+        candidate = parent
+    return {}
+
+
 def _build_html(
     result: PackageDeployResult,
     provenance: Optional[ProvenanceDocument] = None,
     provenance_status: str = "",
     source_view_links: Optional[Dict[str, str]] = None,
+    package_trust: Optional[dict] = None,
 ) -> str:
     """Build the complete HTML report string."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -307,6 +282,7 @@ def _build_html(
         _html_provenance_notice(provenance_status),
         _html_action_items(result, provenance, source_view_links),
         _html_summary(result, mode),
+        _html_package_trust(package_trust or {}),
         _html_preflight(result.preflight_result),
         _html_wave_summary(result),
         _html_object_results(result, provenance, source_view_links),
@@ -647,105 +623,6 @@ def _escape_html(value: str) -> str:
     )
 
 
-def _highlight_sql(source: str) -> str:
-    """Return HTML with simple SQL keyword, comment, and string highlighting."""
-    pieces = []
-    pos = 0
-    for match in _SQL_TOKEN_RE.finditer(source):
-        pieces.append(_escape_html(source[pos : match.start()]))
-        token = match.group(0)
-        escaped = _escape_html(token)
-        upper = token.upper()
-        if token.startswith("--") or token.startswith("/*"):
-            pieces.append(f'<span class="sql-comment">{escaped}</span>')
-        elif token.startswith("'"):
-            pieces.append(f'<span class="sql-string">{escaped}</span>')
-        elif upper in _SQL_KEYWORDS:
-            pieces.append(f'<span class="sql-keyword">{escaped}</span>')
-        else:
-            pieces.append(escaped)
-        pos = match.end()
-    pieces.append(_escape_html(source[pos:]))
-    return "".join(pieces)
-
-
-def _source_viewer_html(
-    *,
-    title: str,
-    packaged_path: str,
-    source_path: str,
-    content: str,
-) -> str:
-    """Build a standalone highlighted source viewer page."""
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>{_escape_html(title)}</title>
-<style>
-body {{
-  margin: 0;
-  background: #F8F9FA;
-  color: #00233C;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}}
-header {{
-  background: #00233C;
-  color: white;
-  padding: 16px 22px;
-  border-bottom: 4px solid #FF5F02;
-}}
-h1 {{
-  margin: 0 0 8px 0;
-  font-size: 18px;
-  font-weight: 700;
-}}
-.meta {{
-  font-family: Consolas, "Courier New", monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  color: #DDEAF3;
-}}
-main {{
-  padding: 18px 22px;
-}}
-pre {{
-  margin: 0;
-  padding: 18px;
-  overflow: auto;
-  background: #FFFFFF;
-  border: 1px solid #DEE2E6;
-  border-radius: 6px;
-  line-height: 1.5;
-  font-family: Consolas, "Courier New", monospace;
-  font-size: 13px;
-  tab-size: 4;
-  white-space: pre;
-}}
-.sql-keyword {{ color: #0D6EFD; font-weight: 700; }}
-.sql-string {{ color: #198754; }}
-.sql-comment {{ color: #6C757D; font-style: italic; }}
-</style>
-</head>
-<body>
-<header>
-<h1>{_escape_html(os.path.basename(packaged_path) or title)}</h1>
-<div class="meta">Package: {_escape_html(packaged_path)}</div>
-<div class="meta">Source: {_escape_html(source_path)}</div>
-</header>
-<main>
-<pre><code>{_highlight_sql(content)}</code></pre>
-</main>
-</body>
-</html>"""
-
-
-def _safe_viewer_filename(final_path: str, index: int) -> str:
-    """Create a filesystem-safe viewer filename for a package path."""
-    stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", final_path.replace("\\", "/")).strip("_")
-    if not stem:
-        stem = f"source_{index}"
-    return f"{index:04d}_{stem}.html"
 
 
 def _write_source_viewers(
@@ -1012,6 +889,150 @@ def _html_action_items(
 
     parts.append("</div>")
     return "\n".join(parts)
+
+
+def _html_package_trust(trust: dict) -> str:
+    """Render the build-time Package Trust Report as a collapsible section.
+
+    Shows the DBA the READY / READY-WITH-CAVEATS / BLOCKED verdict that
+    SHIPS computed at package time, together with per-signal rows and
+    expandable plain-English explanations — exactly the same information
+    that lives in the Trust Report tab of ``package_report.html``, so
+    the DBA does not need to open a separate file.
+
+    The section is wrapped in a ``<details>`` element collapsed by
+    default when the trust label is READY (all signals passed) so it
+    does not crowd the report on successful deployments.  It opens
+    automatically when the label is anything other than READY, because
+    that warrants immediate attention.
+
+    Returns an empty string when the package was built without trust
+    data (e.g. built by a pre-trust version of SHIPS), so the section
+    is simply absent rather than showing a confusing empty table.
+
+    Args:
+        trust: The ``trust`` dict from ``context/ships.build.json``,
+               or an empty dict when unavailable.
+
+    Returns:
+        HTML string, or ``""`` when no trust data is available.
+    """
+    if not trust:
+        return ""
+
+    label = trust.get("label", "")
+    if not label:
+        return ""
+
+    signals = trust.get("signals", {})
+
+    # Colour the label pill using the same palette as the package report.
+    _LABEL_STYLES = {
+        "READY": ("#198754", _WHITE),
+        "READY-WITH-CAVEATS": ("#856404", "#FFF3CD"),
+        "BLOCKED": ("#DC3545", _WHITE),
+    }
+    bg, fg = _LABEL_STYLES.get(label.upper(), ("#6C757D", _WHITE))
+
+    label_pill = (
+        f'<span style="display:inline-block;background:{bg};color:{fg};'
+        f"padding:3px 14px;border-radius:12px;font-size:13px;font-weight:700;"
+        f'letter-spacing:.3px;vertical-align:middle">{_escape_html(label)}</span>'
+    )
+
+    # Build per-signal rows.
+    _ICON = {"pass": "✔", "warn": "⚠", "fail": "✗", "unknown": "?"}
+    _ICON_COLOUR = {
+        "pass": "#28A745",
+        "warn": "#B45309",
+        "fail": "#DC3545",
+        "unknown": "#6C757D",
+    }
+    rows = ""
+    for name, sig in signals.items():
+        if not isinstance(sig, dict):
+            continue
+        status = sig.get("status", "unknown")
+        icon = _ICON.get(status, "?")
+        icon_colour = _ICON_COLOUR.get(status, "#6C757D")
+        message = sig.get("message") or sig.get("detail", "")
+        issues = sig.get("issues", []) or []
+
+        # Detail cell: message + issue list when non-passing.
+        if status == "pass":
+            detail = f"<span style='color:#555;font-size:12px'>{_escape_html(message)}</span>"
+        else:
+            colour = "#B45309" if status == "warn" else "#DC3545"
+            detail = (
+                f"<span style='color:{colour};font-weight:600;font-size:12px'>"
+                f"{_escape_html(message)}</span>"
+            )
+            if issues:
+                items = "".join(
+                    f"<li style='margin-top:3px'>{_escape_html(i)}</li>"
+                    for i in issues
+                )
+                detail += (
+                    f"<ul style='margin:4px 0 0 0;padding-left:16px;"
+                    f"color:{colour};font-size:11px'>{items}</ul>"
+                )
+
+        rows += (
+            f"<tr>"
+            f"<td style='padding:8px 10px;vertical-align:top'>"
+            f"{_signal_name_cell(name)}</td>"
+            f"<td style='padding:8px 10px;white-space:nowrap'>"
+            f"<span style='color:{icon_colour};font-weight:700'>{icon}</span>"
+            f"&nbsp;<span style='font-size:12px'>{_escape_html(status)}</span></td>"
+            f"<td style='padding:8px 10px'>{detail}</td>"
+            f"</tr>"
+        )
+
+    if not rows:
+        rows = (
+            '<tr><td colspan="3" style="padding:12px;color:#6C757D;font-size:13px">'
+            "No signals recorded.</td></tr>"
+        )
+
+    # Auto-open the section when not fully passing so the DBA sees it immediately.
+    open_attr = "" if label.upper() == "READY" else " open"
+
+    return f"""
+<details{open_attr} id="pkg-trust-section" style="margin:0 0 24px 0">
+<summary style="
+  list-style:none;cursor:pointer;user-select:none;
+  display:flex;align-items:center;gap:10px;
+  padding:10px 0 10px 0;
+  border-bottom:2px solid {_ORANGE}">
+  <span style="font-size:16px;font-weight:600;color:{_NAVY}">Package Trust Report</span>
+  {label_pill}
+  <span style="margin-left:auto;font-size:11px;color:#6C757D">
+    (build-time quality gate — click to {'collapse' if label.upper() != 'READY' else 'expand'})
+  </span>
+</summary>
+<style>
+  #pkg-trust-section > summary {{ list-style:none; }}
+  #pkg-trust-section > summary::-webkit-details-marker {{ display:none; }}
+  #pkg-trust-section details[open] > summary > span:first-child {{
+    transform:rotate(90deg); display:inline-block;
+  }}
+</style>
+<div style="margin-top:12px;overflow-x:auto">
+<table style="width:100%;border-collapse:collapse;font-size:13px">
+  <thead>
+    <tr style="background:{_NAVY};color:{_WHITE}">
+      <th style="padding:7px 10px;text-align:left;font-weight:500;
+                 font-size:12px;text-transform:uppercase;letter-spacing:.4px">Signal</th>
+      <th style="padding:7px 10px;text-align:left;font-weight:500;
+                 font-size:12px;text-transform:uppercase;letter-spacing:.4px">Status</th>
+      <th style="padding:7px 10px;text-align:left;font-weight:500;
+                 font-size:12px;text-transform:uppercase;letter-spacing:.4px">Detail</th>
+    </tr>
+  </thead>
+  <tbody>{rows}</tbody>
+</table>
+</div>
+</details>"""
 
 
 def _html_summary(result, mode):
