@@ -424,7 +424,7 @@ def _get_user_rights(
     Query all effective access rights for a user on a database.
 
     Combines direct user grants (DBC.AllRightsV) with rights inherited
-    via roles (DBC.RoleRightsV joined through DBC.RoleMembersV).
+    via roles (DBC.AllRoleRightsV joined through DBC.RoleMembersV).
     Both sources are needed because a deploying service account commonly
     holds DDL rights through a role rather than as direct database grants.
 
@@ -465,11 +465,11 @@ def _get_user_rights(
     # -- Role-based grants on the database --
     # A deploying service account often holds DDL rights through a role
     # rather than as direct grants.  DBC.AllRightsV does NOT include
-    # role-inherited rights, so we must also check DBC.RoleRightsV.
+    # role-inherited rights, so we must also check DBC.AllRoleRightsV.
     try:
         cursor.execute(
             "SELECT RR.AccessRight "
-            "FROM DBC.RoleRightsV  AS RR "
+            "FROM DBC.AllRoleRightsV AS RR "
             "JOIN DBC.RoleMembersV AS RM "
             "  ON RM.RoleName = RR.RoleName "
             "WHERE RR.DatabaseName = ? "

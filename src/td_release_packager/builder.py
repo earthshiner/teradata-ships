@@ -96,9 +96,17 @@ def _package_copy_ignore(_directory: str, names: list[str]) -> set[str]:
     under `__pycache__` can disappear while tests or import machinery are
     running, which makes `shutil.copytree` fail with a transient WinError 3.
     Backup/editor artefacts are equally unsafe to ship because they can expose
-    stale code and confuse downstream agents.
+    stale code and confuse downstream agents. Package report viewer pages are
+    regenerated after cloning, so copying the old hidden viewer directory only
+    adds avoidable Windows filesystem race surface.
     """
-    ignored_names = {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
+    ignored_names = {
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".package_report_code",
+    }
     ignored_suffixes = (
         ".pyc",
         ".pyo",
