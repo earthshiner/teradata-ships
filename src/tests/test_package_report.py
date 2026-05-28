@@ -1070,3 +1070,412 @@ class TestWritePackageViewers:
         generate_package_report(str(tmp_path), _minimal_manifest())
         viewer_dir = tmp_path / ".package_report_code"
         assert not viewer_dir.exists()
+
+
+# ---------------------------------------------------------------
+# _load_build_provenance and _build_provenance_tab
+# ---------------------------------------------------------------
+
+
+class TestBuildProvenanceTab:
+    """Tests for the Build Provenance tab in the package report."""
+
+    def _sample_stages(self):
+        return [
+            {
+                "stage": "harvest",
+                "status": "success",
+                "started_at": "2026-05-28T12:00:00+00:00",
+                "finished_at": "2026-05-28T12:00:03+00:00",
+                "duration_ms": 3100,
+                "inputs": {"source_dir": "/project", "total_files": 22},
+                "outputs": {
+                    "classified": 778,
+                    "unclassified": 10,
+                    "files_placed": 778,
+                    "multiset_injected": 37,
+                    "cleaned": 211,
+                },
+                "decisions": {},
+                "issues": [],
+                "issue_counts": {"error": 0, "warning": 0, "info": 0},
+            },
+            {
+                "stage": "inspect",
+                "status": "warning",
+                "started_at": "2026-05-28T12:00:04+00:00",
+                "finished_at": "2026-05-28T12:00:06+00:00",
+                "duration_ms": 2200,
+                "inputs": {"files_scanned": 45},
+                "outputs": {
+                    "lint_errors": 0,
+                    "lint_warnings": 2,
+                    "files_with_issues": 1,
+                    "overall_passed": True,
+                },
+                "decisions": {},
+                "issues": [
+                    {
+                        "severity": "warning",
+                        "code": "LEADING_COMMA_VIOLATION",
+                        "message": "File uses trailing commas",
+                        "location": "payload/03_ddl/tables/DB.T.tbl",
+                    }
+                ],
+                "issue_counts": {"error": 0, "warning": 1, "info": 0},
+            },
+            {
+                "stage": "analyse",
+                "status": "success",
+                "started_at": "2026-05-28T12:00:07+00:00",
+                "finished_at": "2026-05-28T12:00:08+00:00",
+                "duration_ms": 800,
+                "inputs": {},
+                "outputs": {
+                    "object_count": 153,
+                    "wave_count": 6,
+                    "dependency_count": 42,
+                    "cycle_count": 0,
+                },
+                "decisions": {},
+                "issues": [],
+                "issue_counts": {"error": 0, "warning": 0, "info": 0},
+            },
+        ]
+
+    # -- _load_build_provenance --
+
+    def test_returns_empty_when_no_decisions_json(self, tmp_path):
+        from td_release_packager.package_report import _load_build_provenance
+
+        result = _load_build_provenance(str(tmp_path))
+        assert result == []
+
+    def test_returns_stages_from_latest_run(self, tmp_path):
+        import json
+        from td_release_packager.package_report import _load_build_provenance
+
+        decisions = {
+            "schema_version": 1,
+            "runs": [
+                {
+                    "run_id": "old",
+                    "stages": [{"stage": "harvest", "status": "success"}],
+                },
+                {
+                    "run_id": "latest",
+                    "stages": self._sample_stages(),
+                },
+            ],
+        }
+        (tmp_path / "ships.decisions.json").write_text(
+            json.dumps(decisions), encoding="utf-8"
+        )
+        stages = _load_build_provenance(str(tmp_path))
+        assert len(stages) == 3
+        assert stages[0]["stage"] == "harvest"
+
+    def test_walks_up_from_subdirectory(self, tmp_path):
+        """Decisions file in project root is found when pkg_dir is a subdir."""
+        import json
+        from td_release_packager.package_report import _load_build_provenance
+
+        decisions = {
+            "schema_version": 1,
+            "runs": [{"run_id": "r1", "stages": self._sample_stages()}],
+        }
+        (tmp_path / "ships.decisions.json").write_text(
+            json.dumps(decisions), encoding="utf-8"
+        )
+        subdir = tmp_path / "releases" / "pkg"
+        subdir.mkdir(parents=True)
+        stages = _load_build_provenance(str(subdir))
+        assert len(stages) == 3
+
+    def test_returns_empty_on_corrupt_json(self, tmp_path):
+        from td_release_packager.package_report import _load_build_provenance
+
+        (tmp_path / "ships.decisions.json").write_text("not json", encoding="utf-8")
+        result = _load_build_provenance(str(tmp_path))
+        assert result == []
+
+    def test_returns_empty_when_runs_list_empty(self, tmp_path):
+        import json
+        from td_release_packager.package_report import _load_build_provenance
+
+        decisions = {"schema_version": 1, "runs": []}
+        (tmp_path / "ships.decisions.json").write_text(
+            json.dumps(decisions), encoding="utf-8"
+        )
+        result = _load_build_provenance(str(tmp_path))
+        assert result == []
+
+    # -- _build_provenance_tab --
+
+    def test_returns_placeholder_when_no_stages(self):
+        from td_release_packager.package_report import _build_provenance_tab
+
+        html = _build_provenance_tab([])
+        assert "ships.decisions.json" in html
+        assert "not available" in html
+
+    def test_all_stage_names_appear(self):
+        from td_release_packager.package_report import _build_provenance_tab
+
+        html = _build_provenance_tab(self._sample_stages())
+        assert "harvest" in html
+        assert "inspect" in html
+        assert "analyse" in html
+
+    def test_status_icons_rendered(self):
+        from td_release_packager.package_report import _build_provenance_tab
+
+        html = _build_provenance_tab(self._sample_stages())
+        # success → ✔, warning → ⚠
+        assert "✔" in html
+        assert "⚠" in html
+
+    def test_issue_counts_shown_for_warning_stage(self):
+        from td_release_packager.package_report import _build_provenance_tab
+
+        html = _build_provenance_tab(self._sample_stages())
+        assert "1 warning" in html
+
+    def test_issue_message_in_detail_panel(self):
+        from td_release_packager.package_report import _build_provenance_tab
+
+        html = _build_provenance_tab(self._sample_stages())
+        assert "LEADING_COMMA_VIOLATION" in html
+        assert "File uses trailing commas" in html
+
+    def test_error_stage_auto_opens(self):
+        from td_release_packager.package_report import _build_provenance_tab
+
+        stages = self._sample_stages()
+        stages[0]["status"] = "error"
+        stages[0]["issue_counts"] = {"error": 1, "warning": 0, "info": 0}
+        stages[0]["issues"] = [
+            {"severity": "error", "code": "E001", "message": "Something failed"}
+        ]
+        html = _build_provenance_tab(stages)
+        # The details element for the error stage must have the open attribute
+        assert "<details open" in html
+
+    def test_key_metrics_rendered_for_harvest(self):
+        from td_release_packager.package_report import _build_provenance_tab
+
+        html = _build_provenance_tab(self._sample_stages())
+        assert "778" in html   # classified count
+        assert "classified" in html
+
+    def test_key_metrics_rendered_for_analyse(self):
+        from td_release_packager.package_report import _build_provenance_tab
+
+        html = _build_provenance_tab(self._sample_stages())
+        assert "153" in html   # object_count
+        assert "6" in html     # wave_count
+
+    def test_zero_noise_metrics_suppressed(self):
+        from td_release_packager.package_report import _build_provenance_tab
+
+        html = _build_provenance_tab(self._sample_stages())
+        # cycle_count=0 and lint_errors=0 should not appear as metrics
+        assert "0 cycles" not in html
+        assert "0 lint errors" not in html
+
+    def test_duration_formatted(self):
+        from td_release_packager.package_report import _build_provenance_tab
+
+        html = _build_provenance_tab(self._sample_stages())
+        # harvest is 3100 ms → "3.1 s"
+        assert "3.1 s" in html
+
+    def test_generate_package_report_includes_provenance_tab(self, tmp_path):
+        """End-to-end: tab button and pane are present in the generated report."""
+        import json
+
+        decisions = {
+            "schema_version": 1,
+            "runs": [{"run_id": "r1", "stages": self._sample_stages()}],
+        }
+        (tmp_path / "ships.decisions.json").write_text(
+            json.dumps(decisions), encoding="utf-8"
+        )
+        _make_payload(
+            tmp_path,
+            [("03_ddl/tables/DB.T.tbl", "CREATE MULTISET TABLE DB.T (Id INTEGER);")],
+        )
+        generate_package_report(str(tmp_path), _minimal_manifest())
+        html = (tmp_path / "package_report.html").read_text(encoding="utf-8")
+
+        assert "tab-provenance" in html
+        assert "Build Provenance" in html
+        assert "harvest" in html
+
+    def test_generate_package_report_provenance_tab_absent_gracefully(self, tmp_path):
+        """No decisions.json → tab is present but shows the placeholder message."""
+        _make_payload(
+            tmp_path,
+            [("03_ddl/tables/DB.T.tbl", "CREATE MULTISET TABLE DB.T (Id INTEGER);")],
+        )
+        generate_package_report(str(tmp_path), _minimal_manifest())
+        html = (tmp_path / "package_report.html").read_text(encoding="utf-8")
+
+        # Tab button still present
+        assert "Build Provenance" in html
+        # Placeholder message visible
+        assert "not available" in html
+
+
+# ---------------------------------------------------------------
+# _guide_tab
+# ---------------------------------------------------------------
+
+
+class TestGuideTab:
+    """Tests for the reader's Guide tab."""
+
+    def _manifest(self, **overrides):
+        m = _minimal_manifest()
+        m.update(overrides)
+        return m
+
+    def _records(self):
+        return [
+            {
+                "name": "DB.Customer",
+                "type": "TABLE",
+                "phase": "DDL",
+                "wave": 1,
+                "file": "DB.Customer.tbl",
+                "path": "payload/03_ddl/tables/DB.Customer.tbl",
+                "ext": ".tbl",
+                "intent": "CREATE_ONLY",
+            },
+            {
+                "name": "DB.v_Active",
+                "type": "VIEW",
+                "phase": "DDL",
+                "wave": 2,
+                "file": "DB.v_Active.viw",
+                "path": "payload/03_ddl/views/DB.v_Active.viw",
+                "ext": ".viw",
+                "intent": "CREATE_ONLY",
+            },
+            {
+                "name": "DB.role",
+                "type": "GRANT",
+                "phase": "DCL",
+                "wave": None,
+                "file": "DB.role.dcl",
+                "path": "payload/02_dcl/DB.role.dcl",
+                "ext": ".dcl",
+                "intent": "GRANT",
+            },
+        ]
+
+    def test_guide_tab_renders_without_crash(self):
+        from td_release_packager.package_report import _guide_tab
+
+        html = _guide_tab(self._manifest(), self._records())
+        assert html
+
+    def test_build_number_appears(self):
+        from td_release_packager.package_report import _guide_tab
+
+        html = _guide_tab(self._manifest(build_number="0042"), self._records())
+        assert "0042" in html
+
+    def test_environment_appears(self):
+        from td_release_packager.package_report import _guide_tab
+
+        html = _guide_tab(self._manifest(environment="PRD"), self._records())
+        assert "PRD" in html
+
+    def test_present_phases_listed(self):
+        from td_release_packager.package_report import _guide_tab
+
+        html = _guide_tab(self._manifest(), self._records())
+        assert "DCL" in html
+        assert "DDL" in html
+
+    def test_wave_count_mentioned_when_waves_present(self):
+        from td_release_packager.package_report import _guide_tab
+
+        html = _guide_tab(self._manifest(), self._records())
+        # 2 waves (wave 1 and 2) should be mentioned
+        assert "2" in html
+        assert "waves" in html
+
+    def test_no_wave_sentence_when_no_waves(self):
+        from td_release_packager.package_report import _guide_tab
+
+        records = [r.copy() for r in self._records()]
+        for r in records:
+            r["wave"] = None
+        html = _guide_tab(self._manifest(), records)
+        # When there are no waves, the specific wave-count sentence must not appear.
+        # The sentence always starts with "The DDL phase is further divided into"
+        assert "further divided into" not in html
+
+    def test_main_package_role_description(self):
+        from td_release_packager.package_report import _guide_tab
+
+        html = _guide_tab(self._manifest(role="main"), self._records())
+        assert "main package" in html
+
+    def test_prereqs_role_description(self):
+        from td_release_packager.package_report import _guide_tab
+
+        html = _guide_tab(self._manifest(role="prereqs"), self._records())
+        assert "pre-requisites package" in html
+
+    def test_five_steps_present(self):
+        from td_release_packager.package_report import _guide_tab
+
+        html = _guide_tab(self._manifest(), self._records())
+        assert "guide-step-num" in html
+        assert html.count("guide-step-num") == 5
+
+    def test_glossary_contains_ships(self):
+        from td_release_packager.package_report import _guide_tab
+
+        html = _guide_tab(self._manifest(), self._records())
+        assert "<dt>SHIPS</dt>" in html
+
+    def test_glossary_contains_wave(self):
+        from td_release_packager.package_report import _guide_tab
+
+        html = _guide_tab(self._manifest(), self._records())
+        assert "<dt>Wave</dt>" in html
+
+    def test_tooltip_data_tip_attributes_present(self):
+        from td_release_packager.package_report import _guide_tab
+
+        html = _guide_tab(self._manifest(), self._records())
+        assert "data-tip=" in html
+
+    def test_guide_tab_in_generate_package_report(self, tmp_path):
+        """End-to-end: Guide tab button and pane appear in the report."""
+        _make_payload(
+            tmp_path,
+            [("03_ddl/tables/DB.T.tbl", "CREATE MULTISET TABLE DB.T (Id INTEGER);")],
+        )
+        generate_package_report(str(tmp_path), _minimal_manifest())
+        html = (tmp_path / "package_report.html").read_text(encoding="utf-8")
+        assert "tab-guide" in html
+        assert "Reader&#x27;s Guide" in html or "Reader's Guide" in html
+        assert "guide-hero" in html
+
+    def test_guide_is_first_active_tab(self, tmp_path):
+        """Guide tab should be the active tab (first) in the generated report."""
+        _make_payload(
+            tmp_path,
+            [("03_ddl/tables/DB.T.tbl", "CREATE MULTISET TABLE DB.T (Id INTEGER);")],
+        )
+        generate_package_report(str(tmp_path), _minimal_manifest())
+        html = (tmp_path / "package_report.html").read_text(encoding="utf-8")
+        # The guide pane must be the active one
+        assert 'id="tab-guide" class="tab-pane active card"' in html
+        # Summary must NOT be active
+        assert 'id="tab-summary" class="tab-pane active' not in html

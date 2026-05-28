@@ -836,12 +836,12 @@ def _waves_tab(records: List[Dict]) -> str:
     for wn in wave_nums:
         columns.append((f"Wave {wn}", wave_groups[wn]))
 
-    cell_h = 26
-    cell_w = 210
-    gap = 40  # arrow gap between columns
-    col_pad = 12  # padding inside column header
-    header_h = 34
-    margin = 20
+    cell_h = 22
+    cell_w = 160
+    gap = 28   # arrow gap between columns
+    col_pad = 8  # padding inside column header
+    header_h = 30
+    margin = 16
     arrow_w = gap
 
     max_items = max(len(items) for _, items in columns)
@@ -872,8 +872,8 @@ def _waves_tab(records: List[Dict]) -> str:
             f'<rect x="{x}" y="{y + header_h - 6}" width="{cell_w}" height="6" fill="{_NAVY}"/>'
         )
         svg_parts.append(
-            f'<text x="{x + cell_w // 2}" y="{y + 22}" text-anchor="middle" '
-            f'font-size="13" font-weight="600" fill="{_WHITE}">{label}</text>'
+            f'<text x="{x + cell_w // 2}" y="{y + 19}" text-anchor="middle" '
+            f'font-size="12" font-weight="600" fill="{_WHITE}">{label}</text>'
         )
 
         # Items
@@ -882,20 +882,20 @@ def _waves_tab(records: List[Dict]) -> str:
             bg, fg = _TYPE_COLOURS.get(item["type"], _TYPE_COLOUR_DEFAULT)
             # type dot
             svg_parts.append(
-                f'<circle cx="{x + 14}" cy="{iy + 13}" r="5" fill="{bg}"/>'
+                f'<circle cx="{x + 12}" cy="{iy + 11}" r="4" fill="{bg}"/>'
             )
             # object name (truncate to fit); SVG <title> exposes full name as a tooltip.
             full_name = item["name"]
-            display_name = _truncated(full_name, 28)
+            display_name = _truncated(full_name, 20)
             svg_parts.append(
-                f'<text x="{x + 26}" y="{iy + 17}" font-size="11" fill="#333">'
+                f'<text x="{x + 22}" y="{iy + 15}" font-size="11" fill="#333">'
                 f"<title>{_h(full_name)}</title>{_h(display_name)}</text>"
             )
 
         if len(items) > 40:
             iy = y + header_h + col_pad + 40 * cell_h
             svg_parts.append(
-                f'<text x="{x + cell_w // 2}" y="{iy + 13}" text-anchor="middle" '
+                f'<text x="{x + cell_w // 2}" y="{iy + 11}" text-anchor="middle" '
                 f'font-size="11" fill="#6C757D">… {len(items) - 40} more</text>'
             )
 
@@ -949,6 +949,671 @@ def _waves_tab(records: List[Dict]) -> str:
         + "</div>"
     )
 
+
+
+
+
+def _load_build_provenance(pkg_dir: str) -> List[dict]:
+    """Load stage results from ships.decisions.json for the Build Provenance tab.
+
+    Walks up from ``pkg_dir`` looking for ``ships.decisions.json`` using the
+    same ancestor-search strategy as trust loading, so the function works
+    whether the package directory is the project root or a subdirectory.
+
+    Only the **most recent run** is used — older runs are historical noise
+    that would clutter the tab.  Within that run, stages are returned in
+    chronological order so the timeline reads top-to-bottom in the order
+    the developer executed them.
+
+    Args:
+        pkg_dir: Package root directory passed to ``generate_package_report``.
+
+    Returns:
+        List of stage dicts from the latest run, or an empty list when
+        ships.decisions.json is absent, unreadable, or contains no runs.
+    """
+    import json as _json
+
+    candidate = os.path.abspath(pkg_dir)
+    for _ in range(6):  # current dir + up to 5 ancestors
+        decisions_path = os.path.join(candidate, "ships.decisions.json")
+        if os.path.isfile(decisions_path):
+            try:
+                with open(decisions_path, encoding="utf-8") as fh:
+                    data = _json.load(fh)
+                runs = data.get("runs", [])
+                if runs:
+                    return runs[-1].get("stages", [])
+            except Exception:
+                pass
+            return []
+        parent = os.path.dirname(candidate)
+        if parent == candidate:
+            break
+        candidate = parent
+    return []
+
+
+def _build_provenance_tab(stages: List[dict]) -> str:
+    """Render the Build Provenance tab from a list of pipeline stage dicts.
+
+    Produces a compact timeline — one row per stage — showing the stage name,
+    pass/fail status badge, duration, and key output metrics extracted from
+    the stage's ``outputs`` dict.  Each row is clickable to expand a detail
+    panel showing any issues recorded during that stage.
+
+    Returns a ready-to-embed HTML string, or a "not available" placeholder
+    when ``stages`` is empty.
+
+    Args:
+        stages: List of stage dicts from ``_load_build_provenance``.
+
+    Returns:
+        HTML string for use inside the Build Provenance ``<div class="card">``.
+    """
+    if not stages:
+        return (
+            '<p style="color:#6C757D;padding:24px;text-align:center">'
+            "Build provenance not available — "
+            "<code>ships.decisions.json</code> was not found in the project "
+            "directory tree. Run the full pipeline (harvest → inspect → scan "
+            "→ analyse → package) from the project root to populate it."
+            "</p>"
+        )
+
+    # -- Status styling --
+    _STATUS_ICON = {
+        "success": "✔",
+        "warning": "⚠",
+        "error": "✗",
+        "skipped": "○",
+        "no-op": "—",
+    }
+    _STATUS_BG = {
+        "success": "#D4EDDA",
+        "warning": "#FFF3CD",
+        "error": "#F8D7DA",
+        "skipped": "#E9ECEF",
+        "no-op": "#E9ECEF",
+    }
+    _STATUS_FG = {
+        "success": "#155724",
+        "warning": "#856404",
+        "error": "#721C24",
+        "skipped": "#495057",
+        "no-op": "#495057",
+    }
+
+    # -- Key metrics to surface per stage (label, outputs key) --
+    # Each entry is a (display_label, output_key) pair.  The first key that
+    # exists in the stage's outputs dict is rendered; the rest are skipped.
+    # This keeps the row compact and avoids showing zeros for metrics that
+    # were never set by that stage.
+    _STAGE_METRICS: dict[str, list[tuple[str, str]]] = {
+        "harvest": [
+            ("classified", "classified"),
+            ("unclassified", "unclassified"),
+            ("files placed", "files_placed"),
+            ("MULTISET injected", "multiset_injected"),
+            ("cleaned", "cleaned"),
+        ],
+        "inspect": [
+            ("files scanned", "files_scanned"),  # from inputs
+            ("lint errors", "lint_errors"),
+            ("lint warnings", "lint_warnings"),
+            ("files with issues", "files_with_issues"),
+        ],
+        "scan": [
+            ("unique tokens", "unique_tokens"),
+            ("files with tokens", "files_with_tokens"),  # from inputs
+        ],
+        "analyse": [
+            ("objects", "object_count"),
+            ("waves", "wave_count"),
+            ("dependencies", "dependency_count"),
+            ("cycles", "cycle_count"),
+        ],
+        "package": [
+            ("files", "file_count"),
+            ("tokens substituted", "token_count"),
+        ],
+    }
+
+    def _fmt_duration(ms: int) -> str:
+        """Format a millisecond duration as a human-readable string."""
+        if ms < 1000:
+            return f"{ms} ms"
+        if ms < 60_000:
+            return f"{ms / 1000:.1f} s"
+        return f"{ms / 60_000:.1f} min"
+
+    def _stage_metrics_html(stage: dict) -> str:
+        """Return a short comma-separated metric string for one stage."""
+        name = (stage.get("stage") or "").lower()
+        metric_defs = _STAGE_METRICS.get(name, [])
+        outputs = stage.get("outputs", {})
+        inputs = stage.get("inputs", {})
+        combined = {**inputs, **outputs}  # outputs win on collision
+
+        parts = []
+        for label, key in metric_defs:
+            val = combined.get(key)
+            if val is None:
+                continue
+            # Don't show zero-value noise metrics
+            if isinstance(val, (int, float)) and val == 0 and key in (
+                "unclassified", "lint_errors", "lint_warnings",
+                "files_with_issues", "cycle_count", "cleaned",
+                "multiset_injected",
+            ):
+                continue
+            parts.append(f"<strong>{_h(str(val))}</strong> {_h(label)}")
+        return "  ·  ".join(parts) if parts else ""
+
+    def _issues_html(stage: dict) -> str:
+        """Render the issues list for one stage's detail panel."""
+        issues = stage.get("issues", []) or []
+        if not issues:
+            return (
+                '<p style="color:#28A745;font-size:13px;margin:0">'
+                "No issues recorded.</p>"
+            )
+        _SEV_COLOUR = {"error": "#DC3545", "warning": "#856404", "info": "#0D6EFD"}
+        _SEV_ICON = {"error": "✗", "warning": "⚠", "info": "ℹ"}
+        rows = []
+        for issue in issues:
+            sev = str(issue.get("severity", "info")).lower()
+            colour = _SEV_COLOUR.get(sev, "#555")
+            icon = _SEV_ICON.get(sev, "·")
+            code = _h(str(issue.get("code", "")))
+            msg = _h(str(issue.get("message", "")))
+            loc = issue.get("location", "")
+            loc_html = (
+                f'<div style="font-size:11px;color:#6C757D;margin-top:2px">'
+                f"{_h(str(loc))}</div>"
+                if loc else ""
+            )
+            rows.append(
+                f'<div style="padding:5px 0;border-bottom:1px solid #F0F0F0">'
+                f'<span style="color:{colour};font-weight:700;margin-right:6px">'
+                f"{icon}</span>"
+                f'<span style="font-family:monospace;font-size:12px;'
+                f'color:{colour};margin-right:8px">{code}</span>'
+                f'<span style="font-size:12px;color:#333">{msg}</span>'
+                f"{loc_html}"
+                f"</div>"
+            )
+        return "".join(rows)
+
+    # -- Build the rows --
+    rows_html = ""
+    for idx, stage in enumerate(stages):
+        name = stage.get("stage", "unknown")
+        status = str(stage.get("status", "success")).lower()
+        duration_ms = int(stage.get("duration_ms") or 0)
+        started = str(stage.get("started_at") or "")
+        # Trim to HH:MM:SS if it's a full ISO timestamp
+        time_label = started[11:19] if len(started) >= 19 else started
+
+        icon = _STATUS_ICON.get(status, "?")
+        badge_bg = _STATUS_BG.get(status, "#E9ECEF")
+        badge_fg = _STATUS_FG.get(status, "#333")
+        issue_counts = stage.get(
+            "issue_counts",
+            {
+                "error": sum(
+                    1 for i in (stage.get("issues") or [])
+                    if str(i.get("severity", "")).lower() == "error"
+                ),
+                "warning": sum(
+                    1 for i in (stage.get("issues") or [])
+                    if str(i.get("severity", "")).lower() == "warning"
+                ),
+            },
+        )
+        n_errors = issue_counts.get("error", 0)
+        n_warnings = issue_counts.get("warning", 0)
+        n_issues = n_errors + n_warnings
+
+        # Issue count badge shown in the row when non-zero
+        issue_badge = ""
+        if n_errors:
+            issue_badge += (
+                f'<span style="background:#F8D7DA;color:#721C24;'
+                f'font-size:11px;font-weight:700;padding:1px 7px;'
+                f'border-radius:10px;margin-left:8px">'
+                f"{n_errors} error{'s' if n_errors != 1 else ''}</span>"
+            )
+        if n_warnings:
+            issue_badge += (
+                f'<span style="background:#FFF3CD;color:#856404;'
+                f'font-size:11px;font-weight:700;padding:1px 7px;'
+                f'border-radius:10px;margin-left:4px">'
+                f"{n_warnings} warning{'s' if n_warnings != 1 else ''}</span>"
+            )
+
+        metrics = _stage_metrics_html(stage)
+        metrics_html = (
+            f'<div style="font-size:12px;color:#666;margin-top:3px">{metrics}</div>'
+            if metrics else ""
+        )
+
+        detail_panel = (
+            f'<div style="background:#F8F9FA;border-top:1px solid #DEE2E6;'
+            f'padding:12px 16px 10px 16px;font-size:13px">'
+            f"{_issues_html(stage)}"
+            f"</div>"
+        )
+
+        # Expand the detail panel automatically when the stage has errors
+        open_attr = " open" if n_errors else ""
+        row_bg = "#FFF8F8" if n_errors else ("#FFFDF0" if n_warnings else "#FFF")
+        border_left = (
+            f"4px solid #DC3545" if n_errors
+            else (f"4px solid #FFC107" if n_warnings else f"4px solid #28A745")
+        )
+
+        rows_html += f"""
+<details{open_attr} style="border-left:{border_left};background:{row_bg};
+  margin-bottom:4px;border-radius:0 4px 4px 0">
+<summary style="list-style:none;display:flex;align-items:center;
+  gap:10px;padding:10px 14px;cursor:pointer;user-select:none">
+  <span style="background:{badge_bg};color:{badge_fg};font-weight:700;
+    font-size:13px;padding:2px 10px;border-radius:10px;min-width:80px;
+    text-align:center">{icon} {_h(name)}</span>
+  <span style="font-size:12px;color:#555">{_fmt_duration(duration_ms)}</span>
+  {f'<span style="font-size:11px;color:#888">{_h(time_label)}</span>' if time_label else ''}
+  {issue_badge}
+  <span style="margin-left:auto;font-size:11px;color:#AAA">
+    {'click to collapse' if n_errors else 'click to expand'}
+  </span>
+</summary>
+{metrics_html and f'<div style="padding:0 14px 8px 14px">{metrics_html}</div>' or ''}
+{detail_panel}
+</details>"""
+
+    return f"""
+<style>
+  #build-provenance details > summary {{ list-style:none; }}
+  #build-provenance details > summary::-webkit-details-marker {{ display:none; }}
+</style>
+<div id="build-provenance">
+  <p style="font-size:13px;color:#555;margin-bottom:16px">
+    Pipeline steps recorded in <code>ships.decisions.json</code> for the most
+    recent run. Steps with errors open automatically.
+    Click any row to expand or collapse its issue detail.
+  </p>
+  {rows_html}
+</div>"""
+
+
+def _guide_tab(manifest_dict: dict, records: List[Dict]) -> str:
+    """Reader's Guide tab — oriented towards first-time DBAs and reviewers.
+
+    Explains what a SHIPS package is, how it was built, what the deployment
+    phases mean, what to do with it, and provides a glossary of every term
+    used elsewhere in the report.  All content is static prose plus a few
+    dynamic values (build number, environment, phase list, wave count) drawn
+    from the manifest and scanned records.
+
+    Args:
+        manifest_dict: The ``BuildManifest.__dict__`` for this package.
+        records:       Payload records from ``_scan_payload``.
+
+    Returns:
+        HTML string for use inside the Guide ``<div class="card">``.
+    """
+    build_no = _h(str(manifest_dict.get("build_number", "?")))
+    env = _h(str(manifest_dict.get("environment", "?")))
+    role = str(manifest_dict.get("role", "")).lower()
+    file_count = manifest_dict.get("file_count", len(records))
+    report_label = _package_report_label(manifest_dict)
+
+    # Describe the package role in plain English
+    if role == "prereqs" or role == "environment_prereqs":
+        role_description = (
+            "pre-requisites package — it creates the database containers and "
+            "roles that the main package depends on. Deploy this package "
+            "<strong>before</strong> the main package."
+        )
+    else:
+        role_description = (
+            "main package — it contains the data model objects and grants "
+            "that make up the deployed solution."
+        )
+
+    # Identify which phases are present and how many DDL waves there are
+    phase_set: Dict[str, bool] = {}
+    for r in records:
+        phase_set[r["phase"]] = True
+
+    # Canonical phase display order
+    _PHASE_ORDER = [
+        "System", "Pre-requisites", "DCL", "DDL", "DML", "Post-install"
+    ]
+    present_phases = [p for p in _PHASE_ORDER if p in phase_set]
+    # Any phases not in the canonical order go at the end
+    for p in phase_set:
+        if p not in present_phases:
+            present_phases.append(p)
+
+    phase_count = len(present_phases)
+    phases_str = ", ".join(f"<strong>{_h(p)}</strong>" for p in present_phases)
+
+    wave_nums = sorted(
+        {r["wave"] for r in records if r.get("wave") is not None}
+    )
+    wave_count = len(wave_nums)
+
+    # ── Phase cards (only for phases actually present) ──────────────────
+    _PHASE_META = {
+        "System": (
+            "🔧",
+            "System — System-scope objects",
+            "Creates system-level objects (Roles, Profiles, Maps, Authorisations, "
+            "Foreign Servers) that are shared across all environments on this "
+            "Teradata system. These always deploy first and use SKIP IF EXISTS "
+            "semantics — they are never dropped or re-created.",
+        ),
+        "Pre-requisites": (
+            "🏛",
+            "Pre-requisites — Database containers",
+            "Creates the database and user containers that all subsequent objects "
+            "live inside. These must exist before any table, view, or grant can be "
+            "deployed. Contained in the companion pre-requisites package when "
+            "auto-split is used.",
+        ),
+        "DCL": (
+            "🔑",
+            "DCL — Data Control Language",
+            "Grants and revokes privileges so that roles and users can access the "
+            "objects being deployed.",
+        ),
+        "DDL": (
+            "🏗️",
+            "DDL — Data Definition Language",
+            "Creates or replaces tables, views, macros, procedures, and functions — "
+            "the structural objects of the data model.",
+        ),
+        "DML": (
+            "📥",
+            "DML — Data Manipulation Language",
+            "Runs INSERT, MERGE, or DELETE statements to seed or transform data "
+            "after the structure is in place.",
+        ),
+        "Post-install": (
+            "✅",
+            "Post-install — Post-deployment steps",
+            "Runs after all DDL and DML. Typically collects statistics, validates "
+            "data counts, or executes smoke-test macros.",
+        ),
+    }
+
+    def _phase_card(phase: str, is_last: bool) -> str:
+        meta = _PHASE_META.get(phase)
+        if not meta:
+            icon, title, desc = "📄", _h(phase), ""
+        else:
+            icon, title, desc = meta[0], meta[1], meta[2]
+        arrow = (
+            ""
+            if is_last
+            else '<div style="display:flex;align-items:center;color:#aaa;'
+                 'font-size:18px;padding:0 4px;align-self:center">›</div>'
+        )
+        return (
+            f'<div style="display:flex;align-items:stretch;gap:0">'
+            f'<div style="background:#f0f4f8;border:1px solid {_BORDER};border-radius:8px;'
+            f'padding:14px 16px;min-width:130px;max-width:170px;flex:1">'
+            f'<div style="font-size:22px;margin-bottom:6px">{icon}</div>'
+            f'<div style="font-size:12px;font-weight:700;color:{_NAVY};margin-bottom:4px">'
+            f"{title}</div>"
+            f'<div style="font-size:11px;color:#555;line-height:1.4">{desc}</div>'
+            f"</div>"
+            f"{arrow}"
+            f"</div>"
+        )
+
+    phase_cards = "".join(
+        _phase_card(p, i == len(present_phases) - 1)
+        for i, p in enumerate(present_phases)
+    )
+
+    wave_sentence = (
+        f" The DDL phase is further divided into "
+        f'<strong>{wave_count} '
+        f'<span data-tip="Objects in the same wave have no dependencies on each '
+        f'other and can be deployed in parallel, reducing total deployment time.">'
+        f"waves</span></strong>. Each wave deploys in parallel; waves are sequenced "
+        f"so that no object is created before the objects it depends on."
+        if wave_count > 0 else ""
+    )
+
+    return f"""
+<div class="guide-hero">
+  <div class="guide-hero-text">
+    <h2>SHIPS Package Report — Reader's Guide</h2>
+    <p>This is a
+      <span data-tip="{'The main package contains the core data objects: tables, views, procedures, grants, and DML. It is deployed after the pre-requisites package.' if 'main' in role_description else 'The pre-requisites package creates the database containers and roles that the main package depends on. Deploy this first.'}">{role_description}</span>
+      &nbsp; This report was generated automatically at build time
+      to give you full visibility of what is inside the package before you
+      deploy it. Build <strong>{build_no}</strong> &nbsp;·&nbsp;
+      Target environment: <strong>{env}</strong> &nbsp;·&nbsp;
+      <strong>{file_count}</strong> objects across
+      <strong>{phase_count}</strong> {"phase" if phase_count == 1 else "phases"}.</p>
+  </div>
+</div>
+
+<p class="guide-section-title">How this package was built</p>
+<p style="font-size:13px;color:#555;margin-bottom:16px;line-height:1.6">
+  SHIPS (<span data-tip="Scaffold → Harvest → Inspect → Package → Ship. The full pipeline
+  that turns source SQL files into a validated, versioned deployment archive.">Scaffold →
+  Harvest → Inspect → Package → Ship</span>) assembled this package from your project's
+  source SQL files. Each file was classified by its
+  <span data-tip="The top-level SQL verb in the script: CREATE, GRANT, INSERT, etc.
+  SHIPS uses this to place the file in the correct phase and validate it.">script intent</span>,
+  assigned to the correct
+  <span data-tip="A logical group of scripts by purpose. Phases always execute in order:
+  System → Pre-requisites → DCL → DDL → DML → Post-install.">deployment phase</span>,
+  and — within DDL — placed into a
+  <span data-tip="A wave is a group of objects with no mutual dependencies. Objects in
+  the same wave can be deployed in parallel. Waves are computed automatically by analysing
+  foreign-key and view dependencies.">wave</span>
+  based on its dependencies. The
+  <span data-tip="A set of automated checks that verify the package is complete, correctly
+  structured, and safe to deploy before it leaves the build pipeline.">Trust Report</span>
+  then validated the result before the package was sealed.
+</p>
+
+<div style="overflow-x:auto;padding-bottom:8px">
+  <div style="display:inline-flex;gap:8px;align-items:stretch;min-width:max-content;padding:4px 0">
+    <div style="background:{_NAVY};color:{_WHITE};border-radius:8px;padding:14px 16px;
+                min-width:110px;display:flex;flex-direction:column;justify-content:center;
+                text-align:center">
+      <div style="font-size:20px;margin-bottom:4px">📁</div>
+      <div style="font-size:11px;font-weight:700">Source SQL<br>files</div>
+    </div>
+    <div style="display:flex;align-items:center;color:{_ORANGE};font-size:22px;font-weight:700">›</div>
+    <div style="background:{_ORANGE};color:{_WHITE};border-radius:8px;padding:14px 16px;
+                min-width:110px;display:flex;flex-direction:column;justify-content:center;
+                text-align:center">
+      <div style="font-size:20px;margin-bottom:4px">⚙️</div>
+      <div style="font-size:11px;font-weight:700">SHIPS<br>pipeline</div>
+    </div>
+    <div style="display:flex;align-items:center;color:{_ORANGE};font-size:22px;font-weight:700">›</div>
+    <div style="background:#f0f4f8;border:1px solid {_BORDER};border-radius:8px;
+                padding:14px 16px;min-width:110px;display:flex;flex-direction:column;
+                justify-content:center;text-align:center">
+      <div style="font-size:20px;margin-bottom:4px">✅</div>
+      <div style="font-size:11px;font-weight:700;color:{_NAVY}">Trust<br>check</div>
+    </div>
+    <div style="display:flex;align-items:center;color:{_ORANGE};font-size:22px;font-weight:700">›</div>
+    <div style="background:#f0f4f8;border:2px solid {_ORANGE};border-radius:8px;
+                padding:14px 16px;min-width:110px;display:flex;flex-direction:column;
+                justify-content:center;text-align:center">
+      <div style="font-size:20px;margin-bottom:4px">📦</div>
+      <div style="font-size:11px;font-weight:700;color:{_NAVY}">This<br>package</div>
+    </div>
+    <div style="display:flex;align-items:center;color:{_ORANGE};font-size:22px;font-weight:700">›</div>
+    <div style="background:{_NAVY};color:{_WHITE};border-radius:8px;padding:14px 16px;
+                min-width:110px;display:flex;flex-direction:column;justify-content:center;
+                text-align:center">
+      <div style="font-size:20px;margin-bottom:4px">🚀</div>
+      <div style="font-size:11px;font-weight:700">Teradata<br>{env}</div>
+    </div>
+  </div>
+</div>
+
+<p class="guide-section-title">Deployment phase order</p>
+<p style="font-size:13px;color:#555;margin-bottom:12px;line-height:1.6">
+  Scripts always execute left-to-right through these phases. Each phase must
+  complete successfully before the next begins.
+  This package contains: {phases_str}.{wave_sentence}
+</p>
+<div style="overflow-x:auto;padding-bottom:8px">
+  <div style="display:inline-flex;gap:8px;align-items:stretch;min-width:max-content;padding:4px 0">
+    {phase_cards}
+  </div>
+</div>
+
+<p class="guide-section-title">What do you do with this package?</p>
+
+<div class="guide-steps">
+  <div class="guide-step">
+    <div class="guide-step-num">1</div>
+    <h4>Review this report</h4>
+    <p>Check the <strong>Summary</strong> tab to understand what types of objects
+       are included. Check the <strong>Trust Report</strong> tab — the package
+       should show <em>READY</em> before deployment.</p>
+  </div>
+  <div class="guide-step">
+    <div class="guide-step-num">2</div>
+    <h4>Run a dry run</h4>
+    <p>Go to the <strong>Deploy</strong> tab and copy the
+       <em>Dry run</em> command. This validates the pipeline and runs pre-flight
+       checks without executing any DDL on the target system.</p>
+  </div>
+  <div class="guide-step">
+    <div class="guide-step-num">3</div>
+    <h4>Explain the plan</h4>
+    <p>Run the <em>Explain deployment plan</em> command to print the full
+       wave-by-wave execution order. Verify the object sequence looks correct
+       before committing to a real deployment.</p>
+  </div>
+  <div class="guide-step">
+    <div class="guide-step-num">4</div>
+    <h4>Deploy</h4>
+    <p>For production use, run <code>deploy_release.py</code> from the
+       release group directory — it sequences all packages automatically.
+       For single-package or troubleshooting use, run <code>deploy.py</code>
+       from inside the extracted package directory.</p>
+  </div>
+  <div class="guide-step">
+    <div class="guide-step-num">5</div>
+    <h4>Verify</h4>
+    <p>After deployment, confirm objects exist in the target Teradata system
+       and that any expected data has been loaded. Check application connectivity
+       if this package updates existing objects.</p>
+  </div>
+</div>
+
+<p class="guide-section-title">Glossary — terms used in this report</p>
+<p style="font-size:13px;color:#555;margin-bottom:12px">
+  Hover over any <span data-tip="Like this — hover text gives you the definition
+  inline without leaving the page.">underlined term</span> anywhere in this
+  report for a quick definition. The full glossary is below.
+</p>
+<div class="guide-glossary">
+<div class="guide-glossary-item">
+  <dt>SHIPS</dt>
+  <dd>Scaffold → Harvest → Inspect → Package → Ship. The Teradata structured deployment pipeline that builds, validates, and packages DDL/DCL/DML for repeatable deployment across environments.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>Package</dt>
+  <dd>A versioned, self-contained zip archive produced by SHIPS containing all scripts needed to deploy or update a Teradata data product. Named as &lt;product&gt;_&lt;build&gt;_&lt;env&gt;.zip.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>Build number</dt>
+  <dd>A monotonically increasing integer that uniquely identifies this run of the packaging pipeline. Higher = newer.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>Environment</dt>
+  <dd>The target Teradata system this package was built for (e.g. DEV, TEST, PROD). Packages are environment-specific — do not deploy a DEV package to PROD.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>Payload</dt>
+  <dd>The folder inside the package containing all the SQL scripts, organised into phase subdirectories.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>Phase</dt>
+  <dd>A logical grouping of scripts by purpose: System, Pre-requisites, DCL, DDL, DML, and Post-install. Phases always execute in this order.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>Wave</dt>
+  <dd>A group of DDL objects within a phase that have no dependencies on each other and can be deployed in parallel. Computed automatically by <code>ships analyse</code>.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>DDL — Data Definition Language</dt>
+  <dd>SQL statements that define or alter the structure of database objects: CREATE TABLE, CREATE VIEW, CREATE PROCEDURE, DROP TABLE, etc.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>DCL — Data Control Language</dt>
+  <dd>SQL statements that control access to objects: GRANT and REVOKE.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>DML — Data Manipulation Language</dt>
+  <dd>SQL statements that manipulate data within objects: INSERT, UPDATE, DELETE, MERGE.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>Trust Report</dt>
+  <dd>A set of automated checks (signals) that assess whether the package is safe to deploy. A package must be READY or READY-WITH-CAVEATS before deployment.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>READY</dt>
+  <dd>All trust signals passed. The package is safe to deploy as-is.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>READY-WITH-CAVEATS</dt>
+  <dd>The package can be deployed but one or more non-blocking signals raised warnings. Review the Trust Report tab before proceeding.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>BLOCKED</dt>
+  <dd>One or more trust signals failed. The package must not be deployed until the issues listed in the Trust Report are resolved.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>Dry run</dt>
+  <dd>Executing the deploy script with <code>--dry-run</code>: validates the pipeline and runs pre-flight checks without connecting to Teradata or executing any DDL.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>Explain</dt>
+  <dd>Executing the deploy script with <code>--explain</code>: prints the full wave-by-wave execution plan so you can verify object order before committing to a real deployment.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>Wave-parallel deployment</dt>
+  <dd>Using <code>--streams N</code> to deploy objects within a wave concurrently, reducing total deployment time for large packages.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>Pre-requisites package</dt>
+  <dd>A package whose role is "prereqs": it creates the database containers and roles that must exist before any main package can be deployed. Always deploy this first.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>Serial column</dt>
+  <dd>Objects in the Waves diagram labelled "Serial" run before any wave and cannot be parallelised — typically system-level objects like roles and profiles.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>deploy_release.py</dt>
+  <dd>A thin launcher script in the release group directory. It invokes <code>td_release_packager deploy</code> on the whole group, deploying every package in the correct order automatically. Preferred for production deployments.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>deploy.py</dt>
+  <dd>A single-package deployer script found inside each extracted package directory. Use it for dry runs, explain plans, troubleshooting, or deploying one package in isolation.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>Release group</dt>
+  <dd>A directory containing all packages that make up a release — typically a pre-requisites package and one or more main packages. <code>deploy_release.py</code> lives here and orchestrates the whole group.</dd>
+</div>
+</div>
+"""
 
 
 def _signal_name_cell(name: str) -> str:
@@ -1168,6 +1833,7 @@ def generate_package_report(pkg_dir: str, manifest_dict: dict) -> str:
     records = _scan_payload(pkg_dir)
     trust = manifest_dict.get("trust", {})
     viewer_links = _write_package_viewers(pkg_dir, records)
+    stages = _load_build_provenance(pkg_dir)
 
     pkg_name = manifest_dict.get("package_name", "Package")
     report_label = _package_report_label(manifest_dict)
@@ -1244,6 +1910,40 @@ pre {{ white-space: pre-wrap; word-break: break-all; }}
 .summary-flags {{ background: #fff3cd; border: 1px solid #ffca2c; border-left: 6px solid {_ORANGE};
                   padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; }}
 .summary-flags ul {{ margin: 8px 0 0 18px; color: #7a3b00; }}
+/* ── Guide tab ── */
+.guide-hero {{ background: {_NAVY}; color: {_WHITE}; border-radius: 8px;
+               padding: 28px 32px; margin-bottom: 24px;
+               display: flex; align-items: center; gap: 24px; }}
+.guide-hero-text h2 {{ font-size: 20px; font-weight: 700; margin-bottom: 6px; }}
+.guide-hero-text p {{ font-size: 14px; color: #8ba4be; max-width: 680px; line-height: 1.6; }}
+.guide-steps {{ display: grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr));
+                gap: 16px; margin-bottom: 24px; }}
+.guide-step {{ border: 1px solid {_BORDER}; border-radius: 8px; padding: 18px 20px;
+               background: {_WHITE}; }}
+.guide-step-num {{ display: inline-flex; align-items: center; justify-content: center;
+                   width: 28px; height: 28px; border-radius: 50%; background: {_ORANGE};
+                   color: {_WHITE}; font-size: 13px; font-weight: 700; margin-bottom: 10px; }}
+.guide-step h4 {{ font-size: 14px; font-weight: 700; color: {_NAVY}; margin-bottom: 6px; }}
+.guide-step p {{ font-size: 13px; color: #555; line-height: 1.5; }}
+.guide-glossary {{ display: grid; grid-template-columns: repeat(auto-fit,minmax(280px,1fr));
+                   gap: 12px; margin-bottom: 8px; }}
+.guide-glossary-item {{ border-left: 4px solid {_ORANGE}; background: #f8f9fa;
+                         padding: 10px 14px; border-radius: 0 4px 4px 0; }}
+.guide-glossary-item dt {{ font-weight: 700; font-size: 13px; color: {_NAVY}; }}
+.guide-glossary-item dd {{ font-size: 13px; color: #555; margin: 4px 0 0; line-height: 1.5; }}
+.guide-section-title {{ font-size: 15px; font-weight: 700; color: {_NAVY};
+                         margin: 24px 0 12px; padding-bottom: 8px;
+                         border-bottom: 2px solid {_ORANGE}; }}
+/* Tooltip */
+[data-tip] {{ border-bottom: 1px dashed {_ORANGE}; cursor: help; position: relative; }}
+[data-tip]:hover::after {{ content: attr(data-tip); position: absolute; bottom: 125%;
+  left: 50%; transform: translateX(-50%); background: {_NAVY}; color: {_WHITE};
+  font-size: 12px; padding: 6px 10px; border-radius: 5px; white-space: normal;
+  width: 260px; line-height: 1.5; z-index: 100; pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,.25); }}
+[data-tip]:hover::before {{ content: ""; position: absolute; bottom: 115%;
+  left: 50%; transform: translateX(-50%); border: 6px solid transparent;
+  border-top-color: {_NAVY}; z-index: 100; }}
 </style>
 </head>
 <body>
@@ -1267,9 +1967,11 @@ pre {{ white-space: pre-wrap; word-break: break-all; }}
 </div>
 
 <div class="tabs">
-  <button class="tab-btn active" onclick="switchTab(this,'tab-summary')">Summary</button>
-  <button class="tab-btn" onclick="switchTab(this,'tab-objects')">Objects</button>
+  <button class="tab-btn active" onclick="switchTab(this,'tab-guide')">📖 Guide</button>
+  <button class="tab-btn" onclick="switchTab(this,'tab-summary')">Summary</button>
   <button class="tab-btn" onclick="switchTab(this,'tab-waves')">Waves</button>
+  <button class="tab-btn" onclick="switchTab(this,'tab-objects')">Objects</button>
+  <button class="tab-btn" onclick="switchTab(this,'tab-provenance')">Build Provenance</button>
   <button class="tab-btn" onclick="switchTab(this,'tab-trust')">Trust Report</button>
   <button class="tab-btn" onclick="switchTab(this,'tab-deploy')">Deploy</button>
 </div>
@@ -1278,16 +1980,24 @@ pre {{ white-space: pre-wrap; word-break: break-all; }}
 
 {_environment_prereq_banner(manifest_dict)}
 
-<div id="tab-summary" class="tab-pane active card">
+<div id="tab-guide" class="tab-pane active card">
+{_guide_tab(manifest_dict, records)}
+</div>
+
+<div id="tab-summary" class="tab-pane card">
 {_summary_tab(records)}
+</div>
+
+<div id="tab-waves" class="tab-pane card">
+{_waves_tab(records)}
 </div>
 
 <div id="tab-objects" class="tab-pane card">
 {_objects_tab(records, trust, viewer_links)}
 </div>
 
-<div id="tab-waves" class="tab-pane card">
-{_waves_tab(records)}
+<div id="tab-provenance" class="tab-pane card">
+{_build_provenance_tab(stages)}
 </div>
 
 <div id="tab-trust" class="tab-pane card">
