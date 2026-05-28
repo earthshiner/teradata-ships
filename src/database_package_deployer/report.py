@@ -661,8 +661,12 @@ def _write_source_viewers(
             source_path=chain.source_path(),
             content=content,
         )
-        with open(viewer_path, "w", encoding="utf-8") as f:
-            f.write(html)
+        try:
+            with open(viewer_path, "w", encoding="utf-8") as f:
+                f.write(html)
+        except OSError as exc:
+            logger.warning("Could not write source viewer for %s: %s", final_path, exc)
+            continue
         links[final_path] = f"{viewer_dir_name}/{viewer_name}"
 
     return links
