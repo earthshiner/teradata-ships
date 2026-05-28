@@ -669,7 +669,7 @@ def _entrypoints() -> Dict[str, Dict[str, Any]]:
                 _context_path("prerequisites/DBA_INSTRUCTIONS.md"),
                 _context_path("prerequisites/database_parent_requirements.json"),
                 _context_path("prerequisites/create_missing_parents.review.sql"),
-                _context_path("prerequisites/create_missing_parents.manifest.json"),
+                _context_path("prerequisites/parents.manifest.json"),
             ],
         },
         "prompts": {

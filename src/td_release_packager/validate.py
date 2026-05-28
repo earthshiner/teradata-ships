@@ -127,6 +127,10 @@ DEFAULT_RULES: Dict[str, str] = {
     # LATIN character set (the server default).  Replace em-dashes, bullets,
     # arrows, and box-drawing characters with ASCII equivalents.
     "non_ascii": "ERROR",
+    # comment_length: Teradata COMMENT text is limited to 254 characters.
+    # Longer COMMENT ON ... IS '...' values fail at deploy time with
+    # Error 5550, so inspect catches them before packaging.
+    "comment_length": "ERROR",
     # Grant validation severities.
     # ERROR blocks packaging/deployment trust, WARNING/WARN reports but does
     # not block, and OFF suppresses the finding.
@@ -511,6 +515,11 @@ def generate_default_config() -> str:
         "# with ASCII equivalents before packaging.",
         "# Defaults to ERROR because the failure is silent until deploy time.",
         f"non_ascii={DEFAULT_RULES['non_ascii']}",
+        "#",
+        "# comment_length: COMMENT ON ... IS '...' text must be <= 254",
+        "# characters. Teradata rejects longer comment strings with Error 5550.",
+        "# Defaults to ERROR because this is a deterministic deploy-time failure.",
+        f"comment_length={DEFAULT_RULES['comment_length']}",
     ]
     return "\n".join(lines) + "\n"
 
@@ -1171,6 +1180,7 @@ def _validate_directory_impl(
             _check_intra_package_dependency(rel_path, clean, file_path, package_prereqs)
         )
         file_issues.extend(_check_view_column_list(rel_path, clean))
+        file_issues.extend(_check_comment_length(rel_path, content, rules_config))
         file_issues.extend(_check_non_ascii_literals(rel_path, content))
 
         # -- Apply rule config: remap severity or drop OFF rules --
@@ -2437,6 +2447,60 @@ def _check_non_ascii_literals(rel_path: str, content: str) -> List[ValidationIss
                     ),
                 )
             )
+
+    return issues
+
+
+_COMMENT_TEXT_RE = re.compile(
+    r"\bCOMMENT\s+ON\b.*?\bIS\s*'((?:''|[^'])*)'",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _check_comment_length(
+    rel_path: str,
+    content: str,
+    rules_config: Dict[str, str] = None,
+) -> List[ValidationIssue]:
+    """Detect COMMENT strings longer than Teradata's 254 character limit.
+
+    Teradata raises Error 5550 when a COMMENT ON ... IS '...' body exceeds
+    254 characters.  This rule runs only for ``.cmt`` companion files because
+    those are the package convention for deployable COMMENT statements.
+    """
+    if os.path.splitext(rel_path)[1].lower() != ".cmt":
+        return []
+
+    if rules_config is None:
+        rules_config = {}
+    severity = rules_config.get(
+        "comment_length",
+        DEFAULT_RULES.get("comment_length", "ERROR"),
+    )
+    if severity == "OFF":
+        return []
+
+    issues: List[ValidationIssue] = []
+    for match in _COMMENT_TEXT_RE.finditer(content):
+        body = match.group(1)
+        body_len = len(body)
+        if body_len <= 254:
+            continue
+
+        line_no = content.count("\n", 0, match.start()) + 1
+        issues.append(
+            ValidationIssue(
+                file=rel_path,
+                rule="comment_length",
+                severity=severity,
+                line=line_no,
+                message=(
+                    f"COMMENT text is {body_len} characters, exceeding "
+                    "Teradata's 254 character limit. Deploy will fail with "
+                    "Error 5550. Shorten the COMMENT ON ... IS string."
+                ),
+            )
+        )
 
     return issues
 

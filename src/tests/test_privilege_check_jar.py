@@ -5,8 +5,9 @@ from database_package_deployer.privilege_check import check_deployer_privileges
 
 
 class SequencedCursor:
-    def __init__(self, rights_rows):
+    def __init__(self, rights_rows, role_rights_rows=None):
         self.rights_rows = rights_rows
+        self.role_rights_rows = role_rights_rows or []
         self.last_sql = ""
         self.statements = []
 
@@ -22,6 +23,8 @@ class SequencedCursor:
     def fetchall(self):
         if "DBC.AllRightsV" in self.last_sql:
             return self.rights_rows
+        if "DBC.AllRoleRightsV" in self.last_sql:
+            return self.role_rights_rows
         return []
 
 
@@ -81,3 +84,24 @@ def test_jar_install_external_procedure_privileges_pass_when_present():
     assert result.passed is True
     assert result.missing == {}
     assert result.checked_databases == ["GDEV1P_UT"]
+
+
+def test_role_privileges_use_all_role_rights_view():
+    cursor = SequencedCursor(rights_rows=[], role_rights_rows=[("CE",), ("AE",)])
+    parsed = _jar_statement(
+        "DATABASE GDEV1P_UT;\n"
+        "CALL SQLJ.INSTALL_JAR('CJ!GCFR_UT_Install_Jar.jar', 'GCFR_UT', 0);"
+    )
+
+    result = check_deployer_privileges(
+        cursor=cursor,
+        parsed_ddls=[parsed],
+        created_databases=set(),
+        package_name="GCFR",
+        environment="DEV",
+    )
+
+    statements = "\n".join(sql for sql, _params in cursor.statements)
+    assert result.passed is True
+    assert "DBC.AllRoleRightsV" in statements
+    assert "DBC.RoleRightsV" not in statements

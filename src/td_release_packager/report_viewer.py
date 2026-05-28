@@ -25,6 +25,7 @@ safe_viewer_filename(final_path, index)
 
 from __future__ import annotations
 
+import hashlib
 import re
 
 # ---------------------------------------------------------------------------
@@ -257,6 +258,8 @@ def safe_viewer_filename(final_path: str, index: int) -> str:
     Replaces every character that is not alphanumeric, an underscore,
     a hyphen, or a period with an underscore, then prefixes with a
     zero-padded index so files sort in the order they were written.
+    Long stems are capped and hash-suffixed to keep extracted SHIPS
+    packages below Windows path-length limits.
 
     Args:
         final_path: Payload-relative path, e.g.
@@ -269,6 +272,9 @@ def safe_viewer_filename(final_path: str, index: int) -> str:
     stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", final_path.replace("\\", "/")).strip("_")
     if not stem:
         stem = f"source_{index}"
+    if len(stem) > 72:
+        digest = hashlib.sha1(final_path.encode("utf-8")).hexdigest()[:10]
+        stem = f"{stem[:57].rstrip('_.-')}_{digest}"
     return f"{index:04d}_{stem}.html"
 
 

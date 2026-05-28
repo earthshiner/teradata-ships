@@ -349,7 +349,7 @@ def write_environment_prereq_context(
         "package_filename": package_filename,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "generated_script": "context/prerequisites/create_missing_parents.review.sql",
-        "manifest": "context/prerequisites/create_missing_parents.manifest.json",
+        "manifest": "context/prerequisites/parents.manifest.json",
         "dba_instructions": "context/prerequisites/DBA_INSTRUCTIONS.md",
         "deployable_payload": payload_paths or [],
         "dba_action_required": [
@@ -386,7 +386,7 @@ def write_environment_prereq_context(
         "missing_parents": [req.parent_name for req in requirements],
         "deployable_payload": payload_paths or [],
     }
-    (prereq_dir / "create_missing_parents.manifest.json").write_text(
+    (prereq_dir / "parents.manifest.json").write_text(
         json.dumps(manifest_payload, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
@@ -400,7 +400,7 @@ def write_environment_prereq_context(
     manifest_payload["script_sha256"] = hashlib.sha256(
         script_path.read_bytes()
     ).hexdigest()
-    (prereq_dir / "create_missing_parents.manifest.json").write_text(
+    (prereq_dir / "parents.manifest.json").write_text(
         json.dumps(manifest_payload, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
