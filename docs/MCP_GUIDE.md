@@ -486,6 +486,14 @@ Format a prior pipeline run as a structured summary for review.
 
 ## Agentic workflows
 
+### AI-native data product discovery
+
+For AI-native data products, MCP clients should discover the product
+registry before querying Semantic module metadata or data entrypoints.
+The registry contract, SHIPS-compatible DDL template, and recommended
+resource shape are defined in
+[`docs/references/ai_native_data_product_discovery.md`](references/ai_native_data_product_discovery.md).
+
 ### Workflow 1 — Onboard a legacy codebase
 
 An agent receives a directory of unstructured Teradata DDL. No human intervention after handing off the source.
