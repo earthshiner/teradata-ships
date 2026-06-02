@@ -698,7 +698,10 @@ def _ingest_directory_impl(
                 # Remove .gitkeep if present
                 gitkeep = os.path.join(dest_dir, ".gitkeep")
                 if os.path.exists(gitkeep):
-                    os.remove(gitkeep)
+                    try:
+                        os.remove(gitkeep)
+                    except OSError as exc:
+                        logger.debug("Could not remove %s: %s", gitkeep, exc)
 
                 dest_path = os.path.join(dest_dir, dest_name)
 
