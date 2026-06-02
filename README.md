@@ -75,6 +75,34 @@ python -m td_release_packager deploy ./releases/DEV_MyProject_BUILD_0001_<timest
 python -m td_release_packager deploy ./releases/DEV_MyProject_BUILD_0001_<timestamp>/DEV_MyProject_BUILD_0001_<timestamp>_01_main.zip --dry-run
 ```
 
+### Demo Mode
+
+For low-friction demos that are just a repository of numbered SQL scripts,
+`demo` stages the source into a generated SHIPS project, auto-tokenises
+literal database names, runs relaxed inspection and dependency analysis, then
+builds a package.
+
+```bash
+python -m td_release_packager demo \
+    --source-github NathanG-TD/cargointelligence-data-product \
+    --source-ref master \
+    --name CargoIntelligence \
+    --root-parent DEMO_ROOT_DB \
+    --output releases/
+
+# Stage and inspect only, without building a package:
+python -m td_release_packager demo --source ./my-demo-repo --prepare-only
+```
+
+Use `--root-parent` when demo SQL contains parentless `CREATE DATABASE` or
+`CREATE USER` statements. Demo mode injects a tokenised `FROM {{ROOT_PARENT}}`
+clause into those staged prerequisite scripts and writes `ROOT_PARENT=<value>`
+to the generated environment config. Existing `FROM <parent>` clauses are
+preserved.
+
+For a team-friendly walkthrough, see
+[README_DEMO_PACKAGING.md](README_DEMO_PACKAGING.md).
+
 
 ## Release group output layout
 

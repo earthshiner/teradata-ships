@@ -336,3 +336,33 @@ class TestResolveGithubSourceCLI:
         assert args.commit == "user_provided_sha"
         for tmp in holder:
             tmp.cleanup()
+
+    def test_falls_back_to_git_clone_when_api_returns_404(self):
+        from td_release_packager.cli import _resolve_github_source
+
+        args = self._make_args(
+            source_github="NathanG-TD/cargointelligence-data-product",
+            source_ref="master",
+        )
+        holder = []
+
+        clone_result = MagicMock(returncode=0, stdout="", stderr="")
+        sha_result = MagicMock(returncode=0, stdout="abc123456789\n", stderr="")
+
+        with patch(
+            "td_release_packager.remote_source.fetch_github_source",
+            side_effect=ValueError("GitHub API error 404"),
+        ), patch("subprocess.run", side_effect=[clone_result, sha_result]) as run:
+            _resolve_github_source(args, holder)
+
+        assert args.source is not None
+        assert args.source.endswith("repo")
+        assert args.commit == "abc123456789"
+        assert run.call_args_list[0].args[0][:4] == [
+            "git",
+            "clone",
+            "--depth",
+            "1",
+        ]
+        for tmp in holder:
+            tmp.cleanup()
