@@ -33,6 +33,7 @@ import json
 import logging
 import os
 import shutil
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -292,6 +293,8 @@ def _main():
         _cmd_generate(args)
     elif args.command == "process":
         _cmd_process(args)
+    elif args.command == "demo":
+        sys.exit(_cmd_demo(args))
     elif args.command == "explain":
         _cmd_explain(args)
     elif args.command == "verify":
@@ -365,6 +368,75 @@ def _cmd_deploy(args) -> int:
     except Exception as exc:  # noqa: BLE001
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
+
+
+def _cmd_demo(args) -> int:
+    """Run the low-friction SHIPS demo workflow."""
+    _gh_tmp: list = []
+    _resolve_github_source(args, _gh_tmp)
+
+    try:
+        from td_release_packager.demo import run_demo
+
+        result = run_demo(
+            source=args.source,
+            name=args.name,
+            work_dir=args.work_dir,
+            output_dir=args.output_dir,
+            env=args.env,
+            env_prefix=args.env_prefix,
+            root_parent=args.root_parent,
+            package=not args.prepare_only,
+            deploy=args.deploy,
+            deploy_args=_strip_remainder_separator(args.deploy_args),
+            source_commit=getattr(args, "commit", "") or "",
+            author=args.author or "",
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        for tmp in _gh_tmp:
+            tmp.cleanup()
+
+    print(f"\n{'=' * 64}")
+    print("  SHIPS Demo Mode")
+    print(f"{'=' * 64}")
+    print(f"  Source:      {result.source_dir}")
+    print(f"  Project:     {result.project_dir}")
+    print(f"  Env config:  {result.env_config}")
+    print(f"  Token map:   {result.token_map}")
+    print(f"  Classified:  {result.classified}")
+    print(f"  Unclassified:{result.unclassified}")
+    print(f"  Lint:        {result.lint_errors} error(s), {result.lint_warnings} warning(s)")
+    print(
+        f"  Analysis:    {result.analysis_objects} object(s), "
+        f"{result.analysis_waves} wave(s)"
+    )
+    if result.root_parent_injections:
+        print(f"  Root parent: {result.root_parent_injections} parentless prereq(s) updated")
+    if result.archive_path:
+        print(f"  Archive:     {result.archive_path}")
+    if result.companion_archive_path:
+        print(f"  Companion:   {result.companion_archive_path}")
+    for report_path in result.report_paths:
+        print(f"  Report:      {report_path}")
+    if result.release_group:
+        print(f"  Release grp: {result.release_group}")
+    if result.deploy_exit_code is not None:
+        print(f"  Deploy exit: {result.deploy_exit_code}")
+    print(f"{'=' * 64}\n")
+
+    if result.deploy_exit_code not in (None, 0):
+        return result.deploy_exit_code
+    return 0
+
+
+def _strip_remainder_separator(args: list[str]) -> list[str]:
+    """Drop a leading ``--`` from argparse.REMAINDER passthrough args."""
+    if args and args[0] == "--":
+        return args[1:]
+    return args
 
 
 class _NullStageRecorder:
@@ -1048,9 +1120,8 @@ def _add_github_source_args(parser, mutually_exclusive_with: str = "--source") -
         dest="source_github",
         default=None,
         help="Fetch DDL source from a GitHub repository (e.g. 'myorg/myrepo'). "
-        "Downloads the repository tarball for --source-ref via the GitHub "
-        "REST API — no local git clone required.  Mutually exclusive with "
-        f"{mutually_exclusive_with}.",
+        "Downloads via the GitHub REST API first, then falls back to local "
+        f"git clone credentials. Mutually exclusive with {mutually_exclusive_with}.",
     )
     parser.add_argument(
         "--source-ref",
@@ -1113,18 +1184,73 @@ def _resolve_github_source(args, tmp_dir_holder: list) -> None:
 
     try:
         commit_sha = fetch_github_source(source_github, ref, tmp.name, token)
-    except ValueError as exc:
+        args.source = tmp.name
+    except ValueError as api_exc:
+        print(
+            "  GitHub API fetch failed; trying local git clone credentials...",
+            file=sys.stderr,
+        )
+        clone_dir = os.path.join(tmp.name, "repo")
+        try:
+            commit_sha = _clone_github_source(source_github, ref, clone_dir)
+            args.source = clone_dir
+        except ValueError as clone_exc:
+            print(
+                f"\nERROR: {api_exc}\n\n"
+                f"Git clone fallback also failed:\n  {clone_exc}\n\n"
+                "Tip: set GITHUB_TOKEN for API access, or make sure "
+                "`git clone https://github.com/<owner>/<repo>.git` works "
+                "from this shell.",
+                file=sys.stderr,
+            )
+            tmp.cleanup()
+            sys.exit(1)
+    except Exception as exc:  # noqa: BLE001
         print(f"\nERROR: {exc}", file=sys.stderr)
         tmp.cleanup()
         sys.exit(1)
 
-    args.source = tmp.name
     # Record the resolved SHA as the commit unless the user already passed --commit
     if not getattr(args, "commit", None):
         args.commit = commit_sha
 
     print(f"  Resolved commit : {commit_sha[:12]}")
-    print(f"  Extracted to    : {tmp.name}\n")
+    print(f"  Extracted to    : {args.source}\n")
+
+
+def _clone_github_source(owner_repo: str, ref: str, dest_dir: str) -> str:
+    """Clone a GitHub source repository using the local git credential stack."""
+    url = f"https://github.com/{owner_repo}.git"
+    clone_cmd = [
+        "git",
+        "clone",
+        "--depth",
+        "1",
+        "--branch",
+        ref,
+        url,
+        dest_dir,
+    ]
+    result = subprocess.run(
+        clone_cmd,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        message = (result.stderr or result.stdout or "").strip()
+        raise ValueError(message or f"git clone exited {result.returncode}")
+
+    sha_result = subprocess.run(
+        ["git", "-C", dest_dir, "rev-parse", "HEAD"],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    if sha_result.returncode != 0:
+        message = (sha_result.stderr or sha_result.stdout or "").strip()
+        raise ValueError(message or "git rev-parse HEAD failed after clone")
+    return sha_result.stdout.strip()
 
 
 def _resolve_path(
@@ -4573,6 +4699,95 @@ def _build_parser():
         "deploy_args",
         nargs=argparse.REMAINDER,
         help="Arguments forwarded to generated deploy.py, e.g. --host srv --user dbc.",
+    )
+
+    # -- demo --
+    dm = subs.add_parser(
+        "demo",
+        help="[D] Demo — stage, inspect, analyse, package, and optionally deploy plain SQL demos.",
+        description=(
+            "Low-friction demo mode for SQL repositories that are not already "
+            "SHIPS projects. It discovers common demo layouts such as "
+            "workspace/src/<product>, stages SQL into a generated SHIPS project, "
+            "auto-tokenises literal database names, runs relaxed inspection and "
+            "dependency analysis, then builds a package unless --prepare-only is set."
+        ),
+    )
+    demo_source = dm.add_mutually_exclusive_group(required=True)
+    demo_source.add_argument(
+        "--source",
+        help="Local demo repository or SQL directory.",
+    )
+    demo_source.add_argument(
+        "--source-github",
+        metavar="OWNER/REPO",
+        dest="source_github",
+        default=None,
+        help="Fetch demo source from a GitHub repository.",
+    )
+    dm.add_argument(
+        "--source-ref",
+        metavar="REF",
+        dest="source_ref",
+        default="main",
+        help="Branch, tag, or commit SHA to fetch with --source-github (default: main).",
+    )
+    dm.add_argument(
+        "--github-token",
+        metavar="TOKEN",
+        dest="github_token",
+        default="",
+        help="GitHub token for private repositories. Falls back to GITHUB_TOKEN.",
+    )
+    dm.add_argument(
+        "--name",
+        help="Demo package/project name. Defaults to the source directory name.",
+    )
+    dm.add_argument(
+        "--work-dir",
+        default=".ships-demo",
+        help="Parent directory for generated demo projects (default: .ships-demo).",
+    )
+    dm.add_argument(
+        "--output",
+        "--output-dir",
+        dest="output_dir",
+        help=(
+            "Directory for generated release packages. Defaults to "
+            "<work-dir>/<name>/releases."
+        ),
+    )
+    dm.add_argument(
+        "--env",
+        default="DEV",
+        help="Environment name for generated config and package (default: DEV).",
+    )
+    dm.add_argument(
+        "--env-prefix",
+        help="Optional literal prefix to strip when deriving token names.",
+    )
+    dm.add_argument(
+        "--root-parent",
+        help=(
+            "Root database/user parent for parentless CREATE DATABASE/USER "
+            "demo prerequisites. Existing FROM clauses are preserved."
+        ),
+    )
+    dm.add_argument(
+        "--prepare-only",
+        action="store_true",
+        help="Stage, tokenise, inspect, and analyse only; skip package build.",
+    )
+    dm.add_argument("--author", help="Builder's name stamped into package metadata.")
+    dm.add_argument(
+        "--deploy",
+        action="store_true",
+        help="Deploy the generated package or release group after packaging.",
+    )
+    dm.add_argument(
+        "deploy_args",
+        nargs=argparse.REMAINDER,
+        help="Arguments forwarded to generated deploy.py when --deploy is set.",
     )
 
     # -- repackage --
