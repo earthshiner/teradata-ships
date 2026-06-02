@@ -21,6 +21,7 @@ from td_release_packager.builder import build_package
 from td_release_packager.discovery import resolve_harvest_extensions
 from td_release_packager.ingest import ingest_directory
 from td_release_packager.models import BuildConfig
+from td_release_packager.root_parent import inject_root_parent, normalise_root_parent
 from td_release_packager.scaffolder import scaffold_project
 from td_release_packager.token_engine import generate_token_map, write_token_map
 from td_release_packager.validate import read_inspect_config, validate_directory
@@ -140,8 +141,12 @@ def run_demo(
         force=True,
         clean_payload=True,
     )
-    root_parent_value = _normalise_root_parent(root_parent)
-    root_parent_injections = _inject_root_parent(project_dir, root_parent_value)
+    root_parent_value = normalise_root_parent(root_parent)
+    root_parent_injections = inject_root_parent(
+        project_dir,
+        root_parent_value,
+        parent_expression=_ROOT_PARENT_TOKEN,
+    )
     env_config = _write_demo_env_config(project_dir, env, token_map, root_parent_value)
 
     rules = read_inspect_config(str(project_dir / "config" / "inspect.conf"))
@@ -281,57 +286,6 @@ def discover_demo_sql_root(source_root: Path) -> Path:
 
 
 _ROOT_PARENT_TOKEN = "{{ROOT_PARENT}}"
-_CREATE_PREREQ_HEADER_RE = re.compile(
-    r"\bCREATE\s+(?:DATABASE|USER)\s+"
-    r"(?:\"[^\"]+\"|\{\{[A-Za-z_][A-Za-z0-9_]*\}\}|[A-Za-z_][A-Za-z0-9_$#]*)",
-    re.IGNORECASE,
-)
-_PREREQ_FROM_RE = re.compile(r"\bFROM\b", re.IGNORECASE)
-
-
-def _normalise_root_parent(root_parent: str | None) -> str | None:
-    if root_parent is None:
-        return None
-    value = root_parent.strip()
-    if not value:
-        raise ValueError("[DemoRootParentEmpty] --root-parent cannot be blank.")
-    return value
-
-
-def _inject_root_parent(project_dir: Path, root_parent: str | None) -> int:
-    """Inject an explicit tokenised root parent into parentless prereq DDL."""
-    if root_parent is None:
-        return 0
-
-    prereq_dir = project_dir / "payload" / "database" / "pre-requisites"
-    if not prereq_dir.is_dir():
-        return 0
-
-    injections = 0
-    for path in sorted(prereq_dir.rglob("*")):
-        if path.suffix.lower() not in {".db", ".usr"}:
-            continue
-        content = path.read_text(encoding="utf-8")
-        updated = _inject_root_parent_in_content(content)
-        if updated != content:
-            path.write_text(updated, encoding="utf-8")
-            injections += 1
-    return injections
-
-
-def _inject_root_parent_in_content(content: str) -> str:
-    match = _CREATE_PREREQ_HEADER_RE.search(content)
-    if not match:
-        return content
-
-    statement_end = content.find(";", match.end())
-    if statement_end == -1:
-        statement_end = len(content)
-    statement_tail = content[match.end() : statement_end]
-    if _PREREQ_FROM_RE.search(statement_tail):
-        return content
-
-    return content[: match.end()] + f" FROM {_ROOT_PARENT_TOKEN}" + content[match.end() :]
 
 
 def detect_demo_token_candidates(source_root: Path) -> dict[str, list[str]]:
