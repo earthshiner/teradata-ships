@@ -545,7 +545,9 @@ def find_all_object_references(
     if tokens_only:
         return refs
 
-    valid_db_refs = {ref.upper() for ref in find_all_db_references(sql, tokens_only=False)}
+    valid_db_refs = {
+        ref.upper() for ref in find_all_db_references(sql, tokens_only=False)
+    }
     for match in RE_LITERAL_REF.finditer(sql):
         db_name = match.group(1)
         if db_name.upper() in valid_db_refs:
@@ -563,9 +565,7 @@ def appears_as_read_source(sql: str, db_ref: str) -> bool:
     target side of DELETE.
     """
     pattern = re.compile(
-        r"\b(?P<keyword>FROM|JOIN|USING)\s+"
-        + re.escape(db_ref)
-        + r"\s*\.",
+        r"\b(?P<keyword>FROM|JOIN|USING)\s+" + re.escape(db_ref) + r"\s*\.",
         re.IGNORECASE,
     )
     for match in pattern.finditer(sql):
@@ -607,8 +607,7 @@ def build_view_dependency_index(project_dir: Path) -> Dict[Tuple[str, str], Set[
                 sql[as_match.end() :],
                 tokens_only=False,
             )
-            if db_ref.upper() != view_db.upper()
-            and not _is_excluded_db_ref(db_ref)
+            if db_ref.upper() != view_db.upper() and not _is_excluded_db_ref(db_ref)
         }
         if base_dbs:
             index[_ref_key(view_db, view_obj)] = base_dbs

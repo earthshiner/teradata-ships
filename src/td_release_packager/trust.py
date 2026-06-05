@@ -196,7 +196,8 @@ def _inspect_signal(
     matching = [
         i
         for i in stage.get("issues", [])
-        if i.get("code") == issue_code and not _is_generated_artifact_issue(i, source_dir)
+        if i.get("code") == issue_code
+        and not _is_generated_artifact_issue(i, source_dir)
     ]
 
     errors = [i for i in matching if i.get("severity") == "error"]

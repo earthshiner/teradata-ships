@@ -176,7 +176,9 @@ def _cmd_deploy(args):
                 connection_params=_conn_params,
                 public_key_path=getattr(args, "public_key", "") or "",
                 table_trigger_action=(
-                    "recreate" if getattr(args, "recreate_table_triggers", False) else "fail"
+                    "recreate"
+                    if getattr(args, "recreate_table_triggers", False)
+                    else "fail"
                 ),
             )
             otel_span.set_attribute("ships.deploy.completed", result.completed)

@@ -814,8 +814,7 @@ class TestDmlDetection:
     def test_ordered_sql_extension_forces_direct_execute(self):
         """Mixed ordered scripts are direct-execute regardless of first verb."""
         parsed = parse_statement_text(
-            "CREATE TABLE MyDB.T (id INT);\n"
-            "REVOKE SELECT ON MyDB FROM WorkerRole;",
+            "CREATE TABLE MyDB.T (id INT);\nREVOKE SELECT ON MyDB FROM WorkerRole;",
             file_path="/some/path/temporary_access.ordered.osql",
         )
         assert parsed.object_type == ObjectType.ORDERED_SQL

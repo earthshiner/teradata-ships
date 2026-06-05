@@ -716,8 +716,7 @@ class TestAnalyseProject:
         views_dir = tmp_project / "payload" / "database" / "DDL" / "views"
 
         (views_dir / "{{GCFR_V}}.GCFR_System_File_Extract.viw").write_text(
-            "REPLACE VIEW {{GCFR_V}}.GCFR_System_File_Extract AS\n"
-            "SELECT 1 AS File_Id;",
+            "REPLACE VIEW {{GCFR_V}}.GCFR_System_File_Extract AS\nSELECT 1 AS File_Id;",
             encoding="utf-8",
         )
         (views_dir / "{{OPR_V}}.GCFR_RV_File_Count.viw").write_text(
@@ -743,9 +742,7 @@ class TestAnalyseProject:
         }
 
         wave_for = {
-            qn: idx
-            for idx, wave in enumerate(result.waves, start=1)
-            for qn in wave
+            qn: idx for idx, wave in enumerate(result.waves, start=1) for qn in wave
         }
         assert (
             wave_for["{{GCFR_V}}.GCFR_System_File_Extract"]
@@ -774,9 +771,7 @@ class TestAnalyseProject:
             "$DATABASE.BionicCC"
         }
         wave_for = {
-            qn: idx
-            for idx, wave in enumerate(result.waves, start=1)
-            for qn in wave
+            qn: idx for idx, wave in enumerate(result.waves, start=1) for qn in wave
         }
         assert wave_for["$DATABASE.BionicCC"] < wave_for["$DATABASE.BionicCC_DOM_STD"]
 
@@ -800,9 +795,7 @@ class TestAnalyseProject:
 
         assert result.dependencies["$USER.ChildUser"] == {"$DATABASE.ParentDB"}
         wave_for = {
-            qn: idx
-            for idx, wave in enumerate(result.waves, start=1)
-            for qn in wave
+            qn: idx for idx, wave in enumerate(result.waves, start=1) for qn in wave
         }
         assert wave_for["$DATABASE.ParentDB"] < wave_for["$USER.ChildUser"]
 

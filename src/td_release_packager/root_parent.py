@@ -75,7 +75,9 @@ def inject_root_parent_in_content(content: str, parent_expression: str) -> str:
     if PREREQ_FROM_RE.search(statement_tail):
         return content
 
-    return content[: match.end()] + f" FROM {parent_expression}" + content[match.end() :]
+    return (
+        content[: match.end()] + f" FROM {parent_expression}" + content[match.end() :]
+    )
 
 
 def _iter_prereq_files(prereq_dir: Path) -> Iterable[Path]:

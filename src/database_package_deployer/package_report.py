@@ -252,7 +252,9 @@ def _strip_report_comments_and_strings(sql: str) -> str:
     return "".join(chars)
 
 
-def _normalise_script_head(verb: str, qualifier: str, obj: str, fallback_type: str) -> str:
+def _normalise_script_head(
+    verb: str, qualifier: str, obj: str, fallback_type: str
+) -> str:
     """Return a compact report label such as ``CREATE/PROCEDURE``."""
     verb = verb.upper()
     qualifier = " ".join((qualifier or "").upper().split())
@@ -661,7 +663,7 @@ def _summary_tab(records: List[Dict]) -> str:
     def render_category(name: str, counts: Dict[str, int]) -> str:
         rows = "\n".join(
             f"<tr><td>{_h(label)}</td><td>{count}</td></tr>"
-            for label, count in sorted(counts.items(), key=lambda item: (item[0]))
+            for label, count in sorted(counts.items(), key=lambda item: item[0])
         )
         return f"""
 <section class="summary-section">
@@ -797,9 +799,9 @@ def _waves_tab(records: List[Dict]) -> str:
         # The shaft starts/ends a few px off the column edges so the head
         # lands exactly at the boundary without overlapping the column border.
         if ci < len(columns) - 1:
-            ax_start = x + cell_w + 5       # small gap off the right column edge
-            ax_end   = x + cell_w + arrow_w - 5  # tip just before the next column
-            ay       = margin + col_h // 2
+            ax_start = x + cell_w + 5  # small gap off the right column edge
+            ax_end = x + cell_w + arrow_w - 5  # tip just before the next column
+            ay = margin + col_h // 2
             svg_parts.append(
                 f'<line x1="{ax_start}" y1="{ay}" x2="{ax_end}" y2="{ay}" '
                 f'stroke="{_ORANGE}" stroke-width="1.5" stroke-linecap="round" '
@@ -812,14 +814,14 @@ def _waves_tab(records: List[Dict]) -> str:
     # so there is never a colour mismatch between shaft and head.
     svg_parts.insert(
         1,
-        '<defs>'
+        "<defs>"
         '<marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" '
         'markerWidth="10" markerHeight="10" orient="auto-start-reverse" '
         'markerUnits="userSpaceOnUse">'
         '<path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" '
         'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>'
-        '</marker>'
-        '</defs>',
+        "</marker>"
+        "</defs>",
     )
 
     svg_parts.append("</svg>")

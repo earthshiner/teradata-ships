@@ -107,6 +107,7 @@ _STATE_BADGES = {
     DeployState.MIGRATED: ("Migrated", "#28A745", _WHITE),
 }
 
+
 def generate_report(
     result: PackageDeployResult,
     output_dir: str,
@@ -136,7 +137,9 @@ def generate_report(
     # without having to open the separate package_report.html.
     package_trust = _load_package_trust(output_dir)
 
-    html = _build_html(result, provenance, prov_status, source_view_links, package_trust)
+    html = _build_html(
+        result, provenance, prov_status, source_view_links, package_trust
+    )
 
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(html)
@@ -574,8 +577,7 @@ def _linked_source_path(
     final_path = chain.final_path().replace("\\", "/")
     packaged_path = f"payload/{final_path}"
     title = (
-        f"Open packaged code: {packaged_path} "
-        f"(original source: {chain.source_path()})"
+        f"Open packaged code: {packaged_path} (original source: {chain.source_path()})"
     )
     style = f' style="{css}"' if css else ""
     return (
@@ -621,8 +623,6 @@ def _escape_html(value: str) -> str:
         .replace('"', "&quot;")
         .replace("'", "&#x27;")
     )
-
-
 
 
 def _write_source_viewers(
@@ -821,7 +821,7 @@ def _html_action_items(
                 )
             return (
                 '<div class="action-items has-errors">'
-                f'<h3>Action Items ({len(error_rows)})</h3>'
+                f"<h3>Action Items ({len(error_rows)})</h3>"
                 f'<details class="action-group" open>'
                 f'<summary class="err">✗ Pre-flight failed — requires attention</summary>'
                 + "\n".join(error_rows)
@@ -973,8 +973,7 @@ def _html_package_trust(trust: dict) -> str:
             )
             if issues:
                 items = "".join(
-                    f"<li style='margin-top:3px'>{_escape_html(i)}</li>"
-                    for i in issues
+                    f"<li style='margin-top:3px'>{_escape_html(i)}</li>" for i in issues
                 )
                 detail += (
                     f"<ul style='margin:4px 0 0 0;padding-left:16px;"
@@ -1011,7 +1010,7 @@ def _html_package_trust(trust: dict) -> str:
   <span style="font-size:16px;font-weight:600;color:{_NAVY}">Package Trust Report</span>
   {label_pill}
   <span style="margin-left:auto;font-size:11px;color:#6C757D">
-    (build-time quality gate — click to {'collapse' if label.upper() != 'READY' else 'expand'})
+    (build-time quality gate — click to {"collapse" if label.upper() != "READY" else "expand"})
   </span>
 </summary>
 <style>

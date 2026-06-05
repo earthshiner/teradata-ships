@@ -82,6 +82,7 @@ def _status_icon(ok: bool) -> str:
     """Return a coloured pass/fail icon for terminal status lines."""
     return _colour("✓", _ANSI_GREEN) if ok else _colour("✗", _ANSI_RED)
 
+
 # -- Graph format registry (name → file extension) ---------------
 _GRAPH_FORMATS = {
     "dot": ".gv",
@@ -184,15 +185,10 @@ def _format_grant_recap(
     drifted = [
         status
         for status in grant_result.drifted
-        if status.missing_privs
-        or extra_grants_severity != "OFF"
+        if status.missing_privs or extra_grants_severity != "OFF"
     ]
     missing = grant_result.missing
-    orphaned = (
-        []
-        if orphan_grants_severity == "OFF"
-        else grant_result.orphaned
-    )
+    orphaned = [] if orphan_grants_severity == "OFF" else grant_result.orphaned
     total = len(drifted) + len(missing) + len(orphaned)
 
     if total == 0:
@@ -408,13 +404,17 @@ def _cmd_demo(args) -> int:
     print(f"  Token map:   {result.token_map}")
     print(f"  Classified:  {result.classified}")
     print(f"  Unclassified:{result.unclassified}")
-    print(f"  Lint:        {result.lint_errors} error(s), {result.lint_warnings} warning(s)")
+    print(
+        f"  Lint:        {result.lint_errors} error(s), {result.lint_warnings} warning(s)"
+    )
     print(
         f"  Analysis:    {result.analysis_objects} object(s), "
         f"{result.analysis_waves} wave(s)"
     )
     if result.root_parent_injections:
-        print(f"  Root parent: {result.root_parent_injections} parentless prereq(s) updated")
+        print(
+            f"  Root parent: {result.root_parent_injections} parentless prereq(s) updated"
+        )
     if result.archive_path:
         print(f"  Archive:     {result.archive_path}")
     if result.companion_archive_path:
@@ -1521,9 +1521,7 @@ def _run_ingest(args, stage, issue_codes, apply_tokens) -> int:
             force=args.force,
             clean_payload=not getattr(args, "keep_existing", False),
             legacy_migration_rules=legacy_migration_rules,
-            remove_view_type_affixes=getattr(
-                args, "remove_view_type_affixes", False
-            ),
+            remove_view_type_affixes=getattr(args, "remove_view_type_affixes", False),
         )
         if detection.token_candidates:
             env_prefix = getattr(args, "env_prefix", None)
@@ -2332,9 +2330,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
 
         lint_ok = lint_result.passed
         grant_ok = (
-            True
-            if grant_result is None
-            else _effective_grant_passed(grant_result)
+            True if grant_result is None else _effective_grant_passed(grant_result)
         )
         overall_ok = token_ok and lint_ok and grant_ok and hierarchy_ok
 
@@ -2379,14 +2375,19 @@ def _run_inspect(args, stage, issue_codes) -> int:
             suffix = _grant_suffix(grant_result) if grant_result else ""
             print(f"  Step 2 (Grants): PASSED — {n} grantees consistent{suffix}")
         else:
-            d = len([
-                status
-                for status in grant_result.drifted
-                if status.missing_privs
-                or warn_extra_grants_severity != "OFF"
-            ])
+            d = len(
+                [
+                    status
+                    for status in grant_result.drifted
+                    if status.missing_privs or warn_extra_grants_severity != "OFF"
+                ]
+            )
             m = len(grant_result.missing)
-            o = 0 if warn_orphan_grants_severity == "OFF" else len(grant_result.orphaned)
+            o = (
+                0
+                if warn_orphan_grants_severity == "OFF"
+                else len(grant_result.orphaned)
+            )
             print(f"  Step 2 (Grants): FAILED — {d} drifted, {m} missing, {o} orphaned")
 
         # -- Step 3 line
@@ -2635,10 +2636,7 @@ def _run_build(args, stage, issue_codes) -> int:
         getattr(args, "root_parent", None),
     )
     if root_parent_injections:
-        print(
-            "  Root parent: "
-            f"{root_parent_injections} parentless prereq(s) updated"
-        )
+        print(f"  Root parent: {root_parent_injections} parentless prereq(s) updated")
 
     # Resolve build number: explicit, no-increment, or auto-increment
     build_number = args.build_number  # None if not specified
@@ -3829,10 +3827,7 @@ def _run_generate(args, stage, issue_codes) -> int:
     for config_file in config_files:
         status = "found" if config_file["exists"] else "missing"
         used = "used here" if config_file["used_by_generate"] else "not read here"
-        print(
-            f"    - {config_file['label']}: {status}, {used}"
-            f" — {config_file['path']}"
-        )
+        print(f"    - {config_file['label']}: {status}, {used} — {config_file['path']}")
 
     print(
         f"  Locking views:    {result.locking_views_written} written"
@@ -4561,7 +4556,9 @@ def _build_parser():
     vl = subs.add_parser(
         "inspect", help="[I] Inspect — check DDL against Coding Discipline."
     )
-    vl.add_argument("--project", required=True, help="SHIPS project directory to inspect.")
+    vl.add_argument(
+        "--project", required=True, help="SHIPS project directory to inspect."
+    )
     vl.add_argument(
         "--config",
         help="Path to inspect.conf rules configuration file. "
@@ -4896,7 +4893,9 @@ def _build_parser():
         aliases=["analyse"],
         help="Analyse DDL dependencies, generate waves, and export dependency graph.",
     )
-    az.add_argument("--project", required=True, help="SHIPS project directory to analyse.")
+    az.add_argument(
+        "--project", required=True, help="SHIPS project directory to analyse."
+    )
     az.add_argument(
         "--output", help="Output path for _waves.txt (default: <source>/_waves.txt)."
     )

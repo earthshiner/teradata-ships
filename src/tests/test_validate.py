@@ -1278,8 +1278,7 @@ class TestReadInspectConfig:
         invalid = {
             rule: sev
             for rule, sev in DEFAULT_RULES.items()
-            if sev not in _VALID_SEVERITIES
-            and rule not in _DOMAIN_VALUE_RULES
+            if sev not in _VALID_SEVERITIES and rule not in _DOMAIN_VALUE_RULES
         }
         assert not invalid, (
             f"Rules in DEFAULT_RULES with invalid severities "
@@ -2032,12 +2031,7 @@ class TestCheckViewColumnList:
     def test_generated_ships_directory_is_not_validated(self, tmp_path):
         """Generated helper mirrors under .ships are not payload source."""
         mirror_dir = (
-            tmp_path
-            / ".ships"
-            / "harvest"
-            / "by_database"
-            / "DB_DOMAIN_V"
-            / "views"
+            tmp_path / ".ships" / "harvest" / "by_database" / "DB_DOMAIN_V" / "views"
         )
         mirror_dir.mkdir(parents=True)
         (mirror_dir / "{{DB_DOMAIN_V}}.Agent_Current.viw").write_text(
@@ -2175,16 +2169,36 @@ class TestWarnGrantSeverities:
 
     def test_read_severity_accepts_off(self):
         """OFF suppresses the configured grant finding."""
-        assert read_severity_from_inspect_config({"warn_extra_grants": "OFF"}, "warn_extra_grants") == "OFF"
+        assert (
+            read_severity_from_inspect_config(
+                {"warn_extra_grants": "OFF"}, "warn_extra_grants"
+            )
+            == "OFF"
+        )
 
     def test_read_severity_accepts_warning_and_warn_alias(self):
         """WARNING and WARN both normalize to WARNING."""
-        assert read_severity_from_inspect_config({"warn_extra_grants": "WARNING"}, "warn_extra_grants") == "WARNING"
-        assert read_severity_from_inspect_config({"warn_orphan_grants": "WARN"}, "warn_orphan_grants") == "WARNING"
+        assert (
+            read_severity_from_inspect_config(
+                {"warn_extra_grants": "WARNING"}, "warn_extra_grants"
+            )
+            == "WARNING"
+        )
+        assert (
+            read_severity_from_inspect_config(
+                {"warn_orphan_grants": "WARN"}, "warn_orphan_grants"
+            )
+            == "WARNING"
+        )
 
     def test_read_severity_accepts_error(self):
         """ERROR blocks the configured grant finding."""
-        assert read_severity_from_inspect_config({"warn_extra_grants": "ERROR"}, "warn_extra_grants") == "ERROR"
+        assert (
+            read_severity_from_inspect_config(
+                {"warn_extra_grants": "ERROR"}, "warn_extra_grants"
+            )
+            == "ERROR"
+        )
 
     def test_warn_extra_grants_off_parsed_from_conf(self, tmp_path):
         """warn_extra_grants=OFF is correctly parsed from inspect.conf."""
@@ -2198,7 +2212,9 @@ class TestWarnGrantSeverities:
         conf = tmp_path / "inspect.conf"
         conf.write_text("warn_orphan_grants=WARN\n", encoding="utf-8")
         rules = read_inspect_config(str(conf))
-        assert read_severity_from_inspect_config(rules, "warn_orphan_grants") == "WARNING"
+        assert (
+            read_severity_from_inspect_config(rules, "warn_orphan_grants") == "WARNING"
+        )
 
     def test_both_settings_error_by_default_in_conf(self, tmp_path):
         """An empty inspect.conf gives ERROR for both grant severity settings."""

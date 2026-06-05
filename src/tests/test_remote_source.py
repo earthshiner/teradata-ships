@@ -349,10 +349,13 @@ class TestResolveGithubSourceCLI:
         clone_result = MagicMock(returncode=0, stdout="", stderr="")
         sha_result = MagicMock(returncode=0, stdout="abc123456789\n", stderr="")
 
-        with patch(
-            "td_release_packager.remote_source.fetch_github_source",
-            side_effect=ValueError("GitHub API error 404"),
-        ), patch("subprocess.run", side_effect=[clone_result, sha_result]) as run:
+        with (
+            patch(
+                "td_release_packager.remote_source.fetch_github_source",
+                side_effect=ValueError("GitHub API error 404"),
+            ),
+            patch("subprocess.run", side_effect=[clone_result, sha_result]) as run,
+        ):
             _resolve_github_source(args, holder)
 
         assert args.source is not None

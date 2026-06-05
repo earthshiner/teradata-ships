@@ -1166,7 +1166,9 @@ def _create_environment_prereqs_package_if_needed(
         os.path.join(env_pkg_dir, p.replace("/", os.sep)) for p in payload_paths
     )
     if not extracted_payload_summary:
-        extracted_payload_summary = os.path.join(env_pkg_dir, "payload", "01_pre_requisites")
+        extracted_payload_summary = os.path.join(
+            env_pkg_dir, "payload", "01_pre_requisites"
+        )
     print(
         "\n"
         "================================================================\n"
@@ -1600,9 +1602,7 @@ def _read_manifest_from_package_dir(pkg_dir: str) -> BuildManifest:
         package_root = _find_package_root_ancestor(pkg_dir)
         hint = ""
         if package_root:
-            hint = (
-                f" Use the extracted package root instead: {package_root}."
-            )
+            hint = f" Use the extracted package root instead: {package_root}."
         raise FileNotFoundError(
             f"Package manifest not found: {manifest_path}. "
             "Expected an extracted SHIPS package directory containing "
@@ -3837,12 +3837,24 @@ def _archive_package(pkg_dir: str, archive_format: str) -> str:
         # and _generate_integrity_file exclusions.  __pycache__ directories are
         # pruned from the os.walk in-place so their contents are never visited.
         _SKIP_DIRS = {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
-        _SKIP_SUFFIXES = (".pyc", ".pyo", ".bak", ".tmp", ".old", ".orig", ".rej", ".swp", ".swo")
+        _SKIP_SUFFIXES = (
+            ".pyc",
+            ".pyo",
+            ".bak",
+            ".tmp",
+            ".old",
+            ".orig",
+            ".rej",
+            ".swp",
+            ".swo",
+        )
 
         with _zipfile.ZipFile(archive_path, "w", _zipfile.ZIP_DEFLATED) as zf:
             for current_root, dirs, files in os.walk(pkg_dir):
                 # Prune excluded directories in-place so os.walk skips them.
-                dirs[:] = sorted(d for d in dirs if d not in _SKIP_DIRS and not d.startswith("~"))
+                dirs[:] = sorted(
+                    d for d in dirs if d not in _SKIP_DIRS and not d.startswith("~")
+                )
 
                 # Write a directory entry with a POSIX-style path so that
                 # extractall() on any platform — including Windows paths that

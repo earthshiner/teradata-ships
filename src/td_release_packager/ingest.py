@@ -1201,7 +1201,9 @@ def _emit_database_placement_mirror(
             f" — {interpretation}"
         )
 
-    (mirror_root / "README.md").write_text("\n".join(index_lines) + "\n", encoding="utf-8")
+    (mirror_root / "README.md").write_text(
+        "\n".join(index_lines) + "\n", encoding="utf-8"
+    )
 
     return os.path.relpath(mirror_root, project_dir), copied
 

@@ -467,11 +467,26 @@ class TestPackageTrustSection:
         return {
             "label": "READY",
             "signals": {
-                "inspect_lint": {"status": "pass", "message": "No lint violations found"},
-                "inspect_token_format": {"status": "pass", "message": "No malformed token markers found"},
-                "inspect_grants": {"status": "pass", "message": "Grant validation clean"},
-                "provenance_complete": {"status": "pass", "message": "context/ships.provenance.json present"},
-                "build_reproducible": {"status": "pass", "message": "Clean working tree"},
+                "inspect_lint": {
+                    "status": "pass",
+                    "message": "No lint violations found",
+                },
+                "inspect_token_format": {
+                    "status": "pass",
+                    "message": "No malformed token markers found",
+                },
+                "inspect_grants": {
+                    "status": "pass",
+                    "message": "Grant validation clean",
+                },
+                "provenance_complete": {
+                    "status": "pass",
+                    "message": "context/ships.provenance.json present",
+                },
+                "build_reproducible": {
+                    "status": "pass",
+                    "message": "Clean working tree",
+                },
             },
         }
 
@@ -482,12 +497,26 @@ class TestPackageTrustSection:
                 "inspect_lint": {
                     "status": "fail",
                     "message": "Coding Discipline lint violations: 2 error(s)",
-                    "issues": ["payload/03_ddl/tables/DB.T.tbl:1: [db_qualifier] Missing database qualifier"],
+                    "issues": [
+                        "payload/03_ddl/tables/DB.T.tbl:1: [db_qualifier] Missing database qualifier"
+                    ],
                 },
-                "inspect_token_format": {"status": "pass", "message": "No malformed token markers found"},
-                "inspect_grants": {"status": "pass", "message": "Grant validation clean"},
-                "provenance_complete": {"status": "pass", "message": "context/ships.provenance.json present"},
-                "build_reproducible": {"status": "warn", "message": "Built with --allow-dirty"},
+                "inspect_token_format": {
+                    "status": "pass",
+                    "message": "No malformed token markers found",
+                },
+                "inspect_grants": {
+                    "status": "pass",
+                    "message": "Grant validation clean",
+                },
+                "provenance_complete": {
+                    "status": "pass",
+                    "message": "context/ships.provenance.json present",
+                },
+                "build_reproducible": {
+                    "status": "warn",
+                    "message": "Built with --allow-dirty",
+                },
             },
         }
 
@@ -527,8 +556,13 @@ class TestPackageTrustSection:
         from database_package_deployer.report import _html_package_trust
 
         html = _html_package_trust(self._ready_trust())
-        for sig in ("inspect_lint", "inspect_token_format", "inspect_grants",
-                    "provenance_complete", "build_reproducible"):
+        for sig in (
+            "inspect_lint",
+            "inspect_token_format",
+            "inspect_grants",
+            "provenance_complete",
+            "build_reproducible",
+        ):
             assert sig in html, f"{sig} missing from trust section"
 
     def test_known_signals_have_expandable_details(self):

@@ -756,8 +756,6 @@ class TestExecuteDdl:
         stmts = self._run("INSERT INTO t VALUES (1)")
         assert len(stmts) == 1
 
-
-
     def test_double_hyphen_inside_string_literal_not_treated_as_comment(self):
         """A '--' sequence inside a string literal must not be treated as a
         SQL single-line comment.
@@ -815,9 +813,6 @@ class TestExecuteDdl:
             f"incorrectly treated as a statement terminator."
         )
         assert "ORDER BY a.agent_name;" in stmts[0]
-
-
-    
 
     def test_split_disabled_keeps_procedure_body_as_one_request(self):
         """Stored procedure bodies contain semicolons inside one DDL request."""
@@ -1027,8 +1022,14 @@ class TestSqljClientFilePathResolution:
         jar_two = (script.parent / "ExecLargeNOSSqlJ.jar").resolve().as_posix()
         assert result.state == DeployState.COMPLETED
         retry_sql = "\n".join(cur.executed[3:])
-        assert f"CALL SQLJ.REPLACE_JAR('CJ!{jar_one}', 'JAR_EXECUTE_LARGE_SQL')" in retry_sql
-        assert f"CALL SQLJ.INSTALL_JAR('CJ!{jar_two}', 'JAR_EXECUTE_LARGE_NOS_SQL', 0)" in retry_sql
+        assert (
+            f"CALL SQLJ.REPLACE_JAR('CJ!{jar_one}', 'JAR_EXECUTE_LARGE_SQL')"
+            in retry_sql
+        )
+        assert (
+            f"CALL SQLJ.INSTALL_JAR('CJ!{jar_two}', 'JAR_EXECUTE_LARGE_NOS_SQL', 0)"
+            in retry_sql
+        )
         assert (
             f"CALL SQLJ.INSTALL_JAR('CJ!{jar_one}', 'JAR_EXECUTE_LARGE_SQL', 0)"
             not in retry_sql
@@ -1079,8 +1080,7 @@ class TestExternalNameClientFilePathResolution:
 
         expected = (script.parent / "RaiseException.cpp").resolve().as_posix()
         assert (
-            f"EXTERNAL NAME 'CS!RaiseException!{expected}!F!RaiseException'"
-            in resolved
+            f"EXTERNAL NAME 'CS!RaiseException!{expected}!F!RaiseException'" in resolved
         )
 
     def test_deploy_direct_execute_rewrites_cpp_external_path_only_for_execution(

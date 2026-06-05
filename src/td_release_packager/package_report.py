@@ -258,7 +258,9 @@ def _strip_report_comments_and_strings(sql: str) -> str:
     return "".join(chars)
 
 
-def _normalise_script_head(verb: str, qualifier: str, obj: str, fallback_type: str) -> str:
+def _normalise_script_head(
+    verb: str, qualifier: str, obj: str, fallback_type: str
+) -> str:
     """Return a compact report label such as ``CREATE/PROCEDURE``."""
     verb = verb.upper()
     qualifier = " ".join((qualifier or "").upper().split())
@@ -554,9 +556,7 @@ def _write_package_viewers(
             with open(viewer_path, "w", encoding="utf-8") as fh:
                 fh.write(html)
         except OSError as exc:
-            logger.warning(
-                "Could not write viewer page for %s: %s", norm_path, exc
-            )
+            logger.warning("Could not write viewer page for %s: %s", norm_path, exc)
             continue
 
         links[norm_path] = f"{viewer_dir_name}/{viewer_name}"
@@ -767,7 +767,7 @@ def _summary_tab(records: List[Dict]) -> str:
     def render_category(name: str, counts: Dict[str, int]) -> str:
         rows = "\n".join(
             f"<tr><td>{_h(label)}</td><td>{count}</td></tr>"
-            for label, count in sorted(counts.items(), key=lambda item: (item[0]))
+            for label, count in sorted(counts.items(), key=lambda item: item[0])
         )
         return f"""
 <section class="summary-section">
@@ -838,7 +838,7 @@ def _waves_tab(records: List[Dict]) -> str:
 
     cell_h = 22
     cell_w = 160
-    gap = 28   # arrow gap between columns
+    gap = 28  # arrow gap between columns
     col_pad = 8  # padding inside column header
     header_h = 30
     margin = 16
@@ -903,9 +903,9 @@ def _waves_tab(records: List[Dict]) -> str:
         # The shaft starts/ends a few px off the column edges so the head
         # lands exactly at the boundary without overlapping the column border.
         if ci < len(columns) - 1:
-            ax_start = x + cell_w + 5       # small gap off the right column edge
-            ax_end   = x + cell_w + arrow_w - 5  # tip just before the next column
-            ay       = margin + col_h // 2
+            ax_start = x + cell_w + 5  # small gap off the right column edge
+            ax_end = x + cell_w + arrow_w - 5  # tip just before the next column
+            ay = margin + col_h // 2
             svg_parts.append(
                 f'<line x1="{ax_start}" y1="{ay}" x2="{ax_end}" y2="{ay}" '
                 f'stroke="{_ORANGE}" stroke-width="1.5" stroke-linecap="round" '
@@ -918,14 +918,14 @@ def _waves_tab(records: List[Dict]) -> str:
     # so there is never a colour mismatch between shaft and head.
     svg_parts.insert(
         1,
-        '<defs>'
+        "<defs>"
         '<marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" '
         'markerWidth="10" markerHeight="10" orient="auto-start-reverse" '
         'markerUnits="userSpaceOnUse">'
         '<path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" '
         'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>'
-        '</marker>'
-        '</defs>',
+        "</marker>"
+        "</defs>",
     )
 
     svg_parts.append("</svg>")
@@ -948,9 +948,6 @@ def _waves_tab(records: List[Dict]) -> str:
         + "".join(legend_parts)
         + "</div>"
     )
-
-
-
 
 
 def _load_build_provenance(pkg_dir: str) -> List[dict]:
@@ -1101,10 +1098,19 @@ def _build_provenance_tab(stages: List[dict]) -> str:
             if val is None:
                 continue
             # Don't show zero-value noise metrics
-            if isinstance(val, (int, float)) and val == 0 and key in (
-                "unclassified", "lint_errors", "lint_warnings",
-                "files_with_issues", "cycle_count", "cleaned",
-                "multiset_injected",
+            if (
+                isinstance(val, (int, float))
+                and val == 0
+                and key
+                in (
+                    "unclassified",
+                    "lint_errors",
+                    "lint_warnings",
+                    "files_with_issues",
+                    "cycle_count",
+                    "cleaned",
+                    "multiset_injected",
+                )
             ):
                 continue
             parts.append(f"<strong>{_h(str(val))}</strong> {_h(label)}")
@@ -1131,7 +1137,8 @@ def _build_provenance_tab(stages: List[dict]) -> str:
             loc_html = (
                 f'<div style="font-size:11px;color:#6C757D;margin-top:2px">'
                 f"{_h(str(loc))}</div>"
-                if loc else ""
+                if loc
+                else ""
             )
             rows.append(
                 f'<div style="padding:5px 0;border-bottom:1px solid #F0F0F0">'
@@ -1162,11 +1169,13 @@ def _build_provenance_tab(stages: List[dict]) -> str:
             "issue_counts",
             {
                 "error": sum(
-                    1 for i in (stage.get("issues") or [])
+                    1
+                    for i in (stage.get("issues") or [])
                     if str(i.get("severity", "")).lower() == "error"
                 ),
                 "warning": sum(
-                    1 for i in (stage.get("issues") or [])
+                    1
+                    for i in (stage.get("issues") or [])
                     if str(i.get("severity", "")).lower() == "warning"
                 ),
             },
@@ -1180,14 +1189,14 @@ def _build_provenance_tab(stages: List[dict]) -> str:
         if n_errors:
             issue_badge += (
                 f'<span style="background:#F8D7DA;color:#721C24;'
-                f'font-size:11px;font-weight:700;padding:1px 7px;'
+                f"font-size:11px;font-weight:700;padding:1px 7px;"
                 f'border-radius:10px;margin-left:8px">'
                 f"{n_errors} error{'s' if n_errors != 1 else ''}</span>"
             )
         if n_warnings:
             issue_badge += (
                 f'<span style="background:#FFF3CD;color:#856404;'
-                f'font-size:11px;font-weight:700;padding:1px 7px;'
+                f"font-size:11px;font-weight:700;padding:1px 7px;"
                 f'border-radius:10px;margin-left:4px">'
                 f"{n_warnings} warning{'s' if n_warnings != 1 else ''}</span>"
             )
@@ -1195,7 +1204,8 @@ def _build_provenance_tab(stages: List[dict]) -> str:
         metrics = _stage_metrics_html(stage)
         metrics_html = (
             f'<div style="font-size:12px;color:#666;margin-top:3px">{metrics}</div>'
-            if metrics else ""
+            if metrics
+            else ""
         )
 
         detail_panel = (
@@ -1209,7 +1219,8 @@ def _build_provenance_tab(stages: List[dict]) -> str:
         open_attr = " open" if n_errors else ""
         row_bg = "#FFF8F8" if n_errors else ("#FFFDF0" if n_warnings else "#FFF")
         border_left = (
-            f"4px solid #DC3545" if n_errors
+            f"4px solid #DC3545"
+            if n_errors
             else (f"4px solid #FFC107" if n_warnings else f"4px solid #28A745")
         )
 
@@ -1222,13 +1233,13 @@ def _build_provenance_tab(stages: List[dict]) -> str:
     font-size:13px;padding:2px 10px;border-radius:10px;min-width:80px;
     text-align:center">{icon} {_h(name)}</span>
   <span style="font-size:12px;color:#555">{_fmt_duration(duration_ms)}</span>
-  {f'<span style="font-size:11px;color:#888">{_h(time_label)}</span>' if time_label else ''}
+  {f'<span style="font-size:11px;color:#888">{_h(time_label)}</span>' if time_label else ""}
   {issue_badge}
   <span style="margin-left:auto;font-size:11px;color:#AAA">
-    {'click to collapse' if n_errors else 'click to expand'}
+    {"click to collapse" if n_errors else "click to expand"}
   </span>
 </summary>
-{metrics_html and f'<div style="padding:0 14px 8px 14px">{metrics_html}</div>' or ''}
+{metrics_html and f'<div style="padding:0 14px 8px 14px">{metrics_html}</div>' or ""}
 {detail_panel}
 </details>"""
 
@@ -1288,9 +1299,7 @@ def _guide_tab(manifest_dict: dict, records: List[Dict]) -> str:
         phase_set[r["phase"]] = True
 
     # Canonical phase display order
-    _PHASE_ORDER = [
-        "System", "Pre-requisites", "DCL", "DDL", "DML", "Post-install"
-    ]
+    _PHASE_ORDER = ["System", "Pre-requisites", "DCL", "DDL", "DML", "Post-install"]
     present_phases = [p for p in _PHASE_ORDER if p in phase_set]
     # Any phases not in the canonical order go at the end
     for p in phase_set:
@@ -1300,9 +1309,7 @@ def _guide_tab(manifest_dict: dict, records: List[Dict]) -> str:
     phase_count = len(present_phases)
     phases_str = ", ".join(f"<strong>{_h(p)}</strong>" for p in present_phases)
 
-    wave_nums = sorted(
-        {r["wave"] for r in records if r.get("wave") is not None}
-    )
+    wave_nums = sorted({r["wave"] for r in records if r.get("wave") is not None})
     wave_count = len(wave_nums)
 
     # ── Phase cards (only for phases actually present) ──────────────────
@@ -1359,7 +1366,7 @@ def _guide_tab(manifest_dict: dict, records: List[Dict]) -> str:
             ""
             if is_last
             else '<div style="display:flex;align-items:center;color:#aaa;'
-                 'font-size:18px;padding:0 4px;align-self:center">›</div>'
+            'font-size:18px;padding:0 4px;align-self:center">›</div>'
         )
         return (
             f'<div style="display:flex;align-items:stretch;gap:0">'
@@ -1381,12 +1388,13 @@ def _guide_tab(manifest_dict: dict, records: List[Dict]) -> str:
 
     wave_sentence = (
         f" The DDL phase is further divided into "
-        f'<strong>{wave_count} '
+        f"<strong>{wave_count} "
         f'<span data-tip="Objects in the same wave have no dependencies on each '
         f'other and can be deployed in parallel, reducing total deployment time.">'
         f"waves</span></strong>. Each wave deploys in parallel; waves are sequenced "
         f"so that no object is created before the objects it depends on."
-        if wave_count > 0 else ""
+        if wave_count > 0
+        else ""
     )
 
     return f"""
@@ -1394,7 +1402,7 @@ def _guide_tab(manifest_dict: dict, records: List[Dict]) -> str:
   <div class="guide-hero-text">
     <h2>SHIPS Package Report — Reader's Guide</h2>
     <p>This is a
-      <span data-tip="{'The main package contains the core data objects: tables, views, procedures, grants, and DML. It is deployed after the pre-requisites package.' if 'main' in role_description else 'The pre-requisites package creates the database containers and roles that the main package depends on. Deploy this first.'}">{role_description}</span>
+      <span data-tip="{"The main package contains the core data objects: tables, views, procedures, grants, and DML. It is deployed after the pre-requisites package." if "main" in role_description else "The pre-requisites package creates the database containers and roles that the main package depends on. Deploy this first."}">{role_description}</span>
       &nbsp; This report was generated automatically at build time
       to give you full visibility of what is inside the package before you
       deploy it. Build <strong>{build_no}</strong> &nbsp;·&nbsp;
@@ -1632,7 +1640,6 @@ def _signal_name_cell(name: str) -> str:
     return _signal_name_cell_shared(name, navy=_NAVY, orange=_ORANGE)
 
 
-
 def _trust_tab(trust: dict) -> str:
     """Trust Report signals table with expandable signal explanations."""
     label = trust.get("label", "UNKNOWN")
@@ -1780,13 +1787,17 @@ def _deploy_tab(manifest_dict: dict) -> str:
     You do not need to manage package order manually.
   </p>
   <p style="font-size:13px;color:#8ba4be;margin-bottom:8px">
-    Run from the release group directory{f" ({_h(release_group)})" if release_group else ""}:
+    Run from the release group directory{
+            f" ({_h(release_group)})" if release_group else ""
+        }:
   </p>
-  {cmd_block(
-      "Release group deployment (recommended)",
-      "python deploy_release.py --host &lt;host&gt; --user &lt;user&gt;",
-      "Deploys all packages in this release group in dependency order.",
-  )}
+  {
+            cmd_block(
+                "Release group deployment (recommended)",
+                "python deploy_release.py --host &lt;host&gt; --user &lt;user&gt;",
+                "Deploys all packages in this release group in dependency order.",
+            )
+        }
 </div>
 <div style="font-weight:700;margin-bottom:4px">Single-package commands</div>
 <p style="font-size:13px;color:#666;margin-bottom:14px">
