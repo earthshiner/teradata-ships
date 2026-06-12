@@ -1,0 +1,2 @@
+COMMENT ON VIEW {{CargoIntelligence_Memory_V}}.v_Current_Decisions IS
+'Current non-superseded design decisions - primary view for agents reviewing architectural rationale.';

@@ -1,0 +1,20 @@
+CREATE MULTISET TABLE {{CargoIntelligence_Memory_T}}.agent_interaction (
+    interaction_id        BIGINT GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1) NOT NULL,
+    session_id            BIGINT NOT NULL,
+    interaction_seq       INTEGER NOT NULL,
+    interaction_type      VARCHAR(50),
+    interaction_dts       TIMESTAMP(6) WITH TIME ZONE NOT NULL,
+    user_input            VARCHAR(4000),
+    agent_response        VARCHAR(4000),
+    action_taken          VARCHAR(500),
+    referenced_tables     VARCHAR(1000),
+    sql_executed          VARCHAR(4000),
+    query_result_count    INTEGER,
+    execution_time_ms     INTEGER,
+    outcome_status        VARCHAR(20),
+    user_feedback         VARCHAR(20),
+    scope_level           VARCHAR(20) NOT NULL,
+    scope_identifier      VARCHAR(100) NOT NULL,
+    created_at            TIMESTAMP(6) WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP(6)
+)
+PRIMARY INDEX (interaction_id);

@@ -1,0 +1,43 @@
+COMMENT ON TABLE {{CargoIntelligence_Semantic_T}}.column_metadata IS
+'Column (attribute) metadata - business meanings, data classifications, and governance flags for all columns.';
+COMMENT ON COLUMN {{CargoIntelligence_Semantic_T}}.column_metadata.column_metadata_id IS
+'Surrogate key for column metadata record.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Semantic_T}}.column_metadata.database_name IS
+'Physical database name where table is located.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Semantic_T}}.column_metadata.table_name IS
+'Physical table name containing this column.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Semantic_T}}.column_metadata.column_name IS
+'Physical column name.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Semantic_T}}.column_metadata.business_description IS
+'Business meaning and purpose of column - what the data represents in cargo risk context.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Semantic_T}}.column_metadata.is_pii IS
+'Personally Identifiable Information flag - 1 = contains PII, apply data governance controls.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Semantic_T}}.column_metadata.is_sensitive IS
+'Sensitive data flag - 1 = sensitive data requiring elevated access controls.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Semantic_T}}.column_metadata.data_classification IS
+'Data classification level - PUBLIC, INTERNAL, CONFIDENTIAL, or RESTRICTED.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Semantic_T}}.column_metadata.is_required IS
+'Required field indicator - 1 = NOT NULL constraint, 0 = nullable.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Semantic_T}}.column_metadata.data_type IS
+'Physical data type - VARCHAR, BIGINT, BYTEINT, DECIMAL, DATE, TIMESTAMP, CLOB, JSON, etc.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Semantic_T}}.column_metadata.allowed_values_json IS
+'Allowed values - JSON array of valid values for constrained columns e.g. HIGH or STANDARD.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Semantic_T}}.column_metadata.is_active IS
+'Active indicator - 1 = column active and documented, 0 = deprecated or removed.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Semantic_T}}.column_metadata.created_at IS
+'Timestamp when metadata record was created.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Semantic_T}}.column_metadata.updated_at IS
+'Timestamp when metadata record was last updated.';

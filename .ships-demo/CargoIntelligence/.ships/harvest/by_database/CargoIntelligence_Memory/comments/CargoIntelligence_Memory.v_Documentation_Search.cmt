@@ -1,0 +1,2 @@
+COMMENT ON VIEW {{CargoIntelligence_Memory_V}}.v_Documentation_Search IS
+'Unified text search across all documentation tables - record_type, record_id, title, content columns.';

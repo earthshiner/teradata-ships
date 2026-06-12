@@ -1,0 +1,22 @@
+REPLACE VIEW {{CargoIntelligence_Memory_V}}.v_Cookbook_Active (
+    recipe_key,
+    recipe_id,
+    recipe_title,
+    use_case,
+    target_module,
+    complexity,
+    source_module,
+    valid_from
+)
+AS
+SELECT
+    cb.recipe_key,
+    cb.recipe_id,
+    cb.recipe_title,
+    cb.use_case,
+    cb.target_module,
+    cb.complexity,
+    cb.source_module,
+    cb.valid_from
+FROM {{CargoIntelligence_Memory_T}}.Query_Cookbook cb
+WHERE cb.is_active = 1;

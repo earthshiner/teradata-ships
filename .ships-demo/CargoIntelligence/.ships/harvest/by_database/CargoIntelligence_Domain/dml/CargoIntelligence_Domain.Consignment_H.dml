@@ -1,0 +1,67 @@
+INSERT INTO {{CargoIntelligence_Domain_T}}.{{Consignment_H_T}} (
+    {{consignment_id_T}},
+    consignment_key,
+    party_id,
+    hs_code_id,
+    country_risk_id,
+    {{declaration_date_T}},
+    declaration_year,
+    trade_value_usd,
+    net_weight_kg,
+    value_per_kg,
+    transport_code,
+    transport_desc,
+    source_system,
+    source_key,
+    valid_from_dt,
+    valid_to_dt,
+    is_current,
+    is_deleted
+)
+SELECT
+    {{ck_V}}.{{consignment_id_T}},
+    CAST(stg.{{consignment_id_T}} AS VARCHAR(30)) AS consignment_key,
+    {{pk_V}}.party_id,
+    {{hs_V}}.hs_code_id,
+    {{cr_V}}.country_risk_id,
+    CAST(stg.{{declaration_date_T}} AS DATE FORMAT 'YYYY-MM-DD') AS {{declaration_date_T}},
+    CAST(EXTRACT(YEAR FROM CAST(stg.{{declaration_date_T}} AS DATE FORMAT 'YYYY-MM-DD')) AS SMALLINT) AS declaration_year,
+    CAST(stg.trade_value_usd AS DECIMAL(15,2)) AS trade_value_usd,
+    CAST(stg.net_weight_kg AS DECIMAL(12,3)) AS net_weight_kg,
+    CAST(stg.value_per_kg AS DECIMAL(10,4)) AS value_per_kg,
+    stg.transport_code,
+    stg.transport_desc,
+    'ABF_CARGO' AS source_system,
+    CAST(stg.{{consignment_id_T}} AS VARCHAR(30)) AS source_key,
+    CAST(stg.{{declaration_date_T}} AS DATE FORMAT 'YYYY-MM-DD') AS valid_from_dt,
+    DATE '9999-12-31' AS valid_to_dt,
+    1 AS is_current,
+    0 AS is_deleted
+FROM (
+    SELECT
+        {{consignment_id_T}},
+        {{declaration_date_T}},
+        partner_code,
+        hs_chapter,
+        trade_value_usd,
+        net_weight_kg,
+        value_per_kg,
+        transport_code,
+        transport_desc,
+        sender_id
+    FROM {{CargoIntelligence_Staging_V}}.{{STG_Cargo_Consignments_T}}
+    QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY {{consignment_id_T}}
+        ORDER BY {{declaration_date_T}} DESC
+    ) = 1
+) stg
+INNER JOIN {{CargoIntelligence_Domain_T}}.{{Consignment_Keymap_T}} {{ck_T}}
+    ON {{ck_V}}.consignment_key = CAST(stg.{{consignment_id_T}} AS VARCHAR(30))
+INNER JOIN {{CargoIntelligence_Domain_T}}.{{Party_Keymap_T}} {{pk_T}}
+    ON {{pk_V}}.party_key = stg.sender_id
+INNER JOIN {{CargoIntelligence_Domain_T}}.{{HsCode_R}} {{hs_T}}
+    ON {{hs_V}}.hs_chapter = stg.hs_chapter
+   AND {{hs_V}}.is_active = 1
+INNER JOIN {{CargoIntelligence_Domain_T}}.CountryRisk_R {{cr_T}}
+    ON {{cr_V}}.partner_code = stg.partner_code
+   AND {{cr_V}}.is_active = 1;

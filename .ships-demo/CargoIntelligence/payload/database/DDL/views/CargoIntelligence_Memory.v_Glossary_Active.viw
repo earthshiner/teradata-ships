@@ -1,0 +1,20 @@
+REPLACE VIEW {{CargoIntelligence_Memory_V}}.v_Glossary_Active (
+    glossary_key,
+    term,
+    term_category,
+    related_table,
+    related_column,
+    source_module,
+    valid_from
+)
+AS
+SELECT
+    gl.glossary_key,
+    gl.term,
+    gl.term_category,
+    gl.related_table,
+    gl.related_column,
+    gl.source_module,
+    gl.valid_from
+FROM {{CargoIntelligence_Memory_T}}.Business_Glossary gl
+WHERE gl.is_active = 1;

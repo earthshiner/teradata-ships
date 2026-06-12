@@ -1,0 +1,43 @@
+REPLACE VIEW {{CargoIntelligence_Memory_V}}.v_interactions_summary (
+    session_key,
+    agent_key,
+    user_key,
+    session_scope,
+    interaction_id,
+    interaction_seq,
+    interaction_type,
+    user_input,
+    action_taken,
+    sql_executed,
+    query_result_count,
+    execution_time_ms,
+    outcome_status,
+    user_feedback,
+    referenced_tables,
+    scope_level,
+    scope_identifier,
+    interaction_dts
+)
+AS
+SELECT
+    {{ses_V}}.session_key,
+    {{ses_V}}.agent_key,
+    {{ses_V}}.user_key,
+    {{ses_V}}.scope_level,
+    intr.interaction_id,
+    intr.interaction_seq,
+    intr.interaction_type,
+    intr.user_input,
+    intr.action_taken,
+    intr.sql_executed,
+    intr.query_result_count,
+    intr.execution_time_ms,
+    intr.outcome_status,
+    intr.user_feedback,
+    intr.referenced_tables,
+    intr.scope_level,
+    intr.scope_identifier,
+    intr.interaction_dts
+FROM {{CargoIntelligence_Memory_T}}.agent_interaction intr
+INNER JOIN {{CargoIntelligence_Memory_T}}.agent_session {{ses_V}}
+    ON {{ses_V}}.session_id = intr.session_id;

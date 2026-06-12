@@ -1,0 +1,14 @@
+CREATE MULTISET TABLE {{CargoIntelligence_Domain_T}}.{{Party_H_T}} (
+    party_id      BIGINT NOT NULL,
+    party_key     VARCHAR(20) NOT NULL,
+    party_name    VARCHAR(100),
+    source_system VARCHAR(50) DEFAULT 'ABF_CARGO',
+    source_key    VARCHAR(20),
+    valid_from_dt DATE NOT NULL,
+    valid_to_dt   DATE NOT NULL DEFAULT DATE '9999-12-31',
+    is_current    BYTEINT NOT NULL DEFAULT 1,
+    is_deleted    BYTEINT NOT NULL DEFAULT 0,
+    created_dt    TIMESTAMP(6) WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP(6),
+    updated_dt    TIMESTAMP(6) WITH TIME ZONE
+)
+PRIMARY INDEX (party_id);

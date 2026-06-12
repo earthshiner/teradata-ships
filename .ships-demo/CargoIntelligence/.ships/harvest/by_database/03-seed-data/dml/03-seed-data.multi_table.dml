@@ -1,0 +1,502 @@
+INSERT INTO {{CargoIntelligence_Semantic_T}}.data_product_map (
+    module_name, module_description, module_purpose,
+    database_name, naming_pattern, table_prefix,
+    primary_tables, primary_views,
+    module_version, deployment_status, deployed_dts,
+    is_active, created_at, updated_at
+) VALUES (
+    'Domain',
+    'Core business entities for cargo consignment risk detection. Five entities: Consignment_H, Party_H, HsCode_R, CountryRisk_R, RiskProfile_R. Bi-temporal history on transactional entities, reference tables for classifications and archetypes.',
+    'Source of truth for all cargo consignment business entities',
+    'CargoIntelligence_Domain',
+    'SEPARATE_DB',
+    NULL,
+    'Consignment_H, Party_H, HsCode_R, CountryRisk_R, RiskProfile_R',
+    'Consignment_Current, Party_Current',
+    '1.0.0',
+    'DEPLOYED',
+    CURRENT_TIMESTAMP(6),
+    1,
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.data_product_map (
+    module_name, module_description, module_purpose,
+    database_name, naming_pattern, table_prefix,
+    primary_tables, primary_views,
+    module_version, deployment_status, deployed_dts,
+    is_active, created_at, updated_at
+) VALUES (
+    'Semantic',
+    'Knowledge and meaning layer for CargoIntelligence. Machine-readable metadata: module discovery via data_product_map, entity catalog via entity_metadata, column definitions via column_metadata, join patterns via table_relationship, and naming conventions via naming_standard.',
+    'Enable autonomous agent discovery and correct SQL generation',
+    'CargoIntelligence_Semantic',
+    'SEPARATE_DB',
+    NULL,
+    'data_product_map, entity_metadata, table_relationship',
+    'v_entity_catalog, v_relationship_paths',
+    '1.0.0',
+    'DEPLOYED',
+    CURRENT_TIMESTAMP(6),
+    1,
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.data_product_map (
+    module_name, module_description, module_purpose,
+    database_name, naming_pattern, table_prefix,
+    primary_tables, primary_views,
+    module_version, deployment_status, deployed_dts,
+    is_active, created_at, updated_at
+) VALUES (
+    'Memory',
+    'Agent state, learning, and documentation sub-module. Runtime memory tables for session continuity and cross-analyst learning. Documentation sub-module hosts design decisions, business glossary, query cookbook, and change history for all modules.',
+    'Agent continuity, learning persistence, and product-level documentation',
+    'CargoIntelligence_Memory',
+    'SEPARATE_DB',
+    NULL,
+    'agent_session, agent_interaction, Module_Registry, Design_Decision, Business_Glossary, Query_Cookbook',
+    'v_interactions_summary, v_Current_Decisions, v_Cookbook_Active',
+    '1.0.0',
+    'DEPLOYED',
+    CURRENT_TIMESTAMP(6),
+    1,
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.data_product_map (
+    module_name, module_description, module_purpose,
+    database_name, naming_pattern, table_prefix,
+    primary_tables, primary_views,
+    module_version, deployment_status, deployed_dts,
+    is_active, created_at, updated_at
+) VALUES (
+    'Observability',
+    'Data quality monitoring, agent interaction events, and outcome tracking. Monitors Domain entity load quality, tracks similarity search performance, and captures analyst feedback on risk scoring outcomes to enable closed-loop improvement.',
+    'Monitor data product health and enable closed-loop learning',
+    'CargoIntelligence_Observability',
+    'SEPARATE_DB',
+    NULL,
+    'change_event, data_quality_metric, query_log',
+    NULL,
+    '1.0.0',
+    'DEPLOYED',
+    CURRENT_TIMESTAMP(6),
+    1,
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.data_product_map (
+    module_name, module_description, module_purpose,
+    database_name, naming_pattern, table_prefix,
+    primary_tables, primary_views,
+    module_version, deployment_status, deployed_dts,
+    is_active, created_at, updated_at
+) VALUES (
+    'Search',
+    'Structured vector similarity search for tobacco smuggling detection. Encodes consignments as feature strings, embeds via ONNX in-database, scores against RiskProfile archetypes using TD_VectorDistance cosine. Produces similarity_score_max for the Prediction feature store.',
+    'Structured embedding and similarity scoring for risk detection',
+    'CargoIntelligence_Search',
+    'SEPARATE_DB',
+    NULL,
+    'entity_embedding',
+    NULL,
+    '1.0.0',
+    'DEPLOYED',
+    CURRENT_TIMESTAMP(6),
+    1,
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.data_product_map (
+    module_name, module_description, module_purpose,
+    database_name, naming_pattern, table_prefix,
+    primary_tables, primary_views,
+    module_version, deployment_status, deployed_dts,
+    is_active, created_at, updated_at
+) VALUES (
+    'Prediction',
+    'Feature store and composite risk scoring. Pre-computed features: value_density_score, origin_risk_score, hs_adjacency_risk, trade_asymmetry_score, consignee_network_flag, similarity_score_max (from Search), composite_risk_score. Terminal module - no downstream dependents.',
+    'Feature store and composite risk score for tobacco smuggling detection',
+    'CargoIntelligence_Prediction',
+    'SEPARATE_DB',
+    NULL,
+    'consignment_features, model_prediction',
+    NULL,
+    '1.0.0',
+    'DEPLOYED',
+    CURRENT_TIMESTAMP(6),
+    1,
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+-- -----------------------------------------------------------------------------
+-- ENTITY_METADATA -- 5 rows (Domain entities only at v1.0.0)
+-- -----------------------------------------------------------------------------
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.entity_metadata (
+    entity_name, entity_description, module_name, database_name,
+    table_name, view_name, surrogate_key_column, natural_key_column,
+    temporal_pattern, current_flag_column, deleted_flag_column,
+    industry_standard, is_active, created_at, updated_at
+) VALUES (
+    'Consignment',
+    'Import declaration for a cargo consignment entering Australia. 2M records 2019-2023. Covers HS chapter, declared trade value, net weight, origin country, transport mode, and sender identity. Primary unit of analysis for tobacco smuggling detection.',
+    'Domain',
+    'CargoIntelligence_Domain',
+    'Consignment_H',
+    'Consignment_Current',
+    'consignment_id',
+    'consignment_key',
+    'BI_TEMPORAL',
+    'is_current',
+    'is_deleted',
+    'CUSTOM',
+    1,
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.entity_metadata (
+    entity_name, entity_description, module_name, database_name,
+    table_name, view_name, surrogate_key_column, natural_key_column,
+    temporal_pattern, current_flag_column, deleted_flag_column,
+    industry_standard, is_active, created_at, updated_at
+) VALUES (
+    'Party',
+    'Sender of a cargo consignment. 398K distinct sender entities derived from STG_Cargo_Consignments.sender_id. Bi-temporal to track sender attribute changes over time. Sender-only - no consignee data in source.',
+    'Domain',
+    'CargoIntelligence_Domain',
+    'Party_H',
+    'Party_Current',
+    'party_id',
+    'party_key',
+    'BI_TEMPORAL',
+    'is_current',
+    'is_deleted',
+    'CUSTOM',
+    1,
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.entity_metadata (
+    entity_name, entity_description, module_name, database_name,
+    table_name, view_name, surrogate_key_column, natural_key_column,
+    temporal_pattern, current_flag_column, deleted_flag_column,
+    industry_standard, is_active, created_at, updated_at
+) VALUES (
+    'HsCode',
+    'Harmonized System chapter reference. 17 HS chapters in CargoIntelligence. Flags is_tobacco_chapter (ch.24) and is_disguise_category (ch.20,22,25,39,63,94). Chapters 20,22,24,25,39,63,94 have benchmark value_per_kg from UN Comtrade TradeStats.',
+    'Domain',
+    'CargoIntelligence_Domain',
+    'HsCode_R',
+    NULL,
+    'hs_code_id',
+    'hs_chapter',
+    'NONE',
+    'is_active',
+    NULL,
+    'CUSTOM',
+    1,
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.entity_metadata (
+    entity_name, entity_description, module_name, database_name,
+    table_name, view_name, surrogate_key_column, natural_key_column,
+    temporal_pattern, current_flag_column, deleted_flag_column,
+    industry_standard, is_active, created_at, updated_at
+) VALUES (
+    'CountryRisk',
+    'Country risk reference with origin_risk_tier classification (HIGH or STANDARD). 199 countries. 5 HIGH-risk countries: China, China HK SAR, Singapore, UAE, Viet Nam. Joins to Consignment via partner_code (UN Comtrade country code).',
+    'Domain',
+    'CargoIntelligence_Domain',
+    'CountryRisk_R',
+    NULL,
+    'country_risk_id',
+    'partner_code',
+    'NONE',
+    'is_active',
+    NULL,
+    'CUSTOM',
+    1,
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.entity_metadata (
+    entity_name, entity_description, module_name, database_name,
+    table_name, view_name, surrogate_key_column, natural_key_column,
+    temporal_pattern, current_flag_column, deleted_flag_column,
+    industry_standard, is_active, created_at, updated_at
+) VALUES (
+    'RiskProfile',
+    'Curated tobacco smuggling archetype. 8 seeded profiles: 1 direct tobacco (HS 24), 6 tobacco-in-disguise (HS 20,22,25,39,63,94), 1 baseline legitimate. Each profile encodes hs_chapter, origin_risk_tier, transport_mode, and value_density_range as a feature_text for embedding. Anchor points for Search module similarity scoring.',
+    'Domain',
+    'CargoIntelligence_Domain',
+    'RiskProfile_R',
+    NULL,
+    'risk_profile_id',
+    'profile_code',
+    'NONE',
+    'is_active',
+    NULL,
+    'CUSTOM',
+    1,
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+-- -----------------------------------------------------------------------------
+-- TABLE_RELATIONSHIP -- 8 rows (5 intra-Domain, 3 cross-module)
+-- -----------------------------------------------------------------------------
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.table_relationship (
+    relationship_name, relationship_description,
+    from_database, from_table, from_column,
+    to_database, to_table, to_column,
+    relationship_type, cardinality, relationship_meaning,
+    is_mandatory, is_active, created_at, updated_at
+) VALUES (
+    'Consignment_To_Party',
+    'Each consignment is sent by one party. Links Consignment_H to the sender Party_H via party_id.',
+    'CargoIntelligence_Domain', 'Consignment_H', 'party_id',
+    'CargoIntelligence_Domain', 'Party_H', 'party_id',
+    'FOREIGN_KEY', 'M:1',
+    'A sender party can ship many consignments; each consignment has one sender',
+    1, 1, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.table_relationship (
+    relationship_name, relationship_description,
+    from_database, from_table, from_column,
+    to_database, to_table, to_column,
+    relationship_type, cardinality, relationship_meaning,
+    is_mandatory, is_active, created_at, updated_at
+) VALUES (
+    'Consignment_To_HsCode',
+    'Each consignment declares one HS chapter. Links Consignment_H to HsCode_R for chapter classification and risk flags.',
+    'CargoIntelligence_Domain', 'Consignment_H', 'hs_code_id',
+    'CargoIntelligence_Domain', 'HsCode_R', 'hs_code_id',
+    'FOREIGN_KEY', 'M:1',
+    'An HS chapter can apply to many consignments; each consignment declares one chapter',
+    1, 1, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.table_relationship (
+    relationship_name, relationship_description,
+    from_database, from_table, from_column,
+    to_database, to_table, to_column,
+    relationship_type, cardinality, relationship_meaning,
+    is_mandatory, is_active, created_at, updated_at
+) VALUES (
+    'Consignment_To_CountryRisk',
+    'Each consignment originates from one country. Links Consignment_H to CountryRisk_R for origin risk tier classification.',
+    'CargoIntelligence_Domain', 'Consignment_H', 'country_risk_id',
+    'CargoIntelligence_Domain', 'CountryRisk_R', 'country_risk_id',
+    'FOREIGN_KEY', 'M:1',
+    'An origin country can be the source of many consignments; each consignment has one origin country',
+    1, 1, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.table_relationship (
+    relationship_name, relationship_description,
+    from_database, from_table, from_column,
+    to_database, to_table, to_column,
+    relationship_type, cardinality, relationship_meaning,
+    is_mandatory, is_active, created_at, updated_at
+) VALUES (
+    'RiskProfile_To_HsCode',
+    'Each risk profile is anchored to one HS chapter. Links RiskProfile_R to HsCode_R to define which chapter the smuggling archetype targets.',
+    'CargoIntelligence_Domain', 'RiskProfile_R', 'hs_code_id',
+    'CargoIntelligence_Domain', 'HsCode_R', 'hs_code_id',
+    'FOREIGN_KEY', 'M:1',
+    'An HS chapter can be targeted by multiple risk profiles; each profile is anchored to one chapter',
+    1, 1, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.table_relationship (
+    relationship_name, relationship_description,
+    from_database, from_table, from_column,
+    to_database, to_table, to_column,
+    relationship_type, cardinality, relationship_meaning,
+    is_mandatory, is_active, created_at, updated_at
+) VALUES (
+    'RiskProfile_To_CountryRisk',
+    'Risk profiles reference an origin risk tier via CountryRisk_R. Links RiskProfile_R to CountryRisk_R to constrain which origin risk tier the archetype applies to.',
+    'CargoIntelligence_Domain', 'RiskProfile_R', 'country_risk_id',
+    'CargoIntelligence_Domain', 'CountryRisk_R', 'country_risk_id',
+    'FOREIGN_KEY', 'M:1',
+    'A country risk tier can be referenced by multiple risk profiles; each profile targets one tier',
+    0, 1, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.table_relationship (
+    relationship_name, relationship_description,
+    from_database, from_table, from_column,
+    to_database, to_table, to_column,
+    relationship_type, cardinality, relationship_meaning,
+    is_mandatory, is_active, created_at, updated_at
+) VALUES (
+    'Consignment_To_Embedding',
+    'Each consignment has a corresponding embedding vector in the Search module. Links Consignment_H to entity_embedding via consignment_id.',
+    'CargoIntelligence_Domain', 'Consignment_H', 'consignment_id',
+    'CargoIntelligence_Search', 'entity_embedding', 'entity_id',
+    'ASSOCIATIVE', '1:1',
+    'Each consignment is encoded once as an embedding vector for similarity scoring',
+    0, 1, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.table_relationship (
+    relationship_name, relationship_description,
+    from_database, from_table, from_column,
+    to_database, to_table, to_column,
+    relationship_type, cardinality, relationship_meaning,
+    is_mandatory, is_active, created_at, updated_at
+) VALUES (
+    'Consignment_To_Features',
+    'Each consignment has a corresponding feature store row in the Prediction module. Links Consignment_H to consignment_features via consignment_id.',
+    'CargoIntelligence_Domain', 'Consignment_H', 'consignment_id',
+    'CargoIntelligence_Prediction', 'consignment_features', 'consignment_id',
+    'ASSOCIATIVE', '1:1',
+    'Each consignment has one pre-computed feature row including composite_risk_score',
+    0, 1, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.table_relationship (
+    relationship_name, relationship_description,
+    from_database, from_table, from_column,
+    to_database, to_table, to_column,
+    relationship_type, cardinality, relationship_meaning,
+    is_mandatory, is_active, created_at, updated_at
+) VALUES (
+    'Embedding_To_Features',
+    'The similarity_score_max computed in entity_embedding feeds directly into consignment_features. Documents the Search-to-Prediction cross-module data flow.',
+    'CargoIntelligence_Search', 'entity_embedding', 'entity_id',
+    'CargoIntelligence_Prediction', 'consignment_features', 'consignment_id',
+    'ASSOCIATIVE', '1:1',
+    'similarity_score_max from Search is the bridge between embedding layer and prediction feature store',
+    0, 1, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);
+
+-- -----------------------------------------------------------------------------
+-- NAMING_STANDARD -- 10 rows
+-- -----------------------------------------------------------------------------
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.naming_standard (
+    standard_type, standard_value, meaning, usage_guidance, applies_to, examples, is_active, created_at
+) VALUES (
+    'SUFFIX', '_H',
+    'History table with bi-temporal tracking. Contains full version history with valid_from, valid_to, is_current, and is_deleted columns.',
+    'Use for all entities requiring full change history. Filter WHERE is_current = 1 AND is_deleted = 0 for current records.',
+    'TABLE',
+    'Consignment_H, Party_H',
+    1, CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.naming_standard (
+    standard_type, standard_value, meaning, usage_guidance, applies_to, examples, is_active, created_at
+) VALUES (
+    'SUFFIX', '_R',
+    'Reference table. Static or slowly-changing lookup data. No temporal history columns. Filter WHERE is_active = 1 for active records.',
+    'Use for classification lookups, code lists, and curated archetypes. No is_current column - use is_active instead.',
+    'TABLE',
+    'HsCode_R, CountryRisk_R, RiskProfile_R',
+    1, CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.naming_standard (
+    standard_type, standard_value, meaning, usage_guidance, applies_to, examples, is_active, created_at
+) VALUES (
+    'SUFFIX', '_Current',
+    'View exposing only current records from a history table. Equivalent to WHERE is_current = 1 AND is_deleted = 0 on the base _H table.',
+    'Use for standard analytical queries that do not need historical versions. Preferred access pattern for Domain entities in Prediction and Search joins.',
+    'VIEW',
+    'Consignment_Current, Party_Current',
+    1, CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.naming_standard (
+    standard_type, standard_value, meaning, usage_guidance, applies_to, examples, is_active, created_at
+) VALUES (
+    'SUFFIX', '_id',
+    'Surrogate key column. BIGINT GENERATED ALWAYS AS IDENTITY. System-assigned, never exposed to business users. Used as the physical join key between tables.',
+    'Always join on _id columns, not _key columns, for performance. Example: JOIN Party_H ON Party_H.party_id = Consignment_H.party_id',
+    'COLUMN',
+    'consignment_id, party_id, hs_code_id, country_risk_id, risk_profile_id',
+    1, CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.naming_standard (
+    standard_type, standard_value, meaning, usage_guidance, applies_to, examples, is_active, created_at
+) VALUES (
+    'SUFFIX', '_key',
+    'Natural business key column. Business-meaningful identifier sourced from the source system. Used for display and lookup by analysts, not for physical joins.',
+    'Use _key columns in WHERE clauses when filtering by business value. Use _id columns for table joins.',
+    'COLUMN',
+    'consignment_key, party_key, profile_code',
+    1, CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.naming_standard (
+    standard_type, standard_value, meaning, usage_guidance, applies_to, examples, is_active, created_at
+) VALUES (
+    'PREFIX', 'is_',
+    'Boolean flag column. BYTEINT NOT NULL DEFAULT 0 or 1. Filter with = 1 (true) or = 0 (false). Never use Y/N string comparison.',
+    'All boolean columns use BYTEINT and is_ prefix. Filter: WHERE is_current = 1 not WHERE is_current = Y',
+    'COLUMN',
+    'is_current, is_deleted, is_active, is_tobacco_chapter, is_disguise_category',
+    1, CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.naming_standard (
+    standard_type, standard_value, meaning, usage_guidance, applies_to, examples, is_active, created_at
+) VALUES (
+    'SUFFIX', '_dts',
+    'Datetime stamp column. TIMESTAMP(6) WITH TIME ZONE. Always stored in UTC. Use for event timestamps requiring sub-second precision.',
+    'Use _dts for event timestamps (interaction_dts, deployed_dts). Use _at for audit timestamps (created_at, updated_at). Use _date for DATE columns.',
+    'COLUMN',
+    'interaction_dts, session_start_dts, session_end_dts, deployed_dts',
+    1, CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.naming_standard (
+    standard_type, standard_value, meaning, usage_guidance, applies_to, examples, is_active, created_at
+) VALUES (
+    'SUFFIX', '_at',
+    'Audit timestamp column. TIMESTAMP(6) WITH TIME ZONE. Records when the row was created or last modified in the data product, not when the business event occurred.',
+    'Every table must have created_at and updated_at audit columns using CURRENT_TIMESTAMP(6) defaults.',
+    'COLUMN',
+    'created_at, updated_at',
+    1, CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.naming_standard (
+    standard_type, standard_value, meaning, usage_guidance, applies_to, examples, is_active, created_at
+) VALUES (
+    'SUFFIX', '_json',
+    'JSON document column. Stores complex or flexible structured data. Agents should retrieve the full JSON document and parse it in application code, not filter inside Teradata SQL.',
+    'Use for context or metadata with variable structure. Do not use for values needing SQL-level filtering - use VARCHAR instead.',
+    'COLUMN',
+    'session_context_json, pattern_definition_json, allowed_values_json',
+    1, CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Semantic_T}}.naming_standard (
+    standard_type, standard_value, meaning, usage_guidance, applies_to, examples, is_active, created_at
+) VALUES (
+    'PATTERN', '{ProductName}_{ModuleName}',
+    'Database naming convention for Approach 1 (separate databases per module). Each module has its own Teradata database named as ProductName underscore ModuleName.',
+    'Agent bootstrap: construct Semantic database name as {ProductName}_Semantic, then query data_product_map to discover all other module databases.',
+    'ALL',
+    'CargoIntelligence_Domain, CargoIntelligence_Semantic, CargoIntelligence_Memory, CargoIntelligence_Search, CargoIntelligence_Prediction, CargoIntelligence_Observability',
+    1, CURRENT_TIMESTAMP(6)
+);

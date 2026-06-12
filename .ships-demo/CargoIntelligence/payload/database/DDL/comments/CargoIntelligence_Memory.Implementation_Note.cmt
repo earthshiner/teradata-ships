@@ -1,0 +1,49 @@
+COMMENT ON TABLE {{CargoIntelligence_Memory_T}}.Implementation_Note IS
+'Operational knowledge for CargoIntelligence - workarounds, known issues, and deployment tips.';
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.Implementation_Note.note_key IS
+'Surrogate key for implementation note record.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.Implementation_Note.note_id IS
+'Human-readable note ID - format IN-MODULE-NNN e.g. IN-MEMORY-001.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.Implementation_Note.note_title IS
+'Short descriptive title for this note.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.Implementation_Note.note_content IS
+'Full content of the note including workaround or operational detail.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.Implementation_Note.note_category IS
+'Note type - DEPLOYMENT, WORKAROUND, KNOWN_ISSUE, PERFORMANCE_TIP, OPERATIONAL, or SECURITY.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.Implementation_Note.severity IS
+'Issue severity - LOW, MEDIUM, HIGH, or CRITICAL. NULL for non-issue notes.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.Implementation_Note.affects_table IS
+'Tables or components affected by this note.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.Implementation_Note.resolution_status IS
+'Resolution state - OPEN, IN_PROGRESS, RESOLVED, or WONT_FIX.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.Implementation_Note.resolution_notes IS
+'Description of how the issue was resolved if applicable.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.Implementation_Note.source_module IS
+'Module that owns this note.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.Implementation_Note.module_version IS
+'Module version when this note was created.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.Implementation_Note.is_active IS
+'Active indicator - 1 = note active, 0 = resolved or retired.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.Implementation_Note.valid_from IS
+'Date note became active.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.Implementation_Note.valid_to IS
+'Date note expires - 9999-12-31 for active notes.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.Implementation_Note.created_timestamp IS
+'Timestamp when note was created.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.Implementation_Note.updated_timestamp IS
+'Timestamp when note was last updated.';

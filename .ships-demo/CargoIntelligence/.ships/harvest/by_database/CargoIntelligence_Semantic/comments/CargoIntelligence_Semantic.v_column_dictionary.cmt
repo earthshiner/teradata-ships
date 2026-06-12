@@ -1,0 +1,2 @@
+COMMENT ON VIEW {{CargoIntelligence_Semantic_V}}.v_column_dictionary IS
+'Active column metadata - business descriptions, PII flags, and data classifications for all documented columns.';

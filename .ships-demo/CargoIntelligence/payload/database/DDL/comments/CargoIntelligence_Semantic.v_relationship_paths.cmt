@@ -1,0 +1,2 @@
+COMMENT ON VIEW {{CargoIntelligence_Semantic_V}}.v_relationship_paths IS
+'Multi-hop join path discovery up to 5 hops. Agents use path_joins column for ready-to-use JOIN syntax.';

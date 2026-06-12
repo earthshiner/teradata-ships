@@ -1,0 +1,19 @@
+CREATE MULTISET TABLE {{CargoIntelligence_Memory_T}}.Business_Glossary (
+    glossary_key        BIGINT GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1) NOT NULL,
+    term                VARCHAR(200) NOT NULL,
+    term_category       VARCHAR(50) NOT NULL,
+    definition          CLOB NOT NULL,
+    business_context    CLOB,
+    synonyms            VARCHAR(500),
+    related_terms       VARCHAR(500),
+    related_table       VARCHAR(200),
+    related_column      VARCHAR(200),
+    source_module       VARCHAR(50) NOT NULL,
+    module_version      VARCHAR(20),
+    is_active           BYTEINT NOT NULL DEFAULT 1,
+    valid_from          DATE NOT NULL,
+    valid_to            DATE DEFAULT DATE '9999-12-31',
+    created_timestamp   TIMESTAMP(6) WITH TIME ZONE,
+    updated_timestamp   TIMESTAMP(6) WITH TIME ZONE
+)
+PRIMARY INDEX (glossary_key);

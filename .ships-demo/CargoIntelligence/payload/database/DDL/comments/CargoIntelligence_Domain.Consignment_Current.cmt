@@ -1,0 +1,2 @@
+COMMENT ON VIEW {{CargoIntelligence_Domain_V}}.Consignment_Current IS
+'Current active consignments - is_current=1 and is_deleted=0. Standard access pattern for risk analysis and module joins.';

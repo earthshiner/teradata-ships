@@ -1,0 +1,206 @@
+INSERT INTO {{CargoIntelligence_Memory_T}}.Design_Decision (
+    decision_id, decision_version, decision_title, decision_description,
+    context, alternatives_considered, rationale, consequences,
+    decision_status, decision_category, source_module, module_version,
+    affects_table, decided_by, decided_date,
+    valid_from, valid_to, is_current, created_timestamp, updated_timestamp
+) VALUES (
+    'DD-SEMANTIC-001', 1,
+    'entity_metadata populated for Domain entities only at initial deployment',
+    'At Semantic v1.0.0, entity_metadata contains 5 rows covering the 5 Domain entities. Entities from other modules (entity_embedding in Search, consignment_features in Prediction, etc.) will be added as those modules are deployed.',
+    'entity_metadata is the agent entity catalog for the entire data product. At initial deployment only the Domain module entities are known, so only Domain entities are registered.',
+    'Register placeholder rows for all anticipated entities across all modules upfront.',
+    'Register entities only when their tables are physically deployed. Placeholder rows for non-existent tables would mislead agents into querying tables that do not yet exist.',
+    'Semantic module must be updated incrementally as each new module deploys. The 04-documentation.sql file for each future module must include entity_metadata INSERTs for that modules entities.',
+    'ACCEPTED', 'SCHEMA', 'SEMANTIC', '1.0.0',
+    'CargoIntelligence_Semantic.entity_metadata',
+    'CargoIntelligence Data Product Team', CURRENT_DATE,
+    CURRENT_DATE, DATE '9999-12-31', 1, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Design_Decision (
+    decision_id, decision_version, decision_title, decision_description,
+    context, alternatives_considered, rationale, consequences,
+    decision_status, decision_category, source_module, module_version,
+    affects_table, decided_by, decided_date,
+    valid_from, valid_to, is_current, created_timestamp, updated_timestamp
+) VALUES (
+    'DD-SEMANTIC-002', 1,
+    'column_metadata populated in Domain module brief, not Semantic',
+    'The column_metadata table is created here (Semantic) but populated with 0 rows at Semantic deployment. All column_metadata INSERTs for Domain tables are included in the Domain module D5 documentation script.',
+    'Column-level metadata requires knowledge of exact column names and types, which are defined in the Domain module DDL. Writing column_metadata INSERTs before the Domain tables are designed would require duplicating column specifications.',
+    'Populate column_metadata for all Domain columns as part of the Semantic module brief.',
+    'Domain module brief is the authoritative source for column definitions. Generating column_metadata alongside Domain DDL avoids drift and ensures consistency.',
+    'Agents bootstrapping from Semantic before Domain is deployed will find entity_metadata rows but no column_metadata rows for Domain tables. This is expected and documented.',
+    'ACCEPTED', 'SCHEMA', 'SEMANTIC', '1.0.0',
+    'CargoIntelligence_Semantic.column_metadata',
+    'CargoIntelligence Data Product Team', CURRENT_DATE,
+    CURRENT_DATE, DATE '9999-12-31', 1, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Design_Decision (
+    decision_id, decision_version, decision_title, decision_description,
+    context, alternatives_considered, rationale, consequences,
+    decision_status, decision_category, source_module, module_version,
+    affects_table, decided_by, decided_date,
+    valid_from, valid_to, is_current, created_timestamp, updated_timestamp
+) VALUES (
+    'DD-SEMANTIC-003', 1,
+    'table_relationship uses from_table/to_table column naming (MortgagePlatform alignment)',
+    'The table_relationship table uses from_database, from_table, from_column, to_database, to_table, to_column column names, aligned to the tested MortgagePlatform Semantic module implementation. The AI-Native Data Product design standard DDL uses source_table/target_table but the MortgagePlatform implementation uses from_/to_ and is confirmed working on ClearScape including the recursive CTE v_relationship_paths view.',
+    'Two naming conventions exist in the framework: the design standard DDL (source_*/target_*) and the MortgagePlatform tested implementation (from_*/to_*). The MortgagePlatform v_relationship_paths recursive CTE view uses from_/to_ and is the proven production pattern.',
+    'Follow the design standard DDL column names (source_table/target_table) and rewrite the v_relationship_paths CTE to match.',
+    'Aligning to the tested MortgagePlatform implementation reduces risk. The recursive CTE v_relationship_paths is proven working on ClearScape when using from_/to_ column names. Rewriting the CTE with different column names introduces untested risk.',
+    'table_relationship column names differ from the design standard DDL. All queries against table_relationship and v_relationship_paths must use from_table/to_table not source_table/target_table. The design standard DDL should be updated in a future version.',
+    'ACCEPTED', 'NAMING', 'SEMANTIC', '1.0.0',
+    'CargoIntelligence_Semantic.table_relationship, CargoIntelligence_Semantic.v_relationship_paths',
+    'CargoIntelligence Data Product Team', CURRENT_DATE,
+    CURRENT_DATE, DATE '9999-12-31', 1, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Design_Decision (
+    decision_id, decision_version, decision_title, decision_description,
+    context, alternatives_considered, rationale, consequences,
+    decision_status, decision_category, source_module, module_version,
+    affects_table, decided_by, decided_date,
+    valid_from, valid_to, is_current, created_timestamp, updated_timestamp
+) VALUES (
+    'DD-SEMANTIC-004', 1,
+    'Cross-module joins registered in table_relationship at Semantic deployment',
+    'table_relationship includes 3 cross-module rows: Consignment_H to entity_embedding (Search), Consignment_H to consignment_features (Prediction), and entity_embedding to consignment_features. These are registered as ASSOCIATIVE relationships at Semantic deployment even though Search and Prediction tables do not yet exist.',
+    'The design standard requires all expected agent traversal paths to be registered. The Search-to-Prediction integration via similarity_score_max is the core architectural narrative and must be discoverable from day one.',
+    'Register cross-module relationships only once the target module tables are physically deployed.',
+    'Cross-module join paths are architectural decisions, not implementation details. Registering them at Semantic deployment ensures the intended data flow is documented before the modules are built.',
+    'v_relationship_paths will include rows referencing tables in CargoIntelligence_Search and CargoIntelligence_Prediction that do not yet exist. Agents must check entity_metadata is_active = 1 to confirm a table is deployed before querying it.',
+    'ACCEPTED', 'INTEGRATION', 'SEMANTIC', '1.0.0',
+    'CargoIntelligence_Semantic.table_relationship',
+    'CargoIntelligence Data Product Team', CURRENT_DATE,
+    CURRENT_DATE, DATE '9999-12-31', 1, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);
+
+-- -----------------------------------------------------------------------------
+-- CHANGE_LOG -- 1 row
+-- -----------------------------------------------------------------------------
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Change_Log (
+    change_id, version_number, change_title, change_description,
+    change_type, change_category, source_module, affects_table,
+    migration_steps, rollback_steps, related_decision_id,
+    deployed_date, deployed_by, deployment_status, created_timestamp
+) VALUES (
+    'CL-SEMANTIC-001',
+    '1.0.0',
+    'Semantic Module initial release',
+    'Initial deployment of CargoIntelligence Semantic module. Creates CargoIntelligence_Semantic database with 5 metadata tables and 3 views. Seeds data_product_map with 6 module rows, entity_metadata with 5 Domain entity rows, table_relationship with 8 relationship rows (5 intra-Domain, 3 cross-module), naming_standard with 10 convention rows. column_metadata seeded with 0 rows - populated in D5 Domain module.',
+    'INITIAL_RELEASE',
+    'NON_BREAKING',
+    'SEMANTIC',
+    'ALL',
+    'Run 00-setup.sql, 01-tables.sql, 02-views.sql, 03-seed-data.sql, 04-documentation.sql in sequence.',
+    'DROP DATABASE CargoIntelligence_Semantic',
+    'DD-SEMANTIC-003',
+    CURRENT_DATE,
+    'CargoIntelligence Data Product Team',
+    'DEPLOYED',
+    CURRENT_TIMESTAMP(6)
+);
+
+-- -----------------------------------------------------------------------------
+-- BUSINESS_GLOSSARY -- 3 rows
+-- -----------------------------------------------------------------------------
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Business_Glossary (
+    term, term_category, definition, business_context,
+    synonyms, related_terms, related_table, related_column,
+    source_module, module_version, is_active,
+    valid_from, valid_to, created_timestamp, updated_timestamp
+) VALUES (
+    'Entity (Semantic)',
+    'ENTITY',
+    'In the Semantic module, an entity is a table - a physical database object that stores instances of a business concept. Entity metadata describes what tables exist, where they are located, what their key columns are, and what temporal pattern they use. Agents use entity_metadata as the primary table catalog.',
+    'entity_metadata is the first table agents should query after data_product_map. It answers: what tables exist, which database, how to get current records, and what the primary key is.',
+    'Table, Object',
+    'Relationship, Attribute, data_product_map',
+    'CargoIntelligence_Semantic.entity_metadata',
+    NULL,
+    'SEMANTIC', '1.0.0', 1,
+    CURRENT_DATE, DATE '9999-12-31', CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Business_Glossary (
+    term, term_category, definition, business_context,
+    synonyms, related_terms, related_table, related_column,
+    source_module, module_version, is_active,
+    valid_from, valid_to, created_timestamp, updated_timestamp
+) VALUES (
+    'Relationship',
+    'BUSINESS_RULE',
+    'A documented join pattern between two tables, registered in table_relationship. Defines source table, source column, target table, target column, cardinality, and relationship type. Agents use table_relationship via v_relationship_paths to discover how to write correct JOIN clauses without human guidance.',
+    'table_relationship uses from_table/to_table/from_column/to_column naming (MortgagePlatform alignment). The v_relationship_paths view provides multi-hop traversal up to 5 hops. Cross-module relationships are registered here even before the target tables are deployed.',
+    'Join, Foreign Key, Association',
+    'Entity (Semantic), v_relationship_paths',
+    'CargoIntelligence_Semantic.table_relationship',
+    NULL,
+    'SEMANTIC', '1.0.0', 1,
+    CURRENT_DATE, DATE '9999-12-31', CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Business_Glossary (
+    term, term_category, definition, business_context,
+    synonyms, related_terms, related_table, related_column,
+    source_module, module_version, is_active,
+    valid_from, valid_to, created_timestamp, updated_timestamp
+) VALUES (
+    'Feature Text',
+    'ATTRIBUTE',
+    'A semantically meaningful string encoding of a consignment or risk profile constructed from structured attributes (hs_chapter, origin_risk_tier, transport_code, value_per_kg range, is_disguise_category). Used as the input to the ONNX embedding model in the Search module. Makes similarity structural rather than purely textual, reducing false positives.',
+    'Feature text encoding is the key design choice that makes CargoIntelligence similarity search structural. By encoding categorical and numerical attributes as a canonical string, the embedding captures business meaning rather than text surface form. Example format: HS24|HIGH|AIR_MAIL|HIGH_VALUE|TOBACCO',
+    'Embedding Input, Feature String',
+    'Risk Profile, Similarity Score, entity_embedding',
+    'CargoIntelligence_Search.entity_embedding',
+    'feature_text',
+    'SEMANTIC', '1.0.0', 1,
+    CURRENT_DATE, DATE '9999-12-31', CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);
+
+-- -----------------------------------------------------------------------------
+-- QUERY_COOKBOOK -- 2 rows
+-- -----------------------------------------------------------------------------
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Query_Cookbook (
+    recipe_id, recipe_title, recipe_description, use_case,
+    target_module, sql_template, parameter_descriptions, performance_notes,
+    complexity, source_module, module_version, is_active,
+    valid_from, valid_to, created_timestamp, updated_timestamp
+) VALUES (
+    'QC-SEMANTIC-003',
+    'Multi-hop path discovery using v_relationship_paths',
+    'Queries v_relationship_paths to find the shortest join path between any two tables, up to 5 hops. The view uses a recursive CTE over table_relationship. Returns path_tables (the traversal sequence) and path_joins (ready-to-use JOIN conditions). Filter by hop_count to find the shortest path.',
+    'Agent join path discovery across multiple tables',
+    'SEMANTIC',
+    'SELECT vr.hop_count, vr.path_tables, vr.path_joins FROM CargoIntelligence_Semantic.v_relationship_paths vr WHERE vr.source_table = [table_a] AND vr.target_table = [table_b] ORDER BY vr.hop_count',
+    '[table_a] = starting table name e.g. Consignment_H. [table_b] = target table name e.g. consignment_features. Returns all paths ordered by hop count shortest first.',
+    'Recursive CTE over a small metadata table - no performance concerns at expected relationship counts.',
+    'SIMPLE',
+    'SEMANTIC', '1.0.0', 1,
+    CURRENT_DATE, DATE '9999-12-31', CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Query_Cookbook (
+    recipe_id, recipe_title, recipe_description, use_case,
+    target_module, sql_template, parameter_descriptions, performance_notes,
+    complexity, source_module, module_version, is_active,
+    valid_from, valid_to, created_timestamp, updated_timestamp
+) VALUES (
+    'QC-SEMANTIC-004',
+    'Discover all deployed and active entities',
+    'Returns all active entity registrations across all modules. Use at session start to understand what tables exist, which module they belong to, and what their primary key columns are before generating any domain SQL.',
+    'Agent initialization, SQL generation',
+    'SEMANTIC',
+    'SELECT vc.entity_name, vc.module_name, vc.database_name, vc.table_name, vc.view_name, vc.surrogate_key_column, vc.natural_key_column, vc.temporal_pattern FROM CargoIntelligence_Semantic.v_entity_catalog vc ORDER BY vc.module_name, vc.entity_name',
+    'No parameters. Returns all active entities. Filter by module_name for module-specific discovery e.g. WHERE vc.module_name = Domain',
+    'Lightweight scan on a small metadata table - no performance concerns.',
+    'SIMPLE',
+    'SEMANTIC', '1.0.0', 1,
+    CURRENT_DATE, DATE '9999-12-31', CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);

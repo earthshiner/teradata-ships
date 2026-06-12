@@ -186,7 +186,7 @@ threat, SOX-grade controls). It requires key management infrastructure
 that is not yet in place. The SHA-256 hash approach is implemented now
 as the foundation; the signing layer will be added when the key
 management infrastructure exists.
-See [GitHub issue #76](https://github.com/earthshiner/teradata-deployment-agent/issues/76).
+See [GitHub issue #76](https://github.com/earthshiner/teradata-ships/issues/76).
 
 **Merkle tree (file-level hash chain).** Considered. Would allow proving
 that a single file is part of a valid package without revealing all

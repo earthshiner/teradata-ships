@@ -1,0 +1,4 @@
+COMMENT ON COLUMN {{CargoIntelligence_Observability_T}}.lineage_run.job_name IS
+'Job name denormalised from data_lineage for fast filtering without joining.';
+COMMENT ON COLUMN {{CargoIntelligence_Observability_T}}.lineage_run.openlineage_run_id IS
+'OpenLineage per-execution UUID. NULL until populated by an OpenLineage-compatible orchestrator.';

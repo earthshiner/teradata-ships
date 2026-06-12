@@ -1,0 +1,18 @@
+CREATE MULTISET TABLE {{CargoIntelligence_Semantic_T}}.data_product_map (
+    module_id           BIGINT GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1) NOT NULL,
+    module_name         VARCHAR(50) NOT NULL,
+    module_description  VARCHAR(1000),
+    module_purpose      VARCHAR(500),
+    database_name       VARCHAR(128) NOT NULL,
+    naming_pattern      VARCHAR(20),
+    table_prefix        VARCHAR(10),
+    primary_tables      VARCHAR(500),
+    primary_views       VARCHAR(500),
+    module_version      VARCHAR(20),
+    deployment_status   VARCHAR(20),
+    deployed_dts        TIMESTAMP(6) WITH TIME ZONE,
+    is_active           BYTEINT NOT NULL DEFAULT 1,
+    created_at          TIMESTAMP(6) WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at          TIMESTAMP(6) WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP(6)
+)
+PRIMARY INDEX (module_id);

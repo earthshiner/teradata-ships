@@ -1,0 +1,38 @@
+COMMENT ON TABLE {{CargoIntelligence_Search_T}}.{{entity_embedding_T}} IS
+'Vector embeddings for consignments and risk profiles. Stores vectors and IDs only -- join to Domain for content.';
+COMMENT ON COLUMN CargoIntelligence_Search.entity_embedding.embedding_id IS
+'Surrogate key for embedding record.';
+COMMENT ON COLUMN CargoIntelligence_Search.entity_embedding.entity_id IS
+'FK to Domain entity -- consignment_id for CONSIGNMENT rows, risk_profile_id for RISK_PROFILE rows.';
+COMMENT ON COLUMN {{CargoIntelligence_Search_T}}.{{entity_embedding_V}}.{{entity_type_T}} IS
+'Entity type indicator: CONSIGNMENT or RISK_PROFILE. Distinguishes embedding purpose in queries.';
+COMMENT ON COLUMN {{CargoIntelligence_Search_T}}.{{entity_embedding_V}}.source_module IS
+'Module where source entity resides -- Domain for all CargoIntelligence embeddings.';
+COMMENT ON COLUMN CargoIntelligence_Search.entity_embedding.source_table IS
+'{{source_T}} table containing the entity -- Consignment_H or RiskProfile_R.';
+COMMENT ON COLUMN {{CargoIntelligence_Search_T}}.{{entity_embedding_V}}.source_column IS
+'Source column embedded -- feature_text for all CargoIntelligence embeddings.';
+COMMENT ON COLUMN CargoIntelligence_Search.entity_embedding.feature_text IS
+'Exact text passed to embedding model. Format: {{hs_T}}{ch} {tier} {transport} {vpk_band}. Stored for auditability.';
+COMMENT ON COLUMN CargoIntelligence_Search.entity_embedding.embedding_vector IS
+'384-dim vector stored as VARBYTE(1536). Output of {{mldb_V}}.{{ONNXEmbeddings_T}} with OutputFormat VARBYTE(1536). Works directly with {{TD_VectorDistance_T}} cosine scoring.';
+COMMENT ON COLUMN CargoIntelligence_Search.entity_embedding.embedding_dimensions IS
+'Number of embedding dimensions -- 384 for bge-small-en-v1.5.';
+COMMENT ON COLUMN {{CargoIntelligence_Search_T}}.{{entity_embedding_V}}.embedding_model IS
+'Embedding model name -- bge-small-en-v1.5. Identifies which model generated the vector.';
+COMMENT ON COLUMN CargoIntelligence_Search.entity_embedding.embedding_model_version IS
+'Model version for reproducibility. NULL at initial load.';
+COMMENT ON COLUMN CargoIntelligence_Search.entity_embedding.generated_dts IS
+'Timestamp when embedding was generated. Tracks freshness of semantic representation.';
+COMMENT ON COLUMN CargoIntelligence_Search.entity_embedding.valid_from_dts IS
+'When this embedding version became valid. Supports future embedding versioning.';
+COMMENT ON COLUMN CargoIntelligence_Search.entity_embedding.valid_to_dts IS
+'When this embedding was superseded. 9999-12-31 for currently active embeddings.';
+COMMENT ON COLUMN CargoIntelligence_Search.entity_embedding.is_current IS
+'Current embedding indicator. 1 = active. Filter WHERE is_current = 1 for current embeddings only.';
+COMMENT ON COLUMN CargoIntelligence_Search.entity_embedding.generated_by IS
+'Process that generated the embedding -- CI_SEARCH_ETL for batch load.';
+COMMENT ON COLUMN {{CargoIntelligence_Search_T}}.{{entity_embedding_V}}.computation_method IS
+'Method used to generate embedding -- ONNX for in-database generation via mldb.ONNXEmbeddings.';
+COMMENT ON COLUMN CargoIntelligence_Search.entity_embedding.created_at IS
+'Timestamp when this embedding row was created.';

@@ -1,0 +1,37 @@
+COMMENT ON TABLE {{CargoIntelligence_Memory_T}}.agent_session IS
+'Agent session state - tracks active and historical cargo inspection agent sessions for continuity.';
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_session.session_id IS
+'Surrogate key for session record.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_session.session_key IS
+'Business session identifier - unique ID for tracking session across systems.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_session.agent_key IS
+'Agent identifier - which agent instance is handling this session.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_session.user_key IS
+'User identifier - which ABF analyst is interacting with the agent.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_session.session_start_dts IS
+'Session start timestamp - when agent session began.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_session.session_end_dts IS
+'Session end timestamp - NULL for active sessions.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_session.session_status IS
+'Session status - ACTIVE, COMPLETED, or ABANDONED.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_session.session_goal IS
+'Session goal - what the analyst is trying to accomplish in this session.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_session.session_context_json IS
+'Flexible session context - JSON document with session-specific metadata.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_session.scope_level IS
+'Privacy scope - USER, TEAM, ORGANIZATION, or AGENT.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_session.scope_identifier IS
+'Scope identifier - user_key, team_key, org_key, or agent_key.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_session.created_at IS
+'Timestamp when session record was created.';

@@ -1,0 +1,11 @@
+INSERT INTO {{CargoIntelligence_Domain_T}}.{{Party_Keymap_T}} (
+    party_key,
+    source_system
+)
+SELECT
+    stg.sender_id AS party_key,
+    'ABF_CARGO' AS source_system
+FROM (
+    SELECT DISTINCT sender_id
+    FROM {{CargoIntelligence_Staging_V}}.{{STG_Cargo_Consignments_T}}
+) stg;

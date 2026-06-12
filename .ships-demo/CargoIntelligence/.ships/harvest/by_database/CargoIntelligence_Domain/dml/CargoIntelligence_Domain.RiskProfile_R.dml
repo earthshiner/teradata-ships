@@ -1,0 +1,54 @@
+INSERT INTO {{CargoIntelligence_Domain_T}}.RiskProfile_R (profile_code, profile_name, profile_category, hs_code_id, country_risk_id, transport_code, vpk_range_min, vpk_range_max, feature_text, profile_description)
+VALUES ('RP-001', 'Direct tobacco -- bulk sea', 'TOBACCO',
+    (SELECT hs_code_id FROM CargoIntelligence_Domain.HsCode_R WHERE hs_chapter = '24'),
+    (SELECT country_risk_id FROM CargoIntelligence_Domain.CountryRisk_R WHERE partner_code = 156),
+    'SEA_CONTAINER', 0.1000, 3.5000, 'HS24 HIGH SEA_CONTAINER LOW',
+    'Declared tobacco via sea container from HIGH-risk origin. avg_vpk 2.47 USD/kg vs TradeStats benchmark 7.96. Bulk volume cover. Highest-count confirmed_risk sea container pattern.');
+
+INSERT INTO CargoIntelligence_Domain.RiskProfile_R (profile_code, profile_name, profile_category, hs_code_id, country_risk_id, transport_code, vpk_range_min, vpk_range_max, feature_text, profile_description)
+VALUES ('{{rp_T}}-002', 'Direct tobacco -- air parcel', 'TOBACCO',
+    (SELECT hs_code_id FROM {{CargoIntelligence_Domain_T}}.{{HsCode_R}} WHERE hs_chapter = '24'),
+    (SELECT country_risk_id FROM {{CargoIntelligence_Domain_T}}.CountryRisk_R WHERE partner_code = 156),
+    'AIR_MAIL', 0.1000, 3.5000, 'HS24 HIGH AIR_MAIL LOW',
+    'Declared tobacco via air mail from HIGH-risk origin. avg_vpk 2.55 USD/kg vs benchmark 7.96. Most frequent confirmed_risk pattern by sample count (3,365 hits). Parcel channel for smaller volume.');
+INSERT INTO {{CargoIntelligence_Domain_T}}.RiskProfile_R (profile_code, profile_name, profile_category, hs_code_id, country_risk_id, transport_code, vpk_range_min, vpk_range_max, feature_text, profile_description)
+VALUES ('RP-003', 'Disguise -- plastics', 'DISGUISE',
+    (SELECT hs_code_id FROM CargoIntelligence_Domain.HsCode_R WHERE hs_chapter = '39'),
+    (SELECT country_risk_id FROM CargoIntelligence_Domain.CountryRisk_R WHERE partner_code = 156),
+    'AIR_MAIL', 0.1000, 2.0000, 'HS39 HIGH AIR_MAIL VERY_LOW',
+    'Tobacco disguised as plastics (ch.39). avg_vpk 1.48 USD/kg vs benchmark 3.99 -- 63 pct under-declared. Most frequent disguise category by confirmed_risk volume. Air mail parcel channel.');
+
+INSERT INTO {{CargoIntelligence_Domain_T}}.RiskProfile_R (profile_code, profile_name, profile_category, hs_code_id, country_risk_id, transport_code, vpk_range_min, vpk_range_max, feature_text, profile_description)
+VALUES ('RP-004', 'Disguise -- textile articles', 'DISGUISE',
+    (SELECT hs_code_id FROM CargoIntelligence_Domain.HsCode_R WHERE hs_chapter = '63'),
+    (SELECT country_risk_id FROM CargoIntelligence_Domain.CountryRisk_R WHERE partner_code = 156),
+    'AIR_MAIL', 0.1000, 2.5000, 'HS63 HIGH AIR_MAIL LOW',
+    'Tobacco disguised as textile made-up articles (ch.63). avg_vpk 2.03 USD/kg vs benchmark 5.93 -- 66 pct under-declared. Cigarette cartons concealed in textile-labelled parcels.');
+
+INSERT INTO {{CargoIntelligence_Domain_T}}.RiskProfile_R (profile_code, profile_name, profile_category, hs_code_id, country_risk_id, transport_code, vpk_range_min, vpk_range_max, feature_text, profile_description)
+VALUES ('RP-005', 'Disguise -- beverages', 'DISGUISE',
+    (SELECT hs_code_id FROM CargoIntelligence_Domain.HsCode_R WHERE hs_chapter = '22'),
+    (SELECT country_risk_id FROM CargoIntelligence_Domain.CountryRisk_R WHERE partner_code = 156),
+    'AIR_MAIL', 0.1000, 1.8000, 'HS22 HIGH AIR_MAIL VERY_LOW',
+    'Tobacco disguised as beverages (ch.22). avg_vpk 1.32 USD/kg vs benchmark 2.95 -- 55 pct under-declared. Express parcel channel; deliberate under-declaration below the already-low beverage benchmark.');
+
+INSERT INTO {{CargoIntelligence_Domain_T}}.RiskProfile_R (profile_code, profile_name, profile_category, hs_code_id, country_risk_id, transport_code, vpk_range_min, vpk_range_max, feature_text, profile_description)
+VALUES ('RP-006', 'Disguise -- vegetable preparations', 'DISGUISE',
+    (SELECT hs_code_id FROM CargoIntelligence_Domain.HsCode_R WHERE hs_chapter = '20'),
+    (SELECT country_risk_id FROM CargoIntelligence_Domain.CountryRisk_R WHERE partner_code = 156),
+    'AIR_MAIL', 0.1000, 1.5000, 'HS20 HIGH AIR_MAIL VERY_LOW',
+    'Tobacco disguised as vegetable or fruit preparations (ch.20). avg_vpk 1.14 USD/kg vs benchmark 2.44 -- 53 pct under-declared. Food cover provides plausible deniability; value signal is detectable.');
+
+INSERT INTO {{CargoIntelligence_Domain_T}}.RiskProfile_R (profile_code, profile_name, profile_category, hs_code_id, country_risk_id, transport_code, vpk_range_min, vpk_range_max, feature_text, profile_description)
+VALUES ('RP-007', 'Disguise -- minerals and stone', 'DISGUISE',
+    (SELECT hs_code_id FROM CargoIntelligence_Domain.HsCode_R WHERE hs_chapter = '25'),
+    (SELECT country_risk_id FROM CargoIntelligence_Domain.CountryRisk_R WHERE partner_code = 156),
+    'AIR_MAIL', 0.1000, 0.7000, 'HS25 HIGH AIR_MAIL VERY_LOW',
+    'Tobacco disguised as salt, sulphur, or minerals (ch.25). avg_vpk 0.59 USD/kg vs benchmark 0.18 -- anomalously HIGH-origin value for this chapter. Any ch.25 air shipment from HIGH-risk origin is suspicious.');
+
+INSERT INTO {{CargoIntelligence_Domain_T}}.RiskProfile_R (profile_code, profile_name, profile_category, hs_code_id, country_risk_id, transport_code, vpk_range_min, vpk_range_max, feature_text, profile_description)
+VALUES ('RP-008', 'Baseline legitimate import', 'LEGITIMATE',
+    (SELECT hs_code_id FROM {{CargoIntelligence_Domain_T}}.{{HsCode_R}} WHERE hs_chapter = '84'),
+    NULL,
+    'SEA_CONTAINER', 10.0000, 65.0000, 'HS84 STANDARD SEA_CONTAINER HIGH',
+    'Machinery (ch.84) from STANDARD-risk origin via sea container. avg_vpk 25.03 USD/kg. Most common {{hs_T}} chapter in dataset at 10 pct. Negative reference anchor -- high similarity to this profile indicates low risk.');

@@ -1,0 +1,2 @@
+COMMENT ON DATABASE {{CargoIntelligence_Domain_T}} IS
+'Domain module for CargoIntelligence. Authoritative source of truth for cargo consignment business entities.';

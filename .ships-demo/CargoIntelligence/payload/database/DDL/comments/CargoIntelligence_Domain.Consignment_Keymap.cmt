@@ -1,0 +1,13 @@
+COMMENT ON TABLE {{CargoIntelligence_Domain_T}}.{{Consignment_Keymap_T}} IS
+'Keymap: one row per unique consignment. Surrogate key (IDENTITY) generated here, referenced by Consignment_H and Search/Prediction modules.';
+COMMENT ON COLUMN {{CargoIntelligence_Domain_T}}.{{Consignment_Keymap_V}}.{{consignment_id_T}} IS
+'Surrogate key - generated once per consignment_key, stable across all SCD versions. Never reused.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Domain_T}}.{{Consignment_Keymap_V}}.consignment_key IS
+'Natural key - source consignment_id cast to VARCHAR. One row per unique source identifier.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Domain_T}}.{{Consignment_Keymap_V}}.source_system IS
+'Source system that originated this consignment record.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Domain_T}}.{{Consignment_Keymap_V}}.created_dt IS
+'Timestamp when this surrogate key was first allocated. Immutable once set.';

@@ -1,0 +1,105 @@
+REPLACE VIEW {{CargoIntelligence_Semantic_V}}.lineage_graph
+(
+    Src_Object_Name_FQ,
+    Src_Container_Name,
+    Src_Object_Name,
+    Src_Kind,
+    Src_Display_Name,
+    Edge_Relationship,
+    Transformation_Type,
+    Transformation_Logic,
+    Lineage_ID,
+    Tgt_Object_Name_FQ,
+    Tgt_Container_Name,
+    Tgt_Object_Name,
+    Tgt_Kind,
+    Tgt_Display_Name
+)
+AS
+LOCKING ROW FOR ACCESS
+
+    SELECT
+        COALESCE(dl.source_database, '') || '.' || dl.source_table    AS Src_Object_Name_FQ,
+        COALESCE(dl.source_database, '')                              AS Src_Container_Name,
+        dl.source_table                                               AS Src_Object_Name,
+        CAST(CASE WHEN {{src_obj_V}}.TableKind IS NOT NULL
+             THEN CASE {{src_obj_V}}.TableKind
+                      WHEN 'T' THEN 'Table'
+                      WHEN 'O' THEN 'No PI Table'
+                      WHEN 'V' THEN 'View'
+                      WHEN 'M' THEN 'Macro'
+                      WHEN 'P' THEN 'Procedure'
+                      WHEN 'E' THEN 'Procedure'
+                      WHEN 'G' THEN 'Trigger'
+                      WHEN 'I' THEN 'Join Index'
+                      WHEN 'A' THEN 'Function'
+                      WHEN 'F' THEN 'Function'
+                      WHEN 'R' THEN 'Function'
+                      WHEN 'B' THEN 'Function'
+                      WHEN 'S' THEN 'Function'
+                      WHEN 'N' THEN 'Hash Index'
+                      WHEN 'Q' THEN 'Queue Table'
+                      ELSE 'Unknown: ' || {{src_obj_V}}.TableKind
+                  END
+             ELSE 'Unknown'
+        END AS VARCHAR(30))                                           AS Src_Kind,
+        COALESCE(dl.source_database, '') || '.' || dl.source_table
+            || '0A'xc || ' [' || Src_Kind || ']'                     AS Src_Display_Name,
+        CAST('ETL_INPUT' AS VARCHAR(12))                              AS Edge_Relationship,
+        dl.transformation_type                                        AS Transformation_Type,
+        dl.transformation_logic                                       AS Transformation_Logic,
+        dl.lineage_id                                                 AS Lineage_ID,
+        CAST(dl.job_name AS VARCHAR(200))                             AS Tgt_Object_Name_FQ,
+        CAST('' AS VARCHAR(128))                                      AS Tgt_Container_Name,
+        dl.job_name                                                   AS Tgt_Object_Name,
+        CAST('Job' AS VARCHAR(30))                                    AS Tgt_Kind,
+        dl.job_name || '0A'xc || ' [' || Tgt_Kind || ']'             AS Tgt_Display_Name
+    FROM {{CargoIntelligence_Observability_T}}.{{data_lineage_V}} dl
+    LEFT OUTER JOIN DBC.TablesV {{src_obj_V}}
+        ON  {{src_obj_V}}.DatabaseName = dl.source_database
+        AND {{src_obj_V}}.TableName    = dl.source_table
+    WHERE dl.is_active = 1
+
+    UNION ALL
+
+    SELECT
+        CAST(dl.job_name AS VARCHAR(200))                             AS Src_Object_Name_FQ,
+        CAST('' AS VARCHAR(128))                                      AS Src_Container_Name,
+        dl.job_name                                                   AS Src_Object_Name,
+        CAST('Job' AS VARCHAR(30))                                    AS Src_Kind,
+        dl.job_name || '0A'xc || ' [' || Src_Kind || ']'             AS Src_Display_Name,
+        CAST('ETL_OUTPUT' AS VARCHAR(12))                             AS Edge_Relationship,
+        dl.transformation_type                                        AS Transformation_Type,
+        dl.transformation_logic                                       AS Transformation_Logic,
+        dl.lineage_id                                                 AS Lineage_ID,
+        COALESCE(dl.target_database, '') || '.' || dl.target_table    AS Tgt_Object_Name_FQ,
+        COALESCE(dl.target_database, '')                              AS Tgt_Container_Name,
+        dl.target_table                                               AS Tgt_Object_Name,
+        CAST(CASE WHEN {{tgt_obj_V}}.TableKind IS NOT NULL
+             THEN CASE {{tgt_obj_V}}.TableKind
+                      WHEN 'T' THEN 'Table'
+                      WHEN 'O' THEN 'No PI Table'
+                      WHEN 'V' THEN 'View'
+                      WHEN 'M' THEN 'Macro'
+                      WHEN 'P' THEN 'Procedure'
+                      WHEN 'E' THEN 'Procedure'
+                      WHEN 'G' THEN 'Trigger'
+                      WHEN 'I' THEN 'Join Index'
+                      WHEN 'A' THEN 'Function'
+                      WHEN 'F' THEN 'Function'
+                      WHEN 'R' THEN 'Function'
+                      WHEN 'B' THEN 'Function'
+                      WHEN 'S' THEN 'Function'
+                      WHEN 'N' THEN 'Hash Index'
+                      WHEN 'Q' THEN 'Queue Table'
+                      ELSE 'Unknown: ' || {{tgt_obj_V}}.TableKind
+                  END
+             ELSE 'Unknown'
+        END AS VARCHAR(30))                                           AS Tgt_Kind,
+        COALESCE(dl.target_database, '') || '.' || dl.target_table
+            || '0A'xc || ' [' || Tgt_Kind || ']'                     AS Tgt_Display_Name
+    FROM {{CargoIntelligence_Observability_T}}.{{data_lineage_V}} dl
+    LEFT OUTER JOIN DBC.TablesV {{tgt_obj_V}}
+        ON  {{tgt_obj_V}}.DatabaseName = dl.target_database
+        AND {{tgt_obj_V}}.TableName    = dl.target_table
+    WHERE dl.is_active = 1;

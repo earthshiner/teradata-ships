@@ -1,0 +1,29 @@
+REPLACE VIEW {{CargoIntelligence_Memory_V}}.v_Current_Decisions (
+    decision_key,
+    decision_id,
+    decision_version,
+    decision_title,
+    decision_status,
+    decision_category,
+    source_module,
+    affects_table,
+    decided_by,
+    decided_date,
+    valid_from
+)
+AS
+SELECT
+    dd.decision_key,
+    dd.decision_id,
+    dd.decision_version,
+    dd.decision_title,
+    dd.decision_status,
+    dd.decision_category,
+    dd.source_module,
+    dd.affects_table,
+    dd.decided_by,
+    dd.decided_date,
+    dd.valid_from
+FROM {{CargoIntelligence_Memory_T}}.Design_Decision dd
+WHERE dd.is_current = 1
+  AND dd.decision_status <> 'SUPERSEDED';

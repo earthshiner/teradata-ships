@@ -1,0 +1,26 @@
+REPLACE VIEW {{CargoIntelligence_Semantic_V}}.v_entity_catalog (
+    entity_metadata_id,
+    entity_name,
+    entity_description,
+    module_name,
+    database_name,
+    table_name,
+    view_name,
+    surrogate_key_column,
+    natural_key_column,
+    temporal_pattern
+)
+AS
+SELECT
+    em.entity_metadata_id,
+    em.entity_name,
+    em.entity_description,
+    em.module_name,
+    em.database_name,
+    em.table_name,
+    em.view_name,
+    em.surrogate_key_column,
+    em.natural_key_column,
+    em.temporal_pattern
+FROM {{CargoIntelligence_Semantic_T}}.entity_metadata em
+WHERE em.is_active = 1;

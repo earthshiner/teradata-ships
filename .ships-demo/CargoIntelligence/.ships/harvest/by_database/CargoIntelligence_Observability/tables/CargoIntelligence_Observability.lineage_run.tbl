@@ -1,0 +1,72 @@
+COMMENT ON COLUMN {{CargoIntelligence_Observability_T}}.lineage_run.error_message IS
+'Error message captured on FAILED or PARTIAL runs -- first 2000 chars for diagnostic triage.';
+COMMENT ON COLUMN CargoIntelligence_Observability.lineage_run.created_at IS
+'Timestamp when lineage run record was created.';
+
+
+-- -----------------------------------------------------------------------------
+-- model_performance -- ONNX model metrics over time
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE CargoIntelligence_Observability.model_performance (
+    performance_id  BIGINT GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1) NOT NULL,
+    model_key       VARCHAR(100) NOT NULL,
+    model_version   VARCHAR(20) NOT NULL,
+    metric_name     VARCHAR(128) NOT NULL,
+    metric_value    DECIMAL(10,6),
+    evaluation_dts  TIMESTAMP(6) WITH TIME ZONE NOT NULL,
+    sample_size     INTEGER,
+    is_sla_met      BYTEINT NOT NULL DEFAULT 0,
+    created_at      TIMESTAMP(6) WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP(6)
+)
+PRIMARY INDEX (performance_id);
+
+COMMENT ON TABLE CargoIntelligence_Observability.model_performance IS
+'ONNX model performance metrics over time. Tracks accuracy, latency, and drift for SLA monitoring.';
+COMMENT ON COLUMN CargoIntelligence_Observability.model_performance.performance_id IS
+'Surrogate key for performance metric record.';
+COMMENT ON COLUMN CargoIntelligence_Observability.model_performance.model_key IS
+'Model identifier e.g. CI_ONNX_EMBEDDING_V1 or CI_RISK_SCORE_V1.';
+COMMENT ON COLUMN CargoIntelligence_Observability.model_performance.model_version IS
+'Model version string e.g. 1.0.0. Enables comparison across model versions.';
+COMMENT ON COLUMN CargoIntelligence_Observability.model_performance.metric_name IS
+'Performance metric: ACCURACY, PRECISION, RECALL, AUC, LATENCY_MS, DRIFT_SCORE.';
+COMMENT ON COLUMN CargoIntelligence_Observability.model_performance.metric_value IS
+'Measured performance value. Range depends on metric type.';
+COMMENT ON COLUMN CargoIntelligence_Observability.model_performance.evaluation_dts IS
+'Timestamp when performance was measured.';
+COMMENT ON COLUMN CargoIntelligence_Observability.model_performance.sample_size IS
+'Number of predictions evaluated in this measurement.';
+COMMENT ON COLUMN CargoIntelligence_Observability.model_performance.is_sla_met IS
+'1 = meets performance SLA, 0 = below threshold. Enables alerting on degradation.';
+COMMENT ON COLUMN CargoIntelligence_Observability.model_performance.created_at IS
+'Timestamp when performance record was created.';
+
+
+-- -----------------------------------------------------------------------------
+-- agent_outcome -- agent action outcomes and user feedback
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE CargoIntelligence_Observability.agent_outcome (
+    outcome_id         BIGINT GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1) NOT NULL,
+    agent_key          VARCHAR(100) NOT NULL,
+    session_key        VARCHAR(100),
+    action_type        VARCHAR(50) NOT NULL,
+    action_dts         TIMESTAMP(6) WITH TIME ZONE NOT NULL,
+    tables_accessed    VARCHAR(1000),
+    outcome_status     VARCHAR(20) NOT NULL,
+    user_feedback      VARCHAR(20),
+    execution_time_ms  INTEGER,
+    records_processed  INTEGER,
+    created_at         TIMESTAMP(6) WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP(6)
+)
+PRIMARY INDEX (outcome_id);
+
+COMMENT ON TABLE CargoIntelligence_Observability.agent_outcome IS
+'Agent action outcomes and user feedback. Enables closed-loop learning by tracking what worked.';
+COMMENT ON COLUMN CargoIntelligence_Observability.agent_outcome.outcome_id IS
+'Surrogate key for agent outcome record.';
+COMMENT ON COLUMN CargoIntelligence_Observability.agent_outcome.agent_key IS
+'Agent identifier -- which agent performed this action.';
+COMMENT ON COLUMN {{CargoIntelligence_Observability_V}}.agent_outcome.session_key IS
+'Session identifier linking outcome to agent session context in Memory module.';

@@ -1,0 +1,55 @@
+COMMENT ON TABLE {{CargoIntelligence_Memory_T}}.learned_strategy IS
+'Strategies learned by agents - successful cargo risk detection patterns discovered through experience.';
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.learned_strategy.strategy_id IS
+'Surrogate key for learned strategy record.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.learned_strategy.strategy_name IS
+'Strategy name - descriptive identifier for this learned approach.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.learned_strategy.strategy_description IS
+'Strategy description - explains what this strategy does and when to apply it.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.learned_strategy.strategy_category IS
+'Strategy category - QUERY_OPTIMIZATION, FEATURE_SELECTION, or ERROR_HANDLING.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.learned_strategy.applies_to_scenario IS
+'Scenario where strategy applies - conditions or context for effective use.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.learned_strategy.strategy_pattern IS
+'Strategy implementation - SQL pattern, logic description, or approach details.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.learned_strategy.strategy_metadata_json IS
+'Additional strategy metadata - JSON document for complex strategy details.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.learned_strategy.discovered_dts IS
+'When strategy was discovered - timestamp of learning event.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.learned_strategy.discovered_by_agent IS
+'Agent that discovered this strategy.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.learned_strategy.times_used IS
+'Usage count - how many times this strategy has been applied.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.learned_strategy.success_rate IS
+'Success rate - 0.0 to 1.0, proportion of successful outcomes.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.learned_strategy.scope_level IS
+'Privacy scope - USER, TEAM, ORGANIZATION, or AGENT.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.learned_strategy.scope_identifier IS
+'Scope identifier for access control.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.learned_strategy.is_active IS
+'Active indicator - 1 = strategy is active and should be used, 0 = deprecated.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.learned_strategy.is_validated IS
+'Validation status - 1 = validated by analyst or testing, 0 = not yet validated.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.learned_strategy.validation_dts IS
+'When strategy was validated - timestamp of validation event.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.learned_strategy.created_at IS
+'Timestamp when strategy record was created.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.learned_strategy.updated_at IS
+'Timestamp when strategy record was last updated.';

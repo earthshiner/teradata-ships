@@ -1,0 +1,21 @@
+CREATE MULTISET TABLE {{CargoIntelligence_Memory_T}}.learned_strategy (
+    strategy_id             BIGINT GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1) NOT NULL,
+    strategy_name           VARCHAR(128) NOT NULL,
+    strategy_description    VARCHAR(1000),
+    strategy_category       VARCHAR(50),
+    applies_to_scenario     VARCHAR(500),
+    strategy_pattern        VARCHAR(4000),
+    strategy_metadata_json  JSON,
+    discovered_dts          TIMESTAMP(6) WITH TIME ZONE NOT NULL,
+    discovered_by_agent     VARCHAR(100),
+    times_used              INTEGER DEFAULT 0,
+    success_rate            DECIMAL(5,4),
+    scope_level             VARCHAR(20) NOT NULL,
+    scope_identifier        VARCHAR(100) NOT NULL,
+    is_active               BYTEINT NOT NULL DEFAULT 1,
+    is_validated            BYTEINT NOT NULL DEFAULT 0,
+    validation_dts          TIMESTAMP(6) WITH TIME ZONE,
+    created_at              TIMESTAMP(6) WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at              TIMESTAMP(6) WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP(6)
+)
+PRIMARY INDEX (strategy_id);

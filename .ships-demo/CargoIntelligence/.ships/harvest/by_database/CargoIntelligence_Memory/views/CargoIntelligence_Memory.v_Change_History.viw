@@ -1,0 +1,29 @@
+REPLACE VIEW {{CargoIntelligence_Memory_V}}.v_Change_History (
+    change_key,
+    change_id,
+    version_number,
+    change_title,
+    change_type,
+    change_category,
+    source_module,
+    affects_table,
+    related_decision_id,
+    deployed_date,
+    deployed_by,
+    deployment_status
+)
+AS
+SELECT
+    chg.change_key,
+    chg.change_id,
+    chg.version_number,
+    chg.change_title,
+    chg.change_type,
+    chg.change_category,
+    chg.source_module,
+    chg.affects_table,
+    chg.related_decision_id,
+    chg.deployed_date,
+    chg.deployed_by,
+    chg.deployment_status
+FROM {{CargoIntelligence_Memory_T}}.Change_Log chg;

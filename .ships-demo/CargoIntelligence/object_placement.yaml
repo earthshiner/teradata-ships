@@ -1,0 +1,73 @@
+# ================================================================
+# object_placement.yaml — Object Placement Strategy
+# ================================================================
+#
+# Defines how tables and views are separated across databases for
+# the SHIPS deployment pipeline. Read by:
+#
+#   - tools/migrate_view_references.py  (rewrites view DDL refs)
+#   - src/td_release_packager/validate.py (rules: object_placement,
+#     public_grant_on_tables, review_unmapped_grants)
+#
+# Three strategies are available — pick ONE:
+#
+#   colocated   Tables and views share the same database.
+#               No architectural enforcement. Use this when
+#               starting out, or when the project legitimately
+#               does not separate tables from views.
+#
+#   separated   Pattern-based derivation. Tables and views live
+#               in distinct databases whose names are related by
+#               a shared template (suffix, prefix, midfix).
+#
+#   mapped      Explicit pairs of tables_database / views_database.
+#               Use when the naming is irregular and patterns
+#               cannot derive one from the other.
+
+
+# ----------------------------------------------------------------
+# DEFAULT — colocated (no enforcement)
+# ----------------------------------------------------------------
+#
+# Switch to one of the alternatives below when ready to enforce
+# the SHIPS placement standard. Switching is non-breaking — your
+# DDL files do not need to change unless they reference databases
+# explicitly.
+
+strategy: colocated
+locking_views: false
+
+
+# ----------------------------------------------------------------
+# Alternative — separated (pattern-based)
+# ----------------------------------------------------------------
+#
+# Suffix convention (recommended):
+#
+#   strategy: separated
+#   database_pattern_tables: "{BASE}_T"
+#   database_pattern_views: "{BASE}_V"
+#   locking_views: true
+#
+# Means: 'D01_PROJECT_DOM_T' is a tables database; the matching
+# views database is 'D01_PROJECT_DOM_V'. Every tables database
+# requires a 1:1 locking view in its sibling views database.
+#
+# Other patterns (prefix, midfix) are also supported — see the
+# SHIPS documentation for examples.
+
+
+# ----------------------------------------------------------------
+# Alternative — mapped (explicit pairs)
+# ----------------------------------------------------------------
+#
+#   strategy: mapped
+#   locking_views: true
+#   database_map:
+#     - tables_database: MyProject_Domain_T
+#       views_database: MyProject_Domain_V
+#     - tables_database: "{{DOM_DATABASE_T}}"
+#       views_database: "{{DOM_DATABASE_V}}"
+#
+# Use when project naming is irregular, or when migrating from a
+# legacy schema that doesn't follow a consistent convention.

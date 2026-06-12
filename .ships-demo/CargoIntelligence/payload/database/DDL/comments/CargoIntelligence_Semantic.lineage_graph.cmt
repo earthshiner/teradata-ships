@@ -1,0 +1,2 @@
+COMMENT ON VIEW {{CargoIntelligence_Semantic_V}}.lineage_graph IS
+'Graph-ready lineage edge list. Each declared flow produces 2 edges: source-to-job (ETL_INPUT) and job-to-target (ETL_OUTPUT).';

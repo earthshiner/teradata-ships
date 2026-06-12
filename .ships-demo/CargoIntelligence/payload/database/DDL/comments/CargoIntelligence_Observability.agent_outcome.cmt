@@ -1,0 +1,20 @@
+COMMENT ON COLUMN {{CargoIntelligence_Observability_V}}.agent_outcome.action_type IS
+'Action type: QUERY, RECOMMENDATION, DECISION, or PREDICTION.';
+COMMENT ON COLUMN {{CargoIntelligence_Observability_V}}.agent_outcome.action_dts IS
+'Timestamp when agent action was performed.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Observability_V}}.agent_outcome.tables_accessed IS
+'Comma-separated database.table names involved. Table-level tracking, not column-level.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Observability_V}}.agent_outcome.outcome_status IS
+'Outcome status: SUCCESS, PARTIAL, or FAILED.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Observability_V}}.agent_outcome.user_feedback IS
+'User feedback: POSITIVE, NEUTRAL, NEGATIVE, or CORRECTION. Enables learning from humans.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Observability_V}}.agent_outcome.execution_time_ms IS
+'Execution time in milliseconds -- performance metric for agent action.';
+COMMENT ON COLUMN CargoIntelligence_Observability.agent_outcome.records_processed IS
+'Number of records processed -- aggregate count, not individual keys.';
+COMMENT ON COLUMN {{CargoIntelligence_Observability_V}}.agent_outcome.created_at IS
+'Timestamp when outcome record was created.';

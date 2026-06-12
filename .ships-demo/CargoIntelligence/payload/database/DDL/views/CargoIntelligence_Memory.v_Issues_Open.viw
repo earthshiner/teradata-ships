@@ -1,0 +1,25 @@
+REPLACE VIEW {{CargoIntelligence_Memory_V}}.v_Issues_Open (
+    note_key,
+    note_id,
+    note_title,
+    note_category,
+    severity,
+    affects_table,
+    resolution_status,
+    source_module,
+    valid_from
+)
+AS
+SELECT
+    nt.note_key,
+    nt.note_id,
+    nt.note_title,
+    nt.note_category,
+    nt.severity,
+    nt.affects_table,
+    nt.resolution_status,
+    nt.source_module,
+    nt.valid_from
+FROM {{CargoIntelligence_Memory_T}}.Implementation_Note nt
+WHERE nt.resolution_status IN ('OPEN', 'IN_PROGRESS')
+  AND nt.is_active = 1;

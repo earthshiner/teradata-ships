@@ -1,0 +1,53 @@
+COMMENT ON COLUMN {{CargoIntelligence_Observability_T}}.{{data_lineage_V}}.openlineage_namespace IS
+'OpenLineage namespace -- environment identifier e.g. teradata://host:1025.';
+COMMENT ON COLUMN CargoIntelligence_Observability.data_lineage.is_active IS
+'1 = live flow in current pipeline design. 0 = retired flow preserved for history.';
+COMMENT ON COLUMN CargoIntelligence_Observability.data_lineage.registered_dts IS
+'Timestamp when this flow was first registered into the lineage blueprint.';
+COMMENT ON COLUMN CargoIntelligence_Observability.data_lineage.retired_dts IS
+'Timestamp when this flow was retired. NULL while is_active = 1.';
+COMMENT ON COLUMN CargoIntelligence_Observability.data_lineage.created_at IS
+'Timestamp when this lineage definition record was created.';
+
+
+-- -----------------------------------------------------------------------------
+-- lineage_run -- operational execution log (one row per run per flow)
+-- -----------------------------------------------------------------------------
+
+CREATE TABLE CargoIntelligence_Observability.lineage_run (
+    lineage_run_id      BIGINT GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1) NOT NULL,
+    lineage_id          BIGINT NOT NULL,
+    run_dts             TIMESTAMP(6) WITH TIME ZONE NOT NULL,
+    run_status          VARCHAR(20) NOT NULL,
+    run_duration_ms     INTEGER,
+    records_read        INTEGER,
+    records_written     INTEGER,
+    records_rejected    INTEGER,
+    batch_key           VARCHAR(100),
+    job_name            VARCHAR(200),
+    openlineage_run_id  VARCHAR(200),
+    error_message       VARCHAR(2000),
+    created_at          TIMESTAMP(6) WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP(6)
+)
+PRIMARY INDEX (lineage_run_id);
+
+COMMENT ON TABLE CargoIntelligence_Observability.lineage_run IS
+'Operational lineage execution log. One row per execution of a declared flow. FK to data_lineage. Event-scale volume.';
+COMMENT ON COLUMN CargoIntelligence_Observability.lineage_run.lineage_run_id IS
+'Surrogate key for lineage run record.';
+COMMENT ON COLUMN CargoIntelligence_Observability.lineage_run.lineage_id IS
+'FK to {{data_lineage_V}}.lineage_id -- links this execution to its declared flow definition.';
+COMMENT ON COLUMN {{CargoIntelligence_Observability_T}}.lineage_run.run_dts IS
+'Execution timestamp -- when the transformation run started.';
+COMMENT ON COLUMN CargoIntelligence_Observability.lineage_run.run_status IS
+'Execution status: SUCCESS, FAILED, PARTIAL (completed with rejected rows), or RUNNING.';
+COMMENT ON COLUMN CargoIntelligence_Observability.lineage_run.run_duration_ms IS
+'Execution duration in milliseconds from start to completion.';
+COMMENT ON COLUMN CargoIntelligence_Observability.lineage_run.records_read IS
+'Number of records read from {{source_T}} -- input volume metric.';
+COMMENT ON COLUMN {{CargoIntelligence_Observability_T}}.lineage_run.records_written IS
+'Number of records written to target -- output volume metric.';
+COMMENT ON COLUMN CargoIntelligence_Observability.lineage_run.records_rejected IS
+'Records rejected during transformation -- validation failures or constraint violations.';
+COMMENT ON COLUMN {{CargoIntelligence_Observability_T}}.lineage_run.batch_key IS
+'Batch identifier linking to change_event.batch_key for cross-referencing in same ETL cycle.';

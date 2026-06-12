@@ -1,0 +1,52 @@
+COMMENT ON TABLE {{CargoIntelligence_Memory_T}}.agent_interaction IS
+'Agent interaction log - records what agent did, which tables were queried, and outcomes for learning and audit.';
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_interaction.interaction_id IS
+'Surrogate key for interaction record.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_interaction.session_id IS
+'Foreign key to agent_session - links interaction to parent session.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_interaction.interaction_seq IS
+'Sequence number within session - orders interactions chronologically.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_interaction.interaction_type IS
+'Type of interaction - QUERY, ACTION, DECISION, or EXPLANATION.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_interaction.interaction_dts IS
+'Timestamp of interaction - when this interaction occurred.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_interaction.user_input IS
+'User question or request - what the analyst asked the agent to do.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_interaction.agent_response IS
+'Agent response summary - brief description of what agent provided.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_interaction.action_taken IS
+'Specific action executed by the agent.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_interaction.referenced_tables IS
+'Tables involved - comma-separated: CargoIntelligence_Domain.Consignment_H, ...';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_interaction.sql_executed IS
+'SQL query executed by agent if applicable.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_interaction.query_result_count IS
+'Number of records returned - aggregate count only, not individual keys.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_interaction.execution_time_ms IS
+'Query execution time in milliseconds.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_interaction.outcome_status IS
+'Outcome - SUCCESS, PARTIAL, or FAILED.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_interaction.user_feedback IS
+'User feedback - POSITIVE, NEUTRAL, NEGATIVE, or NULL if not provided.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_interaction.scope_level IS
+'Privacy scope - USER, TEAM, ORGANIZATION, or AGENT.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_interaction.scope_identifier IS
+'Scope identifier matching scope_level.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.agent_interaction.created_at IS
+'Timestamp when interaction record was created.';

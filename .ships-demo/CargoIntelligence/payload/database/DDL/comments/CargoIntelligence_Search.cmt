@@ -1,0 +1,2 @@
+COMMENT ON DATABASE {{CargoIntelligence_Search_T}} IS
+'Search module for CargoIntelligence. Vector embeddings for consignments and risk profiles using bge-small-en-v1.5.';

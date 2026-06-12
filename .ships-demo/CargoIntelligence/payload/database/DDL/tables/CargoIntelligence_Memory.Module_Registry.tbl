@@ -1,0 +1,22 @@
+CREATE MULTISET TABLE {{CargoIntelligence_Memory_T}}.Module_Registry (
+    module_registry_key  BIGINT GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1) NOT NULL,
+    module_name          VARCHAR(50) NOT NULL,
+    database_name        VARCHAR(128) NOT NULL,
+    deployment_status    VARCHAR(20) NOT NULL DEFAULT 'DEPLOYED',
+    module_version       VARCHAR(20) NOT NULL,
+    module_purpose       CLOB NOT NULL,
+    module_scope         CLOB,
+    key_entities         VARCHAR(500),
+    dependencies         VARCHAR(500),
+    dependents           VARCHAR(500),
+    data_owner           VARCHAR(100),
+    technical_owner      VARCHAR(100),
+    refresh_frequency    VARCHAR(50),
+    version_date         DATE NOT NULL,
+    is_current           BYTEINT NOT NULL DEFAULT 1,
+    valid_from           DATE NOT NULL,
+    valid_to             DATE DEFAULT DATE '9999-12-31',
+    created_timestamp    TIMESTAMP(6) WITH TIME ZONE,
+    updated_timestamp    TIMESTAMP(6) WITH TIME ZONE
+)
+PRIMARY INDEX (module_registry_key);

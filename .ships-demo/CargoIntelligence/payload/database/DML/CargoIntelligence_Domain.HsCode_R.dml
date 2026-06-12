@@ -1,0 +1,32 @@
+INSERT INTO {{CargoIntelligence_Domain_T}}.{{HsCode_R}} (hs_chapter, hs_description, is_tobacco_chapter, is_disguise_category, benchmark_vpk_usd) VALUES ('20', 'Preparations of vegetables and fruit', 0, 1, 2.4400);
+INSERT INTO {{CargoIntelligence_Domain_T}}.{{HsCode_R}} (hs_chapter, hs_description, is_tobacco_chapter, is_disguise_category, benchmark_vpk_usd) VALUES ('22', 'Beverages, spirits and vinegar', 0, 1, 2.9500);
+
+INSERT INTO {{CargoIntelligence_Domain_T}}.{{HsCode_R}} (hs_chapter, hs_description, is_tobacco_chapter, is_disguise_category, benchmark_vpk_usd) VALUES ('24', 'Tobacco and manufactured tobacco substitutes', 1, 0, 7.9600);
+
+INSERT INTO {{CargoIntelligence_Domain_T}}.{{HsCode_R}} (hs_chapter, hs_description, is_tobacco_chapter, is_disguise_category, benchmark_vpk_usd) VALUES ('25', 'Salt, sulphur, earths and stone', 0, 1, 0.1800);
+
+INSERT INTO {{CargoIntelligence_Domain_T}}.{{HsCode_R}} (hs_chapter, hs_description, is_tobacco_chapter, is_disguise_category, benchmark_vpk_usd) VALUES ('39', 'Plastics and articles thereof', 0, 1, 3.9900);
+
+INSERT INTO {{CargoIntelligence_Domain_T}}.{{HsCode_R}} (hs_chapter, hs_description, is_tobacco_chapter, is_disguise_category, benchmark_vpk_usd) VALUES ('42', 'Articles of leather', 0, 0, NULL);
+
+INSERT INTO {{CargoIntelligence_Domain_T}}.{{HsCode_R}} (hs_chapter, hs_description, is_tobacco_chapter, is_disguise_category, benchmark_vpk_usd) VALUES ('61', 'Articles of apparel, knitted', 0, 0, NULL);
+
+INSERT INTO {{CargoIntelligence_Domain_T}}.{{HsCode_R}} (hs_chapter, hs_description, is_tobacco_chapter, is_disguise_category, benchmark_vpk_usd) VALUES ('62', 'Articles of apparel, not knitted', 0, 0, NULL);
+
+INSERT INTO {{CargoIntelligence_Domain_T}}.{{HsCode_R}} (hs_chapter, hs_description, is_tobacco_chapter, is_disguise_category, benchmark_vpk_usd) VALUES ('63', 'Textile made-up articles', 0, 1, 5.9300);
+
+INSERT INTO {{CargoIntelligence_Domain_T}}.{{HsCode_R}} (hs_chapter, hs_description, is_tobacco_chapter, is_disguise_category, benchmark_vpk_usd) VALUES ('64', 'Footwear', 0, 0, NULL);
+
+INSERT INTO {{CargoIntelligence_Domain_T}}.{{HsCode_R}} (hs_chapter, hs_description, is_tobacco_chapter, is_disguise_category, benchmark_vpk_usd) VALUES ('73', 'Articles of iron or steel', 0, 0, NULL);
+
+INSERT INTO {{CargoIntelligence_Domain_T}}.{{HsCode_R}} (hs_chapter, hs_description, is_tobacco_chapter, is_disguise_category, benchmark_vpk_usd) VALUES ('84', 'Machinery and mechanical appliances', 0, 0, NULL);
+
+INSERT INTO {{CargoIntelligence_Domain_T}}.{{HsCode_R}} (hs_chapter, hs_description, is_tobacco_chapter, is_disguise_category, benchmark_vpk_usd) VALUES ('85', 'Electrical machinery and equipment', 0, 0, NULL);
+
+INSERT INTO {{CargoIntelligence_Domain_T}}.{{HsCode_R}} (hs_chapter, hs_description, is_tobacco_chapter, is_disguise_category, benchmark_vpk_usd) VALUES ('87', 'Vehicles', 0, 0, NULL);
+
+INSERT INTO {{CargoIntelligence_Domain_T}}.{{HsCode_R}} (hs_chapter, hs_description, is_tobacco_chapter, is_disguise_category, benchmark_vpk_usd) VALUES ('90', 'Optical and medical instruments', 0, 0, NULL);
+
+INSERT INTO {{CargoIntelligence_Domain_T}}.{{HsCode_R}} (hs_chapter, hs_description, is_tobacco_chapter, is_disguise_category, benchmark_vpk_usd) VALUES ('94', 'Furniture, bedding and lamps', 0, 1, 4.9800);
+
+INSERT INTO {{CargoIntelligence_Domain_T}}.{{HsCode_R}} (hs_chapter, hs_description, is_tobacco_chapter, is_disguise_category, benchmark_vpk_usd) VALUES ('95', 'Toys and sports equipment', 0, 0, NULL);

@@ -1,0 +1,20 @@
+CREATE MULTISET TABLE {{CargoIntelligence_Memory_T}}.Query_Cookbook (
+    recipe_key              BIGINT GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1) NOT NULL,
+    recipe_id               VARCHAR(50) NOT NULL,
+    recipe_title            VARCHAR(200) NOT NULL,
+    recipe_description      CLOB NOT NULL,
+    use_case                VARCHAR(200) NOT NULL,
+    target_module           VARCHAR(50) NOT NULL,
+    sql_template            CLOB NOT NULL,
+    parameter_descriptions  CLOB,
+    performance_notes       CLOB,
+    complexity              VARCHAR(20) NOT NULL,
+    source_module           VARCHAR(50) NOT NULL,
+    module_version          VARCHAR(20),
+    is_active               BYTEINT NOT NULL DEFAULT 1,
+    valid_from              DATE NOT NULL,
+    valid_to                DATE DEFAULT DATE '9999-12-31',
+    created_timestamp       TIMESTAMP(6) WITH TIME ZONE,
+    updated_timestamp       TIMESTAMP(6) WITH TIME ZONE
+)
+PRIMARY INDEX (recipe_key);

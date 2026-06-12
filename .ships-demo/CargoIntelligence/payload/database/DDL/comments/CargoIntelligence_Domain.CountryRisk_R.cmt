@@ -1,0 +1,28 @@
+COMMENT ON TABLE {{CargoIntelligence_Domain_T}}.CountryRisk_R IS
+'Country risk reference. 15 origin countries present in consignment data. origin_risk_tier: HIGH or STANDARD.';
+COMMENT ON COLUMN {{CargoIntelligence_Domain_T}}.CountryRisk_R.country_risk_id IS
+'Surrogate key for country risk record. Referenced by Consignment_H and RiskProfile_R.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Domain_T}}.CountryRisk_R.partner_code IS
+'UN Comtrade numeric country code. Matches partner_code in STG_Cargo_Consignments.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Domain_T}}.CountryRisk_R.country_name IS
+'Country name as provided in the UN Comtrade source data.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Domain_T}}.CountryRisk_R.iso_alpha2 IS
+'ISO 3166-1 alpha-2 country code. NULL where not applicable e.g. Other category.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Domain_T}}.CountryRisk_R.origin_risk_tier IS
+'ABF risk classification - HIGH or STANDARD. HIGH countries have elevated tobacco smuggling association.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Domain_T}}.CountryRisk_R.risk_tier_rationale IS
+'Brief rationale for HIGH risk classification. NULL for STANDARD tier countries.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Domain_T}}.CountryRisk_R.effective_date IS
+'Date this risk classification became effective.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Domain_T}}.CountryRisk_R.expiration_date IS
+'Date this classification expires. 9999-12-31 for indefinite validity.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Domain_T}}.CountryRisk_R.is_active IS
+'Active indicator - 1 = currently valid, 0 = retired.';

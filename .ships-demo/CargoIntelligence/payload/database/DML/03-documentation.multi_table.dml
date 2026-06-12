@@ -1,0 +1,535 @@
+INSERT INTO {{CargoIntelligence_Memory_T}}.Module_Registry (
+    module_name, database_name, deployment_status, module_version,
+    module_purpose, key_entities, dependencies, dependents,
+    data_owner, technical_owner, refresh_frequency,
+    version_date, is_current, valid_from, valid_to,
+    created_timestamp, updated_timestamp
+) VALUES (
+    'MEMORY',
+    'CargoIntelligence_Memory',
+    'DEPLOYED',
+    '1.0.0',
+    'Agent state, learning, and documentation sub-module for the CargoIntelligence data product. Hosts runtime memory tables (sessions, interactions, strategies, preferences, patterns) and design memory tables (Module_Registry, Design_Decision, Business_Glossary, Query_Cookbook, Implementation_Note, Change_Log). Enables agent continuity across cargo inspection sessions and captures architectural decisions made during design.',
+    'agent_session, agent_interaction, learned_strategy, user_preference, discovered_pattern, Module_Registry, Design_Decision, Business_Glossary, Query_Cookbook, Change_Log',
+    'None - Memory is a Phase 1 module, no upstream dependencies',
+    'SEMANTIC, DOMAIN, OBSERVABILITY, SEARCH, PREDICTION',
+    'Australian Border Force Data Architecture',
+    'CargoIntelligence Data Product Team',
+    'REAL_TIME',
+    CURRENT_DATE,
+    1,
+    CURRENT_DATE,
+    DATE '9999-12-31',
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Module_Registry (
+    module_name, database_name, deployment_status, module_version,
+    module_purpose, key_entities, dependencies, dependents,
+    data_owner, technical_owner, refresh_frequency,
+    version_date, is_current, valid_from, valid_to,
+    created_timestamp, updated_timestamp
+) VALUES (
+    'SEMANTIC',
+    'CargoIntelligence_Semantic',
+    'DEPLOYED',
+    '1.0.0',
+    'Knowledge and meaning layer for the CargoIntelligence data product. Provides agent-readable metadata: data_product_map for module discovery, entity_metadata for table catalog, column_metadata for column definitions, table_relationship for join patterns, and naming_standard. Enables autonomous agent discovery and SQL generation without human guidance.',
+    'data_product_map, entity_metadata, column_metadata, table_relationship, naming_standard',
+    'MEMORY',
+    'DOMAIN, OBSERVABILITY, SEARCH, PREDICTION',
+    'Australian Border Force Data Architecture',
+    'CargoIntelligence Data Product Team',
+    'ON_CHANGE',
+    CURRENT_DATE,
+    1,
+    CURRENT_DATE,
+    DATE '9999-12-31',
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Module_Registry (
+    module_name, database_name, deployment_status, module_version,
+    module_purpose, key_entities, dependencies, dependents,
+    data_owner, technical_owner, refresh_frequency,
+    version_date, is_current, valid_from, valid_to,
+    created_timestamp, updated_timestamp
+) VALUES (
+    'DOMAIN',
+    'CargoIntelligence_Domain',
+    'DEPLOYED',
+    '1.0.0',
+    'Core business entities for cargo consignment risk detection. Contains five entities: Consignment_H (2M transaction records, bi-temporal), Party_H (398K sender entities, bi-temporal), HsCode_R (17 HS chapters, reference), CountryRisk_R (199 countries with risk tiers, reference), RiskProfile_R (8 curated smuggling archetypes, reference). Ground truth columns (segment, is_under_declared) are excluded from this layer.',
+    'Consignment_H, Party_H, HsCode_R, CountryRisk_R, RiskProfile_R',
+    'MEMORY, SEMANTIC',
+    'OBSERVABILITY, SEARCH, PREDICTION',
+    'Australian Border Force Data Architecture',
+    'CargoIntelligence Data Product Team',
+    'DAILY',
+    CURRENT_DATE,
+    1,
+    CURRENT_DATE,
+    DATE '9999-12-31',
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Module_Registry (
+    module_name, database_name, deployment_status, module_version,
+    module_purpose, key_entities, dependencies, dependents,
+    data_owner, technical_owner, refresh_frequency,
+    version_date, is_current, valid_from, valid_to,
+    created_timestamp, updated_timestamp
+) VALUES (
+    'OBSERVABILITY',
+    'CargoIntelligence_Observability',
+    'DEPLOYED',
+    '1.0.0',
+    'Data quality monitoring, agent interaction events, and outcome tracking for CargoIntelligence. Monitors Domain entity load quality, tracks similarity search query performance, and captures analyst feedback on risk scoring outcomes to enable closed-loop improvement of detection models.',
+    'change_event, data_quality_metric, query_log',
+    'MEMORY, SEMANTIC, DOMAIN',
+    'MEMORY',
+    'Australian Border Force Data Architecture',
+    'CargoIntelligence Data Product Team',
+    'REAL_TIME',
+    CURRENT_DATE,
+    1,
+    CURRENT_DATE,
+    DATE '9999-12-31',
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Module_Registry (
+    module_name, database_name, deployment_status, module_version,
+    module_purpose, key_entities, dependencies, dependents,
+    data_owner, technical_owner, refresh_frequency,
+    version_date, is_current, valid_from, valid_to,
+    created_timestamp, updated_timestamp
+) VALUES (
+    'SEARCH',
+    'CargoIntelligence_Search',
+    'DEPLOYED',
+    '1.0.0',
+    'Structured vector similarity search for cargo consignment risk detection. Encodes each consignment as a semantically meaningful feature string from structured attributes (hs_chapter, origin_risk_tier, transport_code, value_per_kg range, is_disguise_category). Embeds via ONNX in-database. Scores against RiskProfile reference embeddings using TD_VectorDistance cosine. Produces similarity_score_max which feeds the Prediction module feature store.',
+    'entity_embedding',
+    'MEMORY, SEMANTIC, DOMAIN',
+    'PREDICTION',
+    'Australian Border Force Data Architecture',
+    'CargoIntelligence Data Product Team',
+    'DAILY',
+    CURRENT_DATE,
+    1,
+    CURRENT_DATE,
+    DATE '9999-12-31',
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Module_Registry (
+    module_name, database_name, deployment_status, module_version,
+    module_purpose, key_entities, dependencies, dependents,
+    data_owner, technical_owner, refresh_frequency,
+    version_date, is_current, valid_from, valid_to,
+    created_timestamp, updated_timestamp
+) VALUES (
+    'PREDICTION',
+    'CargoIntelligence_Prediction',
+    'DEPLOYED',
+    '1.0.0',
+    'Feature store and risk scoring for tobacco smuggling detection. Stores pre-computed features: value_density_score, origin_risk_score, hs_adjacency_risk, trade_asymmetry_score, consignee_network_flag, similarity_score_max (sourced from CargoIntelligence_Search), and composite_risk_score. The Search-to-Prediction integration via similarity_score_max is the core cross-module dependency of this reference implementation.',
+    'consignment_features, model_prediction',
+    'MEMORY, SEMANTIC, DOMAIN, SEARCH',
+    'None - terminal module',
+    'Australian Border Force Data Architecture',
+    'CargoIntelligence Data Product Team',
+    'DAILY',
+    CURRENT_DATE,
+    1,
+    CURRENT_DATE,
+    DATE '9999-12-31',
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+-- -----------------------------------------------------------------------------
+-- DESIGN_DECISION — 5 rows
+-- -----------------------------------------------------------------------------
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Design_Decision (
+    decision_id, decision_version, decision_title, decision_description,
+    context, alternatives_considered, rationale, consequences,
+    decision_status, decision_category, source_module, module_version,
+    affects_table, decided_by, decided_date,
+    valid_from, valid_to, is_current, created_timestamp, updated_timestamp
+) VALUES (
+    'DD-SCOPE-001',
+    1,
+    'Separate databases per module (Approach 1)',
+    'CargoIntelligence uses Approach 1: one database per module (CargoIntelligence_Memory, CargoIntelligence_Semantic, CargoIntelligence_Domain, CargoIntelligence_Observability, CargoIntelligence_Search, CargoIntelligence_Prediction). This is the recommended approach in the AI-Native Data Product design standard.',
+    'The design standard offers two approaches: Approach 1 (separate databases per module) or Approach 2 (single database with module-prefixed tables). As a reference implementation this product must demonstrate best practice architecture.',
+    'Approach 2: single CargoIntelligence database with module-prefixed tables (D_, S_, M_, etc.). Simpler to manage on a small ClearScape instance with fewer cross-database grant requirements.',
+    'A reference implementation for the Department of Home Affairs SVoE modernisation narrative must demonstrate the recommended enterprise pattern. Separate databases give independent access control per module, support incremental deployment, and align with the six-module architecture concept.',
+    'Six databases to manage. Cross-database views require GRANT SELECT WITH GRANT OPTION before creation. Deployment must follow phase order: Memory and Semantic first, then Domain and Observability, then Search and Prediction.',
+    'ACCEPTED',
+    'ARCHITECTURE',
+    'MEMORY',
+    '1.0.0',
+    'ALL',
+    'CargoIntelligence Data Product Team',
+    CURRENT_DATE,
+    CURRENT_DATE,
+    DATE '9999-12-31',
+    1,
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Design_Decision (
+    decision_id, decision_version, decision_title, decision_description,
+    context, alternatives_considered, rationale, consequences,
+    decision_status, decision_category, source_module, module_version,
+    affects_table, decided_by, decided_date,
+    valid_from, valid_to, is_current, created_timestamp, updated_timestamp
+) VALUES (
+    'DD-SCOPE-002',
+    1,
+    'All six modules deployed - no deferrals',
+    'All six AI-Native Data Product modules are in scope for CargoIntelligence and will be deployed: Memory, Semantic, Domain, Observability, Search, and Prediction. No modules are deferred or excluded.',
+    'Some data products deploy a subset of modules to reduce build complexity. CargoIntelligence is a reference implementation for the Department of Home Affairs SVoE modernisation conversation and must demonstrate the complete architecture.',
+    'Deploy Domain, Semantic, and Search only as a minimum viable product. Defer Prediction and Observability to a later phase to reduce initial build scope.',
+    'Full module deployment is required to demonstrate the Search-to-Prediction integration via similarity_score_max feeding composite_risk_score. This cross-module dependency is the key architectural differentiator for the SVoE modernisation narrative.',
+    'Higher build complexity across six modules. All cross-module GRANT SELECT WITH GRANT OPTION statements must be established in the correct deployment order.',
+    'ACCEPTED',
+    'ARCHITECTURE',
+    'MEMORY',
+    '1.0.0',
+    'ALL',
+    'CargoIntelligence Data Product Team',
+    CURRENT_DATE,
+    CURRENT_DATE,
+    DATE '9999-12-31',
+    1,
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Design_Decision (
+    decision_id, decision_version, decision_title, decision_description,
+    context, alternatives_considered, rationale, consequences,
+    decision_status, decision_category, source_module, module_version,
+    affects_table, decided_by, decided_date,
+    valid_from, valid_to, is_current, created_timestamp, updated_timestamp
+) VALUES (
+    'DD-MEMORY-001',
+    1,
+    'ORGANIZATION scope default for cargo inspection agent interactions',
+    'All agent sessions and interactions in the CargoIntelligence Memory module default to scope_level = ORGANIZATION. Individual analyst preferences use scope_level = USER. No TEAM scope is used in this product.',
+    'The design standard supports four scope levels: USER, TEAM, ORGANIZATION, and AGENT. CargoIntelligence is a government border protection product where learned query strategies and discovered risk patterns are operationally valuable across all analysts.',
+    'USER scope for all interactions (more private, less knowledge sharing). TEAM scope for analyst teams within the Australian Border Force.',
+    'Cross-analyst learning is essential in border protection operations. A risk pattern discovered by one analyst (such as a high-similarity sender cluster) must be visible to all analysts. ORGANIZATION scope maximises knowledge sharing and improves detection capability over time.',
+    'All agent_session, agent_interaction, learned_strategy, and discovered_pattern records default scope_level to ORGANIZATION. user_preference records default to USER scope for personal settings.',
+    'ACCEPTED',
+    'SECURITY',
+    'MEMORY',
+    '1.0.0',
+    'agent_session, agent_interaction, learned_strategy, discovered_pattern',
+    'CargoIntelligence Data Product Team',
+    CURRENT_DATE,
+    CURRENT_DATE,
+    DATE '9999-12-31',
+    1,
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Design_Decision (
+    decision_id, decision_version, decision_title, decision_description,
+    context, alternatives_considered, rationale, consequences,
+    decision_status, decision_category, source_module, module_version,
+    affects_table, decided_by, decided_date,
+    valid_from, valid_to, is_current, created_timestamp, updated_timestamp
+) VALUES (
+    'DD-MEMORY-002',
+    1,
+    'VARCHAR comma-separated for referenced_tables and involved_tables',
+    'Table references in agent_interaction.referenced_tables and discovered_pattern.involved_tables use VARCHAR(1000) comma-separated format. Format is: CargoIntelligence_Domain.Consignment_H, CargoIntelligence_Search.entity_embedding. This enables direct LIKE-based SQL filtering without application-layer JSON parsing.',
+    'The design standard offers VARCHAR (comma-separated) or JSON for storing lists of table names in memory records. Teradata JSON retrieval requires application-side parsing to extract values for filtering.',
+    'JSON array column storing fully-qualified table names as a JSON list, consistent with other JSON columns in the schema.',
+    'LIKE queries on VARCHAR work directly in SQL. Agents can filter WHERE referenced_tables LIKE CargoIntelligence_Domain.Consignment_H without application-side processing. Consistent with the design standard recommendation for table reference lists.',
+    'Format must be consistently applied: fully qualified database.table_name separated by commas and a space. Parsing multiple tables from one record requires application-layer split on comma if individual table counts are needed.',
+    'ACCEPTED',
+    'SCHEMA',
+    'MEMORY',
+    '1.0.0',
+    'agent_interaction, discovered_pattern',
+    'CargoIntelligence Data Product Team',
+    CURRENT_DATE,
+    CURRENT_DATE,
+    DATE '9999-12-31',
+    1,
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Design_Decision (
+    decision_id, decision_version, decision_title, decision_description,
+    context, alternatives_considered, rationale, consequences,
+    decision_status, decision_category, source_module, module_version,
+    affects_table, decided_by, decided_date,
+    valid_from, valid_to, is_current, created_timestamp, updated_timestamp
+) VALUES (
+    'DD-MEMORY-003',
+    1,
+    'RiskProfile_R added as fifth Domain entity',
+    'The original session intent specified four Domain entities (Consignment, Party, HsCode, CountryRisk). RiskProfile was added as a fifth Domain entity (RiskProfile_R, reference table suffix _R) based on source profiling findings and architectural review during design.',
+    'Source profiling of CargoIntelligence_Staging found no pre-built risk profile records. Risk profiles must be constructed as curated reference patterns in the Domain layer. The Search module scores consignments against RiskProfile embeddings, requiring both to have stable identities in the Domain.',
+    'Define risk profiles purely within the Search module as internal configuration or lookup data, not as a formal Domain entity with its own surrogate key and history.',
+    'RiskProfile must be independently queryable and auditable by ABF analysts separate from the search scoring logic. It naturally joins to HsCode_R and CountryRisk_R. The Search module embeds RiskProfile_R records using the same pipeline as Consignment_H, so both require Domain-layer identity for consistent cross-module join patterns.',
+    'Domain module has five entities instead of four. Search module embeds both Consignment_H and RiskProfile_R. RiskProfile_R requires 8 seed INSERT records (curated archetypes) during Domain module deployment.',
+    'ACCEPTED',
+    'ARCHITECTURE',
+    'MEMORY',
+    '1.0.0',
+    'CargoIntelligence_Domain.RiskProfile_R',
+    'CargoIntelligence Data Product Team',
+    CURRENT_DATE,
+    CURRENT_DATE,
+    DATE '9999-12-31',
+    1,
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+-- -----------------------------------------------------------------------------
+-- CHANGE_LOG — 1 row
+-- -----------------------------------------------------------------------------
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Change_Log (
+    change_id, version_number, change_title, change_description,
+    change_type, change_category, source_module, affects_table,
+    migration_steps, rollback_steps, related_decision_id,
+    deployed_date, deployed_by, deployment_status, created_timestamp
+) VALUES (
+    'CL-MEMORY-001',
+    '1.0.0',
+    'Memory Module initial release',
+    'Initial deployment of CargoIntelligence Memory module. Creates CargoIntelligence_Memory database with 5 runtime memory tables (agent_session, agent_interaction, learned_strategy, user_preference, discovered_pattern) and 6 Documentation Sub-Module tables (Module_Registry, Design_Decision, Business_Glossary, Query_Cookbook, Implementation_Note, Change_Log). Includes 8 standard views. Seeds Module_Registry with all 6 product modules, Design_Decision with 5 scope and module decisions, Business_Glossary with 5 CargoIntelligence terms, and Query_Cookbook with 3 recipes including the mandatory QC-SEMANTIC-002 ERD recipe.',
+    'INITIAL_RELEASE',
+    'NON_BREAKING',
+    'MEMORY',
+    'ALL',
+    'Run 00-setup.sql, then 01-tables.sql, then 02-views.sql, then 03-documentation.sql in sequence.',
+    'DROP DATABASE CargoIntelligence_Memory',
+    'DD-SCOPE-001',
+    CURRENT_DATE,
+    'CargoIntelligence Data Product Team',
+    'DEPLOYED',
+    CURRENT_TIMESTAMP(6)
+);
+
+-- -----------------------------------------------------------------------------
+-- BUSINESS_GLOSSARY — 5 rows
+-- -----------------------------------------------------------------------------
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Business_Glossary (
+    term, term_category, definition, business_context,
+    synonyms, related_terms, related_table, related_column,
+    source_module, module_version, is_active,
+    valid_from, valid_to, created_timestamp, updated_timestamp
+) VALUES (
+    'Consignment',
+    'ENTITY',
+    'A single import declaration of goods entering Australia, modelled on the ABF mail cargo declaration structure. Each consignment captures declared HS chapter, trade value, net weight, origin country, transport mode, and sender identity. The primary unit of analysis in CargoIntelligence.',
+    'Sourced from STG_Cargo_Consignments (2M records, 2019-2023). Ground truth risk labels (segment, is_under_declared) are present in staging but excluded from the Domain layer to prevent leakage into operational scoring.',
+    'Declaration, Shipment',
+    'Risk Profile, HS Chapter, Origin Risk Tier',
+    'CargoIntelligence_Domain.Consignment_H',
+    NULL,
+    'MEMORY',
+    '1.0.0',
+    1,
+    CURRENT_DATE,
+    DATE '9999-12-31',
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Business_Glossary (
+    term, term_category, definition, business_context,
+    synonyms, related_terms, related_table, related_column,
+    source_module, module_version, is_active,
+    valid_from, valid_to, created_timestamp, updated_timestamp
+) VALUES (
+    'Risk Profile',
+    'ENTITY',
+    'A curated archetype representing a known tobacco smuggling pattern. Each risk profile encodes a combination of HS chapter affinity, origin risk tier, transport mode, and value density range as a structured feature string. Risk profiles are the reference anchor points that Search module similarity scoring scores consignments against using TD_VectorDistance cosine distance.',
+    'Eight profiles are seeded: 1 direct tobacco (declared as HS 24), 6 tobacco-in-disguise patterns (one per disguise HS chapter: 20, 22, 25, 39, 63, 94), and 1 baseline legitimate profile. Profiles are curated domain knowledge, not derived from staging data.',
+    'Smuggling Archetype, Risk Archetype',
+    'Consignment, Similarity Score, HS Chapter',
+    'CargoIntelligence_Domain.RiskProfile_R',
+    NULL,
+    'MEMORY',
+    '1.0.0',
+    1,
+    CURRENT_DATE,
+    DATE '9999-12-31',
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Business_Glossary (
+    term, term_category, definition, business_context,
+    synonyms, related_terms, related_table, related_column,
+    source_module, module_version, is_active,
+    valid_from, valid_to, created_timestamp, updated_timestamp
+) VALUES (
+    'HS Chapter',
+    'REFERENCE_CODE',
+    'A 2-digit Harmonized System chapter code classifying imported goods by commodity type. CargoIntelligence covers 17 HS chapters. Chapter 24 (Tobacco) is the primary detection target. Chapters 20, 22, 25, 39, 63, 94 are designated disguise categories - goods commonly used to mis-declare tobacco shipments.',
+    'The 7 chapters in UN Comtrade TradeStats (20, 22, 24, 25, 39, 63, 94) provide benchmark value_per_kg statistics used in trade asymmetry scoring. The remaining 10 chapters in consignment data provide context for normal import patterns.',
+    'HS Code, Commodity Chapter',
+    'Consignment, Risk Profile, Origin Risk Tier',
+    'CargoIntelligence_Domain.HsCode_R',
+    NULL,
+    'MEMORY',
+    '1.0.0',
+    1,
+    CURRENT_DATE,
+    DATE '9999-12-31',
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Business_Glossary (
+    term, term_category, definition, business_context,
+    synonyms, related_terms, related_table, related_column,
+    source_module, module_version, is_active,
+    valid_from, valid_to, created_timestamp, updated_timestamp
+) VALUES (
+    'Origin Risk Tier',
+    'CLASSIFICATION',
+    'A classification of an origin country by its historical association with tobacco smuggling into Australia. Two tiers: HIGH (5 countries: China, China HK SAR, Singapore, UAE, Viet Nam) and STANDARD (all others). Derived from UN Comtrade TradeStats analysis and ABF intelligence.',
+    'In CargoIntelligence staging data 62% of consignments originate from HIGH risk countries. The 5 HIGH-risk countries account for the majority of detected tobacco smuggling attempts via disguise categories in the 2019-2023 period.',
+    'Country Risk, Origin Classification',
+    'Consignment, CountryRisk, Risk Profile',
+    'CargoIntelligence_Domain.CountryRisk_R',
+    'origin_risk_tier',
+    'MEMORY',
+    '1.0.0',
+    1,
+    CURRENT_DATE,
+    DATE '9999-12-31',
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Business_Glossary (
+    term, term_category, definition, business_context,
+    synonyms, related_terms, related_table, related_column,
+    source_module, module_version, is_active,
+    valid_from, valid_to, created_timestamp, updated_timestamp
+) VALUES (
+    'Similarity Score',
+    'METRIC',
+    'The cosine distance between a consignment embedding vector and its most similar risk profile embedding vector, computed via TD_VectorDistance in-database. Stored as similarity_score_max in the Prediction feature store. A score close to 1.0 indicates the consignment structurally resembles a known smuggling archetype.',
+    'similarity_score_max is computed in CargoIntelligence_Search and written to CargoIntelligence_Prediction.consignment_features. It is one of 7 features contributing to composite_risk_score. The Search-to-Prediction integration via this metric is the core architectural differentiator of this reference implementation.',
+    'Vector Similarity, Cosine Similarity',
+    'Risk Profile, Composite Risk Score, Consignment',
+    'CargoIntelligence_Search.entity_embedding',
+    'similarity_score_max',
+    'MEMORY',
+    '1.0.0',
+    1,
+    CURRENT_DATE,
+    DATE '9999-12-31',
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+-- -----------------------------------------------------------------------------
+-- QUERY_COOKBOOK — 3 rows
+-- -----------------------------------------------------------------------------
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Query_Cookbook (
+    recipe_id, recipe_title, recipe_description, use_case,
+    target_module, sql_template, parameter_descriptions, performance_notes,
+    complexity, source_module, module_version, is_active,
+    valid_from, valid_to, created_timestamp, updated_timestamp
+) VALUES (
+    'QC-MEMORY-001',
+    'Find all agent interactions involving a specific entity',
+    'Retrieves all agent interactions that queried or acted on a specified table, ordered by most recent first. Uses LIKE filter on the comma-separated referenced_tables VARCHAR column. Useful for auditing which agents have accessed a given entity and what SQL they executed.',
+    'Audit and session review',
+    'MEMORY',
+    'SELECT vis.session_key, vis.agent_key, vis.interaction_seq, vis.interaction_type, vis.user_input, vis.sql_executed, vis.query_result_count, vis.outcome_status, vis.interaction_dts FROM CargoIntelligence_Memory.v_interactions_summary vis WHERE vis.referenced_tables LIKE :table_pattern AND vis.interaction_type = :interaction_type ORDER BY vis.interaction_dts DESC;',
+    ':table_pattern = table name fragment wrapped in % wildcards e.g. %Consignment_H%. :interaction_type = QUERY, DECISION, ACTION, or EXPLANATION. Omit the interaction_type filter to return all types.',
+    'Lightweight LIKE scan on VARCHAR(1000). No performance concerns at expected interaction volumes.',
+    'SIMPLE',
+    'MEMORY',
+    '1.0.0',
+    1,
+    CURRENT_DATE,
+    DATE '9999-12-31',
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Query_Cookbook (
+    recipe_id, recipe_title, recipe_description, use_case,
+    target_module, sql_template, parameter_descriptions, performance_notes,
+    complexity, source_module, module_version, is_active,
+    valid_from, valid_to, created_timestamp, updated_timestamp
+) VALUES (
+    'QC-SEMANTIC-001',
+    'Agent bootstrap: discover modules then entities',
+    'Standard agent initialization sequence for CargoIntelligence. Step 1 queries data_product_map to discover which modules are deployed and their database locations. Step 2 queries entity_metadata to discover what tables exist in a given module. Run these two queries in sequence at session start before generating any domain SQL.',
+    'Agent initialization, onboarding',
+    'SEMANTIC',
+    '-- Step 1: Discover deployed modules
+SELECT module_name, database_name, primary_tables, module_description
+FROM CargoIntelligence_Semantic.data_product_map
+WHERE is_active = 1;
+
+-- Step 2: Discover entities in a module
+SELECT entity_name, table_name, view_name, natural_key_column, entity_description
+FROM CargoIntelligence_Semantic.entity_metadata
+WHERE module_name = :module_name
+  AND is_active = 1;',
+    ':module_name = the module to explore e.g. Domain, Search, or Prediction.',
+    'Both queries operate on small metadata tables. No performance concerns.',
+    'SIMPLE',
+    'MEMORY',
+    '1.0.0',
+    1,
+    CURRENT_DATE,
+    DATE '9999-12-31',
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Query_Cookbook (
+    recipe_id, recipe_title, recipe_description, use_case,
+    target_module, sql_template, parameter_descriptions, performance_notes,
+    complexity, source_module, module_version, is_active,
+    valid_from, valid_to, created_timestamp, updated_timestamp
+) VALUES (
+    'QC-SEMANTIC-002',
+    'Generate entity-relationship diagram from table_relationship',
+    'Queries the Semantic table_relationship table to produce a complete entity-relationship listing for CargoIntelligence. Output can be formatted as Mermaid erDiagram syntax or as a plain relationship listing. Use to verify the current data model without relying on a static diagram that may have drifted.',
+    'Data model documentation, onboarding, design review',
+    'SEMANTIC',
+    'SELECT rel.from_database, rel.from_table, rel.from_column, rel.relationship_type, rel.cardinality, rel.to_database, rel.to_table, rel.to_column, rel.join_type, rel.is_mandatory, rel.relationship_desc FROM CargoIntelligence_Semantic.table_relationship rel WHERE rel.is_active = 1 ORDER BY rel.from_table, rel.to_table;',
+    'No parameters. Returns all active relationships across all modules. To render as Mermaid erDiagram: for each row emit {from_table} {cardinality_symbol} {to_table} : {relationship_desc}. Symbols: ONE_TO_ONE = ||--||, ONE_TO_MANY = ||--o{, MANY_TO_ONE = }o--||, MANY_TO_MANY = }o--o{.',
+    'Lightweight query on a {{small_T}} metadata table. No performance concerns.',
+    'SIMPLE',
+    'MEMORY',
+    '1.0.0',
+    1,
+    CURRENT_DATE,
+    DATE '9999-12-31',
+    CURRENT_TIMESTAMP(6),
+    CURRENT_TIMESTAMP(6)
+);

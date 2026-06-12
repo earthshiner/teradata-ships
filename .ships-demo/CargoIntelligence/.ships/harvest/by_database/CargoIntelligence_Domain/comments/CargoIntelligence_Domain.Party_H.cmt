@@ -1,0 +1,34 @@
+COMMENT ON TABLE {{CargoIntelligence_Domain_T}}.{{Party_H_T}} IS
+'Cargo consignment sender (party) entity. Type 2 SCD. 398K distinct senders. Use Party_Current view for active records.';
+COMMENT ON COLUMN {{CargoIntelligence_Domain_T}}.{{Party_H_V}}.party_id IS
+'Surrogate key from Party_Keymap - stable across all SCD versions. Not IDENTITY; sourced from keymap.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Domain_T}}.{{Party_H_V}}.party_key IS
+'Natural key - source sender_id e.g. S-L012345. Same value across all SCD versions. PII.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Domain_T}}.{{Party_H_V}}.party_name IS
+'Sender name if available. NULL in initial load - not present in staging source. PII.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Domain_T}}.{{Party_H_V}}.source_system IS
+'Source system identifier for lineage tracing.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Domain_T}}.{{Party_H_V}}.source_key IS
+'Natural key as it appeared in the source system.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Domain_T}}.{{Party_H_V}}.valid_from_dt IS
+'Date this SCD version became effective. Set to MIN(declaration_date) per sender in initial load.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Domain_T}}.{{Party_H_V}}.valid_to_dt IS
+'Date this SCD version was superseded. 9999-12-31 = currently active version.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Domain_T}}.{{Party_H_V}}.is_current IS
+'Current version indicator - 1 = active version. Use Party_Current view to filter.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Domain_T}}.{{Party_H_V}}.is_deleted IS
+'Soft delete indicator - 1 = logically deleted, 0 = active. Always filter WHERE is_deleted = 0.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Domain_T}}.{{Party_H_V}}.created_dt IS
+'Timestamp when this row was inserted into the domain table.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Domain_T}}.{{Party_H_V}}.updated_dt IS
+'Timestamp when this row was last modified.';

@@ -1,0 +1,2 @@
+COMMENT ON VIEW {{CargoIntelligence_Memory_V}}.v_interactions_summary IS
+'Agent interaction summary - joins interactions to sessions for filtering and audit without JSON parsing.';

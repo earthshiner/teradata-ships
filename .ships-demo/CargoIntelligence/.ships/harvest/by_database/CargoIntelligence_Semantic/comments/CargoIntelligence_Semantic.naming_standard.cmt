@@ -1,0 +1,28 @@
+COMMENT ON TABLE {{CargoIntelligence_Semantic_T}}.naming_standard IS
+'Naming conventions for CargoIntelligence - agents consult to interpret column and table names correctly.';
+COMMENT ON COLUMN {{CargoIntelligence_Semantic_T}}.naming_standard.naming_standard_id IS
+'Surrogate key for naming standard record.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Semantic_T}}.naming_standard.standard_type IS
+'Type of naming convention - SUFFIX, PREFIX, PATTERN, or ABBREVIATION.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Semantic_T}}.naming_standard.standard_value IS
+'The naming element itself e.g. _H, _R, is_, _id, _key.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Semantic_T}}.naming_standard.meaning IS
+'What this naming element means in the CargoIntelligence context.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Semantic_T}}.naming_standard.usage_guidance IS
+'How and when to apply this naming convention - includes filter patterns and join guidance.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Semantic_T}}.naming_standard.applies_to IS
+'What this convention applies to - TABLE, COLUMN, VIEW, or ALL.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Semantic_T}}.naming_standard.examples IS
+'Example usage of this naming convention in CargoIntelligence.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Semantic_T}}.naming_standard.is_active IS
+'Active indicator - 1 = convention currently in use, 0 = deprecated.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Semantic_T}}.naming_standard.created_at IS
+'Timestamp when naming standard was documented.';

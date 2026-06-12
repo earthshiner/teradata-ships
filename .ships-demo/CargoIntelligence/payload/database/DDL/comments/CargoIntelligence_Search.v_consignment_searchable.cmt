@@ -1,0 +1,2 @@
+COMMENT ON VIEW {{CargoIntelligence_Search_V}}.v_consignment_searchable IS
+'Current consignment embeddings joined to enriched Domain content. Use for semantic search and TD_VectorDistance input.';

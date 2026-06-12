@@ -1,0 +1,44 @@
+REPLACE VIEW {{CargoIntelligence_Memory_V}}.v_Documentation_Search (
+    record_type,
+    record_id,
+    documentation_title,
+    documentation_content
+)
+AS
+SELECT
+    CAST('DECISION' AS VARCHAR(50)),
+    CAST(dd.decision_id AS VARCHAR(50)),
+    CAST(dd.decision_title AS VARCHAR(200)),
+    CAST(SUBSTR(dd.decision_description, 1, 1000) AS VARCHAR(1000))
+FROM {{CargoIntelligence_Memory_T}}.Design_Decision dd
+WHERE dd.is_current = 1
+
+UNION ALL
+
+SELECT
+    CAST('GLOSSARY' AS VARCHAR(50)),
+    CAST(CAST(gl.glossary_key AS VARCHAR(20)) AS VARCHAR(50)),
+    CAST(gl.term AS VARCHAR(200)),
+    CAST(SUBSTR(gl.definition, 1, 1000) AS VARCHAR(1000))
+FROM {{CargoIntelligence_Memory_T}}.Business_Glossary gl
+WHERE gl.is_active = 1
+
+UNION ALL
+
+SELECT
+    CAST('RECIPE' AS VARCHAR(50)),
+    CAST(cb.recipe_id AS VARCHAR(50)),
+    CAST(cb.recipe_title AS VARCHAR(200)),
+    CAST(SUBSTR(cb.recipe_description, 1, 1000) AS VARCHAR(1000))
+FROM {{CargoIntelligence_Memory_T}}.Query_Cookbook cb
+WHERE cb.is_active = 1
+
+UNION ALL
+
+SELECT
+    CAST('NOTE' AS VARCHAR(50)),
+    CAST(nt.note_id AS VARCHAR(50)),
+    CAST(nt.note_title AS VARCHAR(200)),
+    CAST(SUBSTR(nt.note_content, 1, 1000) AS VARCHAR(1000))
+FROM {{CargoIntelligence_Memory_T}}.Implementation_Note nt
+WHERE nt.is_active = 1;

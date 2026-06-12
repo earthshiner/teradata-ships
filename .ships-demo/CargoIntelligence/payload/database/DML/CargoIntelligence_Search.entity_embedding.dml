@@ -1,0 +1,129 @@
+INSERT INTO {{CargoIntelligence_Search_T}}.{{entity_embedding_T}} (
+    entity_id,
+    {{entity_type_T}},
+    source_module,
+    source_table,
+    source_column,
+    feature_text,
+    embedding_vector,
+    embedding_dimensions,
+    embedding_model,
+    embedding_model_version,
+    generated_dts,
+    valid_from_dts,
+    valid_to_dts,
+    is_current,
+    generated_by,
+    computation_method
+)
+SELECT
+    CAST(emb.entity_id AS BIGINT)                                       AS entity_id,
+    emb.{{entity_type_T}}                                                     AS {{entity_type_T}},
+    'Domain'                                                            AS source_module,
+    'RiskProfile_R'                                                     AS source_table,
+    'feature_text'                                                      AS source_column,
+    emb.txt                                                             AS feature_text,
+    emb.sentence_embedding                                              AS embedding_vector,
+    384                                                                 AS embedding_dimensions,
+    'bge-small-en-v1.5'                                                 AS embedding_model,
+    NULL                                                                AS embedding_model_version,
+    CURRENT_TIMESTAMP(6)                                                AS generated_dts,
+    CURRENT_TIMESTAMP(6)                                                AS valid_from_dts,
+    CAST(TIMESTAMP '9999-12-31 23:59:59.999999+00:00'
+         AS TIMESTAMP(6) WITH TIME ZONE)                                AS valid_to_dts,
+    1                                                                   AS is_current,
+    'CI_SEARCH_ETL'                                                     AS generated_by,
+    'ONNX'                                                              AS computation_method
+FROM {{mldb_V}}.{{ONNXEmbeddings_T}}(
+    ON (
+        SELECT
+            CAST({{rp_V}}.risk_profile_id AS BIGINT)  AS entity_id,
+            'RISK_PROFILE'                        AS {{entity_type_T}},
+            {{rp_V}}.feature_text                       AS txt
+        FROM {{CargoIntelligence_Domain_T}}.RiskProfile_R {{rp_T}}
+        WHERE {{rp_V}}.is_active = 1
+    ) AS InputTable
+    ON (
+        SELECT model_id, model
+        FROM {{demo_user_V}}.embeddings_models
+        WHERE model_id = 'bge-small-en-v1.5'
+    ) AS ModelTable DIMENSION
+    ON (
+        SELECT model_id, model AS tokenizer
+        FROM {{demo_user_V}}.embeddings_tokenizers
+        WHERE model_id = 'bge-small-en-v1.5'
+    ) AS TokenizerTable DIMENSION
+    USING
+        Accumulate('entity_id', 'entity_type', 'txt')
+        OutputFormat('VARBYTE(1536)')
+        ModelOutputTensor('sentence_embedding')
+) AS emb;
+INSERT INTO {{CargoIntelligence_Search_T}}.{{entity_embedding_T}} (
+    entity_id,
+    {{entity_type_T}},
+    source_module,
+    source_table,
+    source_column,
+    feature_text,
+    embedding_vector,
+    embedding_dimensions,
+    embedding_model,
+    embedding_model_version,
+    generated_dts,
+    valid_from_dts,
+    valid_to_dts,
+    is_current,
+    generated_by,
+    computation_method
+)
+SELECT
+    CAST(emb.entity_id AS BIGINT)                                       AS entity_id,
+    emb.{{entity_type_T}}                                                     AS {{entity_type_T}},
+    'Domain'                                                            AS source_module,
+    'Consignment_H'                                                     AS source_table,
+    'feature_text'                                                      AS source_column,
+    emb.txt                                                             AS feature_text,
+    emb.sentence_embedding                                              AS embedding_vector,
+    384                                                                 AS embedding_dimensions,
+    'bge-small-en-v1.5'                                                 AS embedding_model,
+    NULL                                                                AS embedding_model_version,
+    CURRENT_TIMESTAMP(6)                                                AS generated_dts,
+    CURRENT_TIMESTAMP(6)                                                AS valid_from_dts,
+    CAST(TIMESTAMP '9999-12-31 23:59:59.999999+00:00'
+         AS TIMESTAMP(6) WITH TIME ZONE)                                AS valid_to_dts,
+    1                                                                   AS is_current,
+    'CI_SEARCH_ETL'                                                     AS generated_by,
+    'ONNX'                                                              AS computation_method
+FROM {{mldb_V}}.{{ONNXEmbeddings_T}}(
+    ON (
+        SELECT
+            {{ce_V}}.{{consignment_id_T}}                           AS entity_id,
+            'CONSIGNMENT'                               AS {{entity_type_T}},
+            'HS' || TRIM({{ce_V}}.hs_chapter) || ' ' ||
+            {{ce_V}}.origin_risk_tier || ' ' ||
+            {{ce_V}}.transport_code || ' ' ||
+            CASE
+                WHEN {{ce_V}}.value_per_kg < 1.0000  THEN 'VERY_LOW'
+                WHEN {{ce_V}}.value_per_kg < 3.5100  THEN 'LOW'
+                WHEN {{ce_V}}.value_per_kg < 10.0100 THEN 'MEDIUM'
+                ELSE 'HIGH'
+            END                                         AS txt
+        FROM {{CargoIntelligence_Domain_V}}.{{Consignment_Enriched_T}} {{ce_T}}
+        WHERE {{ce_V}}.transport_code IS NOT NULL
+          AND {{ce_V}}.value_per_kg IS NOT NULL
+    ) AS InputTable
+    ON (
+        SELECT model_id, model
+        FROM {{demo_user_V}}.embeddings_models
+        WHERE model_id = 'bge-small-en-v1.5'
+    ) AS ModelTable DIMENSION
+    ON (
+        SELECT model_id, model AS tokenizer
+        FROM {{demo_user_V}}.embeddings_tokenizers
+        WHERE model_id = 'bge-small-en-v1.5'
+    ) AS TokenizerTable DIMENSION
+    USING
+        Accumulate('entity_id', 'entity_type', 'txt')
+        OutputFormat('VARBYTE(1536)')
+        ModelOutputTensor('sentence_embedding')
+) AS emb;

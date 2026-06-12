@@ -1,0 +1,15 @@
+CREATE MULTISET TABLE {{CargoIntelligence_Memory_T}}.agent_session (
+    session_id            BIGINT GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1) NOT NULL,
+    session_key           VARCHAR(100) NOT NULL,
+    agent_key             VARCHAR(100) NOT NULL,
+    user_key              VARCHAR(100),
+    session_start_dts     TIMESTAMP(6) WITH TIME ZONE NOT NULL,
+    session_end_dts       TIMESTAMP(6) WITH TIME ZONE,
+    session_status        VARCHAR(20),
+    session_goal          VARCHAR(500),
+    session_context_json  JSON,
+    scope_level           VARCHAR(20) NOT NULL,
+    scope_identifier      VARCHAR(100) NOT NULL,
+    created_at            TIMESTAMP(6) WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP(6)
+)
+PRIMARY INDEX (session_id);

@@ -1,0 +1,2 @@
+COMMENT ON VIEW {{CargoIntelligence_Semantic_V}}.v_entity_catalog IS
+'All active entities across all modules - agent entry point for table discovery and SQL generation.';

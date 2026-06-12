@@ -1,0 +1,245 @@
+INSERT INTO {{CargoIntelligence_Memory_T}}.Design_Decision (
+    decision_id, decision_version, decision_title, decision_description,
+    context, alternatives_considered, rationale, consequences,
+    decision_status, decision_category, source_module, module_version,
+    affects_table, decided_by, decided_date,
+    valid_from, valid_to, is_current, created_timestamp, updated_timestamp
+) VALUES (
+    'DD-DOMAIN-001', 1,
+    'Type 2 SCD temporal strategy for Consignment_H and Party_H',
+    'Consignment_H and Party_H use Type 2 SCD with valid_from_dt/valid_to_dt DATE columns and is_current/is_deleted BYTEINT flags. DATE chosen over TIMESTAMP for validity columns to match the daily declaration grain of ABF cargo data.',
+    'Domain standard supports bi-temporal, Type 2 SCD, or other patterns. Cargo consignment data has a daily grain (declaration_date). Sub-day temporal precision is not required.',
+    'Bi-temporal with TIMESTAMP(6) WITH TIME ZONE valid_from_dts/valid_to_dts columns.',
+    'Type 2 SCD with DATE is sufficient for daily-grained cargo data and aligns with the MortgagePlatform tested implementation. Simpler to load and query than bi-temporal.',
+    'Cannot reconstruct intra-day state. Point-in-time queries use DATE comparison. ETL must manage valid_to_dt updates on prior versions when inserting new SCD rows.',
+    'ACCEPTED', 'ARCHITECTURE', 'DOMAIN', '1.0.0',
+    'CargoIntelligence_Domain.Consignment_H, CargoIntelligence_Domain.Party_H',
+    'CargoIntelligence Data Product Team', CURRENT_DATE,
+    CURRENT_DATE, DATE '9999-12-31', 1, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Design_Decision (
+    decision_id, decision_version, decision_title, decision_description,
+    context, alternatives_considered, rationale, consequences,
+    decision_status, decision_category, source_module, module_version,
+    affects_table, decided_by, decided_date,
+    valid_from, valid_to, is_current, created_timestamp, updated_timestamp
+) VALUES (
+    'DD-DOMAIN-002', 1,
+    'Keymap pattern applied to Consignment_H and Party_H',
+    'Consignment_H and Party_H use the Keymap pattern: IDENTITY surrogate key lives in a separate Keymap table; the _H table holds the surrogate as plain BIGINT NOT NULL. Reference tables use IDENTITY directly as they are not FK-targeted by other domain tables.',
+    'Domain design standard requires FK-target entities to use stable surrogate keys across SCD versions. CargoIntelligence_Search and CargoIntelligence_Prediction will reference consignment_id and party_id.',
+    'IDENTITY on _H table directly -- this causes new surrogate values on every SCD insert, breaking cross-module FK consistency.',
+    '{{keymap_T}} pattern guarantees a stable {{consignment_id_T}} and party_id across all SCD versions. Any Search or Prediction record referencing a surrogate remains valid even after a Type 2 SCD update.',
+    'Keymaps must be populated before _H tables. ETL load sequence: populate {{keymap_T}}, lookup surrogate, insert _H row.',
+    'ACCEPTED', 'ARCHITECTURE', 'DOMAIN', '1.0.0',
+    '{{CargoIntelligence_Domain_T}}.{{Consignment_Keymap_T}}, {{CargoIntelligence_Domain_T}}.{{Party_Keymap_T}}, {{CargoIntelligence_Domain_T}}.{{Consignment_H_T}}, {{CargoIntelligence_Domain_T}}.{{Party_H_T}}',
+    'CargoIntelligence Data Product Team', CURRENT_DATE,
+    CURRENT_DATE, DATE '9999-12-31', 1, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO CargoIntelligence_Memory.Design_Decision (
+    decision_id, decision_version, decision_title, decision_description,
+    context, alternatives_considered, rationale, consequences,
+    decision_status, decision_category, source_module, module_version,
+    affects_table, decided_by, decided_date,
+    valid_from, valid_to, is_current, created_timestamp, updated_timestamp
+) VALUES (
+    'DD-DOMAIN-003', 1,
+    '{{Consignment_H_T}} stores surrogate FK columns resolved via lookup join from {{staging_T}}',
+    '{{Consignment_H_T}} stores hs_code_id (FK to {{HsCode_R}}) and country_risk_id (FK to CountryRisk_R) instead of raw hs_chapter and partner_code strings from staging. The ETL load script resolves these via lookup joins. This makes the domain model appear as part of a larger integrated data model.',
+    '{{staging_T}} tables have unstandardised datatypes and raw codes. The product goal is a domain model that looks like part of a larger enterprise data model rather than a flattened {{staging_T}} copy.',
+    'Store raw hs_chapter VARCHAR and partner_code INTEGER in {{Consignment_H_T}} and join to reference tables at query time.',
+    'Storing surrogate FKs enforces referential integrity at the domain layer, enables cleaner joins for Search and Prediction modules, and matches the integrated data model pattern used in MortgagePlatform.',
+    'Reference tables {{HsCode_R}} and CountryRisk_R must be fully seeded before any {{Consignment_H_T}} rows can be loaded. ETL load script handles the lookup resolution.',
+    'ACCEPTED', 'ARCHITECTURE', 'DOMAIN', '1.0.0',
+    '{{CargoIntelligence_Domain_T}}.{{Consignment_H_T}}, {{CargoIntelligence_Domain_T}}.{{HsCode_R}}, {{CargoIntelligence_Domain_T}}.CountryRisk_R',
+    'CargoIntelligence Data Product Team', CURRENT_DATE,
+    CURRENT_DATE, DATE '9999-12-31', 1, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO CargoIntelligence_Memory.Design_Decision (
+    decision_id, decision_version, decision_title, decision_description,
+    context, alternatives_considered, rationale, consequences,
+    decision_status, decision_category, source_module, module_version,
+    affects_table, decided_by, decided_date,
+    valid_from, valid_to, is_current, created_timestamp, updated_timestamp
+) VALUES (
+    'DD-DOMAIN-004', 1,
+    'segment, is_under_declared, weight_source excluded from {{Consignment_H_T}}',
+    'Three {{staging_T}} columns are excluded from {{Consignment_H_T}}: segment (risk label), is_under_declared (ground truth flag), weight_source (synthetic provenance marker). These are present in {{staging_T}} for validation only and must not appear in the operational domain layer.',
+    '{{CargoIntelligence_Staging_V}}.{{STG_Cargo_Consignments_T}} contains ground truth labels for training and validation. Including these in Domain would compromise the integrity of the operational risk scoring pipeline.',
+    'Include ground truth columns in a separate Domain table with restricted access.',
+    'Excluding ground truth from Domain ensures the similarity search and prediction pipeline cannot access labels it should not see during inference. Ground truth remains accessible in {{staging_T}} for model evaluation.',
+    'Validation of model performance must query {{staging_T}} directly, not the Domain layer. The Search and Prediction modules produce risk scores without access to ground truth labels.',
+    'ACCEPTED', 'SECURITY', 'DOMAIN', '1.0.0',
+    '{{CargoIntelligence_Domain_T}}.{{Consignment_H_T}}',
+    'CargoIntelligence Data Product Team', CURRENT_DATE,
+    CURRENT_DATE, DATE '9999-12-31', 1, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO CargoIntelligence_Memory.Design_Decision (
+    decision_id, decision_version, decision_title, decision_description,
+    context, alternatives_considered, rationale, consequences,
+    decision_status, decision_category, source_module, module_version,
+    affects_table, decided_by, decided_date,
+    valid_from, valid_to, is_current, created_timestamp, updated_timestamp
+) VALUES (
+    'DD-DOMAIN-005', 1,
+    'RiskProfile_R seeded with 8 curated tobacco smuggling archetypes',
+    'RiskProfile_R contains 8 manually curated archetypes: 2 direct tobacco (ch.24, HIGH, different transport modes), 5 disguise categories (ch.20,22,25,39,63 -- HIGH, AIR_MAIL, below-benchmark value_per_kg), and 1 legitimate baseline (ch.84, STANDARD, SEA_CONTAINER, medium-high value). Profile selection based on confirmed_risk segment frequency in STG_Cargo_Consignments SAMPLE 50000. feature_text format: HS{ch} {tier} {transport} {vpk_band}.',
+    'No pre-built risk profiles exist in staging. Profiles must be constructed from domain knowledge combined with data profiling.',
+    'Derive profiles algorithmically from confirmed_risk segment clustering. Use a larger profile set covering all chapter x transport x tier combinations.',
+    '8 archetypes provide coverage of the most operationally significant smuggling patterns while keeping similarity search interpretable. The legitimate baseline RP-008 is essential -- without it the model cannot distinguish risky from clearly legitimate consignments.',
+    'RiskProfile_R requires manual curation as new smuggling {{patterns_T}} emerge. The 8 seed profiles should be reviewed periodically. feature_text format must be consistent between RiskProfile_R and the Search module embedding pipeline.',
+    'ACCEPTED', 'SCHEMA', 'DOMAIN', '1.0.0',
+    '{{CargoIntelligence_Domain_T}}.RiskProfile_R',
+    'CargoIntelligence Data Product Team', CURRENT_DATE,
+    CURRENT_DATE, DATE '9999-12-31', 1, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);
+
+-- -----------------------------------------------------------------------------
+-- CHANGE_LOG -- 1 row
+-- -----------------------------------------------------------------------------
+
+INSERT INTO CargoIntelligence_Memory.Change_Log (
+    change_id, version_number, change_title, change_description,
+    change_type, change_category, source_module, affects_table,
+    migration_steps, rollback_steps, related_decision_id,
+    deployed_date, deployed_by, deployment_status, created_timestamp
+) VALUES (
+    'CL-DOMAIN-001',
+    '1.0.0',
+    'Domain Module initial release',
+    'Initial deployment of CargoIntelligence Domain module. Creates {{CargoIntelligence_Domain_T}} database with 3 reference tables ({{HsCode_R}} 17 rows, CountryRisk_R 15 rows, RiskProfile_R 8 rows), 2 keymaps ({{Consignment_Keymap_T}}, {{Party_Keymap_T}}), 2 history tables ({{Consignment_H_T}}, {{Party_H_T}}), and 3 views (Consignment_Current, Party_Current, {{Consignment_Enriched_T}}). Registers column_metadata in Semantic for all Domain columns. Ground truth columns excluded from domain layer.',
+    'INITIAL_RELEASE',
+    'NON_BREAKING',
+    'DOMAIN',
+    'ALL',
+    'Run scripts in numeric order 00 through 07. Each file is self-contained and safe to run in sequence.',
+    'DROP DATABASE {{CargoIntelligence_Domain_T}}',
+    'DD-DOMAIN-001',
+    CURRENT_DATE,
+    'CargoIntelligence Data Product Team',
+    'DEPLOYED',
+    CURRENT_TIMESTAMP(6)
+);
+
+-- -----------------------------------------------------------------------------
+-- BUSINESS_GLOSSARY -- 3 rows
+-- -----------------------------------------------------------------------------
+
+INSERT INTO CargoIntelligence_Memory.Business_Glossary (
+    term, term_category, definition, business_context,
+    synonyms, related_terms, related_table, related_column,
+    source_module, module_version, is_active,
+    valid_from, valid_to, created_timestamp, updated_timestamp
+) VALUES (
+    'Type 2 SCD',
+    'BUSINESS_RULE',
+    'Slowly Changing Dimension Type 2. Each change to an entity attribute creates a new row rather than overwriting the existing row. Identifies current version with is_current = 1 and valid_to_dt = 9999-12-31. Enables point-in-time state reconstruction for any historical date.',
+    'Applied to {{Consignment_H_T}} and Party_H. Filter WHERE is_current = 1 AND is_deleted = 0 for current records, or use the corresponding _Current view. valid_from_dt and valid_to_dt are DATE columns (not TIMESTAMP) reflecting the daily declaration grain.',
+    'SCD Type 2, Slowly Changing Dimension',
+    'is_current, valid_from_dt, valid_to_dt, {{keymap_T}}',
+    '{{CargoIntelligence_Domain_T}}.{{Consignment_H_T}}',
+    'is_current',
+    'DOMAIN', '1.0.0', 1,
+    CURRENT_DATE, DATE '9999-12-31', CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO CargoIntelligence_Memory.Business_Glossary (
+    term, term_category, definition, business_context,
+    synonyms, related_terms, related_table, related_column,
+    source_module, module_version, is_active,
+    valid_from, valid_to, created_timestamp, updated_timestamp
+) VALUES (
+    '{{keymap_T}}',
+    'BUSINESS_RULE',
+    'A surrogate key allocation table that generates a stable IDENTITY value for each unique natural key. The IDENTITY column lives only in the {{keymap_T}}; the corresponding history table holds the surrogate as a plain BIGINT. Ensures the same surrogate value is used across all SCD versions of an entity.',
+    'Applied to {{Consignment_Keymap_T}} and Party_Keymap. The Search and Prediction modules reference {{consignment_id_T}} and party_id; the stable surrogate ensures cross-module FK integrity is maintained even as SCD versions change. Load sequence: populate {{keymap_T}} first, then lookup surrogate before inserting into _H.',
+    'Surrogate key table, identity table',
+    'Type 2 SCD, {{consignment_id_T}}, party_id',
+    '{{CargoIntelligence_Domain_T}}.{{Consignment_Keymap_T}}',
+    '{{consignment_id_T}}',
+    'DOMAIN', '1.0.0', 1,
+    CURRENT_DATE, DATE '9999-12-31', CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO CargoIntelligence_Memory.Business_Glossary (
+    term, term_category, definition, business_context,
+    synonyms, related_terms, related_table, related_column,
+    source_module, module_version, is_active,
+    valid_from, valid_to, created_timestamp, updated_timestamp
+) VALUES (
+    'Value Density',
+    'METRIC',
+    'Declared trade value per kilogram of net weight (trade_value_usd / net_weight_kg) expressed in USD per kg. Key signal for tobacco smuggling detection: consignments with value_per_kg significantly below the TradeStats benchmark for their {{hs_T}} chapter are flagged as potentially under-declared.',
+    'Confirmed_risk consignments typically show value_per_kg at 30-50 percent of the TradeStats benchmark for the same {{hs_T}} chapter. Benchmark values for the 7 key chapters are stored in {{HsCode_R}}.benchmark_vpk_usd. Used as a feature in Prediction module composite_risk_score. vpk_band labels: VERY_LOW (<1.00), LOW (1.00-3.50), MEDIUM (3.51-10.00), HIGH (>10.00).',
+    'value_per_kg, vpk, price per kg',
+    'benchmark_vpk_usd, RiskProfile_R, feature_text',
+    '{{CargoIntelligence_Domain_T}}.{{Consignment_H_T}}',
+    'value_per_kg',
+    'DOMAIN', '1.0.0', 1,
+    CURRENT_DATE, DATE '9999-12-31', CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);
+
+-- -----------------------------------------------------------------------------
+-- QUERY_COOKBOOK -- 3 rows
+-- -----------------------------------------------------------------------------
+
+INSERT INTO CargoIntelligence_Memory.Query_Cookbook (
+    recipe_id, recipe_title, recipe_description, use_case,
+    target_module, sql_template, parameter_descriptions, performance_notes,
+    complexity, source_module, module_version, is_active,
+    valid_from, valid_to, created_timestamp, updated_timestamp
+) VALUES (
+    'QC-DOMAIN-001',
+    'Current consignments with {{hs_T}} chapter and country risk context',
+    'Queries {{Consignment_Enriched_T}} view to return current consignments with decoded {{hs_T}} chapter classification and country risk tier. Standard starting point for cargo risk analysis -- avoids manual joins to reference tables.',
+    'Cargo risk analysis, agent SQL generation',
+    'DOMAIN',
+    'SELECT ce.consignment_id, ce.consignment_key, ce.declaration_date, ce.trade_value_usd, ce.net_weight_kg, ce.value_per_kg, ce.transport_code, ce.hs_chapter, ce.hs_description, ce.is_tobacco_chapter, ce.is_disguise_category, ce.benchmark_vpk_usd, ce.country_name, ce.origin_risk_tier FROM CargoIntelligence_Domain.Consignment_Enriched ce WHERE ce.origin_risk_tier = [risk_tier] ORDER BY ce.declaration_date DESC',
+    '[risk_tier] = HIGH or STANDARD. Omit WHERE clause to return all consignments.',
+    'Consignment_Enriched joins Current view with 2 reference tables. Performance acceptable on 2M rows with NUPI on consignment_id.',
+    'SIMPLE',
+    'DOMAIN', '1.0.0', 1,
+    CURRENT_DATE, DATE '9999-12-31', CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Query_Cookbook (
+    recipe_id, recipe_title, recipe_description, use_case,
+    target_module, sql_template, parameter_descriptions, performance_notes,
+    complexity, source_module, module_version, is_active,
+    valid_from, valid_to, created_timestamp, updated_timestamp
+) VALUES (
+    'QC-DOMAIN-002',
+    'Identify consignments with value density below chapter benchmark',
+    'Finds consignments from HIGH-risk origins whose value_per_kg is significantly below the TradeStats benchmark for their HS chapter. Uses benchmark_vpk_usd from HsCode_R. A threshold of 50 percent of benchmark is a strong signal of under-declaration.',
+    'Tobacco smuggling detection, analyst investigation',
+    'DOMAIN',
+    'SELECT ce.consignment_id, ce.consignment_key, ce.declaration_date, ce.hs_chapter, ce.hs_description, ce.value_per_kg, ce.benchmark_vpk_usd, CAST(ce.value_per_kg / NULLIFZERO(ce.benchmark_vpk_usd) AS DECIMAL(6,4)) AS vpk_ratio, ce.transport_code, ce.country_name FROM CargoIntelligence_Domain.Consignment_Enriched ce WHERE ce.origin_risk_tier = HIGH AND ce.benchmark_vpk_usd IS NOT NULL AND ce.value_per_kg < (ce.benchmark_vpk_usd * [threshold_pct]) ORDER BY vpk_ratio',
+    '[threshold_pct] = ratio threshold as decimal e.g. 0.50 for 50 percent of benchmark. Lower values return stronger signals only.',
+    'Filters on Consignment_Enriched. For large result sets consider adding declaration_year filter.',
+    'MODERATE',
+    'DOMAIN', '1.0.0', 1,
+    CURRENT_DATE, DATE '9999-12-31', CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);
+
+INSERT INTO {{CargoIntelligence_Memory_T}}.Query_Cookbook (
+    recipe_id, recipe_title, recipe_description, use_case,
+    target_module, sql_template, parameter_descriptions, performance_notes,
+    complexity, source_module, module_version, is_active,
+    valid_from, valid_to, created_timestamp, updated_timestamp
+) VALUES (
+    'QC-DOMAIN-003',
+    'Retrieve all active risk profiles for similarity scoring',
+    'Returns all active RiskProfile_R records with decoded HS chapter and origin risk tier. Used by the Search module to retrieve anchor profiles for TD_VectorDistance similarity scoring. The feature_text column is the embedding input for each profile.',
+    'Search module embedding, risk profile management',
+    'DOMAIN',
+    'SELECT rp.risk_profile_id, rp.profile_code, rp.profile_name, rp.profile_category, rp.feature_text, rp.vpk_range_min, rp.vpk_range_max, hs.hs_chapter, hs.hs_description, cr.origin_risk_tier, cr.country_name FROM CargoIntelligence_Domain.RiskProfile_R rp INNER JOIN CargoIntelligence_Domain.HsCode_R hs ON hs.hs_code_id = rp.hs_code_id LEFT JOIN CargoIntelligence_Domain.CountryRisk_R cr ON cr.country_risk_id = rp.country_risk_id WHERE rp.is_active = 1 ORDER BY rp.profile_code',
+    'No parameters. Returns all 8 active profiles. Filter by profile_category for TOBACCO, DISGUISE, or LEGITIMATE only.',
+    'Small reference table join -- negligible performance concern.',
+    'SIMPLE',
+    'DOMAIN', '1.0.0', 1,
+    CURRENT_DATE, DATE '9999-12-31', CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6)
+);

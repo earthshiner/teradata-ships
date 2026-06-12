@@ -1,0 +1,2 @@
+COMMENT ON DATABASE {{CargoIntelligence_Semantic_T}} IS
+'Semantic module for CargoIntelligence. Machine-readable metadata for autonomous agent discovery and SQL generation.';

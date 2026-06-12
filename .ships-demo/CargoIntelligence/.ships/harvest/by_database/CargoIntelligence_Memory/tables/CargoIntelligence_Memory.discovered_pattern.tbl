@@ -1,0 +1,20 @@
+CREATE MULTISET TABLE {{CargoIntelligence_Memory_T}}.discovered_pattern (
+    pattern_id                BIGINT GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1) NOT NULL,
+    pattern_name              VARCHAR(128) NOT NULL,
+    pattern_description       VARCHAR(1000),
+    pattern_type              VARCHAR(50),
+    pattern_definition_json   JSON,
+    sample_size               INTEGER,
+    occurrences               INTEGER,
+    confidence_score          DECIMAL(5,4),
+    statistical_significance  DECIMAL(5,4),
+    discovered_dts            TIMESTAMP(6) WITH TIME ZONE NOT NULL,
+    discovered_by_agent       VARCHAR(100),
+    is_validated              BYTEINT NOT NULL DEFAULT 0,
+    involved_tables           VARCHAR(1000),
+    scope_level               VARCHAR(20) NOT NULL,
+    scope_identifier          VARCHAR(100) NOT NULL,
+    is_active                 BYTEINT NOT NULL DEFAULT 1,
+    created_at                TIMESTAMP(6) WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP(6)
+)
+PRIMARY INDEX (pattern_id);

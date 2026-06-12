@@ -1,0 +1,49 @@
+COMMENT ON TABLE {{CargoIntelligence_Memory_T}}.user_preference IS
+'Analyst preferences learned from interactions - enables personalised agent behaviour for ABF users.';
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.user_preference.preference_id IS
+'Surrogate key for preference record.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.user_preference.user_key IS
+'User identifier - which analyst this preference belongs to.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.user_preference.user_group IS
+'User group or team for group-level preferences.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.user_preference.preference_category IS
+'Preference category - REPORT_FORMAT, DATA_FILTER, AGGREGATION_LEVEL, etc.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.user_preference.preference_name IS
+'Preference name - specific identifier within category.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.user_preference.preference_value IS
+'Preference value - simple text value for basic preferences.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.user_preference.preference_value_json IS
+'Complex preference value - JSON document for structured preferences.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.user_preference.applies_to_entity IS
+'Entity this preference applies to - table name or entity type.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.user_preference.applies_to_scenario IS
+'Scenario where preference applies - context for this preference.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.user_preference.learned_from_interactions IS
+'Number of interactions that contributed to learning this preference.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.user_preference.confidence IS
+'Confidence in preference - 0.0 to 1.0.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.user_preference.last_used_dts IS
+'Last time preference was applied.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.user_preference.scope_level IS
+'Privacy scope - defaults to USER for personal preferences.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.user_preference.is_active IS
+'Active indicator - 1 = preference active, 0 = deprecated.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.user_preference.created_at IS
+'Timestamp when preference was first learned.';
+
+COMMENT ON COLUMN {{CargoIntelligence_Memory_T}}.user_preference.updated_at IS
+'Timestamp when preference was last updated or reinforced.';

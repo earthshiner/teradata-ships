@@ -1,0 +1,19 @@
+CREATE MULTISET TABLE {{CargoIntelligence_Memory_T}}.Implementation_Note (
+    note_key            BIGINT GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1) NOT NULL,
+    note_id             VARCHAR(50) NOT NULL,
+    note_title          VARCHAR(200) NOT NULL,
+    note_content        CLOB NOT NULL,
+    note_category       VARCHAR(50) NOT NULL,
+    severity            VARCHAR(20),
+    affects_table       VARCHAR(200),
+    resolution_status   VARCHAR(20),
+    resolution_notes    CLOB,
+    source_module       VARCHAR(50) NOT NULL,
+    module_version      VARCHAR(20),
+    is_active           BYTEINT NOT NULL DEFAULT 1,
+    valid_from          DATE NOT NULL,
+    valid_to            DATE DEFAULT DATE '9999-12-31',
+    created_timestamp   TIMESTAMP(6) WITH TIME ZONE,
+    updated_timestamp   TIMESTAMP(6) WITH TIME ZONE
+)
+PRIMARY INDEX (note_key);
