@@ -6,7 +6,7 @@ Accepted | 2026-05-04
 
 ## Context
 
-The `teradata-deployment-agent` repository (codenamed SHIPS, after its
+The `teradata-ships` repository (codenamed SHIPS, after its
 five phases: Scaffold, Harvest, Inspect, Package, Ship) has accumulated
 a non-trivial set of architectural decisions —
 the `{{TOKEN}}` syntax, eponymous filenames, `_T`/`_V` database
@@ -24,13 +24,13 @@ The reasoning behind each of these decisions currently lives in:
 This is sustainable while the project has one or two contributors and
 the decisions are recent. It will not survive scaling to a wider team,
 or even six months of memory drift on the original author. When someone
-asks "why did teradata-deployment-agent use double-brace tokens instead of `${VAR}` like
+asks "why did teradata-ships use double-brace tokens instead of `${VAR}` like
 every shell script in the world?" the answer needs to be findable
 without archaeology through chat history.
 
 ## Decision
 
-The `teradata-deployment-agent` repository will record architecture
+The `teradata-ships` repository will record architecture
 decisions as **Architecture Decision
 Records (ADRs)** in `docs/adr/`, following the format established by
 this ADR.

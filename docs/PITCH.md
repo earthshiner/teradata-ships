@@ -269,8 +269,8 @@ SHIPS addresses all three simultaneously, with one tool, one standard, and no ch
 
 ```bash
 # 1. Install
-git clone https://github.com/earthshiner/teradata-deployment-agent
-cd teradata-deployment-agent && uv sync
+git clone https://github.com/earthshiner/teradata-ships
+cd teradata-ships && uv sync
 
 # 2. Onboard an existing SQL project (wizard recommends the path)
 python -m td_release_packager onboard --source /my/sql/

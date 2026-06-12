@@ -14,8 +14,8 @@ The Scaffold, Harvest, Inspect, Generate, Analyse, and Package phases run entire
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/teradata/teradata-deployment-agent.git
-cd teradata-deployment-agent
+git clone https://github.com/teradata/teradata-ships.git
+cd teradata-ships
 ```
 
 ### 2. Create a Virtual Environment (Recommended)
@@ -93,17 +93,17 @@ SHIPS is designed to be run from the `src/` directory within the repository. If 
 
 ```bash
 # Linux / macOS — add to ~/.bashrc or ~/.zshrc
-export PYTHONPATH="/path/to/teradata-deployment-agent/src:$PYTHONPATH"
+export PYTHONPATH="/path/to/teradata-ships/src:$PYTHONPATH"
 
 # Windows — add to system environment variables
-set PYTHONPATH=C:\path\to\teradata-deployment-agent\src;%PYTHONPATH%
+set PYTHONPATH=C:\path\to\teradata-ships\src;%PYTHONPATH%
 ```
 
 Alternatively, on Windows you can create a convenience wrapper:
 
 ```powershell
 # Save as ships.ps1 in a directory on your PATH
-$env:PYTHONPATH = "C:\Tools\teradata-deployment-agent\src"
+$env:PYTHONPATH = "C:\Tools\teradata-ships\src"
 python -m td_release_packager $args
 ```
 
@@ -196,7 +196,7 @@ python -m td_release_packager deploy /path/to/release_group/ --host myserver --u
 ## Upgrading
 
 ```bash
-cd teradata-deployment-agent
+cd teradata-ships
 git pull origin main
 uv sync
 uv run pytest src/tests/ -q

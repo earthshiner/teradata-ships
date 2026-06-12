@@ -29,5 +29,5 @@ If you're reading the runsheet at [docs/sessions/runsheet-mortgage-ai-data-produ
 
 ## Open follow-ups (issues)
 
-- [#66](https://github.com/earthshiner/teradata-deployment-agent/issues/66) — view-generator should emit `COMMENT ON` inheritance for SHIPS 1:1 locking views.
+- [#66](https://github.com/earthshiner/teradata-ships/issues/66) — view-generator should emit `COMMENT ON` inheritance for SHIPS 1:1 locking views.
 - A future issue will cover the DML splitter fix + MULTI_TABLE_DML opt-out marker described in [DML Naming](./dml-naming.md). Today multi-INSERT files fall through the splitter's keep-keyword filter and end up bundled under one (misleading) eponymous name; the standard there says: split per statement when each has a clear single target, fall back to source-file naming with manifest metadata when it doesn't, and let an explicit `-- MULTI_TABLE_DML` header force the source-file path when a script's order or transactional intent is the meaning.

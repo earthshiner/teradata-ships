@@ -90,7 +90,7 @@ Add to your project's `.claude/settings.json` or your user settings:
     "ships": {
       "command": "uv",
       "args": ["run", "python", "src/ships_mcp.py"],
-      "cwd": "/path/to/teradata-deployment-agent"
+      "cwd": "/path/to/teradata-ships"
     }
   }
 }
@@ -108,7 +108,7 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
     "ships": {
       "command": "uv",
       "args": ["run", "python", "src/ships_mcp.py"],
-      "cwd": "/path/to/teradata-deployment-agent"
+      "cwd": "/path/to/teradata-ships"
     }
   }
 }
@@ -124,7 +124,7 @@ Edit `%APPDATA%\Claude\claude_desktop_config.json`:
     "ships": {
       "command": "uv",
       "args": ["run", "python", "src\\ships_mcp.py"],
-      "cwd": "C:\\path\\to\\teradata-deployment-agent"
+      "cwd": "C:\\path\\to\\teradata-ships"
     }
   }
 }
@@ -160,7 +160,7 @@ import subprocess
 
 proc = subprocess.Popen(
     ["uv", "run", "python", "src/ships_mcp.py"],
-    cwd="/path/to/teradata-deployment-agent",
+    cwd="/path/to/teradata-ships",
     stdin=subprocess.PIPE,
     stdout=subprocess.PIPE,
     stderr=subprocess.PIPE,
@@ -706,7 +706,7 @@ Restart Claude Code or run `/mcp` to reload the server list.
 
 **`ModuleNotFoundError: No module named 'ships_mcp'`**
 
-The `cwd` in the MCP config must point to the `teradata-deployment-agent` directory, and you must use `uv run` so the virtual environment is activated.
+The `cwd` in the MCP config must point to the `teradata-ships` directory, and you must use `uv run` so the virtual environment is activated.
 
 **`ModuleNotFoundError: No module named 'teradatasql'`**
 
