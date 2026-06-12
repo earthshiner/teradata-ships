@@ -1,2 +1,0 @@
-COMMENT ON VIEW {{CargoIntelligence_Domain_V}}.Party_Current IS
-'Current active sender parties - is_current=1 and is_deleted=0. Standard access pattern for sender analytics.';

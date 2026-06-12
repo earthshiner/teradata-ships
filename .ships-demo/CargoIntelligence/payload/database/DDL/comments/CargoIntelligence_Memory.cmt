@@ -1,2 +1,0 @@
-COMMENT ON DATABASE {{CargoIntelligence_Memory_T}} IS
-'Memory module for CargoIntelligence data product. Hosts agent state, learning tables, and documentation sub-module.';

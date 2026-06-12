@@ -1,2 +1,0 @@
-COMMENT ON DATABASE {{CargoIntelligence_Observability_T}} IS
-'Observability module for CargoIntelligence. Change events, quality metrics, lineage, and agent outcomes.';

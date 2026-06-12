@@ -1,3 +1,0 @@
-CREATE DATABASE {{CargoIntelligence_Memory_T}}
-AS PERMANENT = 500e6,
-   SPOOL = 500e6;

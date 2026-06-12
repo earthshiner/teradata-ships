@@ -1,2 +1,0 @@
-COMMENT ON VIEW {{CargoIntelligence_Semantic_V}}.lineage_run_latest IS
-'Latest execution status per declared pipeline flow. NULL last_run_dts = flow declared but never executed.';

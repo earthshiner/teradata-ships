@@ -1,2 +1,0 @@
-COMMENT ON VIEW {{CargoIntelligence_Memory_V}}.v_Glossary_Active IS
-'Active business glossary terms - agents use this to resolve domain terminology.';

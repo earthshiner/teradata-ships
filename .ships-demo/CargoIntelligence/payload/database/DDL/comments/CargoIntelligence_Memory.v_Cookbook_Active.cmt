@@ -1,2 +1,0 @@
-COMMENT ON VIEW {{CargoIntelligence_Memory_V}}.v_Cookbook_Active IS
-'Active query recipes - agents discover available patterns here before generating SQL.';

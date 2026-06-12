@@ -1,1 +1,0 @@
-GRANT SELECT ON {{CargoIntelligence_Domain_T}} TO {{CargoIntelligence_Search_T}} WITH GRANT OPTION;

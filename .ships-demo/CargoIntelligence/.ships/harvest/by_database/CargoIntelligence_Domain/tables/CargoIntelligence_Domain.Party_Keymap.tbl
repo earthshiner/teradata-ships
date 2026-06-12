@@ -1,7 +1,0 @@
-CREATE MULTISET TABLE {{CargoIntelligence_Domain_T}}.{{Party_Keymap_T}} (
-    party_id      BIGINT GENERATED ALWAYS AS IDENTITY (START WITH 1 INCREMENT BY 1) NOT NULL,
-    party_key     VARCHAR(20) NOT NULL,
-    source_system VARCHAR(50) DEFAULT 'ABF_CARGO',
-    created_dt    TIMESTAMP(6) WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP(6)
-)
-UNIQUE PRIMARY INDEX (party_key);

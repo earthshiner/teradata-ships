@@ -85,6 +85,7 @@ report_e2e_smoke.html
 
 # === Scratch / sandbox folders ===
 src/files/
+.ships-demo/
 
 # === Editor / OS noise ===
 .vscode/

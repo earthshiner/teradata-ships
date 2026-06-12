@@ -1,2 +1,0 @@
-COMMENT ON VIEW {{CargoIntelligence_Memory_V}}.v_Module_Registry_Current IS
-'Current module versions - shows all modules and their deployment status for agent discovery.';

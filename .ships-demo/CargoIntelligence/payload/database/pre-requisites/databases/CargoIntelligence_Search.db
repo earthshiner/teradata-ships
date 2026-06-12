@@ -1,3 +1,0 @@
-CREATE DATABASE {{CargoIntelligence_Search_T}} FROM {{ROOT_PARENT}}
-AS PERMANENT = 20000e6,
-   SPOOL = 1000e6;

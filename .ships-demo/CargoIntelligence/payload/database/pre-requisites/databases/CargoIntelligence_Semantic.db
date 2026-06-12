@@ -1,3 +1,0 @@
-CREATE DATABASE {{CargoIntelligence_Semantic_T}} FROM {{ROOT_PARENT}}
-AS PERMANENT = 500e6,
-   SPOOL = 500e6;

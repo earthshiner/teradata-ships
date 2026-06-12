@@ -1,2 +1,0 @@
-COMMENT ON VIEW {{CargoIntelligence_Memory_V}}.v_Change_History IS
-'Full change history across all modules - complete deployment audit trail.';
