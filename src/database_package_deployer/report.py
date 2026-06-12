@@ -107,6 +107,7 @@ _STATE_BADGES = {
     DeployState.MIGRATED: ("Migrated", "#28A745", _WHITE),
 }
 
+
 def generate_report(
     result: PackageDeployResult,
     output_dir: str,
@@ -136,7 +137,9 @@ def generate_report(
     # without having to open the separate package_report.html.
     package_trust = _load_package_trust(output_dir)
 
-    html = _build_html(result, provenance, prov_status, source_view_links, package_trust)
+    html = _build_html(
+        result, provenance, prov_status, source_view_links, package_trust
+    )
 
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(html)
@@ -220,31 +223,27 @@ def _load_provenance(pkg_dir: str) -> Tuple[Optional[ProvenanceDocument], str]:
 
 
 def _load_package_trust(pkg_dir: str) -> dict:
-    """Load the trust report from context/ships.build.json.
+    """Load the canonical trust result from ``context/ships.trust.json``.
 
-    Walks up from ``pkg_dir`` looking for the ``context/ships.build.json``
-    file, using the same ancestor-search strategy as ``_load_provenance``
-    so the function is robust whether the report is written into the
-    package root or into a ``logs/`` subdirectory.
-
-    Args:
-        pkg_dir: Directory the deployer is using for its outputs.
+    Walks up from ``pkg_dir`` looking for the trust document, using the
+    same ancestor-search strategy as ``_load_provenance`` so the function
+    is robust whether the report is written into the package root or into
+    a ``logs/`` subdirectory.
 
     Returns:
-        The ``trust`` dict from the manifest, or an empty dict when
-        the file is absent, unreadable, or contains no trust block.
+        The canonical trust document, or an empty dict when the file is
+        absent or unreadable.
     """
     import json
 
     candidate = os.path.abspath(pkg_dir)
     for _ in range(6):
-        build_json = os.path.join(candidate, "context", "ships.build.json")
-        if os.path.isfile(build_json):
+        trust_json = os.path.join(candidate, "context", "ships.trust.json")
+        if os.path.isfile(trust_json):
             try:
-                with open(build_json, encoding="utf-8") as fh:
+                with open(trust_json, encoding="utf-8") as fh:
                     data = json.load(fh)
-                trust = data.get("trust", {})
-                return trust if isinstance(trust, dict) else {}
+                return data if isinstance(data, dict) else {}
             except Exception:
                 return {}
         parent = os.path.dirname(candidate)
@@ -574,8 +573,7 @@ def _linked_source_path(
     final_path = chain.final_path().replace("\\", "/")
     packaged_path = f"payload/{final_path}"
     title = (
-        f"Open packaged code: {packaged_path} "
-        f"(original source: {chain.source_path()})"
+        f"Open packaged code: {packaged_path} (original source: {chain.source_path()})"
     )
     style = f' style="{css}"' if css else ""
     return (
@@ -621,8 +619,6 @@ def _escape_html(value: str) -> str:
         .replace('"', "&quot;")
         .replace("'", "&#x27;")
     )
-
-
 
 
 def _write_source_viewers(
@@ -821,7 +817,7 @@ def _html_action_items(
                 )
             return (
                 '<div class="action-items has-errors">'
-                f'<h3>Action Items ({len(error_rows)})</h3>'
+                f"<h3>Action Items ({len(error_rows)})</h3>"
                 f'<details class="action-group" open>'
                 f'<summary class="err">✗ Pre-flight failed — requires attention</summary>'
                 + "\n".join(error_rows)
@@ -898,16 +894,16 @@ def _html_action_items(
 def _html_package_trust(trust: dict) -> str:
     """Render the build-time Package Trust Report as a collapsible section.
 
-    Shows the DBA the READY / READY-WITH-CAVEATS / BLOCKED verdict that
+    Shows the DBA the READY / READY_WITH_CAVEATS / BLOCKED verdict that
     SHIPS computed at package time, together with per-signal rows and
     expandable plain-English explanations — exactly the same information
     that lives in the Trust Report tab of ``package_report.html``, so
     the DBA does not need to open a separate file.
 
     The section is wrapped in a ``<details>`` element collapsed by
-    default when the trust label is READY (all signals passed) so it
+    default when the trust status is READY (all signals passed) so it
     does not crowd the report on successful deployments.  It opens
-    automatically when the label is anything other than READY, because
+    automatically when the status is anything other than READY, because
     that warrants immediate attention.
 
     Returns an empty string when the package was built without trust
@@ -915,7 +911,7 @@ def _html_package_trust(trust: dict) -> str:
     is simply absent rather than showing a confusing empty table.
 
     Args:
-        trust: The ``trust`` dict from ``context/ships.build.json``,
+        trust: The canonical trust dict from ``context/ships.trust.json``,
                or an empty dict when unavailable.
 
     Returns:
@@ -924,24 +920,24 @@ def _html_package_trust(trust: dict) -> str:
     if not trust:
         return ""
 
-    label = trust.get("label", "")
-    if not label:
+    status = trust.get("status", "")
+    if not status:
         return ""
 
     signals = trust.get("signals", {})
 
-    # Colour the label pill using the same palette as the package report.
-    _LABEL_STYLES = {
+    # Colour the status pill using the same palette as the package report.
+    _STATUS_STYLES = {
         "READY": ("#198754", _WHITE),
-        "READY-WITH-CAVEATS": ("#856404", "#FFF3CD"),
+        "READY_WITH_CAVEATS": ("#856404", "#FFF3CD"),
         "BLOCKED": ("#DC3545", _WHITE),
     }
-    bg, fg = _LABEL_STYLES.get(label.upper(), ("#6C757D", _WHITE))
+    bg, fg = _STATUS_STYLES.get(status.upper(), ("#6C757D", _WHITE))
 
-    label_pill = (
+    status_pill = (
         f'<span style="display:inline-block;background:{bg};color:{fg};'
         f"padding:3px 14px;border-radius:12px;font-size:13px;font-weight:700;"
-        f'letter-spacing:.3px;vertical-align:middle">{_escape_html(label)}</span>'
+        f'letter-spacing:.3px;vertical-align:middle">{_escape_html(status)}</span>'
     )
 
     # Build per-signal rows.
@@ -956,25 +952,24 @@ def _html_package_trust(trust: dict) -> str:
     for name, sig in signals.items():
         if not isinstance(sig, dict):
             continue
-        status = sig.get("status", "unknown")
-        icon = _ICON.get(status, "?")
-        icon_colour = _ICON_COLOUR.get(status, "#6C757D")
+        sig_status = sig.get("status", "unknown")
+        icon = _ICON.get(sig_status, "?")
+        icon_colour = _ICON_COLOUR.get(sig_status, "#6C757D")
         message = sig.get("message") or sig.get("detail", "")
         issues = sig.get("issues", []) or []
 
         # Detail cell: message + issue list when non-passing.
-        if status == "pass":
+        if sig_status == "pass":
             detail = f"<span style='color:#555;font-size:12px'>{_escape_html(message)}</span>"
         else:
-            colour = "#B45309" if status == "warn" else "#DC3545"
+            colour = "#B45309" if sig_status == "warn" else "#DC3545"
             detail = (
                 f"<span style='color:{colour};font-weight:600;font-size:12px'>"
                 f"{_escape_html(message)}</span>"
             )
             if issues:
                 items = "".join(
-                    f"<li style='margin-top:3px'>{_escape_html(i)}</li>"
-                    for i in issues
+                    f"<li style='margin-top:3px'>{_escape_html(i)}</li>" for i in issues
                 )
                 detail += (
                     f"<ul style='margin:4px 0 0 0;padding-left:16px;"
@@ -987,7 +982,7 @@ def _html_package_trust(trust: dict) -> str:
             f"{_signal_name_cell(name)}</td>"
             f"<td style='padding:8px 10px;white-space:nowrap'>"
             f"<span style='color:{icon_colour};font-weight:700'>{icon}</span>"
-            f"&nbsp;<span style='font-size:12px'>{_escape_html(status)}</span></td>"
+            f"&nbsp;<span style='font-size:12px'>{_escape_html(sig_status)}</span></td>"
             f"<td style='padding:8px 10px'>{detail}</td>"
             f"</tr>"
         )
@@ -999,7 +994,7 @@ def _html_package_trust(trust: dict) -> str:
         )
 
     # Auto-open the section when not fully passing so the DBA sees it immediately.
-    open_attr = "" if label.upper() == "READY" else " open"
+    open_attr = "" if status.upper() == "READY" else " open"
 
     return f"""
 <details{open_attr} id="pkg-trust-section" style="margin:0 0 24px 0">
@@ -1009,9 +1004,9 @@ def _html_package_trust(trust: dict) -> str:
   padding:10px 0 10px 0;
   border-bottom:2px solid {_ORANGE}">
   <span style="font-size:16px;font-weight:600;color:{_NAVY}">Package Trust Report</span>
-  {label_pill}
+  {status_pill}
   <span style="margin-left:auto;font-size:11px;color:#6C757D">
-    (build-time quality gate — click to {'collapse' if label.upper() != 'READY' else 'expand'})
+    (build-time quality gate — click to {"collapse" if status.upper() != "READY" else "expand"})
   </span>
 </summary>
 <style>

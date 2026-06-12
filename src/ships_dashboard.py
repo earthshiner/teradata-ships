@@ -112,14 +112,25 @@ class PackageInfo:
 
 def read_build_json_from_zip(archive_path: str) -> Optional[dict]:
     """Extract and parse context/ships.build.json from inside a package archive."""
+    return _read_archive_json(archive_path, "context/ships.build.json")
+
+
+def read_trust_json_from_zip(archive_path: str) -> Optional[dict]:
+    """Extract and parse context/ships.trust.json from inside a package archive."""
+    return _read_archive_json(archive_path, "context/ships.trust.json")
+
+
+def _read_archive_json(archive_path: str, member_path: str) -> Optional[dict]:
+    """Return a parsed JSON archive member, or None if absent / unreadable."""
     try:
         with zipfile.ZipFile(archive_path) as zf:
             for name in zf.namelist():
-                if name.replace("\\", "/").endswith("context/ships.build.json"):
+                if name.replace("\\", "/").endswith(member_path):
                     return json.loads(zf.read(name).decode("utf-8"))
     except Exception as exc:  # noqa: BLE001
         logger.debug(
-            "dashboard: could not read context/ships.build.json from %s: %s",
+            "dashboard: could not read %s from %s: %s",
+            member_path,
             archive_path,
             exc,
         )
@@ -173,7 +184,7 @@ def scan_project(project_dir: str) -> List[PackageInfo]:
         if build is None:
             continue
 
-        trust = build.get("trust", {})
+        trust = read_trust_json_from_zip(archive_path) or {}
         approved, rejected, reason = check_approval(archive_path)
 
         packages.append(
@@ -188,7 +199,7 @@ def scan_project(project_dir: str) -> List[PackageInfo]:
                 timestamp=build.get("timestamp", ""),
                 author=build.get("author", ""),
                 description=build.get("description", ""),
-                trust_label=trust.get("label", "UNKNOWN"),
+                trust_label=trust.get("status", "UNKNOWN"),
                 trust_signals=trust.get("signals", {}),
                 file_count=build.get("file_count", 0),
                 requires=build.get("requires", []),
@@ -257,7 +268,7 @@ def generate_dbql_query(package_name: str, build_number: str) -> str:
 def _trust_badge(label: str) -> str:
     colours = {
         "READY": ("#198754", _WHITE, "✓"),
-        "READY-WITH-CAVEATS": ("#FFC107", _NAVY, "⚠"),
+        "READY_WITH_CAVEATS": ("#FFC107", _NAVY, "⚠"),
         "BLOCKED": ("#DC3545", _WHITE, "✗"),
     }
     bg, fg, icon = colours.get(label, ("#6C757D", _WHITE, "?"))
@@ -408,7 +419,7 @@ def create_app(project_dirs: List[str]) -> "FastAPI":
         packages = scan_all_projects(project_dirs)
 
         ready = sum(1 for p in packages if p.trust_label == "READY")
-        caveats = sum(1 for p in packages if p.trust_label == "READY-WITH-CAVEATS")
+        caveats = sum(1 for p in packages if p.trust_label == "READY_WITH_CAVEATS")
         blocked = sum(1 for p in packages if p.trust_label == "BLOCKED")
         awaiting = sum(1 for p in packages if p.approval_status == "Awaiting")
 

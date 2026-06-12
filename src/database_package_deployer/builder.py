@@ -463,7 +463,7 @@ def _check_working_tree(source_dir: str, allow_dirty: bool) -> bool:
             f"{summary}\n\n"
             f"Commit or stash your changes, or pass --allow-dirty to override.\n"
             f"Note: --allow-dirty stamps source_dirty=true in context/ships.build.json so the\n"
-            f"Trust Report will flag this package as READY-WITH-CAVEATS."
+            f"Trust Report will flag this package as READY_WITH_CAVEATS."
         )
 
     logger.warning(
@@ -790,12 +790,18 @@ def _build_package_impl(
 
     # -- Phase 8b: Compute and stamp Phase 1 Trust Report --
     # Discrete signals (inspect results + package context artefacts) derive
-    # a label (READY / READY-WITH-CAVEATS / BLOCKED) that tells a DBA or
+    # a status (READY / READY_WITH_CAVEATS / BLOCKED) that tells a DBA or
     # deployment agent whether this package is safe to promote.
-    from td_release_packager.trust import compute_trust_report, format_trust_banner
+    from td_release_packager.trust import (
+        TRUST_RESULT_REF,
+        compute_trust_report,
+        format_trust_banner,
+        write_trust_result,
+    )
 
     trust_report = compute_trust_report(config.source_dir, pkg_dir)
-    manifest.trust = trust_report.to_dict()
+    write_trust_result(pkg_dir, trust_report)
+    manifest.trust = {"trust_ref": TRUST_RESULT_REF}
 
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest.__dict__, f, indent=2, ensure_ascii=False)
@@ -1099,23 +1105,36 @@ def _create_environment_prereqs_package_if_needed(
         require_asymmetric_signature=manifest.require_asymmetric_signature,
         ships_public_key=manifest.ships_public_key,
     )
-    env_manifest.trust = {
-        "label": "BLOCKED",
-        "computed_at": datetime.now(timezone.utc).isoformat(),
-        "signals": {
-            "environment_prereq_requires_dba_review": {
-                "status": "fail",
-                "message": (
+    from td_release_packager.trust import (
+        STATUS_BLOCKED,
+        TRUST_FAIL,
+        TRUST_RESULT_REF,
+        TrustReport,
+        TrustSignal,
+        write_trust_result,
+    )
+
+    env_trust_report = TrustReport(
+        status=STATUS_BLOCKED,
+        evaluated_at=datetime.now(timezone.utc).isoformat(),
+        signals={
+            "environment_prereq_requires_dba_review": TrustSignal(
+                status=TRUST_FAIL,
+                message=(
                     "Missing external parent database/user prerequisites were "
                     "detected. DBA review and execution evidence are required."
                 ),
-                "issues": [req.parent_name for req in requirements],
-            }
+                issues=[req.parent_name for req in requirements],
+                evidence_paths=["context/ships.build.json"],
+            )
         },
-    }
+    )
 
     env_manifest.phase_inventory = _compute_phase_inventory(env_pkg_dir)
     env_manifest.file_count = sum(env_manifest.phase_inventory.values())
+
+    write_trust_result(env_pkg_dir, env_trust_report)
+    env_manifest.trust = {"trust_ref": TRUST_RESULT_REF}
 
     manifest_path = _context_file(env_pkg_dir, "ships.build.json")
     with open(manifest_path, "w", encoding="utf-8") as f:
@@ -1166,7 +1185,9 @@ def _create_environment_prereqs_package_if_needed(
         os.path.join(env_pkg_dir, p.replace("/", os.sep)) for p in payload_paths
     )
     if not extracted_payload_summary:
-        extracted_payload_summary = os.path.join(env_pkg_dir, "payload", "01_pre_requisites")
+        extracted_payload_summary = os.path.join(
+            env_pkg_dir, "payload", "01_pre_requisites"
+        )
     print(
         "\n"
         "================================================================\n"
@@ -1600,9 +1621,7 @@ def _read_manifest_from_package_dir(pkg_dir: str) -> BuildManifest:
         package_root = _find_package_root_ancestor(pkg_dir)
         hint = ""
         if package_root:
-            hint = (
-                f" Use the extracted package root instead: {package_root}."
-            )
+            hint = f" Use the extracted package root instead: {package_root}."
         raise FileNotFoundError(
             f"Package manifest not found: {manifest_path}. "
             "Expected an extracted SHIPS package directory containing "
@@ -1654,36 +1673,53 @@ def _refresh_environment_prereq_trust(pkg_dir: str, manifest: BuildManifest) -> 
     if manifest.role != "environment_prereqs":
         return
 
+    from td_release_packager.trust import (
+        STATUS_BLOCKED,
+        STATUS_CAVEATS,
+        TRUST_FAIL,
+        TRUST_RESULT_REF,
+        TRUST_WARN,
+        TrustReport,
+        TrustSignal,
+        write_trust_result,
+    )
+
+    now = datetime.now(timezone.utc).isoformat()
     if has_dba_placeholders(pkg_dir):
-        manifest.trust = {
-            "label": "BLOCKED",
-            "computed_at": datetime.now(timezone.utc).isoformat(),
-            "signals": {
-                "environment_prereq_requires_dba_values": {
-                    "status": "fail",
-                    "message": (
+        report = TrustReport(
+            status=STATUS_BLOCKED,
+            evaluated_at=now,
+            signals={
+                "environment_prereq_requires_dba_values": TrustSignal(
+                    status=TRUST_FAIL,
+                    message=(
                         "DBA placeholders remain in environment prerequisite "
                         "payload/context. Replace <DBA_SELECTED_PARENT> and "
                         "<DBA_REVIEWED_PERM>, then repackage."
                     ),
-                }
+                    evidence_paths=["payload/", "context/ships.build.json"],
+                )
             },
-        }
+        )
     else:
-        manifest.trust = {
-            "label": "READY_WITH_CAVEATS",
-            "computed_at": datetime.now(timezone.utc).isoformat(),
-            "signals": {
-                "environment_prereq_dba_reviewed": {
-                    "status": "warn",
-                    "message": (
+        report = TrustReport(
+            status=STATUS_CAVEATS,
+            evaluated_at=now,
+            signals={
+                "environment_prereq_dba_reviewed": TrustSignal(
+                    status=TRUST_WARN,
+                    message=(
                         "Environment prerequisite payload no longer contains DBA "
                         "placeholders. Deploy only after DBA approval and target "
                         "preflight verification."
                     ),
-                }
+                    evidence_paths=["payload/", "context/ships.build.json"],
+                )
             },
-        }
+        )
+
+    write_trust_result(pkg_dir, report)
+    manifest.trust = {"trust_ref": TRUST_RESULT_REF}
 
 
 def _collect_release_group_archives(
@@ -1733,7 +1769,10 @@ def repackage_package_dir(
     manifest.package_built_at = datetime.now(timezone.utc).isoformat()
 
     _refresh_environment_prereq_trust(package_dir, manifest)
-    if strict and manifest.trust.get("label") == "BLOCKED":
+    from td_release_packager.trust import STATUS_BLOCKED, load_trust_result
+
+    refreshed_trust = load_trust_result(package_dir) or {}
+    if strict and refreshed_trust.get("status") == STATUS_BLOCKED:
         placeholders = find_dba_placeholders(package_dir)
         details = ""
         if placeholders:
@@ -2830,24 +2869,23 @@ def main():
     # is vacuously satisfied, so the deployer defers the exit, establishes a
     # connection, and queries DBC to verify existence.  All other BLOCKED
     # signals are still hard exits.
-    _build_json = os.path.join(SCRIPT_DIR, "context", "ships.build.json")
+    _trust_json = os.path.join(SCRIPT_DIR, "context", "ships.trust.json")
     _prereq_objects_to_verify: list[str] = []   # populated when deferring
-    if os.path.exists(_build_json):
-        with open(_build_json, encoding="utf-8") as _f:
-            _bdata = json.load(_f)
-        _trust = _bdata.get("trust", {{}})
+    if os.path.exists(_trust_json):
+        with open(_trust_json, encoding="utf-8") as _f:
+            _trust = json.load(_f)
         if _trust:
-            _label = _trust.get("label", "UNKNOWN")
-            _icons = {{"READY": "\\u2713", "READY-WITH-CAVEATS": "\\u26a0", "BLOCKED": "\\u2717"}}
-            _licon = _icons.get(_label, "?")
+            _status = _trust.get("status", "UNKNOWN")
+            _icons = {{"READY": "\\u2713", "READY_WITH_CAVEATS": "\\u26a0", "BLOCKED": "\\u2717"}}
+            _licon = _icons.get(_status, "?")
             logger.info("=" * 64)
-            logger.info("  Package Trust: %s %s", _licon, _label)
+            logger.info("  Package Trust: %s %s", _licon, _status)
             for _sname, _sig in _trust.get("signals", {{}}).items():
                 _sicons = {{"pass": "\\u2713", "warn": "\\u26a0", "fail": "\\u2717", "unknown": "?"}}
                 _sicon = _sicons.get(_sig.get("status", "unknown"), "?")
                 logger.info("  %s %-28s %s", _sicon, _sname, _sig.get("message", ""))
             logger.info("=" * 64)
-            if _label == "BLOCKED":
+            if _status == "BLOCKED":
                 _signals = _trust.get("signals", {{}})
                 _blocking = [
                     _sname for _sname, _sig in _signals.items()
@@ -3837,12 +3875,24 @@ def _archive_package(pkg_dir: str, archive_format: str) -> str:
         # and _generate_integrity_file exclusions.  __pycache__ directories are
         # pruned from the os.walk in-place so their contents are never visited.
         _SKIP_DIRS = {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
-        _SKIP_SUFFIXES = (".pyc", ".pyo", ".bak", ".tmp", ".old", ".orig", ".rej", ".swp", ".swo")
+        _SKIP_SUFFIXES = (
+            ".pyc",
+            ".pyo",
+            ".bak",
+            ".tmp",
+            ".old",
+            ".orig",
+            ".rej",
+            ".swp",
+            ".swo",
+        )
 
         with _zipfile.ZipFile(archive_path, "w", _zipfile.ZIP_DEFLATED) as zf:
             for current_root, dirs, files in os.walk(pkg_dir):
                 # Prune excluded directories in-place so os.walk skips them.
-                dirs[:] = sorted(d for d in dirs if d not in _SKIP_DIRS and not d.startswith("~"))
+                dirs[:] = sorted(
+                    d for d in dirs if d not in _SKIP_DIRS and not d.startswith("~")
+                )
 
                 # Write a directory entry with a POSIX-style path so that
                 # extractall() on any platform — including Windows paths that

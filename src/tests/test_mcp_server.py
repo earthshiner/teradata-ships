@@ -209,8 +209,8 @@ class TestShipsPackage:
         )
         assert result["success"], f"Package failed: {result}"
         assert Path(result["archive_path"]).exists()
-        assert "trust_label" in result
-        assert result["trust_label"] in ("READY", "READY-WITH-CAVEATS", "BLOCKED")
+        assert "trust_status" in result
+        assert result["trust_status"] in ("READY", "READY_WITH_CAVEATS", "BLOCKED")
 
     def test_missing_env_config_error(self, tmp_path):
         from ships_mcp import ships_package

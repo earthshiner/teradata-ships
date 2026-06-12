@@ -118,7 +118,9 @@ class TestParseWavesTxt:
 
     def test_duplicate_basenames_do_not_share_ambiguous_wave_alias(self, tmp_path):
         f = tmp_path / "_waves.txt"
-        f.write_text("views/DB.Shared.viw\n---\nmacros/DB.Shared.viw\n", encoding="utf-8")
+        f.write_text(
+            "views/DB.Shared.viw\n---\nmacros/DB.Shared.viw\n", encoding="utf-8"
+        )
         result = _parse_waves_txt(str(f))
         assert result["views/DB.Shared.viw"] == 1
         assert result["macros/DB.Shared.viw"] == 2
@@ -189,7 +191,9 @@ class TestScanPayload:
             ],
         )
         waves = tmp_path / "payload" / "03_ddl" / "_waves.txt"
-        waves.write_text("views/DB.Shared.viw\n---\nmacros/DB.Shared.viw\n", encoding="utf-8")
+        waves.write_text(
+            "views/DB.Shared.viw\n---\nmacros/DB.Shared.viw\n", encoding="utf-8"
+        )
         records = _scan_payload(str(tmp_path))
 
         by_path = {record["path"]: record["wave"] for record in records}
@@ -431,21 +435,21 @@ class TestWavesTab:
 
 
 class TestTrustTab:
-    def test_ready_label_green(self):
-        trust = {"label": "READY", "signals": {}}
+    def test_ready_status_green(self):
+        trust = {"status": "READY", "signals": {}}
         html = _trust_tab(trust)
         assert "READY" in html
         assert "#198754" in html  # green
 
-    def test_blocked_label_red(self):
-        trust = {"label": "BLOCKED", "signals": {}}
+    def test_blocked_status_red(self):
+        trust = {"status": "BLOCKED", "signals": {}}
         html = _trust_tab(trust)
         assert "BLOCKED" in html
         assert "#DC3545" in html  # red
 
     def test_signals_rendered(self):
         trust = {
-            "label": "READY",
+            "status": "READY",
             "signals": {
                 # message is the canonical key (real trust signals)
                 "inspect_lint": {"status": "pass", "message": "No violations"},
@@ -464,7 +468,7 @@ class TestTrustTab:
         assert "Legacy detail key" in html
 
     def test_empty_signals_no_crash(self):
-        html = _trust_tab({"label": "READY", "signals": {}})
+        html = _trust_tab({"status": "READY", "signals": {}})
         assert "No signals recorded" in html
 
 
@@ -888,12 +892,21 @@ class TestWritePackageViewers:
         self._make_pkg(
             tmp_path,
             [
-                ("03_ddl/tables/DB.Customer.tbl", "CREATE MULTISET TABLE DB.Customer (Id INTEGER);"),
-                ("03_ddl/views/DB.v_Active.viw", "REPLACE VIEW DB.v_Active AS SELECT 1;"),
+                (
+                    "03_ddl/tables/DB.Customer.tbl",
+                    "CREATE MULTISET TABLE DB.Customer (Id INTEGER);",
+                ),
+                (
+                    "03_ddl/views/DB.v_Active.viw",
+                    "REPLACE VIEW DB.v_Active AS SELECT 1;",
+                ),
             ],
         )
         records = [
-            {"path": "payload/03_ddl/tables/DB.Customer.tbl", "file": "DB.Customer.tbl"},
+            {
+                "path": "payload/03_ddl/tables/DB.Customer.tbl",
+                "file": "DB.Customer.tbl",
+            },
             {"path": "payload/03_ddl/views/DB.v_Active.viw", "file": "DB.v_Active.viw"},
         ]
         links = _write_package_viewers(str(tmp_path), records)
@@ -939,7 +952,9 @@ class TestWritePackageViewers:
         # _write_package_viewers imported at top of file
 
         # Record references a file that does not exist on disk — must not crash.
-        records = [{"path": "payload/03_ddl/tables/NonExistent.tbl", "file": "NonExistent.tbl"}]
+        records = [
+            {"path": "payload/03_ddl/tables/NonExistent.tbl", "file": "NonExistent.tbl"}
+        ]
         links = _write_package_viewers(str(tmp_path), records)
         assert links == {}
 
@@ -956,7 +971,9 @@ class TestWritePackageViewers:
         # _file_link imported at top of file
 
         record = {"path": "payload/03_ddl/tables/DB.T.tbl", "file": "DB.T.tbl"}
-        viewer_links = {"payload/03_ddl/tables/DB.T.tbl": ".package_report_code/0001_payload_03_ddl_tables_DB.T.tbl.html"}
+        viewer_links = {
+            "payload/03_ddl/tables/DB.T.tbl": ".package_report_code/0001_payload_03_ddl_tables_DB.T.tbl.html"
+        }
         html = _file_link(record, viewer_links)
         assert ".package_report_code/" in html
         # The title attribute still shows the raw payload path for discoverability
@@ -974,7 +991,9 @@ class TestWritePackageViewers:
 
         record = {"path": "payload/03_ddl/tables/DB.T.tbl", "file": "DB.T.tbl"}
         # Viewer links exist but for a different file
-        viewer_links = {"payload/03_ddl/tables/Other.tbl": ".package_report_code/0001_Other.html"}
+        viewer_links = {
+            "payload/03_ddl/tables/Other.tbl": ".package_report_code/0001_Other.html"
+        }
         html = _file_link(record, viewer_links)
         assert 'href="payload/03_ddl/tables/DB.T.tbl"' in html
 
@@ -1026,7 +1045,12 @@ class TestWritePackageViewers:
     def test_generate_package_report_writes_viewer_directory(self, tmp_path):
         _make_payload(
             tmp_path,
-            [("03_ddl/tables/DB.Customer.tbl", "CREATE MULTISET TABLE DB.Customer (Id INTEGER);")],
+            [
+                (
+                    "03_ddl/tables/DB.Customer.tbl",
+                    "CREATE MULTISET TABLE DB.Customer (Id INTEGER);",
+                )
+            ],
         )
         generate_package_report(str(tmp_path), _minimal_manifest())
         viewer_dir = tmp_path / ".package_report_code"
@@ -1037,7 +1061,12 @@ class TestWritePackageViewers:
     def test_generate_package_report_report_links_to_viewer(self, tmp_path):
         _make_payload(
             tmp_path,
-            [("03_ddl/tables/DB.Customer.tbl", "CREATE MULTISET TABLE DB.Customer (Id INTEGER);")],
+            [
+                (
+                    "03_ddl/tables/DB.Customer.tbl",
+                    "CREATE MULTISET TABLE DB.Customer (Id INTEGER);",
+                )
+            ],
         )
         generate_package_report(str(tmp_path), _minimal_manifest())
         report_html = (tmp_path / "package_report.html").read_text(encoding="utf-8")
@@ -1046,7 +1075,12 @@ class TestWritePackageViewers:
     def test_generate_package_report_viewer_contains_highlighted_sql(self, tmp_path):
         _make_payload(
             tmp_path,
-            [("03_ddl/tables/DB.Customer.tbl", "CREATE MULTISET TABLE DB.Customer (Id INTEGER);")],
+            [
+                (
+                    "03_ddl/tables/DB.Customer.tbl",
+                    "CREATE MULTISET TABLE DB.Customer (Id INTEGER);",
+                )
+            ],
         )
         generate_package_report(str(tmp_path), _minimal_manifest())
         viewer_dir = tmp_path / ".package_report_code"
@@ -1054,10 +1088,17 @@ class TestWritePackageViewers:
         viewer_html = viewer_file.read_text(encoding="utf-8")
         assert '<span class="sql-keyword">CREATE</span>' in viewer_html
 
-    def test_generate_package_report_viewer_contains_packaged_path_metadata(self, tmp_path):
+    def test_generate_package_report_viewer_contains_packaged_path_metadata(
+        self, tmp_path
+    ):
         _make_payload(
             tmp_path,
-            [("03_ddl/tables/DB.Customer.tbl", "CREATE MULTISET TABLE DB.Customer (Id INTEGER);")],
+            [
+                (
+                    "03_ddl/tables/DB.Customer.tbl",
+                    "CREATE MULTISET TABLE DB.Customer (Id INTEGER);",
+                )
+            ],
         )
         generate_package_report(str(tmp_path), _minimal_manifest())
         viewer_dir = tmp_path / ".package_report_code"
@@ -1066,12 +1107,20 @@ class TestWritePackageViewers:
         # Packaged path metadata line must be present
         assert "03_ddl/tables/DB.Customer.tbl" in viewer_html
 
-    def test_generate_package_report_multiple_files_get_separate_viewers(self, tmp_path):
+    def test_generate_package_report_multiple_files_get_separate_viewers(
+        self, tmp_path
+    ):
         _make_payload(
             tmp_path,
             [
-                ("03_ddl/tables/DB.T1.tbl", "CREATE MULTISET TABLE DB.T1 (Id INTEGER);"),
-                ("03_ddl/tables/DB.T2.tbl", "CREATE MULTISET TABLE DB.T2 (Id INTEGER);"),
+                (
+                    "03_ddl/tables/DB.T1.tbl",
+                    "CREATE MULTISET TABLE DB.T1 (Id INTEGER);",
+                ),
+                (
+                    "03_ddl/tables/DB.T2.tbl",
+                    "CREATE MULTISET TABLE DB.T2 (Id INTEGER);",
+                ),
                 ("03_ddl/views/DB.v1.viw", "REPLACE VIEW DB.v1 AS SELECT 1;"),
             ],
         )
@@ -1281,15 +1330,15 @@ class TestBuildProvenanceTab:
         from td_release_packager.package_report import _build_provenance_tab
 
         html = _build_provenance_tab(self._sample_stages())
-        assert "778" in html   # classified count
+        assert "778" in html  # classified count
         assert "classified" in html
 
     def test_key_metrics_rendered_for_analyse(self):
         from td_release_packager.package_report import _build_provenance_tab
 
         html = _build_provenance_tab(self._sample_stages())
-        assert "153" in html   # object_count
-        assert "6" in html     # wave_count
+        assert "153" in html  # object_count
+        assert "6" in html  # wave_count
 
     def test_zero_noise_metrics_suppressed(self):
         from td_release_packager.package_report import _build_provenance_tab

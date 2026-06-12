@@ -2,35 +2,40 @@
 trust.py — Phase 1 Trust Report for SHIPS packages.
 
 Computes discrete trust signals from build-time artefacts and derives
-a human-readable label (READY / READY-WITH-CAVEATS / BLOCKED) that tells
-a DBA or deployment agent whether a package is safe to promote.
+a machine-readable status (READY / READY_WITH_CAVEATS / BLOCKED) that
+tells a DBA or deployment agent whether a package is safe to promote.
 
 **Why discrete signals, not a composite score**
 
 A composite score (e.g. 94%) suffers from Goodhart's Law — once a score
 becomes a target, it ceases to be a good measure. It also creates false
 precision: "this package is 94% safe to deploy" is not a meaningful
-statement. Discrete signals with a derived label are actionable:
+statement. Discrete signals with a derived status are actionable:
 "inspect_lint is WARN — two naming conventions failed" is specific enough
 to fix.
 
 **Phase 1 signals (computable at build time)**
 
-| Signal               | Source                      | Fail condition           |
-|----------------------|-----------------------------|--------------------------|
-| inspect_token_format | ships.decisions.json inspect stage | Any INSPECT_TOKEN_MALFORMED error   |
-| inspect_lint         | ships.decisions.json inspect stage | Any INSPECT_LINT_VIOLATION error    |
-| inspect_grants       | ships.decisions.json inspect stage | Any INSPECT_GRANT_VIOLATION error   |
-| provenance_complete  | context/ships.provenance.json existence | File absent from payload |
+| Signal               | Source                                  | Fail condition                  |
+|----------------------|-----------------------------------------|---------------------------------|
+| inspect_token_format | ships.decisions.json inspect stage      | Any INSPECT_TOKEN_MALFORMED err |
+| inspect_lint         | ships.decisions.json inspect stage      | Any INSPECT_LINT_VIOLATION err  |
+| inspect_grants       | ships.decisions.json inspect stage      | Any INSPECT_GRANT_VIOLATION err |
+| provenance_complete  | context/ships.provenance.json existence | File absent from payload        |
+| build_reproducible   | context/ships.build.json.source_dirty   | source_dirty == true            |
 
-**Label derivation**
+**Status derivation**
 
-  BLOCKED           Any signal has status="fail"
-  READY-WITH-CAVEATS  One or more signals have status="warn", none "fail"
-  READY             All signals pass
+  BLOCKED             Any signal has status="fail"
+  READY_WITH_CAVEATS  One or more signals have status="warn"/"unknown", none "fail"
+  READY               All signals pass
 
-The label is the primary signal for gate automation. The per-signal detail
-is for human inspection and structured audit logs.
+**Canonical artefact**
+
+The full TrustReport is written to `context/ships.trust.json` and is the
+single source of truth. Other manifests (ships.build.json, ships.context.json,
+ships.manifest.json) reference it via `"trust_ref": "context/ships.trust.json"`
+rather than embedding the body.
 """
 
 from __future__ import annotations
@@ -49,17 +54,32 @@ from td_release_packager.orchestrator.issue_codes import (
 
 
 # ---------------------------------------------------------------
-# Data model
+# Schema + status enums
 # ---------------------------------------------------------------
+
+TRUST_SCHEMA_VERSION = "1.0"
 
 TRUST_PASS = "pass"
 TRUST_WARN = "warn"
 TRUST_FAIL = "fail"
 TRUST_UNKNOWN = "unknown"
 
-LABEL_READY = "READY"
-LABEL_CAVEATS = "READY-WITH-CAVEATS"
-LABEL_BLOCKED = "BLOCKED"
+STATUS_READY = "READY"
+STATUS_CAVEATS = "READY_WITH_CAVEATS"
+STATUS_BLOCKED = "BLOCKED"
+
+TRUST_RESULT_FILENAME = "ships.trust.json"
+TRUST_RESULT_REF = f"context/{TRUST_RESULT_FILENAME}"
+
+# Evidence file references — relative to the package root.
+_EVIDENCE_INSPECT = "ships.decisions.json"
+_EVIDENCE_PROVENANCE = "context/ships.provenance.json"
+_EVIDENCE_BUILD = "context/ships.build.json"
+
+
+# ---------------------------------------------------------------
+# Data model
+# ---------------------------------------------------------------
 
 
 @dataclass
@@ -68,26 +88,73 @@ class TrustSignal:
 
     status: str  # pass / warn / fail / unknown
     message: str  # human summary
-    issues: List[str] = field(default_factory=list)  # specific findings
+    issues: List[str] = field(default_factory=list)
+    evidence_paths: List[str] = field(default_factory=list)
 
 
 @dataclass
 class TrustReport:
     """Aggregate trust report for a package."""
 
-    label: str  # READY / READY-WITH-CAVEATS / BLOCKED
-    computed_at: str  # ISO-8601 timestamp
+    status: str  # READY / READY_WITH_CAVEATS / BLOCKED
+    evaluated_at: str  # ISO-8601 timestamp
     signals: Dict[str, TrustSignal] = field(default_factory=dict)
+    schema_version: str = TRUST_SCHEMA_VERSION
+
+    @property
+    def deploy_allowed(self) -> bool:
+        """A non-BLOCKED package can be deployed (subject to gates)."""
+        return self.status != STATUS_BLOCKED
+
+    @property
+    def override_allowed(self) -> bool:
+        """True when an operator may force-deploy despite caveats.
+
+        Policy v1: caveats are overridable, BLOCKED is not, READY has
+        nothing to override. Per-signal overrides may come later.
+        """
+        return self.status == STATUS_CAVEATS
+
+    @property
+    def blocking_signals(self) -> List[str]:
+        """Names of signals that contribute to a BLOCKED status."""
+        return [name for name, sig in self.signals.items() if sig.status == TRUST_FAIL]
+
+    @property
+    def warning_signals(self) -> List[str]:
+        """Names of signals that contribute to caveats."""
+        return [
+            name
+            for name, sig in self.signals.items()
+            if sig.status in (TRUST_WARN, TRUST_UNKNOWN)
+        ]
+
+    @property
+    def evidence_paths(self) -> List[str]:
+        """De-duplicated rollup of every signal's evidence paths."""
+        seen: List[str] = []
+        for sig in self.signals.values():
+            for path in sig.evidence_paths:
+                if path not in seen:
+                    seen.append(path)
+        return seen
 
     def to_dict(self) -> dict:
         return {
-            "label": self.label,
-            "computed_at": self.computed_at,
+            "schema_version": self.schema_version,
+            "status": self.status,
+            "deploy_allowed": self.deploy_allowed,
+            "override_allowed": self.override_allowed,
+            "evaluated_at": self.evaluated_at,
+            "evidence_paths": self.evidence_paths,
+            "blocking_signals": self.blocking_signals,
+            "warning_signals": self.warning_signals,
             "signals": {
                 name: {
                     "status": sig.status,
                     "message": sig.message,
                     "issues": sig.issues,
+                    "evidence_paths": sig.evidence_paths,
                 }
                 for name, sig in self.signals.items()
             },
@@ -101,7 +168,7 @@ class TrustReport:
 
 def compute_trust_report(source_dir: str, pkg_dir: str) -> TrustReport:
     """
-    Compute Phase 1 trust signals and derive the trust label.
+    Compute Phase 1 trust signals and derive the trust status.
 
     Args:
         source_dir: SHIPS project root (contains ships.decisions.json).
@@ -112,7 +179,6 @@ def compute_trust_report(source_dir: str, pkg_dir: str) -> TrustReport:
     """
     signals: Dict[str, TrustSignal] = {}
 
-    # Load ships.decisions.json — source of inspect signals
     decisions_path = os.path.join(source_dir, "ships.decisions.json")
     decisions = _load_decisions(decisions_path)
     inspect_stage = _find_latest_inspect_stage(decisions)
@@ -142,10 +208,32 @@ def compute_trust_report(source_dir: str, pkg_dir: str) -> TrustReport:
     signals["provenance_complete"] = _provenance_signal(pkg_dir)
     signals["build_reproducible"] = _build_reproducible_signal(pkg_dir)
 
-    label = _derive_label(signals)
+    status = _derive_status(signals)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
-    return TrustReport(label=label, computed_at=now, signals=signals)
+    return TrustReport(status=status, evaluated_at=now, signals=signals)
+
+
+def write_trust_result(pkg_dir: str, report: TrustReport) -> str:
+    """Write the canonical trust result JSON to ``pkg_dir`` and return its path."""
+    path = os.path.join(pkg_dir, "context", TRUST_RESULT_FILENAME)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(report.to_dict(), f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    return path
+
+
+def load_trust_result(pkg_dir: str) -> Optional[dict]:
+    """Load the canonical trust result dict from ``pkg_dir`` or return None."""
+    path = os.path.join(pkg_dir, "context", TRUST_RESULT_FILENAME)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------
@@ -191,12 +279,14 @@ def _inspect_signal(
         return TrustSignal(
             status=TRUST_UNKNOWN,
             message="Inspect stage not found in ships.decisions.json — run inspect first",
+            evidence_paths=[_EVIDENCE_INSPECT],
         )
 
     matching = [
         i
         for i in stage.get("issues", [])
-        if i.get("code") == issue_code and not _is_generated_artifact_issue(i, source_dir)
+        if i.get("code") == issue_code
+        and not _is_generated_artifact_issue(i, source_dir)
     ]
 
     errors = [i for i in matching if i.get("severity") == "error"]
@@ -207,7 +297,8 @@ def _inspect_signal(
         return TrustSignal(
             status=TRUST_FAIL,
             message=f"{fail_message_prefix}: {len(errors)} error(s)",
-            issues=messages[:10],  # cap to keep ships.build.json small
+            issues=messages[:10],  # cap to keep ships.trust.json small
+            evidence_paths=[_EVIDENCE_INSPECT],
         )
     if warnings:
         messages = [_format_issue_for_trust(i) for i in warnings]
@@ -215,8 +306,13 @@ def _inspect_signal(
             status=TRUST_WARN,
             message=f"{fail_message_prefix}: {len(warnings)} warning(s)",
             issues=messages[:10],
+            evidence_paths=[_EVIDENCE_INSPECT],
         )
-    return TrustSignal(status=TRUST_PASS, message=pass_message)
+    return TrustSignal(
+        status=TRUST_PASS,
+        message=pass_message,
+        evidence_paths=[_EVIDENCE_INSPECT],
+    )
 
 
 def _is_generated_artifact_issue(issue: dict, source_dir: str = "") -> bool:
@@ -255,19 +351,13 @@ def _format_issue_for_trust(issue: dict) -> str:
 
 
 def _provenance_signal(pkg_dir: str) -> TrustSignal:
-    """Check whether the package contains ``context/ships.provenance.json``.
-
-    The provenance file records the full source → payload file
-    transformation chain and enables the deployer to link each
-    failed/skipped object back to its original source file. Without
-    it, the deploy report's drill-down and edit-source hints are
-    disabled.
-    """
+    """Check whether the package contains ``context/ships.provenance.json``."""
     provenance_path = os.path.join(pkg_dir, "context", "ships.provenance.json")
     if os.path.exists(provenance_path):
         return TrustSignal(
             status=TRUST_PASS,
             message="context/ships.provenance.json present — deploy report drill-downs enabled",
+            evidence_paths=[_EVIDENCE_PROVENANCE],
         )
 
     return TrustSignal(
@@ -277,6 +367,7 @@ def _provenance_signal(pkg_dir: str) -> TrustSignal:
             "will be disabled. Rebuild the package with the current SHIPS version "
             "to generate provenance."
         ),
+        evidence_paths=[_EVIDENCE_PROVENANCE],
     )
 
 
@@ -285,15 +376,13 @@ def _build_reproducible_signal(pkg_dir: str) -> TrustSignal:
     Trust signal: was the package built from a clean working tree?
 
     Reads ``source_dirty`` from context/ships.build.json in ``pkg_dir``.
-    - ``source_dirty: true``  → WARN (built with --allow-dirty)
-    - ``source_dirty: false`` or absent → PASS
-    - context/ships.build.json not found → UNKNOWN
     """
     build_json = os.path.join(pkg_dir, "context", "ships.build.json")
     if not os.path.exists(build_json):
         return TrustSignal(
             status=TRUST_PASS,
             message="context/ships.build.json absent — no evidence of dirty-tree build",
+            evidence_paths=[_EVIDENCE_BUILD],
         )
     try:
         with open(build_json, encoding="utf-8") as f:
@@ -302,6 +391,7 @@ def _build_reproducible_signal(pkg_dir: str) -> TrustSignal:
         return TrustSignal(
             status=TRUST_PASS,
             message="context/ships.build.json unreadable — assuming clean build",
+            evidence_paths=[_EVIDENCE_BUILD],
         )
 
     if manifest.get("source_dirty", False):
@@ -309,26 +399,28 @@ def _build_reproducible_signal(pkg_dir: str) -> TrustSignal:
             status=TRUST_WARN,
             message="Package built from dirty working tree (--allow-dirty was passed). "
             "source_commit may not fully represent the deployed code.",
+            evidence_paths=[_EVIDENCE_BUILD],
         )
     return TrustSignal(
         status=TRUST_PASS,
         message="Built from a clean working tree — source_commit is authoritative",
+        evidence_paths=[_EVIDENCE_BUILD],
     )
 
 
 # ---------------------------------------------------------------
-# Label derivation
+# Status derivation
 # ---------------------------------------------------------------
 
 
-def _derive_label(signals: Dict[str, TrustSignal]) -> str:
-    """Derive the top-level trust label from the signal set."""
+def _derive_status(signals: Dict[str, TrustSignal]) -> str:
+    """Derive the top-level trust status from the signal set."""
     statuses = {sig.status for sig in signals.values()}
     if TRUST_FAIL in statuses:
-        return LABEL_BLOCKED
+        return STATUS_BLOCKED
     if TRUST_WARN in statuses or TRUST_UNKNOWN in statuses:
-        return LABEL_CAVEATS
-    return LABEL_READY
+        return STATUS_CAVEATS
+    return STATUS_READY
 
 
 # ---------------------------------------------------------------
@@ -342,20 +434,20 @@ _STATUS_ICON = {
     TRUST_UNKNOWN: "?",
 }
 
-_LABEL_ICON = {
-    LABEL_READY: "✓",
-    LABEL_CAVEATS: "⚠",
-    LABEL_BLOCKED: "✗",
+_HEADER_ICON = {
+    STATUS_READY: "✓",
+    STATUS_CAVEATS: "⚠",
+    STATUS_BLOCKED: "✗",
 }
 
 
 def format_trust_banner(report: TrustReport, width: int = 64) -> str:
     """Return a formatted CLI banner string for the trust report."""
     bar = "=" * width
-    label_icon = _LABEL_ICON.get(report.label, "?")
+    header_icon = _HEADER_ICON.get(report.status, "?")
     lines = [
         f"\n{bar}",
-        f"  Package Trust: {label_icon} {report.label}",
+        f"  Package Trust: {header_icon} {report.status}",
         bar,
     ]
     for name, sig in report.signals.items():

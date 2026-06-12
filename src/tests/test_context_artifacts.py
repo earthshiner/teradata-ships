@@ -18,7 +18,7 @@ def test_write_context_artifacts_emits_agent_context_contract(tmp_path):
         file_count=4,
         phase_inventory={"03_ddl": 4},
         tokens_resolved={"CORE_T": "DEV_CORE_T", "CORE_V": "DEV_CORE_V"},
-        trust={"label": "READY"},
+        trust={"trust_ref": "context/ships.trust.json"},
         require_tls=True,
     )
     config = BuildConfig(
@@ -44,6 +44,7 @@ def test_write_context_artifacts_emits_agent_context_contract(tmp_path):
         "schemas/ships.integrity.schema.json",
         "schemas/ships.manifest.schema.json",
         "schemas/ships.provenance.schema.json",
+        "schemas/ships.trust.schema.json",
         "ships.context.json",
         "ships.handoff.json",
         "ships.index.json",

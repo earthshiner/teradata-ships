@@ -73,7 +73,7 @@ def test_build_audit_event_minimum_fields(tmp_path):
         "change_ref",
         "operator",
         "hostname",
-        "trust_label",
+        "trust_status",
         "outcome",
         "objects_deployed",
         "objects_failed",

@@ -28,7 +28,7 @@ Audit event schema (minimum fields):
     change_ref       From context/ships.build.json (null if not set)
     operator         os.getlogin() or SHIPS_OPERATOR env var
     hostname         socket.gethostname()
-    trust_label      From context/ships.build.json trust.label
+    trust_status     From context/ships.trust.json status
     outcome          "SUCCESS" or "FAILURE"
     objects_deployed Count of COMPLETED objects
     objects_failed   Count of FAILED objects
@@ -116,7 +116,9 @@ def build_audit_event(
         Dict ready to serialise as JSON.
     """
     manifest = _read_build_json(package_dir)
-    trust = manifest.get("trust", {})
+    from td_release_packager.trust import load_trust_result
+
+    trust = load_trust_result(package_dir) or {}
 
     return {
         "event": "ships.deploy",
@@ -127,7 +129,7 @@ def build_audit_event(
         "change_ref": manifest.get("change_ref"),
         "operator": _resolve_operator(),
         "hostname": socket.gethostname(),
-        "trust_label": trust.get("label", "") if isinstance(trust, dict) else "",
+        "trust_status": trust.get("status", ""),
         "outcome": outcome,
         "objects_deployed": objects_deployed,
         "objects_failed": objects_failed,

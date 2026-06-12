@@ -4,10 +4,11 @@ test_trust.py — Tests for the Phase 1 Trust Report.
 Covers:
     - Signal computation from ships.decisions.json (inspect stages)
     - Provenance signal from filesystem state
-    - Label derivation (READY / READY-WITH-CAVEATS / BLOCKED)
-    - to_dict serialisation matches ships.build.json schema
+    - Status derivation (READY / READY_WITH_CAVEATS / BLOCKED)
+    - to_dict serialisation matches the canonical ships.trust.json schema
     - Banner formatting
-    - Integration: build_package stamps trust block in ships.build.json
+    - Integration: build_package writes canonical context/ships.trust.json
+      and ships.build.json carries only a trust_ref pointer.
 """
 
 from __future__ import annotations
@@ -19,20 +20,22 @@ from pathlib import Path
 import pytest
 
 from td_release_packager.trust import (
-    LABEL_BLOCKED,
-    LABEL_CAVEATS,
-    LABEL_READY,
+    STATUS_BLOCKED,
+    STATUS_CAVEATS,
+    STATUS_READY,
     TRUST_FAIL,
     TRUST_PASS,
+    TRUST_RESULT_REF,
     TRUST_UNKNOWN,
     TRUST_WARN,
     TrustReport,
     TrustSignal,
-    _derive_label,
+    _derive_status,
     _inspect_signal,
     _provenance_signal,
     compute_trust_report,
     format_trust_banner,
+    load_trust_result,
 )
 from td_release_packager.orchestrator.issue_codes import (
     INSPECT_LINT_VIOLATION,
@@ -140,40 +143,40 @@ class TestProvenanceSignal:
 # ---------------------------------------------------------------
 
 
-class TestDeriveLabel:
+class TestDeriveStatus:
     def test_ready_all_pass(self):
         signals = {
             "a": TrustSignal(status=TRUST_PASS, message="ok"),
             "b": TrustSignal(status=TRUST_PASS, message="ok"),
         }
-        assert _derive_label(signals) == LABEL_READY
+        assert _derive_status(signals) == STATUS_READY
 
     def test_caveats_on_warn(self):
         signals = {
             "a": TrustSignal(status=TRUST_PASS, message="ok"),
             "b": TrustSignal(status=TRUST_WARN, message="warning"),
         }
-        assert _derive_label(signals) == LABEL_CAVEATS
+        assert _derive_status(signals) == STATUS_CAVEATS
 
     def test_caveats_on_unknown(self):
         signals = {
             "a": TrustSignal(status=TRUST_UNKNOWN, message="?"),
         }
-        assert _derive_label(signals) == LABEL_CAVEATS
+        assert _derive_status(signals) == STATUS_CAVEATS
 
     def test_blocked_on_fail(self):
         signals = {
             "a": TrustSignal(status=TRUST_FAIL, message="fail"),
             "b": TrustSignal(status=TRUST_PASS, message="ok"),
         }
-        assert _derive_label(signals) == LABEL_BLOCKED
+        assert _derive_status(signals) == STATUS_BLOCKED
 
     def test_blocked_takes_precedence_over_warn(self):
         signals = {
             "a": TrustSignal(status=TRUST_FAIL, message="fail"),
             "b": TrustSignal(status=TRUST_WARN, message="warn"),
         }
-        assert _derive_label(signals) == LABEL_BLOCKED
+        assert _derive_status(signals) == STATUS_BLOCKED
 
 
 # ---------------------------------------------------------------
@@ -202,7 +205,7 @@ class TestComputeTrustReport:
             "{}", encoding="utf-8"
         )
         report = compute_trust_report(str(tmp_path), str(tmp_path))
-        assert report.label == LABEL_READY
+        assert report.status == STATUS_READY
 
     def test_blocked_on_token_malformed_error(self, tmp_path):
         _write_decisions(
@@ -227,7 +230,7 @@ class TestComputeTrustReport:
             ],
         )
         report = compute_trust_report(str(tmp_path), str(tmp_path))
-        assert report.label == LABEL_BLOCKED
+        assert report.status == STATUS_BLOCKED
         assert report.signals["inspect_token_format"].status == TRUST_FAIL
 
     def test_caveats_on_lint_warning(self, tmp_path):
@@ -257,7 +260,7 @@ class TestComputeTrustReport:
             "{}", encoding="utf-8"
         )
         report = compute_trust_report(str(tmp_path), str(tmp_path))
-        assert report.label == LABEL_CAVEATS
+        assert report.status == STATUS_CAVEATS
         assert report.signals["inspect_lint"].status == TRUST_WARN
 
     def test_lint_issues_keep_file_location(self, tmp_path):
@@ -333,13 +336,13 @@ class TestComputeTrustReport:
 
         report = compute_trust_report(str(tmp_path), str(tmp_path))
 
-        assert report.label == LABEL_READY
+        assert report.status == STATUS_READY
         assert report.signals["inspect_lint"].status == TRUST_PASS
 
     def test_caveats_when_no_decisions_json(self, tmp_path):
         """No ships.decisions.json means inspect never ran — signals are UNKNOWN."""
         report = compute_trust_report(str(tmp_path), str(tmp_path))
-        assert report.label == LABEL_CAVEATS  # UNKNOWN signals → caveats
+        assert report.status == STATUS_CAVEATS  # UNKNOWN signals → caveats
         for sig in report.signals.values():
             if "inspect" in sig.message.lower() or sig.status == TRUST_UNKNOWN:
                 break
@@ -384,13 +387,80 @@ class TestComputeTrustReport:
     def test_to_dict_schema(self, tmp_path):
         report = compute_trust_report(str(tmp_path), str(tmp_path))
         d = report.to_dict()
-        assert "label" in d
-        assert "computed_at" in d
+        assert d["schema_version"]
+        assert d["status"] in (STATUS_READY, STATUS_CAVEATS, STATUS_BLOCKED)
+        assert "deploy_allowed" in d
+        assert "override_allowed" in d
+        assert "evaluated_at" in d
+        assert isinstance(d["evidence_paths"], list)
+        assert isinstance(d["blocking_signals"], list)
+        assert isinstance(d["warning_signals"], list)
         assert "signals" in d
         for sig_dict in d["signals"].values():
             assert "status" in sig_dict
             assert "message" in sig_dict
             assert "issues" in sig_dict
+            assert "evidence_paths" in sig_dict
+
+    def test_deploy_allowed_only_when_not_blocked(self):
+        ready = TrustReport(
+            status=STATUS_READY,
+            evaluated_at="2026-05-09T14:30:00+00:00",
+            signals={"x": TrustSignal(status=TRUST_PASS, message="ok")},
+        )
+        caveats = TrustReport(
+            status=STATUS_CAVEATS,
+            evaluated_at="2026-05-09T14:30:00+00:00",
+            signals={"x": TrustSignal(status=TRUST_WARN, message="warn")},
+        )
+        blocked = TrustReport(
+            status=STATUS_BLOCKED,
+            evaluated_at="2026-05-09T14:30:00+00:00",
+            signals={"x": TrustSignal(status=TRUST_FAIL, message="fail")},
+        )
+        assert ready.deploy_allowed is True
+        assert ready.override_allowed is False
+        assert caveats.deploy_allowed is True
+        assert caveats.override_allowed is True
+        assert blocked.deploy_allowed is False
+        assert blocked.override_allowed is False
+
+    def test_blocking_and_warning_signal_lists(self):
+        report = TrustReport(
+            status=STATUS_BLOCKED,
+            evaluated_at="2026-05-09T14:30:00+00:00",
+            signals={
+                "ok": TrustSignal(status=TRUST_PASS, message="ok"),
+                "soft": TrustSignal(status=TRUST_WARN, message="warn"),
+                "hard": TrustSignal(status=TRUST_FAIL, message="fail"),
+                "missing": TrustSignal(status=TRUST_UNKNOWN, message="?"),
+            },
+        )
+        assert report.blocking_signals == ["hard"]
+        assert set(report.warning_signals) == {"soft", "missing"}
+
+    def test_evidence_paths_rolled_up(self):
+        report = TrustReport(
+            status=STATUS_READY,
+            evaluated_at="2026-05-09T14:30:00+00:00",
+            signals={
+                "a": TrustSignal(
+                    status=TRUST_PASS,
+                    message="ok",
+                    evidence_paths=["context/ships.build.json"],
+                ),
+                "b": TrustSignal(
+                    status=TRUST_PASS,
+                    message="ok",
+                    evidence_paths=["context/ships.build.json", "ships.decisions.json"],
+                ),
+            },
+        )
+        # De-duplicated, preserving first-seen order.
+        assert report.evidence_paths == [
+            "context/ships.build.json",
+            "ships.decisions.json",
+        ]
 
 
 # ---------------------------------------------------------------
@@ -399,24 +469,24 @@ class TestComputeTrustReport:
 
 
 class TestFormatTrustBanner:
-    def test_ready_banner_contains_label(self):
+    def test_ready_banner_contains_status(self):
         report = TrustReport(
-            label=LABEL_READY,
-            computed_at="2026-05-09T14:30:00+00:00",
+            status=STATUS_READY,
+            evaluated_at="2026-05-09T14:30:00+00:00",
             signals={"test": TrustSignal(status=TRUST_PASS, message="OK")},
         )
         banner = format_trust_banner(report)
-        assert LABEL_READY in banner
+        assert STATUS_READY in banner
         assert "test" in banner
 
-    def test_blocked_banner_contains_label(self):
+    def test_blocked_banner_contains_status(self):
         report = TrustReport(
-            label=LABEL_BLOCKED,
-            computed_at="2026-05-09T14:30:00+00:00",
+            status=STATUS_BLOCKED,
+            evaluated_at="2026-05-09T14:30:00+00:00",
             signals={"bad": TrustSignal(status=TRUST_FAIL, message="Error found")},
         )
         banner = format_trust_banner(report)
-        assert LABEL_BLOCKED in banner
+        assert STATUS_BLOCKED in banner
 
 
 # ---------------------------------------------------------------
@@ -471,10 +541,21 @@ class TestBuildPackageStampsTrust:
             )
             build_data = json.loads(zf.read(build_json_name))
 
-        assert "trust" in build_data, "ships.build.json must contain a trust block"
-        trust = build_data["trust"]
-        assert "label" in trust
-        assert trust["label"] in (LABEL_READY, LABEL_CAVEATS, LABEL_BLOCKED)
+            trust_json_name = next(
+                n for n in zf.namelist() if n.endswith("ships.trust.json")
+            )
+            trust = json.loads(zf.read(trust_json_name))
+
+        # ships.build.json carries only a pointer to the canonical trust file.
+        assert build_data["trust"] == {"trust_ref": TRUST_RESULT_REF}
+
+        # The canonical trust file holds the full document.
+        assert trust["status"] in (STATUS_READY, STATUS_CAVEATS, STATUS_BLOCKED)
+        assert trust["schema_version"]
+        assert "deploy_allowed" in trust
+        assert "override_allowed" in trust
+        assert "evaluated_at" in trust
+        assert isinstance(trust["evidence_paths"], list)
         assert "signals" in trust
         assert "inspect_token_format" in trust["signals"]
         assert "provenance_complete" in trust["signals"]
@@ -529,12 +610,13 @@ class TestBuildPackageStampsTrust:
         (main_arc, _), _companion = build_package(cfg)
 
         with zipfile.ZipFile(main_arc) as zf:
-            build_json_name = next(
-                n for n in zf.namelist() if n.endswith("ships.build.json")
+            trust_json_name = next(
+                n for n in zf.namelist() if n.endswith("ships.trust.json")
             )
-            build_data = json.loads(zf.read(build_json_name))
+            trust = json.loads(zf.read(trust_json_name))
 
-        assert build_data["trust"]["label"] == LABEL_READY
+        assert trust["status"] == STATUS_READY
+        assert trust["deploy_allowed"] is True
 
 
 # ---------------------------------------------------------------
@@ -585,5 +667,5 @@ class TestBuildReproducibleSignal:
             "{}", encoding="utf-8"
         )
         report = compute_trust_report(str(tmp_path), str(tmp_path))
-        assert report.label == LABEL_CAVEATS
+        assert report.status == STATUS_CAVEATS
         assert report.signals["build_reproducible"].status == TRUST_WARN
