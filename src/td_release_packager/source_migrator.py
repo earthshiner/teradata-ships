@@ -48,24 +48,80 @@ logger = logging.getLogger(__name__)
 # The LHS and RHS may contain escaped slashes (\/).
 _SED_RULE_RE = re.compile(r"^s/((?:[^/\\]|\\.)*?)/((?:[^/\\]|\\.)*)/([a-zA-Z]*)\s*$")
 
+# Matches  regex::PATTERN:=REPLACEMENT  (issue #259).
+#
+# Split on the FIRST ``:=`` after the leading ``regex::`` keyword so
+# the pattern itself may contain colons. Trailing whitespace is
+# tolerated; everything else is part of the replacement.
+_REGEX_RULE_PREFIX = "regex::"
+
 
 @dataclass(frozen=True)
 class MigrationRule:
-    """One parsed ``s/LHS/RHS/g`` substitution rule.
+    """One parsed substitution rule.
 
     Attributes:
-        raw_lhs:  The literal pattern from the sed script (with any
-                  backslash-escapes intact). Used for display.
-        lhs:      Compiled regex for the left-hand side.
-        rhs:      Replacement string (after sed-escape processing).
-        global_:  True when the ``g`` flag was present (always for
-                  SHIPS-generated scripts, but honoured from input).
+        raw_lhs:   The literal pattern from the source file (for
+                   display and hit-tracking keys). For ``s/.../.../g``
+                   rules, this is the LHS exactly as written. For
+                   ``regex::PATTERN:=REPLACEMENT`` rules, this is the
+                   PATTERN exactly as written.
+        lhs:       Compiled regex.
+        rhs:       Replacement string. For literal rules this is the
+                   literal RHS. For regex rules, ``$1..$9`` have been
+                   translated to Python's ``\\1..\\9`` backref form so
+                   ``Match.expand(rhs)`` Just Works.
+        global_:   True when ``g`` flag was present (always True for
+                   ``regex::`` rules — substitute every occurrence).
+        is_regex:  True for ``regex::`` rules. Drives expansion in
+                   the apply path: regex rules call ``m.expand(rhs)``
+                   so back-references are honoured; literal rules
+                   return ``rhs`` verbatim so a literal ``\\1`` in the
+                   replacement stays a literal ``\\1``.
     """
 
     raw_lhs: str
     lhs: re.Pattern
     rhs: str
     global_: bool
+    is_regex: bool = False
+
+
+def _translate_regex_replacement(raw: str) -> str:
+    """Translate ``$1..$9`` back-references to Python's ``\\1..\\9`` form.
+
+    Conventions (familiar from sed / Perl):
+
+    - ``$1..$9``  → ``\\1..\\9``   (capture group references)
+    - ``$$``      → ``$``          (literal dollar)
+    - ``$`` followed by anything else: kept as-is.
+
+    Any existing ``\\`` in ``raw`` is escaped first so a literal
+    backslash in the user's replacement does not collide with the
+    backslash we inject for the back-reference.
+    """
+    # Escape literal backslashes so they survive ``Match.expand``.
+    escaped = raw.replace("\\", "\\\\")
+
+    out = []
+    i = 0
+    while i < len(escaped):
+        ch = escaped[i]
+        if ch != "$":
+            out.append(ch)
+            i += 1
+            continue
+        nxt = escaped[i + 1] if i + 1 < len(escaped) else ""
+        if nxt == "$":
+            out.append("$")
+            i += 2
+        elif nxt.isdigit() and nxt != "0":
+            out.append("\\" + nxt)
+            i += 2
+        else:
+            out.append("$")
+            i += 1
+    return "".join(out)
 
 
 def _unescape_sed(text: str) -> str:
@@ -76,14 +132,22 @@ def _unescape_sed(text: str) -> str:
 def parse_migration_sed(content: str) -> Tuple[List[MigrationRule], List[str]]:
     """Parse a ``legacy_migration.sed`` file.
 
-    Recognises only the ``s/LHS/RHS/[flags]`` form that
-    ``import-legacy`` generates.  Comments (``#``) and blank lines
-    are skipped without warning.  Unrecognised non-blank, non-comment
-    lines are returned in the second element of the tuple so the
-    caller can warn the user.
+    Recognises two rule forms:
+
+    1. ``s/LHS/RHS/[flags]`` — literal-string substitution. LHS is
+       ``re.escape``'d, RHS used verbatim. This is the form
+       ``import-legacy`` generates.
+    2. ``regex::PATTERN:=REPLACEMENT`` — full regex substitution.
+       PATTERN is compiled as Python regex (no escaping). REPLACEMENT
+       supports ``$1..$9`` back-references and ``$$`` for a literal
+       ``$``. Inline flags such as ``(?i)`` work. Issue #259.
+
+    Comments (``#``) and blank lines are skipped without warning.
+    Unrecognised non-blank, non-comment lines are returned in the
+    second element of the tuple so the caller can warn the user.
 
     Args:
-        content: Full text of the sed script.
+        content: Full text of the migration file.
 
     Returns:
         ``(rules, skipped_lines)`` where ``rules`` is a list of
@@ -98,6 +162,39 @@ def parse_migration_sed(content: str) -> Tuple[List[MigrationRule], List[str]]:
         if not stripped or stripped.startswith("#"):
             continue
 
+        # -- Regex rule:  regex::PATTERN:=REPLACEMENT --
+        if stripped.startswith(_REGEX_RULE_PREFIX):
+            body = stripped[len(_REGEX_RULE_PREFIX) :]
+            if ":=" not in body:
+                logger.warning(
+                    "Skipping regex rule missing ':=' separator: %s", stripped
+                )
+                skipped.append(stripped)
+                continue
+            raw_lhs, raw_rhs = body.split(":=", 1)
+            try:
+                lhs_re = re.compile(raw_lhs)
+            except re.error as exc:
+                logger.warning(
+                    "Skipping regex rule with unparseable PATTERN %r: %s",
+                    raw_lhs,
+                    exc,
+                )
+                skipped.append(stripped)
+                continue
+            translated_rhs = _translate_regex_replacement(raw_rhs)
+            rules.append(
+                MigrationRule(
+                    raw_lhs=raw_lhs,
+                    lhs=lhs_re,
+                    rhs=translated_rhs,
+                    global_=True,  # Regex rules always replace every match.
+                    is_regex=True,
+                )
+            )
+            continue
+
+        # -- Literal rule:  s/LHS/RHS/[flags] --
         m = _SED_RULE_RE.match(stripped)
         if not m:
             skipped.append(stripped)
@@ -125,6 +222,7 @@ def parse_migration_sed(content: str) -> Tuple[List[MigrationRule], List[str]]:
                 lhs=lhs_re,
                 rhs=rhs,
                 global_=global_,
+                is_regex=False,
             )
         )
 
@@ -160,6 +258,12 @@ class MigrationResult:
 def _apply_rules_to_text(content: str, rules: List[MigrationRule]) -> Tuple[str, dict]:
     """Apply every rule to ``content`` in order.
 
+    For ``s/.../.../g`` rules the replacement is returned verbatim so a
+    literal ``\\1`` in the RHS stays a literal ``\\1``. For
+    ``regex::PATTERN:=REPLACEMENT`` rules the replacement is expanded
+    via ``Match.expand`` so ``$1..$9`` back-references (translated at
+    parse time to ``\\1..\\9``) resolve to the matched capture groups.
+
     Returns:
         ``(new_content, hits)`` where ``hits`` maps ``raw_lhs`` to
         the number of substitutions made.
@@ -171,6 +275,8 @@ def _apply_rules_to_text(content: str, rules: List[MigrationRule]) -> Tuple[str,
 
         def _replace(m, rule=rule, count=count):
             count[0] += 1
+            if rule.is_regex:
+                return m.expand(rule.rhs)
             return rule.rhs
 
         new = rule.lhs.sub(

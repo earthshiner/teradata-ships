@@ -133,6 +133,58 @@ python -m td_release_packager package \
 
 ---
 
+### I need to retokenise DDL that's already deployed on another system. How?
+
+Common scenario: you've extracted DDL from a live Teradata system where the project prefix is hardcoded (`CallCentre_DOM_STD_T`, `CallCentre_MEM_BUS_V`, etc.) and you want to redeploy it to a different system or project with a `{{SHIPS_PROJECT}}` token in place of the prefix.
+
+Use a **regex migration rule** in `config/legacy_migration.sed`:
+
+```
+# Token the project prefix on every <Project>_<DOMAIN>_<TIER>_<KIND> name.
+regex::(?i)(\w+)_(\w{3})_(\w{3})_(V|T):={{SHIPS_PROJECT}}_$2_$3_$4
+```
+
+What this does:
+
+- **Match**: any name shaped `<Project>_<DOMAIN>_<TIER>_<KIND>` where `KIND` is `V` (view) or `T` (table), case-insensitive.
+- **Replace**: discard the captured project prefix; substitute `{{SHIPS_PROJECT}}` and keep groups 2/3/4 verbatim.
+- **Hit**: `CallCentre_DOM_STD_T` → `{{SHIPS_PROJECT}}_DOM_STD_T`.
+
+The file accepts both rule kinds side-by-side:
+
+```
+# Literal substitutions (these are what `import-legacy` generates):
+s/$DB_PROD/{{DB_PROD}}/g
+s/&&CORE&&/{{CORE}}/g
+
+# Regex substitutions (hand-authored — issue #259):
+regex::(?i)(\w+)_(\w{3})_(\w{3})_(V|T):={{SHIPS_PROJECT}}_$2_$3_$4
+```
+
+Conventions for the `regex::` form:
+
+- Pattern is a real Python regex. `(?i)`, alternation, character classes, anchors all work as expected.
+- Replacement supports `$1..$9` back-references. Use `$$` for a literal `$`.
+- Always replaces every match (there is no per-rule flag like `g` — that would be redundant).
+- An unparseable PATTERN is skipped with a warning, not silently dropped.
+
+Harvest and process auto-apply `legacy_migration.sed` before classification, so this works in the normal pipeline. You can also preview with:
+
+```bash
+python -m td_release_packager migrate-source \
+    --sed    config/legacy_migration.sed \
+    --source ./source \
+    --dry-run
+```
+
+A couple of things worth being deliberate about:
+
+- **Order matters.** Rules apply in file order. If one rule's output could match a later rule, the later rule will fire too.
+- **Idempotence is your responsibility.** A pattern like `(\w+)_DOM_STD_T` will match `{{SHIPS_PROJECT}}_DOM_STD_T` on a second run too. Add an anchor or a negative lookahead if you need a second run to be a no-op.
+- **Test on a small slice first.** Use `migrate-source --dry-run` to confirm the hit list before letting harvest rewrite hundreds of files.
+
+---
+
 ### I want to skip tokenisation for now. Can I?
 
 Yes. Just omit `--token-map` from harvest. Your DDL will be copied into the payload with its original hardcoded database names. Inspect will flag them as `hardcoded_name` warnings. You can suppress that rule in `config/inspect.conf` while you transition:
