@@ -1356,6 +1356,163 @@ def _check_ddl_terminator(rel_path: str, content: str) -> List[ValidationIssue]:
     return issues
 
 
+# ---------------------------------------------------------------
+# DDL terminator auto-fix (#253)
+# ---------------------------------------------------------------
+
+
+@dataclass
+class DDLTerminatorFix:
+    """One file that was rewritten by ``fix_ddl_terminators``."""
+
+    file: str  # path relative to source_dir
+    statements_fixed: int
+
+
+@dataclass
+class DDLTerminatorFixResult:
+    """Aggregate result of a ``fix_ddl_terminators`` run."""
+
+    files_scanned: int = 0
+    files_fixed: List[DDLTerminatorFix] = field(default_factory=list)
+
+    @property
+    def files_written(self) -> int:
+        return len(self.files_fixed)
+
+    @property
+    def statements_fixed(self) -> int:
+        return sum(f.statements_fixed for f in self.files_fixed)
+
+    def to_dict(self) -> dict:
+        return {
+            "files_scanned": self.files_scanned,
+            "files_written": self.files_written,
+            "statements_fixed": self.statements_fixed,
+            "files": [
+                {"file": f.file, "statements_fixed": f.statements_fixed}
+                for f in self.files_fixed
+            ],
+        }
+
+
+def _compute_terminator_insertions(stripped: str, raw: str) -> List[int]:
+    """Return raw-content offsets where ``;`` should be inserted.
+
+    The detector walks DDL verb starts in the comment-/string-stripped
+    text. ``strip_comments_and_string_literals`` preserves character
+    positions, so a stripped offset maps 1:1 to the raw content.
+
+    For each segment whose stripped tail does not end with ``;``, we
+    locate the last non-whitespace character of the segment in the
+    *raw* content and report the index immediately AFTER it. Inserting
+    ``;`` at that offset puts the terminator flush against the final
+    token while preserving any trailing whitespace or comments.
+
+    A file with no matching DDL verbs returns ``[]``.
+    """
+    matches = list(_DDL_TERMINATOR_START_RE.finditer(stripped))
+    if not matches:
+        return []
+
+    insertions: List[int] = []
+    for idx, match in enumerate(matches):
+        seg_start = match.start()
+        seg_end = matches[idx + 1].start() if idx + 1 < len(matches) else len(stripped)
+        # Use the stripped text to decide whether a terminator is missing,
+        # exactly as the detector does. This stops us from "fixing" a
+        # statement that already has a ``;`` followed only by comments.
+        seg_stripped = stripped[seg_start:seg_end].rstrip()
+        if not seg_stripped or seg_stripped.endswith(";"):
+            continue
+
+        # Walk back through the STRIPPED segment to find the last
+        # non-whitespace character. The stripper blanks comments and
+        # string literals with spaces of the same length (positions
+        # preserved), so trailing comments after the DDL are treated
+        # as whitespace here — exactly what we want. Using ``raw``
+        # would land the new ``;`` inside a trailing comment.
+        insert_at = seg_end
+        while insert_at > seg_start and stripped[insert_at - 1].isspace():
+            insert_at -= 1
+        if insert_at == seg_start:
+            # Defensive guard: an all-whitespace segment cannot need a
+            # terminator. Should not be reachable because the detector
+            # would have skipped it too.
+            continue
+        insertions.append(insert_at)
+
+    return insertions
+
+
+def fix_ddl_terminators(source_dir: str) -> DDLTerminatorFixResult:
+    """Add missing ``;`` terminators to deployable DDL statements.
+
+    Walks ``source_dir`` using the same file-discovery rules as
+    ``validate_dir`` (same extensions, same generated-path exclusions),
+    re-uses the detector's boundary regex on the comment-/string-
+    stripped content, then inserts a semi-colon at the last non-
+    whitespace character of each violating statement segment in the
+    *raw* file.
+
+    Files that need no changes are not touched. Files inside SHIPS-
+    generated paths (``releases/``, ``.ships-work/``, ``_rollback/``)
+    are skipped entirely.
+
+    The fix is idempotent: running it twice on a clean tree leaves the
+    second run with ``files_written == 0``.
+    """
+    from td_release_packager.discovery import resolve_harvest_extensions
+
+    extensions = set(resolve_harvest_extensions(project_dir=source_dir))
+    extensions.add(".jar")
+
+    result = DDLTerminatorFixResult()
+
+    for root, dirs, filenames in os.walk(source_dir):
+        dirs.sort()
+        _prune_generated_dirs(dirs)
+        for filename in sorted(filenames):
+            if filename.startswith(".") or filename.startswith("_"):
+                continue
+            ext = os.path.splitext(filename)[1].lower()
+            if ext not in extensions:
+                continue
+
+            file_path = os.path.join(root, filename)
+            result.files_scanned += 1
+
+            try:
+                with open(file_path, "r", encoding="utf-8") as fh:
+                    raw = fh.read()
+            except (OSError, UnicodeDecodeError):
+                continue
+
+            stripped = _strip_sql_comments(raw)
+            insertions = _compute_terminator_insertions(stripped, raw)
+            if not insertions:
+                continue
+
+            # Apply insertions right-to-left so earlier offsets stay
+            # valid as we mutate the buffer.
+            new_content = raw
+            for offset in sorted(insertions, reverse=True):
+                new_content = new_content[:offset] + ";" + new_content[offset:]
+
+            try:
+                with open(file_path, "w", encoding="utf-8", newline="") as fh:
+                    fh.write(new_content)
+            except OSError:
+                continue
+
+            rel_path = os.path.relpath(file_path, source_dir)
+            result.files_fixed.append(
+                DDLTerminatorFix(file=rel_path, statements_fixed=len(insertions))
+            )
+
+    return result
+
+
 # NOTE: An older comment-only ``_strip_sql_comments`` used to live
 # here and silently shadowed the import at the top of the module.
 # Removed: every caller wants both comments AND string literals
