@@ -258,6 +258,8 @@ class BuildManifest:
     role: str = ""
     requires: List[str] = field(default_factory=list)
     trust: Dict[str, object] = field(default_factory=dict)
+    # Pointer to context/ships.actions.json — see #143.
+    actions_ref: str = ""
     discovery: Dict[str, object] = field(default_factory=dict)
     baseline_dir: str = ""
     # Security: explicit target environment lock (GAP-002).
