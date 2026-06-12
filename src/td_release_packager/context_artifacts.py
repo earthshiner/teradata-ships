@@ -28,6 +28,10 @@ from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+from td_release_packager.actions import (
+    ACTIONS_RESULT_FILENAME,
+    ACTIONS_RESULT_REF,
+)
 from td_release_packager.models import BuildConfig, BuildManifest
 from td_release_packager.trust import (
     STATUS_BLOCKED,
@@ -71,6 +75,7 @@ SCHEMA_FILENAMES = {
     PROVENANCE_FILENAME: "ships.provenance.schema.json",
     INTEGRITY_FILENAME: "ships.integrity.schema.json",
     TRUST_RESULT_FILENAME: "ships.trust.schema.json",
+    ACTIONS_RESULT_FILENAME: "ships.actions.schema.json",
 }
 
 DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
@@ -125,6 +130,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "package",
             "governance",
             "trust_ref",
+            "actions_ref",
             "references",
         ],
         "properties": {
@@ -134,6 +140,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "package": {"type": "object"},
             "governance": {"type": "object"},
             "trust_ref": {"type": "string"},
+            "actions_ref": {"type": "string"},
             "references": {"type": "object"},
         },
         "examples": [
@@ -144,6 +151,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
                 "package": {},
                 "governance": {},
                 "trust_ref": "context/ships.trust.json",
+                "actions_ref": "context/ships.actions.json",
                 "references": {},
             }
         ],
@@ -164,6 +172,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "tokens",
             "governance",
             "trust_ref",
+            "actions_ref",
             "evidence",
         ],
         "properties": {
@@ -175,6 +184,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "tokens": {"type": "object"},
             "governance": {"type": "object"},
             "trust_ref": {"type": "string"},
+            "actions_ref": {"type": "string"},
             "evidence": {"type": "object"},
         },
         "examples": [
@@ -187,6 +197,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
                 "tokens": {},
                 "governance": {},
                 "trust_ref": "context/ships.trust.json",
+                "actions_ref": "context/ships.actions.json",
                 "evidence": {},
             }
         ],
@@ -320,6 +331,80 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
                 "schema_version": "1.0",
                 "package_hash": "0" * 64,
                 "files": {"payload/database/DDL/tables/example.tbl": "0" * 64},
+            }
+        ],
+    },
+    "ships.actions.schema.json": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://teradata-ships.local/schemas/ships.actions.schema.json",
+        "title": "SHIPS canonical action controls",
+        "description": "Machine-readable action vocabulary for a package: what an agent may take autonomously, must not take, or must escalate to a human. Derived from ships.trust.json and the package role.",
+        "type": "object",
+        "additionalProperties": True,
+        "required": [
+            "schema_version",
+            "evaluated_at",
+            "deploy_allowed",
+            "dry_run_allowed",
+            "payload_modification_allowed",
+            "allowed_actions",
+            "blocked_actions",
+            "requires_human_approval",
+        ],
+        "properties": {
+            "schema_version": {"type": "string"},
+            "evaluated_at": {"type": "string"},
+            "deploy_allowed": {"type": "boolean"},
+            "dry_run_allowed": {"type": "boolean"},
+            "payload_modification_allowed": {"type": "boolean"},
+            "allowed_actions": {"type": "array", "items": {"type": "string"}},
+            "blocked_actions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["action", "reason"],
+                    "properties": {
+                        "action": {"type": "string"},
+                        "reason": {"type": "string"},
+                        "evidence_ref": {"type": "string"},
+                    },
+                },
+            },
+            "requires_human_approval": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["action", "reason"],
+                    "properties": {
+                        "action": {"type": "string"},
+                        "reason": {"type": "string"},
+                        "evidence_ref": {"type": "string"},
+                    },
+                },
+            },
+        },
+        "examples": [
+            {
+                "schema_version": "1.0",
+                "evaluated_at": "2026-05-19T00:00:00+00:00",
+                "deploy_allowed": True,
+                "dry_run_allowed": True,
+                "payload_modification_allowed": False,
+                "allowed_actions": [
+                    "deploy",
+                    "dry_run",
+                    "verify_integrity",
+                    "rollback",
+                    "forward_to_human",
+                ],
+                "blocked_actions": [
+                    {
+                        "action": "modify_payload",
+                        "reason": "not_environment_prereq_package",
+                        "evidence_ref": "context/ships.trust.json",
+                    }
+                ],
+                "requires_human_approval": [],
             }
         ],
     },
@@ -703,6 +788,12 @@ def _entrypoints() -> Dict[str, Dict[str, Any]]:
             "required": True,
             "audience": ["agent", "ci_cd", "dba", "governance"],
         },
+        "actions": {
+            "path": _context_path(ACTIONS_RESULT_FILENAME),
+            "description": "Canonical machine-readable action controls for this package: which actions an agent may take autonomously, which are blocked, and which require human approval. Derived from trust + role.",
+            "required": True,
+            "audience": ["agent", "ci_cd", "dba", "governance"],
+        },
         "manifest": {
             "path": _context_path(MANIFEST_FILENAME),
             "description": "Compact, agent-safe package inventory describing included artefacts, object counts, token usage, dependency contract, governance settings, and deployment-relevant contents.",
@@ -981,6 +1072,7 @@ def _build_index_document(
             "current_state": _package_state(trust),
         },
         "trust_ref": TRUST_RESULT_REF,
+        "actions_ref": ACTIONS_RESULT_REF,
         "entrypoints": _entrypoints(),
         "recommended_read_order": _recommended_read_order(),
         "human_actions_required": (
@@ -1039,6 +1131,7 @@ def _build_context_document(
         ],
         "governance": _governance(manifest),
         "trust_ref": TRUST_RESULT_REF,
+        "actions_ref": ACTIONS_RESULT_REF,
         "agent_policy": _agent_policy(manifest, trust),
         "context_budget": {
             "preferred_agent_prompting": "Load context/ships.index.json first, then open referenced evidence only when needed.",
@@ -1089,6 +1182,7 @@ def _build_agent_manifest_document(
         "warnings": manifest.get("warnings") or [],
         "governance": _governance(manifest),
         "trust_ref": TRUST_RESULT_REF,
+        "actions_ref": ACTIONS_RESULT_REF,
         "agent_policy": _agent_policy(manifest, trust),
         "evidence": _evidence_files(),
     }
@@ -1144,6 +1238,7 @@ def _build_handoff_document(
         "to_actor": "human-operator-or-deployment-agent",
         "current_state": _package_state(trust),
         "trust_ref": TRUST_RESULT_REF,
+        "actions_ref": ACTIONS_RESULT_REF,
         "package": {
             "name": manifest.get("package_name"),
             "filename": manifest.get("package_filename"),

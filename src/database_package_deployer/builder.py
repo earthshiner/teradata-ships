@@ -803,6 +803,21 @@ def _build_package_impl(
     write_trust_result(pkg_dir, trust_report)
     manifest.trust = {"trust_ref": TRUST_RESULT_REF}
 
+    # -- Phase 8b.2: Stamp action controls (issue #143) --
+    from td_release_packager.actions import (
+        ACTIONS_RESULT_REF,
+        compute_actions_report,
+        write_actions_result,
+    )
+
+    actions_report = compute_actions_report(
+        trust=trust_report.to_dict(),
+        role=manifest.role or "",
+        has_dba_placeholders=has_dba_placeholders(pkg_dir),
+    )
+    write_actions_result(pkg_dir, actions_report)
+    manifest.actions_ref = ACTIONS_RESULT_REF
+
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest.__dict__, f, indent=2, ensure_ascii=False)
 
@@ -1135,6 +1150,20 @@ def _create_environment_prereqs_package_if_needed(
 
     write_trust_result(env_pkg_dir, env_trust_report)
     env_manifest.trust = {"trust_ref": TRUST_RESULT_REF}
+
+    from td_release_packager.actions import (
+        ACTIONS_RESULT_REF,
+        compute_actions_report,
+        write_actions_result,
+    )
+
+    env_actions_report = compute_actions_report(
+        trust=env_trust_report.to_dict(),
+        role=env_manifest.role or "",
+        has_dba_placeholders=has_dba_placeholders(env_pkg_dir),
+    )
+    write_actions_result(env_pkg_dir, env_actions_report)
+    env_manifest.actions_ref = ACTIONS_RESULT_REF
 
     manifest_path = _context_file(env_pkg_dir, "ships.build.json")
     with open(manifest_path, "w", encoding="utf-8") as f:
@@ -1720,6 +1749,20 @@ def _refresh_environment_prereq_trust(pkg_dir: str, manifest: BuildManifest) -> 
 
     write_trust_result(pkg_dir, report)
     manifest.trust = {"trust_ref": TRUST_RESULT_REF}
+
+    from td_release_packager.actions import (
+        ACTIONS_RESULT_REF,
+        compute_actions_report,
+        write_actions_result,
+    )
+
+    refreshed_actions = compute_actions_report(
+        trust=report.to_dict(),
+        role=manifest.role or "",
+        has_dba_placeholders=has_dba_placeholders(pkg_dir),
+    )
+    write_actions_result(pkg_dir, refreshed_actions)
+    manifest.actions_ref = ACTIONS_RESULT_REF
 
 
 def _collect_release_group_archives(
