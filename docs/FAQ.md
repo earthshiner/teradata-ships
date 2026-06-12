@@ -135,7 +135,27 @@ python -m td_release_packager package \
 
 ### I need to retokenise DDL that's already deployed on another system. How?
 
-Common scenario: you've extracted DDL from a live Teradata system where the project prefix is hardcoded (`CallCentre_DOM_STD_T`, `CallCentre_MEM_BUS_V`, etc.) and you want to redeploy it to a different system or project with a `{{SHIPS_PROJECT}}` token in place of the prefix.
+#### Why tokenise at all? Why de-tokenise later?
+
+A SHIPS package is meant to be **one artefact that can deploy anywhere** — DEV, TEST, PROD, sandbox, a fresh customer tenant. To do that, every part of the DDL that varies between targets (project prefix, environment tier, ownership database) is replaced with a `{{TOKEN}}` placeholder during harvest. The packaged payload is then **environment-independent**: it has no idea where it will eventually run.
+
+At deploy time, the deployer reads the target's `config/env/<ENV>.conf` (e.g. `PROD.conf` with `SHIPS_PROJECT=callcentre_prod`) and substitutes each `{{TOKEN}}` with that environment's resolved value. Same payload bytes; concrete DDL on the wire. This is the "tokenise once, deploy many" cycle:
+
+```
+   Source DDL on system A              Package payload (env-independent)         Deployed DDL on system B
+   ───────────────────────             ───────────────────────────────────       ────────────────────────
+   CallCentre_DOM_STD_T   ──tokenise─► {{SHIPS_PROJECT}}_DOM_STD_T  ──deploy─►  callcentre_prod_DOM_STD_T
+                          (harvest)                                  (token
+                                                                     substitution
+                                                                     against
+                                                                     PROD.conf)
+```
+
+You **never** want a package to carry the source system's literal names baked in — that's the failure mode this avoids. Tokenisation at harvest is the moment the payload becomes portable; token substitution at deploy is the moment it gets re-bound to a specific target.
+
+#### When you need the regex form
+
+The common scenario: you've extracted DDL from a live Teradata system where the project prefix is hardcoded (`CallCentre_DOM_STD_T`, `CallCentre_MEM_BUS_V`, etc.) and you want a portable payload that can later be deployed wherever your env config says. The literal `s/.../.../g` form `import-legacy` generates is enough for `$VAR → {{VAR}}` rewrites, but it can't handle "match anything that looks like `<Project>_<DOMAIN>_<TIER>_<KIND>` and keep groups 2/3/4 while replacing group 1 with `{{SHIPS_PROJECT}}`". That's what the `regex::` form is for.
 
 Use a **regex migration rule** in `config/legacy_migration.sed`:
 
@@ -144,20 +164,25 @@ Use a **regex migration rule** in `config/legacy_migration.sed`:
 regex::(?i)(\w+)_(\w{3})_(\w{3})_(V|T):={{SHIPS_PROJECT}}_$2_$3_$4
 ```
 
-What this does:
+What this does at harvest time:
 
 - **Match**: any name shaped `<Project>_<DOMAIN>_<TIER>_<KIND>` where `KIND` is `V` (view) or `T` (table), case-insensitive.
 - **Replace**: discard the captured project prefix; substitute `{{SHIPS_PROJECT}}` and keep groups 2/3/4 verbatim.
-- **Hit**: `CallCentre_DOM_STD_T` → `{{SHIPS_PROJECT}}_DOM_STD_T`.
+- **Hit**: `CallCentre_DOM_STD_T` → `{{SHIPS_PROJECT}}_DOM_STD_T` in the packaged payload.
+
+What happens at deploy time, automatically:
+
+- The deployer reads the target env config (e.g. `PROD.conf` defines `SHIPS_PROJECT=callcentre_prod`).
+- Every `{{SHIPS_PROJECT}}_DOM_STD_T` in the payload becomes `callcentre_prod_DOM_STD_T` — no further regex work needed.
 
 The file accepts both rule kinds side-by-side:
 
 ```
-# Literal substitutions (these are what `import-legacy` generates):
+# Literal substitutions (what `import-legacy` generates for $VAR / &&VAR&& migration):
 s/$DB_PROD/{{DB_PROD}}/g
 s/&&CORE&&/{{CORE}}/g
 
-# Regex substitutions (hand-authored — issue #259):
+# Regex substitutions (hand-authored — when you need capture groups):
 regex::(?i)(\w+)_(\w{3})_(\w{3})_(V|T):={{SHIPS_PROJECT}}_$2_$3_$4
 ```
 
