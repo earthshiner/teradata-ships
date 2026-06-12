@@ -39,6 +39,7 @@ def test_write_context_artifacts_emits_agent_context_contract(tmp_path):
         "prompts/verification_agent.prompt.md",
         "schemas/ships.actions.schema.json",
         "schemas/ships.build.schema.json",
+        "schemas/ships.capabilities.schema.json",
         "schemas/ships.context.schema.json",
         "schemas/ships.handoff.schema.json",
         "schemas/ships.index.schema.json",

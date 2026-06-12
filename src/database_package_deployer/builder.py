@@ -818,6 +818,24 @@ def _build_package_impl(
     write_actions_result(pkg_dir, actions_report)
     manifest.actions_ref = ACTIONS_RESULT_REF
 
+    # -- Phase 8b.3: Stamp capability flags (issue #149) --
+    from td_release_packager.capabilities import (
+        CAPABILITIES_RESULT_REF,
+        compute_capabilities_report,
+        write_capabilities_result,
+    )
+
+    capabilities_report = compute_capabilities_report(
+        {
+            "require_change_ref": manifest.require_change_ref,
+            "require_signature": manifest.require_signature,
+            "require_asymmetric_signature": manifest.require_asymmetric_signature,
+            "require_approvals": manifest.require_approvals,
+        }
+    )
+    write_capabilities_result(pkg_dir, capabilities_report)
+    manifest.capabilities_ref = CAPABILITIES_RESULT_REF
+
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest.__dict__, f, indent=2, ensure_ascii=False)
 
@@ -1164,6 +1182,23 @@ def _create_environment_prereqs_package_if_needed(
     )
     write_actions_result(env_pkg_dir, env_actions_report)
     env_manifest.actions_ref = ACTIONS_RESULT_REF
+
+    from td_release_packager.capabilities import (
+        CAPABILITIES_RESULT_REF,
+        compute_capabilities_report,
+        write_capabilities_result,
+    )
+
+    env_capabilities = compute_capabilities_report(
+        {
+            "require_change_ref": env_manifest.require_change_ref,
+            "require_signature": env_manifest.require_signature,
+            "require_asymmetric_signature": env_manifest.require_asymmetric_signature,
+            "require_approvals": env_manifest.require_approvals,
+        }
+    )
+    write_capabilities_result(env_pkg_dir, env_capabilities)
+    env_manifest.capabilities_ref = CAPABILITIES_RESULT_REF
 
     manifest_path = _context_file(env_pkg_dir, "ships.build.json")
     with open(manifest_path, "w", encoding="utf-8") as f:
@@ -1763,6 +1798,23 @@ def _refresh_environment_prereq_trust(pkg_dir: str, manifest: BuildManifest) -> 
     )
     write_actions_result(pkg_dir, refreshed_actions)
     manifest.actions_ref = ACTIONS_RESULT_REF
+
+    from td_release_packager.capabilities import (
+        CAPABILITIES_RESULT_REF,
+        compute_capabilities_report,
+        write_capabilities_result,
+    )
+
+    refreshed_capabilities = compute_capabilities_report(
+        {
+            "require_change_ref": manifest.require_change_ref,
+            "require_signature": manifest.require_signature,
+            "require_asymmetric_signature": manifest.require_asymmetric_signature,
+            "require_approvals": manifest.require_approvals,
+        }
+    )
+    write_capabilities_result(pkg_dir, refreshed_capabilities)
+    manifest.capabilities_ref = CAPABILITIES_RESULT_REF
 
 
 def _collect_release_group_archives(
