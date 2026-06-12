@@ -120,6 +120,11 @@ ROOT_PARENT=DEMO_ROOT_DB
 
 Existing `FROM SomeParent` clauses are preserved.
 
+The same option is also available in normal SHIPS `package` and `process`
+runs. Demo mode injects `{{ROOT_PARENT}}` because it owns the generated env
+config. Normal `package` and `process` runs inject the concrete CLI value into
+the staged payload so user-owned env config files are not edited.
+
 ## Prepare Only
 
 Use `--prepare-only` when you want to inspect the generated SHIPS project before
@@ -178,7 +183,8 @@ written.
 default is `.ships-demo`.
 
 `--root-parent NAME` injects an explicit parent for parentless `CREATE DATABASE`
-and `CREATE USER` statements.
+and `CREATE USER` statements. It is available on `demo`, `package`, and
+`process`.
 
 `--prepare-only` skips package creation.
 

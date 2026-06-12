@@ -569,6 +569,7 @@ def _make_process_args(project: Path, source: Path = None, **overrides) -> Names
         inspect_config=None,
         env=None,
         env_config=None,
+        root_parent=None,
         name=None,
         output=None,
         format="zip",
@@ -632,6 +633,26 @@ class TestProcessMetaVerb:
         stage_names = [s["stage"] for s in process_run["stages"]]
         assert "harvest" not in stage_names
         assert "inspect" in stage_names
+
+    def test_process_root_parent_applies_before_inspect(self, tmp_path):
+        """--root-parent makes parentless prereqs explicit in process payload."""
+        project = _make_project(tmp_path)
+        source = tmp_path / "src"
+        source.mkdir()
+        (source / "00-setup.sql").write_text(
+            "CREATE DATABASE Demo_DB AS PERMANENT = 1000000;",
+            encoding="utf-8",
+        )
+
+        args = _make_process_args(project, source, root_parent="DEMO_ROOT")
+        _run(_cmd_process, args)
+
+        prereq_files = list(
+            (project / "payload" / "database" / "pre-requisites").rglob("*.db")
+        )
+        assert len(prereq_files) == 1
+        content = prereq_files[0].read_text(encoding="utf-8")
+        assert "CREATE DATABASE Demo_DB FROM DEMO_ROOT AS" in content
 
     def test_process_strict_aborts_on_stage_error(self, tmp_path):
         """--strict mode: cyclic views in inspect/analyse cause sys.exit(1)."""

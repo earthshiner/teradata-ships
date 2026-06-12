@@ -103,6 +103,10 @@ preserved.
 For a team-friendly walkthrough, see
 [README_DEMO_PACKAGING.md](README_DEMO_PACKAGING.md).
 
+The broader `package` and `process` commands also support `--root-parent`.
+Those commands inject the concrete parent value into parentless prerequisite
+payload before packaging; `process` applies it before inspect and analyse.
+
 
 ## Release group output layout
 
