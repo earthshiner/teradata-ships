@@ -63,13 +63,7 @@ def _build_json(pkg_name="OMR", build_no="0042", env="PRD", label="READY") -> di
         "timestamp": "2026-05-10T12:00:00+00:00",
         "author": "tester",
         "description": "test build",
-        "trust": {
-            "label": label,
-            "signals": {
-                "inspect_lint": {"status": "pass", "detail": ""},
-                "inspect_token_format": {"status": "pass", "detail": ""},
-            },
-        },
+        "trust": {"trust_ref": "context/ships.trust.json"},
         "file_count": 10,
         "requires": [],
         "source_commit": "abc1234",
@@ -77,12 +71,45 @@ def _build_json(pkg_name="OMR", build_no="0042", env="PRD", label="READY") -> di
     }
 
 
+def _trust_json(status="READY") -> dict:
+    """Canonical ships.trust.json document for tests."""
+    return {
+        "schema_version": "1.0",
+        "status": status,
+        "deploy_allowed": status != "BLOCKED",
+        "override_allowed": status == "READY_WITH_CAVEATS",
+        "evaluated_at": "2026-05-10T12:00:00+00:00",
+        "evidence_paths": [],
+        "blocking_signals": [],
+        "warning_signals": [],
+        "signals": {
+            "inspect_lint": {
+                "status": "pass",
+                "message": "",
+                "issues": [],
+                "evidence_paths": [],
+            },
+            "inspect_token_format": {
+                "status": "pass",
+                "message": "",
+                "issues": [],
+                "evidence_paths": [],
+            },
+        },
+    }
+
+
 def _make_package_zip(tmp_path: Path, filename: str, **build_overrides) -> str:
-    """Write a realistic package archive with context/ships.build.json."""
-    bd = _build_json(**build_overrides)
-    members = {f"{filename.split('.')[0]}/context/ships.build.json": json.dumps(bd)}
+    """Write a realistic package archive with build + canonical trust JSONs."""
+    stem = filename.split(".")[0]
+    bd = _build_json(**{k: v for k, v in build_overrides.items() if k != "with_report"})
+    td = _trust_json(status=build_overrides.get("label", "READY"))
+    members = {
+        f"{stem}/context/ships.build.json": json.dumps(bd),
+        f"{stem}/context/ships.trust.json": json.dumps(td),
+    }
     if build_overrides.get("with_report"):
-        members[f"{filename.split('.')[0]}/package_report.html"] = "<html></html>"
+        members[f"{stem}/package_report.html"] = "<html></html>"
     return _make_zip(tmp_path, filename, members)
 
 
@@ -92,8 +119,13 @@ def _make_project(tmp_path: Path, archives: list[tuple[str, dict]]) -> Path:
     releases = project / "releases"
     releases.mkdir(parents=True)
     for filename, build_kwargs in archives:
+        stem = Path(filename).stem
         bd = _build_json(**build_kwargs)
-        members = {f"{Path(filename).stem}/context/ships.build.json": json.dumps(bd)}
+        td = _trust_json(status=build_kwargs.get("label", "READY"))
+        members = {
+            f"{stem}/context/ships.build.json": json.dumps(bd),
+            f"{stem}/context/ships.trust.json": json.dumps(td),
+        }
         archive_path = releases / filename
         archive_path.parent.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(archive_path, "w") as zf:

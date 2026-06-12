@@ -29,6 +29,13 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from td_release_packager.models import BuildConfig, BuildManifest
+from td_release_packager.trust import (
+    STATUS_BLOCKED,
+    STATUS_CAVEATS,
+    TRUST_RESULT_FILENAME,
+    TRUST_RESULT_REF,
+    load_trust_result,
+)
 
 CONTEXT_SCHEMA_VERSION = "1.0"
 INDEX_SCHEMA_VERSION = "1.0"
@@ -63,6 +70,7 @@ SCHEMA_FILENAMES = {
     BUILD_FILENAME: "ships.build.schema.json",
     PROVENANCE_FILENAME: "ships.provenance.schema.json",
     INTEGRITY_FILENAME: "ships.integrity.schema.json",
+    TRUST_RESULT_FILENAME: "ships.trust.schema.json",
 }
 
 DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
@@ -116,7 +124,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "current_state",
             "package",
             "governance",
-            "trust",
+            "trust_ref",
             "references",
         ],
         "properties": {
@@ -125,7 +133,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "current_state": {"type": "string"},
             "package": {"type": "object"},
             "governance": {"type": "object"},
-            "trust": {"type": "object"},
+            "trust_ref": {"type": "string"},
             "references": {"type": "object"},
         },
         "examples": [
@@ -135,7 +143,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
                 "current_state": "package-built-awaiting-deployment",
                 "package": {},
                 "governance": {},
-                "trust": {},
+                "trust_ref": "context/ships.trust.json",
                 "references": {},
             }
         ],
@@ -155,7 +163,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "dependency_contract",
             "tokens",
             "governance",
-            "trust",
+            "trust_ref",
             "evidence",
         ],
         "properties": {
@@ -166,7 +174,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "dependency_contract": {"type": "object"},
             "tokens": {"type": "object"},
             "governance": {"type": "object"},
-            "trust": {"type": "object"},
+            "trust_ref": {"type": "string"},
             "evidence": {"type": "object"},
         },
         "examples": [
@@ -178,7 +186,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
                 "dependency_contract": {},
                 "tokens": {},
                 "governance": {},
-                "trust": {},
+                "trust_ref": "context/ships.trust.json",
                 "evidence": {},
             }
         ],
@@ -251,7 +259,12 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "package_filename": {"type": "string"},
             "timestamp": {"type": "string"},
             "target_env": {"type": ["string", "null"]},
-            "trust": {"type": "object"},
+            "trust": {
+                "type": "object",
+                "description": "Pointer to canonical trust result.",
+                "required": ["trust_ref"],
+                "properties": {"trust_ref": {"type": "string"}},
+            },
         },
         "examples": [
             {
@@ -262,7 +275,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
                 "package_filename": "DEV_customer_risk_BUILD_0001.zip",
                 "timestamp": "2026-05-19T00:00:00+00:00",
                 "target_env": "DEV",
-                "trust": {"label": "READY"},
+                "trust": {"trust_ref": "context/ships.trust.json"},
             }
         ],
     },
@@ -307,6 +320,53 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
                 "schema_version": "1.0",
                 "package_hash": "0" * 64,
                 "files": {"payload/database/DDL/tables/example.tbl": "0" * 64},
+            }
+        ],
+    },
+    "ships.trust.schema.json": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://teradata-ships.local/schemas/ships.trust.schema.json",
+        "title": "SHIPS canonical trust result",
+        "description": "Machine-readable trust verdict for a package. The single source of truth referenced by ships.build.json, ships.context.json, ships.manifest.json, ships.handoff.json, and ships.index.json.",
+        "type": "object",
+        "additionalProperties": True,
+        "required": [
+            "schema_version",
+            "status",
+            "deploy_allowed",
+            "override_allowed",
+            "evaluated_at",
+            "evidence_paths",
+            "blocking_signals",
+            "warning_signals",
+            "signals",
+        ],
+        "properties": {
+            "schema_version": {"type": "string"},
+            "status": {"enum": ["READY", "READY_WITH_CAVEATS", "BLOCKED"]},
+            "deploy_allowed": {"type": "boolean"},
+            "override_allowed": {"type": "boolean"},
+            "evaluated_at": {"type": "string"},
+            "evidence_paths": {"type": "array", "items": {"type": "string"}},
+            "blocking_signals": {"type": "array", "items": {"type": "string"}},
+            "warning_signals": {"type": "array", "items": {"type": "string"}},
+            "signals": {"type": "object"},
+        },
+        "examples": [
+            {
+                "schema_version": "1.0",
+                "status": "READY",
+                "deploy_allowed": True,
+                "override_allowed": False,
+                "evaluated_at": "2026-05-19T00:00:00+00:00",
+                "evidence_paths": [
+                    "ships.decisions.json",
+                    "context/ships.provenance.json",
+                    "context/ships.build.json",
+                ],
+                "blocking_signals": [],
+                "warning_signals": [],
+                "signals": {},
             }
         ],
     },
@@ -484,6 +544,7 @@ def write_context_artifacts(
     manifest_dict = _to_dict(manifest)
     config_dict = _to_dict(config) if config is not None else {}
     context_id = _context_id(manifest_dict)
+    trust_dict = _resolve_trust(manifest_dict, pkg_dir)
 
     artefacts = {
         CONTEXT_FILENAME: _build_context_document(
@@ -491,21 +552,25 @@ def write_context_artifacts(
             generated_at=generated_at,
             manifest=manifest_dict,
             config=config_dict,
+            trust=trust_dict,
         ),
         MANIFEST_FILENAME: _build_agent_manifest_document(
             context_id=context_id,
             generated_at=generated_at,
             manifest=manifest_dict,
+            trust=trust_dict,
         ),
         HANDOFF_FILENAME: _build_handoff_document(
             context_id=context_id,
             generated_at=generated_at,
             manifest=manifest_dict,
+            trust=trust_dict,
         ),
         INDEX_FILENAME: _build_index_document(
             context_id=context_id,
             generated_at=generated_at,
             manifest=manifest_dict,
+            trust=trust_dict,
         ),
     }
 
@@ -561,13 +626,29 @@ def _context_id(manifest: Dict[str, Any]) -> str:
     return f"ships-context-{digest}"
 
 
-def _package_state(manifest: Dict[str, Any]) -> str:
-    """Return the workflow state implied by package manifest metadata."""
-    trust = manifest.get("trust") or {}
-    label = str(trust.get("label", "")).upper()
-    if label == "BLOCKED":
+def _resolve_trust(manifest: Dict[str, Any], pkg_dir: Optional[str]) -> Dict[str, Any]:
+    """Return the canonical trust document.
+
+    The manifest now carries only a pointer (``{"trust_ref": ...}``);
+    the full document lives in ``context/ships.trust.json``. Falls back
+    to an empty dict when neither is available.
+    """
+    if pkg_dir:
+        loaded = load_trust_result(pkg_dir)
+        if loaded:
+            return loaded
+    embedded = manifest.get("trust")
+    if isinstance(embedded, dict):
+        return embedded
+    return {}
+
+
+def _package_state(trust: Dict[str, Any]) -> str:
+    """Return the workflow state implied by the resolved trust document."""
+    status = str(trust.get("status", "")).upper()
+    if status == STATUS_BLOCKED:
         return "package-built-blocked"
-    if label == "READY-WITH-CAVEATS":
+    if status == STATUS_CAVEATS:
         return "package-built-ready-with-caveats"
     return "package-built-awaiting-deployment"
 
@@ -612,9 +693,15 @@ def _entrypoints() -> Dict[str, Dict[str, Any]]:
         },
         "build": {
             "path": _context_path(BUILD_FILENAME),
-            "description": "Authoritative technical build manifest containing build identity, package version, target environment, token summary, trust label, policy flags, and build-time metadata.",
+            "description": "Authoritative technical build manifest containing build identity, package version, target environment, token summary, policy flags, and build-time metadata.",
             "required": True,
             "audience": ["agent", "human", "ci_cd", "dba"],
+        },
+        "trust": {
+            "path": _context_path(TRUST_RESULT_FILENAME),
+            "description": "Canonical machine-readable trust result for this package: status (READY / READY_WITH_CAVEATS / BLOCKED), deploy_allowed flag, blocking/warning signals, and evidence pointers.",
+            "required": True,
+            "audience": ["agent", "ci_cd", "dba", "governance"],
         },
         "manifest": {
             "path": _context_path(MANIFEST_FILENAME),
@@ -767,15 +854,14 @@ def _environment_prereq_human_action(manifest: Dict[str, Any]) -> Dict[str, Any]
     }
 
 
-def _agent_policy(manifest: Dict[str, Any]) -> Dict[str, Any]:
+def _agent_policy(manifest: Dict[str, Any], trust: Dict[str, Any]) -> Dict[str, Any]:
     """Return explicit do-not-guess safety controls for agents.
 
     The policy is intentionally conservative. It tells a downstream agent what
     it must not infer and which package states require a hard stop or human
     approval instead of autonomous action.
     """
-    trust = manifest.get("trust") or {}
-    trust_label = str(trust.get("label", "")).upper()
+    trust_status = str(trust.get("status", "")).upper()
     governance = _governance(manifest)
 
     ask_for_human_approval_when = [
@@ -799,7 +885,7 @@ def _agent_policy(manifest: Dict[str, Any]) -> Dict[str, Any]:
         "do_not_modify_payload": True,
         "do_not_deploy_if_blocked": True,
         "do_not_ignore_failed_integrity": True,
-        "trust_label_at_build": trust_label or "UNKNOWN",
+        "trust_status_at_build": trust_status or "UNKNOWN",
         "payload_modification_allowed": False,
         "deployment_allowed_when_trust_blocked": False,
         "ask_for_human_approval_when": ask_for_human_approval_when,
@@ -872,6 +958,7 @@ def _build_index_document(
     context_id: str,
     generated_at: str,
     manifest: Dict[str, Any],
+    trust: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Build ships.index.json, the canonical package read-first contract."""
     return {
@@ -891,8 +978,9 @@ def _build_index_document(
             "role": manifest.get("role") or "single",
             "release_group": manifest.get("release_group") or "",
             "requires": manifest.get("requires") or [],
-            "current_state": _package_state(manifest),
+            "current_state": _package_state(trust),
         },
+        "trust_ref": TRUST_RESULT_REF,
         "entrypoints": _entrypoints(),
         "recommended_read_order": _recommended_read_order(),
         "human_actions_required": (
@@ -900,7 +988,7 @@ def _build_index_document(
             if _is_environment_prereq(manifest)
             else []
         ),
-        "agent_policy": _agent_policy(manifest),
+        "agent_policy": _agent_policy(manifest, trust),
         "agent_instructions": _agent_instructions(),
     }
 
@@ -911,6 +999,7 @@ def _build_context_document(
     generated_at: str,
     manifest: Dict[str, Any],
     config: Dict[str, Any],
+    trust: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Build ships.context.json."""
     return {
@@ -921,7 +1010,7 @@ def _build_context_document(
         "purpose": "Durable SHIPS workflow context for humans, CI/CD, MCP tools, and autonomous agents.",
         "workflow": "package-build",
         "stage": "package",
-        "current_state": _package_state(manifest),
+        "current_state": _package_state(trust),
         "objective": "Deploy a trusted, self-contained Teradata package without relying on prior chat or agent memory.",
         "package": {
             "name": manifest.get("package_name"),
@@ -943,13 +1032,14 @@ def _build_context_document(
             "Preserve Teradata SQL syntax and deployment order.",
             "Do not change business logic during package handoff or deployment.",
             "Use context/ships.build.json as the authoritative technical build manifest.",
+            f"Use {TRUST_RESULT_REF} as the authoritative trust result.",
             "Use context/ships.manifest.json for compact agent-safe inventory and policy context.",
             "Use context/ships.provenance.json for file-level source-to-package traceability.",
             "Do not rely on conversational memory between agents; carry this package context forward.",
         ],
         "governance": _governance(manifest),
-        "trust": manifest.get("trust") or {},
-        "agent_policy": _agent_policy(manifest),
+        "trust_ref": TRUST_RESULT_REF,
+        "agent_policy": _agent_policy(manifest, trust),
         "context_budget": {
             "preferred_agent_prompting": "Load context/ships.index.json first, then open referenced evidence only when needed.",
             "detailed_evidence_is_referenced_not_repeated": True,
@@ -964,6 +1054,7 @@ def _build_agent_manifest_document(
     context_id: str,
     generated_at: str,
     manifest: Dict[str, Any],
+    trust: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Build ships.manifest.json."""
     return {
@@ -997,8 +1088,8 @@ def _build_agent_manifest_document(
         "tokens": _safe_token_summary(manifest),
         "warnings": manifest.get("warnings") or [],
         "governance": _governance(manifest),
-        "trust": manifest.get("trust") or {},
-        "agent_policy": _agent_policy(manifest),
+        "trust_ref": TRUST_RESULT_REF,
+        "agent_policy": _agent_policy(manifest, trust),
         "evidence": _evidence_files(),
     }
 
@@ -1008,6 +1099,7 @@ def _build_handoff_document(
     context_id: str,
     generated_at: str,
     manifest: Dict[str, Any],
+    trust: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Build ships.handoff.json."""
     governance = _governance(manifest)
@@ -1050,7 +1142,8 @@ def _build_handoff_document(
         "handoff_type": "package-to-deployment",
         "from_actor": "ships-package-builder",
         "to_actor": "human-operator-or-deployment-agent",
-        "current_state": _package_state(manifest),
+        "current_state": _package_state(trust),
+        "trust_ref": TRUST_RESULT_REF,
         "package": {
             "name": manifest.get("package_name"),
             "filename": manifest.get("package_filename"),
@@ -1074,7 +1167,7 @@ def _build_handoff_document(
             ),
         },
         "blocking_conditions": [
-            "Trust label is BLOCKED.",
+            "Trust status is BLOCKED.",
             "Package integrity or signature verification fails.",
             "Target environment does not match target_env.",
             "Required approval, change reference, or TLS policy is not satisfied.",
@@ -1087,6 +1180,6 @@ def _build_handoff_document(
             "post-install validation outputs",
             "any drift, skipped, failed, or waived object details",
         ],
-        "agent_policy": _agent_policy(manifest),
+        "agent_policy": _agent_policy(manifest, trust),
         "references": _evidence_files(),
     }

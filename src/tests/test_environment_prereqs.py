@@ -33,6 +33,12 @@ def _read_zip_member(archive_path: str, suffix: str) -> str:
     raise FileNotFoundError(suffix)
 
 
+def _trust_status_from_archive(archive_path: str) -> str:
+    """Read the canonical trust status from inside a package archive."""
+    trust = json.loads(_read_zip_member(archive_path, "context/ships.trust.json"))
+    return trust["status"]
+
+
 def test_analyse_environment_parent_requirements_detects_external_parent(tmp_path):
     """A parent not created in-package and not DBC becomes a requirement."""
     pkg = tmp_path / "pkg"
@@ -114,7 +120,8 @@ def test_build_package_emits_environment_prereqs_zip_and_chains_requires(
     )
     assert env_build["role"] == "environment_prereqs"
     assert env_build["release_group"] == release_group
-    assert env_build["trust"]["label"] == "BLOCKED"
+    assert env_build["trust"] == {"trust_ref": "context/ships.trust.json"}
+    assert _trust_status_from_archive(str(env_archive)) == "BLOCKED"
 
     requirements = json.loads(
         _read_zip_member(
@@ -291,7 +298,7 @@ def test_repackage_unblocks_reviewed_environment_payload(tmp_project, tmp_path):
     archive_path, manifest = repackage_package_dir(str(env_pkg_dir), strict=True)
 
     assert Path(archive_path).is_file()
-    assert manifest.trust["label"] == "READY_WITH_CAVEATS"
+    assert _trust_status_from_archive(archive_path) == "READY_WITH_CAVEATS"
     rebuilt = _read_zip_member(
         archive_path, "payload/01_pre_requisites/databases/GCFR_MAIN.db"
     )
@@ -345,7 +352,7 @@ def test_repackage_accepts_payload_subdirectory(tmp_project, tmp_path):
     archive_path, manifest = repackage_package_dir(str(payload_subdir), strict=True)
 
     assert Path(archive_path).is_file()
-    assert manifest.trust["label"] == "READY_WITH_CAVEATS"
+    assert _trust_status_from_archive(archive_path) == "READY_WITH_CAVEATS"
     assert Path(archive_path).parent == env_pkg_dir.parent
 
 
@@ -394,11 +401,11 @@ def test_repackage_from_ships_work_updates_release_group_archive(tmp_project, tm
     archive_path, manifest = repackage_package_dir(str(env_pkg_dir), strict=True)
 
     assert Path(archive_path) == env_archive
-    assert manifest.trust["label"] == "READY_WITH_CAVEATS"
+    assert _trust_status_from_archive(str(env_archive)) == "READY_WITH_CAVEATS"
     assert not (work_dir / env_archive.name).exists()
 
     rebuilt = _read_zip_member(str(env_archive), "context/ships.build.json")
-    assert json.loads(rebuilt)["trust"]["label"] == "READY_WITH_CAVEATS"
+    assert json.loads(rebuilt)["trust"] == {"trust_ref": "context/ships.trust.json"}
 
 
 def test_environment_prereqs_zip_contains_dba_instructions(tmp_project, tmp_path):

@@ -465,29 +465,58 @@ class TestPackageTrustSection:
 
     def _ready_trust(self):
         return {
-            "label": "READY",
+            "status": "READY",
             "signals": {
-                "inspect_lint": {"status": "pass", "message": "No lint violations found"},
-                "inspect_token_format": {"status": "pass", "message": "No malformed token markers found"},
-                "inspect_grants": {"status": "pass", "message": "Grant validation clean"},
-                "provenance_complete": {"status": "pass", "message": "context/ships.provenance.json present"},
-                "build_reproducible": {"status": "pass", "message": "Clean working tree"},
+                "inspect_lint": {
+                    "status": "pass",
+                    "message": "No lint violations found",
+                },
+                "inspect_token_format": {
+                    "status": "pass",
+                    "message": "No malformed token markers found",
+                },
+                "inspect_grants": {
+                    "status": "pass",
+                    "message": "Grant validation clean",
+                },
+                "provenance_complete": {
+                    "status": "pass",
+                    "message": "context/ships.provenance.json present",
+                },
+                "build_reproducible": {
+                    "status": "pass",
+                    "message": "Clean working tree",
+                },
             },
         }
 
     def _blocked_trust(self):
         return {
-            "label": "BLOCKED",
+            "status": "BLOCKED",
             "signals": {
                 "inspect_lint": {
                     "status": "fail",
                     "message": "Coding Discipline lint violations: 2 error(s)",
-                    "issues": ["payload/03_ddl/tables/DB.T.tbl:1: [db_qualifier] Missing database qualifier"],
+                    "issues": [
+                        "payload/03_ddl/tables/DB.T.tbl:1: [db_qualifier] Missing database qualifier"
+                    ],
                 },
-                "inspect_token_format": {"status": "pass", "message": "No malformed token markers found"},
-                "inspect_grants": {"status": "pass", "message": "Grant validation clean"},
-                "provenance_complete": {"status": "pass", "message": "context/ships.provenance.json present"},
-                "build_reproducible": {"status": "warn", "message": "Built with --allow-dirty"},
+                "inspect_token_format": {
+                    "status": "pass",
+                    "message": "No malformed token markers found",
+                },
+                "inspect_grants": {
+                    "status": "pass",
+                    "message": "Grant validation clean",
+                },
+                "provenance_complete": {
+                    "status": "pass",
+                    "message": "context/ships.provenance.json present",
+                },
+                "build_reproducible": {
+                    "status": "warn",
+                    "message": "Built with --allow-dirty",
+                },
             },
         }
 
@@ -496,7 +525,7 @@ class TestPackageTrustSection:
 
         assert _html_package_trust({}) == ""
 
-    def test_returns_empty_when_label_missing(self):
+    def test_returns_empty_when_status_missing(self):
         from database_package_deployer.report import _html_package_trust
 
         assert _html_package_trust({"signals": {}}) == ""
@@ -527,8 +556,13 @@ class TestPackageTrustSection:
         from database_package_deployer.report import _html_package_trust
 
         html = _html_package_trust(self._ready_trust())
-        for sig in ("inspect_lint", "inspect_token_format", "inspect_grants",
-                    "provenance_complete", "build_reproducible"):
+        for sig in (
+            "inspect_lint",
+            "inspect_token_format",
+            "inspect_grants",
+            "provenance_complete",
+            "build_reproducible",
+        ):
             assert sig in html, f"{sig} missing from trust section"
 
     def test_known_signals_have_expandable_details(self):
@@ -557,38 +591,34 @@ class TestPackageTrustSection:
         html = _html_package_trust(self._ready_trust())
         assert "If this fails" in html
 
-    def test_load_package_trust_reads_ships_build_json(self, tmp_path):
+    def test_load_package_trust_reads_canonical_file(self, tmp_path):
         import json
         from database_package_deployer.report import _load_package_trust
 
         trust_data = {
-            "label": "READY",
+            "status": "READY",
             "signals": {"inspect_lint": {"status": "pass", "message": "Clean"}},
         }
         ctx = tmp_path / "context"
         ctx.mkdir()
-        (ctx / "ships.build.json").write_text(
-            json.dumps({"trust": trust_data}), encoding="utf-8"
-        )
+        (ctx / "ships.trust.json").write_text(json.dumps(trust_data), encoding="utf-8")
         result = _load_package_trust(str(tmp_path))
-        assert result["label"] == "READY"
+        assert result["status"] == "READY"
         assert "inspect_lint" in result["signals"]
 
     def test_load_package_trust_walks_up_from_logs_subdir(self, tmp_path):
         import json
         from database_package_deployer.report import _load_package_trust
 
-        trust_data = {"label": "READY-WITH-CAVEATS", "signals": {}}
+        trust_data = {"status": "READY_WITH_CAVEATS", "signals": {}}
         ctx = tmp_path / "context"
         ctx.mkdir()
-        (ctx / "ships.build.json").write_text(
-            json.dumps({"trust": trust_data}), encoding="utf-8"
-        )
+        (ctx / "ships.trust.json").write_text(json.dumps(trust_data), encoding="utf-8")
         logs = tmp_path / "logs"
         logs.mkdir()
-        # Call with logs/ — should find ships.build.json one level up
+        # Call with logs/ — should find ships.trust.json one level up
         result = _load_package_trust(str(logs))
-        assert result["label"] == "READY-WITH-CAVEATS"
+        assert result["status"] == "READY_WITH_CAVEATS"
 
     def test_load_package_trust_returns_empty_when_absent(self, tmp_path):
         from database_package_deployer.report import _load_package_trust
@@ -601,26 +631,24 @@ class TestPackageTrustSection:
 
         ctx = tmp_path / "context"
         ctx.mkdir()
-        (ctx / "ships.build.json").write_text("not valid json", encoding="utf-8")
+        (ctx / "ships.trust.json").write_text("not valid json", encoding="utf-8")
         result = _load_package_trust(str(tmp_path))
         assert result == {}
 
     def test_trust_section_present_in_full_report(self, tmp_path):
-        """End-to-end: trust data from ships.build.json appears in the deploy report."""
+        """End-to-end: canonical trust data appears in the deploy report."""
         import json
         from database_package_deployer.report import generate_report
 
         trust_data = {
-            "label": "READY",
+            "status": "READY",
             "signals": {
                 "inspect_lint": {"status": "pass", "message": "No violations"},
             },
         }
         ctx = tmp_path / "context"
         ctx.mkdir()
-        (ctx / "ships.build.json").write_text(
-            json.dumps({"trust": trust_data}), encoding="utf-8"
-        )
+        (ctx / "ships.trust.json").write_text(json.dumps(trust_data), encoding="utf-8")
 
         result = PackageDeployResult(
             deployment_id="deploy_20260528_120000",
@@ -644,8 +672,8 @@ class TestPackageTrustSection:
         assert "READY" in html
         assert "inspect_lint" in html
 
-    def test_trust_section_absent_when_no_build_json(self, tmp_path):
-        """When ships.build.json is absent the section is silently omitted."""
+    def test_trust_section_absent_when_no_trust_json(self, tmp_path):
+        """When ships.trust.json is absent the section is silently omitted."""
         from database_package_deployer.report import generate_report
 
         result = PackageDeployResult(

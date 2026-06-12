@@ -434,7 +434,7 @@ def ships_package(
 
     Returns:
         {"archive_path": str, "build_number": int, "file_count": int,
-         "token_count": int, "trust_label": str, "warnings": list}
+         "token_count": int, "trust_status": str, "warnings": list}
     """
     try:
         from td_release_packager.builder import build_package
@@ -457,6 +457,7 @@ def ships_package(
 
         (main_arc, manifest), companion = build_package(config)
 
+        trust_doc = _find_trust_json(main_arc) or {}
         result = {
             "success": True,
             "archive_path": main_arc,
@@ -464,9 +465,7 @@ def ships_package(
             "build_number": manifest.build_number,
             "file_count": manifest.file_count,
             "token_count": manifest.token_count,
-            "trust_label": manifest.trust.get("label", "UNKNOWN")
-            if manifest.trust
-            else "UNKNOWN",
+            "trust_status": trust_doc.get("status", "UNKNOWN"),
             "warnings": manifest.warnings,
         }
         result.update(_ships_context_response(main_arc))
@@ -839,7 +838,7 @@ def ships_verify(project: str) -> dict:
         project: SHIPS project directory.
 
     Returns:
-        {"ready": bool, "trust_label": str, "checks": [...], "archive_path": str}
+        {"ready": bool, "trust_status": str, "checks": [...], "archive_path": str}
     """
     try:
         decisions_path = os.path.join(project, "ships.decisions.json")
@@ -889,17 +888,17 @@ def ships_verify(project: str) -> dict:
         ]
         ready = all(c["passed"] for c in checks)
 
-        # Read trust label from context/ships.build.json if available
-        trust_label = "UNKNOWN"
+        # Read trust status from the canonical context/ships.trust.json
+        trust_status = "UNKNOWN"
         if archive_exists:
-            build_json = _find_build_json(archive)
-            if build_json:
-                trust_label = build_json.get("trust", {}).get("label", "UNKNOWN")
+            trust_doc = _find_trust_json(archive)
+            if trust_doc:
+                trust_status = trust_doc.get("status", "UNKNOWN")
 
         response = {
             "success": True,
             "ready": ready,
-            "trust_label": trust_label,
+            "trust_status": trust_status,
             "archive_path": archive,
             "checks": checks,
             "run_id": pkg_run.get("run_id") if pkg_run else None,
@@ -1105,6 +1104,7 @@ def _ships_context_response(
         "context/ships.context.json",
         "context/ships.build.json",
         "context/ships.manifest.json",
+        "context/ships.trust.json",
         "context/ships.integrity.json",
         "context/ships.provenance.json",
         "context/ships.decisions.json",
@@ -1128,12 +1128,22 @@ def _ships_context_response(
 
 def _find_build_json(archive_path: str) -> Optional[dict]:
     """Extract context/ships.build.json from a package zip, or None if not found."""
+    return _find_archive_json(archive_path, "context/ships.build.json")
+
+
+def _find_trust_json(archive_path: str) -> Optional[dict]:
+    """Extract context/ships.trust.json from a package zip, or None if not found."""
+    return _find_archive_json(archive_path, "context/ships.trust.json")
+
+
+def _find_archive_json(archive_path: str, member_path: str) -> Optional[dict]:
+    """Return a JSON archive member as a dict, or None if absent / unreadable."""
     import zipfile
 
     try:
         with zipfile.ZipFile(archive_path) as zf:
             for name in zf.namelist():
-                if name.replace("\\", "/").endswith("context/ships.build.json"):
+                if name.replace("\\", "/").endswith(member_path):
                     return json.loads(zf.read(name).decode("utf-8"))
     except Exception:
         pass
