@@ -1513,6 +1513,141 @@ def fix_ddl_terminators(source_dir: str) -> DDLTerminatorFixResult:
     return result
 
 
+# ---------------------------------------------------------------
+# Non-ASCII auto-fix (#257)
+# ---------------------------------------------------------------
+
+# Codepoints whose lossless ASCII equivalent is well-known. These are
+# the rich-text characters word processors and rich-text editors inject
+# silently. Every entry here MUST be a substitution that preserves
+# meaning — there is no "best guess" mode. U+FFFD is deliberately NOT
+# in this set: the original byte is lost, so we cannot substitute
+# safely.
+_NON_ASCII_AUTO_FIX_REPLACEMENTS: Dict[str, str] = {
+    "—": " - ",  # em-dash → spaced hyphen (NOT "--" — that opens a SQL comment)
+    "•": "-",  # bullet → hyphen
+    "→": "->",  # rightwards arrow → ASCII arrow
+    "─": "-",  # box drawings light horizontal → hyphen
+}
+
+
+@dataclass
+class NonAsciiFix:
+    """One file that was rewritten by ``fix_non_ascii``."""
+
+    file: str  # path relative to source_dir
+    substitutions: Dict[str, int] = field(default_factory=dict)
+
+    @property
+    def total_chars_substituted(self) -> int:
+        return sum(self.substitutions.values())
+
+    def to_dict(self) -> dict:
+        return {
+            "file": self.file,
+            "total_chars_substituted": self.total_chars_substituted,
+            "substitutions": {
+                f"U+{ord(c):04X}": count for c, count in self.substitutions.items()
+            },
+        }
+
+
+@dataclass
+class NonAsciiFixResult:
+    """Aggregate result of a ``fix_non_ascii`` run."""
+
+    files_scanned: int = 0
+    files_fixed: List[NonAsciiFix] = field(default_factory=list)
+
+    @property
+    def files_written(self) -> int:
+        return len(self.files_fixed)
+
+    @property
+    def chars_substituted(self) -> int:
+        return sum(f.total_chars_substituted for f in self.files_fixed)
+
+    def to_dict(self) -> dict:
+        return {
+            "files_scanned": self.files_scanned,
+            "files_written": self.files_written,
+            "chars_substituted": self.chars_substituted,
+            "files": [f.to_dict() for f in self.files_fixed],
+        }
+
+
+def fix_non_ascii(source_dir: str) -> NonAsciiFixResult:
+    """Substitute non-ASCII characters that have a known ASCII equivalent.
+
+    Walks ``source_dir`` using the same file-discovery rules as
+    ``validate_directory`` (same extensions, same generated-path
+    exclusions), reads each file as UTF-8 (strict — non-UTF-8 files
+    are skipped), and replaces every character whose codepoint is in
+    ``_NON_ASCII_AUTO_FIX_REPLACEMENTS`` with the documented ASCII
+    equivalent.
+
+    Characters NOT in the map (notably U+FFFD — unrecoverable; the
+    original byte is gone) are deliberately left alone and will still
+    surface as ``[non_ascii]`` findings on the next ``inspect`` run.
+
+    Files inside SHIPS-generated paths (``releases/``, ``.ships-work/``,
+    ``_rollback/``) are skipped.
+
+    The fix is idempotent: a clean re-run produces ``files_written == 0``.
+    """
+    from td_release_packager.discovery import resolve_harvest_extensions
+
+    extensions = set(resolve_harvest_extensions(project_dir=source_dir))
+    extensions.add(".jar")
+
+    result = NonAsciiFixResult()
+
+    for root, dirs, filenames in os.walk(source_dir):
+        dirs.sort()
+        _prune_generated_dirs(dirs)
+        for filename in sorted(filenames):
+            if filename.startswith(".") or filename.startswith("_"):
+                continue
+            ext = os.path.splitext(filename)[1].lower()
+            if ext not in extensions:
+                continue
+
+            file_path = os.path.join(root, filename)
+            result.files_scanned += 1
+
+            try:
+                with open(file_path, "r", encoding="utf-8") as fh:
+                    raw = fh.read()
+            except (OSError, UnicodeDecodeError):
+                continue
+
+            # Fast path: nothing to do.
+            if not any(ch in raw for ch in _NON_ASCII_AUTO_FIX_REPLACEMENTS):
+                continue
+
+            counts: Dict[str, int] = {}
+            new_content = raw
+            for ch, replacement in _NON_ASCII_AUTO_FIX_REPLACEMENTS.items():
+                if ch not in new_content:
+                    continue
+                counts[ch] = new_content.count(ch)
+                new_content = new_content.replace(ch, replacement)
+
+            if new_content == raw:
+                continue
+
+            try:
+                with open(file_path, "w", encoding="utf-8", newline="") as fh:
+                    fh.write(new_content)
+            except OSError:
+                continue
+
+            rel_path = os.path.relpath(file_path, source_dir)
+            result.files_fixed.append(NonAsciiFix(file=rel_path, substitutions=counts))
+
+    return result
+
+
 # NOTE: An older comment-only ``_strip_sql_comments`` used to live
 # here and silently shadowed the import at the top of the module.
 # Removed: every caller wants both comments AND string literals
