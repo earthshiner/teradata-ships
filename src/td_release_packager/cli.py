@@ -439,6 +439,15 @@ def _strip_remainder_separator(args: list[str]) -> list[str]:
     return args
 
 
+def _apply_root_parent_option(project_dir: str, root_parent: str | None) -> int:
+    """Apply ``--root-parent`` to parentless project prerequisite DDL."""
+    if root_parent is None:
+        return 0
+    from td_release_packager.root_parent import inject_root_parent
+
+    return inject_root_parent(Path(project_dir), root_parent)
+
+
 class _NullStageRecorder:
     """
     Drop-in for ``StageRecorder`` that ignores every call.
@@ -2614,9 +2623,22 @@ def _run_build(args, stage, issue_codes) -> int:
     stage.set_config_resolved("env_config", args.env_config, "layer-5", "cli")
     stage.set_config_resolved("output", getattr(args, "output", None), "layer-5", "cli")
     stage.set_config_resolved(
+        "root_parent", getattr(args, "root_parent", None), "layer-5", "cli"
+    )
+    stage.set_config_resolved(
         "format", getattr(args, "format", "zip"), "layer-5", "cli"
     )
     stage.set_inputs(source_dir=args.project)
+
+    root_parent_injections = _apply_root_parent_option(
+        args.project,
+        getattr(args, "root_parent", None),
+    )
+    if root_parent_injections:
+        print(
+            "  Root parent: "
+            f"{root_parent_injections} parentless prereq(s) updated"
+        )
 
     # Resolve build number: explicit, no-increment, or auto-increment
     build_number = args.build_number  # None if not specified
@@ -2718,6 +2740,7 @@ def _run_build(args, stage, issue_codes) -> int:
         companion_archive_path=(
             companion_pair[0] if companion_pair is not None else None
         ),
+        root_parent_injections=root_parent_injections,
     )
     for w in manifest.warnings:
         stage.add_issue("warning", issue_codes.PACKAGE_WARNING, w)
@@ -3024,6 +3047,16 @@ def _cmd_process_impl(args):
         else:
             print("  [G] Generate … skipped (--skip-generate)")
 
+        root_parent_injections = _apply_root_parent_option(
+            project_dir,
+            getattr(args, "root_parent", None),
+        )
+        if root_parent_injections:
+            print(
+                "  [R] Root parent … "
+                f"{root_parent_injections} parentless prereq(s) updated"
+            )
+
         # ---- [I] Inspect ----------------------------------------
         print("  [I] Inspect …")
         inspect_args = _build_process_namespace(
@@ -3086,6 +3119,7 @@ def _cmd_process_impl(args):
                 commit=getattr(args, "commit", ""),
                 build_number=None,
                 no_increment=False,
+                root_parent=None,
             )
             try:
                 with run.stage("package") as stage:
@@ -4596,6 +4630,13 @@ def _build_parser():
         "--env-config", required=True, help="Path to environment .conf file."
     )
     bp.add_argument(
+        "--root-parent",
+        help=(
+            "Root database/user parent for parentless CREATE DATABASE/USER "
+            "prerequisites. Existing FROM clauses are preserved."
+        ),
+    )
+    bp.add_argument(
         "--build-number",
         type=int,
         default=None,
@@ -5127,6 +5168,14 @@ def _build_parser():
         default=None,
         help="Path to the .conf file for token resolution. Required "
         "to run the package stage.",
+    )
+    pr.add_argument(
+        "--root-parent",
+        default=None,
+        help=(
+            "Root database/user parent for parentless CREATE DATABASE/USER "
+            "prerequisites. Applied after harvest/generate and before inspect."
+        ),
     )
     pr.add_argument(
         "--name",
