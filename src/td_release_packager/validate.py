@@ -2575,32 +2575,74 @@ def _check_non_ascii_literals(rel_path: str, content: str) -> List[ValidationIss
         "\\u2500": '"-" (box-drawing -> hyphen)',
     }
 
-    for line_no, line in enumerate(content.splitlines(), start=1):
+    # Strip comments only (NOT string literals) and preserve positions.
+    # Characters whose original position is whitespace after stripping
+    # were inside a ``--`` or ``/* ... */`` block — those are WARNING
+    # because the Teradata server never parses comment content. Any
+    # non-ASCII character still present in the stripped form is in
+    # real SQL (code or a string literal) and is ERROR — that is the
+    # path that risks Error 6706 on LATIN databases.
+    from td_release_packager.sql_text import strip_comments_preserving_positions
+
+    no_comments = strip_comments_preserving_positions(content)
+
+    # Index splitlines() lines by their start offset so per-line column
+    # positions map back to the absolute offset used to look up the
+    # stripped char. ``splitlines()`` drops the line terminator length,
+    # so we step manually using the original content.
+    offset = 0
+    for line_no, line in enumerate(content.splitlines(keepends=True), start=1):
+        line_offset = offset
+        offset += len(line)
         try:
             line.encode("ascii")
             continue  # line is clean
         except UnicodeEncodeError:
             pass
 
-        for char in set(line):
+        # Iterate by position so we can classify each occurrence
+        # individually. A line with both a comment em-dash and a
+        # literal em-dash must produce one WARNING and one ERROR.
+        reported_keys: set = set()
+        for col, char in enumerate(line):
             if ord(char) <= 127:
                 continue
-            # Build lookup key matching the format used in _SUGGESTIONS dict
+            abs_offset = line_offset + col
+            in_comment = (
+                abs_offset < len(no_comments)
+                and no_comments[abs_offset].isspace()
+                and not char.isspace()
+            )
+            severity = "WARNING" if in_comment else "ERROR"
+            # De-duplicate per (line, char, severity) so the same char
+            # repeated on one line in the same context only reports once,
+            # matching the original behaviour of the rule.
+            dedup_key = (line_no, char, severity)
+            if dedup_key in reported_keys:
+                continue
+            reported_keys.add(dedup_key)
+
             char_key = "\\u{:04x}".format(ord(char))
             suggestion = _SUGGESTIONS.get(
                 char_key,
                 "replace with an ASCII equivalent",
             )
+            location = (
+                "SQL comment (Teradata server does not parse comment content; "
+                "still a maintenance hazard — replace before the comment text "
+                "is moved into a string literal)"
+                if in_comment
+                else "SQL source -- Teradata Error 6706 on LATIN databases"
+            )
             issues.append(
                 ValidationIssue(
                     rule="non_ascii",
-                    severity="ERROR",
+                    severity=severity,
                     file=rel_path,
                     line=line_no,
                     message=(
                         f"Non-ASCII character U+{ord(char):04X} {repr(char)} "
-                        f"in SQL source -- Teradata Error 6706 on LATIN databases. "
-                        f"Suggestion: {suggestion}"
+                        f"in {location}. Suggestion: {suggestion}"
                     ),
                 )
             )

@@ -1278,8 +1278,7 @@ class TestReadInspectConfig:
         invalid = {
             rule: sev
             for rule, sev in DEFAULT_RULES.items()
-            if sev not in _VALID_SEVERITIES
-            and rule not in _DOMAIN_VALUE_RULES
+            if sev not in _VALID_SEVERITIES and rule not in _DOMAIN_VALUE_RULES
         }
         assert not invalid, (
             f"Rules in DEFAULT_RULES with invalid severities "
@@ -2032,12 +2031,7 @@ class TestCheckViewColumnList:
     def test_generated_ships_directory_is_not_validated(self, tmp_path):
         """Generated helper mirrors under .ships are not payload source."""
         mirror_dir = (
-            tmp_path
-            / ".ships"
-            / "harvest"
-            / "by_database"
-            / "DB_DOMAIN_V"
-            / "views"
+            tmp_path / ".ships" / "harvest" / "by_database" / "DB_DOMAIN_V" / "views"
         )
         mirror_dir.mkdir(parents=True)
         (mirror_dir / "{{DB_DOMAIN_V}}.Agent_Current.viw").write_text(
@@ -2131,6 +2125,57 @@ class TestCheckNonAsciiLiterals:
         codes = {i.line for i in issues}
         assert codes == {1, 2, 3}
 
+    # ---------------------------------------------------------------
+    # Comment-vs-literal severity (issue #255)
+    # ---------------------------------------------------------------
+
+    def test_em_dash_in_line_comment_is_warning(self):
+        """Em-dash inside a -- comment is WARNING (not ERROR)."""
+        sql = "-- header — trailer\nSELECT 1;\n"
+        issues = _check_non_ascii_literals("view.viw", sql)
+        assert len(issues) == 1
+        assert issues[0].severity == "WARNING"
+        assert "U+2014" in issues[0].message
+        assert "SQL comment" in issues[0].message
+
+    def test_em_dash_in_block_comment_is_warning(self):
+        """Em-dash inside a /* */ block comment is WARNING."""
+        sql = "/* header — trailer */\nSELECT 1;\n"
+        issues = _check_non_ascii_literals("view.viw", sql)
+        assert len(issues) == 1
+        assert issues[0].severity == "WARNING"
+
+    def test_em_dash_in_string_literal_stays_error(self):
+        """Em-dash inside a string literal remains ERROR."""
+        sql = "VALUES ( 'before — after' );\n"
+        issues = _check_non_ascii_literals("seed.dml", sql)
+        assert issues
+        assert all(i.severity == "ERROR" for i in issues)
+        assert all("LATIN" in i.message for i in issues)
+
+    def test_mixed_comment_and_literal_on_one_line(self):
+        """Same char in both a comment and a literal on one line yields both severities."""
+        sql = "VALUES ( 'a — b' ) -- note — about\n"
+        issues = _check_non_ascii_literals("seed.dml", sql)
+        severities = sorted(i.severity for i in issues)
+        assert severities == ["ERROR", "WARNING"]
+
+    def test_block_comment_spans_multiple_lines(self):
+        """A multi-line /* */ comment with non-ASCII on an inner line is WARNING."""
+        sql = "/*\n   header text\n   meaning — explanation\n*/\nSELECT 1;\n"
+        issues = _check_non_ascii_literals("view.viw", sql)
+        assert len(issues) == 1
+        assert issues[0].line == 3
+        assert issues[0].severity == "WARNING"
+
+    def test_ufffd_in_comment_is_warning_not_error(self):
+        """U+FFFD inside a comment is still WARNING (matches the real-world reproducer)."""
+        sql = "/* Call_Summary_Current � current-state */\nSELECT 1;\n"
+        issues = _check_non_ascii_literals("view.viw", sql)
+        assert len(issues) == 1
+        assert issues[0].severity == "WARNING"
+        assert "U+FFFD" in issues[0].message
+
     def test_integrate_non_ascii_caught_in_validate_directory(self, tmp_path):
         """validate_directory must surface NAS-001 issues for DML files."""
         dml = tmp_path / "{{DB_MEMORY_T}}.Business_Glossary.dml"
@@ -2175,16 +2220,36 @@ class TestWarnGrantSeverities:
 
     def test_read_severity_accepts_off(self):
         """OFF suppresses the configured grant finding."""
-        assert read_severity_from_inspect_config({"warn_extra_grants": "OFF"}, "warn_extra_grants") == "OFF"
+        assert (
+            read_severity_from_inspect_config(
+                {"warn_extra_grants": "OFF"}, "warn_extra_grants"
+            )
+            == "OFF"
+        )
 
     def test_read_severity_accepts_warning_and_warn_alias(self):
         """WARNING and WARN both normalize to WARNING."""
-        assert read_severity_from_inspect_config({"warn_extra_grants": "WARNING"}, "warn_extra_grants") == "WARNING"
-        assert read_severity_from_inspect_config({"warn_orphan_grants": "WARN"}, "warn_orphan_grants") == "WARNING"
+        assert (
+            read_severity_from_inspect_config(
+                {"warn_extra_grants": "WARNING"}, "warn_extra_grants"
+            )
+            == "WARNING"
+        )
+        assert (
+            read_severity_from_inspect_config(
+                {"warn_orphan_grants": "WARN"}, "warn_orphan_grants"
+            )
+            == "WARNING"
+        )
 
     def test_read_severity_accepts_error(self):
         """ERROR blocks the configured grant finding."""
-        assert read_severity_from_inspect_config({"warn_extra_grants": "ERROR"}, "warn_extra_grants") == "ERROR"
+        assert (
+            read_severity_from_inspect_config(
+                {"warn_extra_grants": "ERROR"}, "warn_extra_grants"
+            )
+            == "ERROR"
+        )
 
     def test_warn_extra_grants_off_parsed_from_conf(self, tmp_path):
         """warn_extra_grants=OFF is correctly parsed from inspect.conf."""
@@ -2198,7 +2263,9 @@ class TestWarnGrantSeverities:
         conf = tmp_path / "inspect.conf"
         conf.write_text("warn_orphan_grants=WARN\n", encoding="utf-8")
         rules = read_inspect_config(str(conf))
-        assert read_severity_from_inspect_config(rules, "warn_orphan_grants") == "WARNING"
+        assert (
+            read_severity_from_inspect_config(rules, "warn_orphan_grants") == "WARNING"
+        )
 
     def test_both_settings_error_by_default_in_conf(self, tmp_path):
         """An empty inspect.conf gives ERROR for both grant severity settings."""
