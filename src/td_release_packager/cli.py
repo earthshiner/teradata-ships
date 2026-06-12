@@ -2007,6 +2007,12 @@ def _run_inspect(args, stage, issue_codes) -> int:
             "layer-5",
             "cli",
         )
+        stage.set_config_resolved(
+            "fix_non_ascii",
+            getattr(args, "fix_non_ascii", False),
+            "layer-5",
+            "cli",
+        )
 
         # ==============================================================
         # Step 0 — Token format check
@@ -2121,6 +2127,30 @@ def _run_inspect(args, stage, issue_codes) -> int:
                 print(
                     "\n  ✓ No DDL terminator violations found "
                     "(--fix-ddl-terminators had nothing to fix)."
+                )
+
+        # -- Optional: auto-fix non-ASCII characters (issue #257) --
+        # Substitutes the deterministic suggestion-map characters
+        # (em-dash, bullet, arrow, box-drawing) with their documented
+        # ASCII equivalents. U+FFFD and other unmapped codepoints are
+        # left alone — the operator still gets a [non_ascii] finding
+        # for those.
+        non_ascii_fix_result = None
+        if getattr(args, "fix_non_ascii", False):
+            from td_release_packager.validate import fix_non_ascii
+
+            non_ascii_fix_result = fix_non_ascii(args.project)
+            if non_ascii_fix_result.files_written:
+                print(
+                    f"\n  ✎ Auto-fixed non-ASCII characters in "
+                    f"{non_ascii_fix_result.files_written} file(s) "
+                    f"({non_ascii_fix_result.chars_substituted} char(s)) "
+                    f"— re-run inspect to confirm."
+                )
+            else:
+                print(
+                    "\n  ✓ No deterministic non-ASCII characters found "
+                    "(--fix-non-ascii had nothing to fix)."
                 )
 
         lint_result = validate_directory(
@@ -2512,6 +2542,11 @@ def _run_inspect(args, stage, issue_codes) -> int:
             ddl_terminator_fix=(
                 ddl_terminator_fix_result.to_dict()
                 if ddl_terminator_fix_result is not None
+                else None
+            ),
+            non_ascii_fix=(
+                non_ascii_fix_result.to_dict()
+                if non_ascii_fix_result is not None
                 else None
             ),
         )
@@ -4638,6 +4673,16 @@ def _build_parser():
         "trailing whitespace and comments. Skips generated paths "
         "(releases/, .ships-work/, _rollback/). Opt-in only; the "
         "operator is expected to audit the diff via source control.",
+    )
+    vl.add_argument(
+        "--fix-non-ascii",
+        action="store_true",
+        help="Replace deterministic non-ASCII characters with their "
+        "lossless ASCII equivalent: em-dash (U+2014) -> ' - ', bullet "
+        "(U+2022) -> '-', right arrow (U+2192) -> '->', box-drawing "
+        "(U+2500) -> '-'. Characters NOT in the suggestion map (notably "
+        "U+FFFD — original byte is lost) are deliberately left for "
+        "human review. Skips generated paths.",
     )
     vl.add_argument(
         "--skip-grants",
