@@ -31,6 +31,7 @@ from typing import Any, Dict, Optional
 from td_release_packager.actions import (
     ACTIONS_RESULT_FILENAME,
     ACTIONS_RESULT_REF,
+    required_evidence_after_action,
 )
 from td_release_packager.models import BuildConfig, BuildManifest
 from td_release_packager.trust import (
@@ -218,6 +219,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "required_actions",
             "preconditions",
             "blocking_conditions",
+            "required_evidence_after_action",
             "references",
         ],
         "properties": {
@@ -229,6 +231,28 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "required_actions": {"type": "array", "items": {"type": "string"}},
             "preconditions": {"type": "object"},
             "blocking_conditions": {"type": "array", "items": {"type": "string"}},
+            "required_evidence_after_action": {
+                "type": "object",
+                "description": "For each action in the SHIPS action vocabulary, the typed artefacts an agent must return after running it. Allows handoff to be closed with evidence rather than only a status message.",
+                "additionalProperties": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["evidence_type", "condition"],
+                        "properties": {
+                            "evidence_type": {"type": "string"},
+                            "condition": {
+                                "enum": ["always", "on_success", "on_failure"]
+                            },
+                            "accept_paths": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "description": {"type": "string"},
+                        },
+                    },
+                },
+            },
             "references": {"type": "object"},
         },
         "examples": [
@@ -241,6 +265,16 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
                 "required_actions": ["Read context/ships.index.json first."],
                 "preconditions": {},
                 "blocking_conditions": [],
+                "required_evidence_after_action": {
+                    "deploy": [
+                        {
+                            "evidence_type": "deploy_report",
+                            "condition": "always",
+                            "accept_paths": ["logs/.deploy_report_*.html"],
+                            "description": "Per-object HTML deploy report.",
+                        }
+                    ]
+                },
                 "references": {},
             }
         ],
@@ -1275,6 +1309,7 @@ def _build_handoff_document(
             "post-install validation outputs",
             "any drift, skipped, failed, or waived object details",
         ],
+        "required_evidence_after_action": required_evidence_after_action(),
         "agent_policy": _agent_policy(manifest, trust),
         "references": _evidence_files(),
     }

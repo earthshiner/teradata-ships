@@ -94,6 +94,151 @@ REASON_ALWAYS_SAFE = "always_safe"
 # ---------------------------------------------------------------
 
 _EVIDENCE_TRUST = "context/ships.trust.json"
+
+
+# ---------------------------------------------------------------
+# Evidence vocabulary (#148) — what an agent must return after each
+# action so the handoff can be closed with typed artefacts, not just
+# a status message.
+#
+# The mapping is static for the action vocabulary; it does NOT depend
+# on trust or role. It is published into ``ships.handoff.json`` under
+# the ``required_evidence_after_action`` key.
+# ---------------------------------------------------------------
+
+EVIDENCE_INTEGRITY_CHECK_RESULT = "integrity_check_result"
+EVIDENCE_DRY_RUN_REPORT = "dry_run_report"
+EVIDENCE_DEPLOY_REPORT = "deploy_report"
+EVIDENCE_DEPLOY_MANIFEST = "deploy_manifest"
+EVIDENCE_PREFLIGHT_RESULT = "preflight_result"
+EVIDENCE_LINEAGE_EVENT = "lineage_event"
+EVIDENCE_APPROVAL_REFERENCE = "approval_reference"
+EVIDENCE_FAILURE_SUMMARY = "failure_summary"
+EVIDENCE_ROLLBACK_REPORT = "rollback_report"
+EVIDENCE_DBA_REVIEW_EVIDENCE = "dba_review_evidence"
+
+ALL_EVIDENCE_TYPES = (
+    EVIDENCE_INTEGRITY_CHECK_RESULT,
+    EVIDENCE_DRY_RUN_REPORT,
+    EVIDENCE_DEPLOY_REPORT,
+    EVIDENCE_DEPLOY_MANIFEST,
+    EVIDENCE_PREFLIGHT_RESULT,
+    EVIDENCE_LINEAGE_EVENT,
+    EVIDENCE_APPROVAL_REFERENCE,
+    EVIDENCE_FAILURE_SUMMARY,
+    EVIDENCE_ROLLBACK_REPORT,
+    EVIDENCE_DBA_REVIEW_EVIDENCE,
+)
+
+CONDITION_ALWAYS = "always"
+CONDITION_ON_SUCCESS = "on_success"
+CONDITION_ON_FAILURE = "on_failure"
+
+ALL_CONDITIONS = (CONDITION_ALWAYS, CONDITION_ON_SUCCESS, CONDITION_ON_FAILURE)
+
+
+def _evidence(
+    evidence_type: str, condition: str, accept_paths, description: str
+) -> dict:
+    return {
+        "evidence_type": evidence_type,
+        "condition": condition,
+        "accept_paths": list(accept_paths),
+        "description": description,
+    }
+
+
+# Per-action evidence contract. Static for v1 — additive thereafter.
+REQUIRED_EVIDENCE_AFTER_ACTION: Dict[str, List[dict]] = {
+    ACTION_DEPLOY: [
+        _evidence(
+            EVIDENCE_DEPLOY_REPORT,
+            CONDITION_ALWAYS,
+            ["logs/.deploy_report_*.html"],
+            "Per-object HTML deploy report written by the deployer.",
+        ),
+        _evidence(
+            EVIDENCE_DEPLOY_MANIFEST,
+            CONDITION_ALWAYS,
+            ["logs/.deploy_manifest.json"],
+            "Machine-readable manifest of every object's terminal state.",
+        ),
+        _evidence(
+            EVIDENCE_LINEAGE_EVENT,
+            CONDITION_ON_SUCCESS,
+            [],
+            "OpenLineage event emitted at the end of the deploy run, when lineage is enabled.",
+        ),
+        _evidence(
+            EVIDENCE_FAILURE_SUMMARY,
+            CONDITION_ON_FAILURE,
+            ["logs/.deploy_manifest.json"],
+            "Summary of failed objects with the originating error text.",
+        ),
+    ],
+    ACTION_DRY_RUN: [
+        _evidence(
+            EVIDENCE_DRY_RUN_REPORT,
+            CONDITION_ALWAYS,
+            ["logs/.deploy_report_*.html"],
+            "Dry-run deploy report — same shape as a real deploy report with no DDL executed.",
+        ),
+    ],
+    ACTION_MODIFY_PAYLOAD: [
+        _evidence(
+            EVIDENCE_DBA_REVIEW_EVIDENCE,
+            CONDITION_ALWAYS,
+            ["context/prerequisites/DBA_INSTRUCTIONS.md"],
+            "DBA confirmation that the payload edit complies with environment-prereq guidance.",
+        ),
+    ],
+    ACTION_REPACKAGE: [],
+    ACTION_VERIFY_INTEGRITY: [
+        _evidence(
+            EVIDENCE_INTEGRITY_CHECK_RESULT,
+            CONDITION_ALWAYS,
+            ["context/ships.integrity.json"],
+            "Integrity manifest plus a pass/fail summary of the hash check.",
+        ),
+    ],
+    ACTION_ROLLBACK: [
+        _evidence(
+            EVIDENCE_ROLLBACK_REPORT,
+            CONDITION_ALWAYS,
+            ["logs/rollback/", "logs/.deploy_report_*.html"],
+            "Rollback report — per-object reverse-deployment outcome.",
+        ),
+        _evidence(
+            EVIDENCE_LINEAGE_EVENT,
+            CONDITION_ON_SUCCESS,
+            [],
+            "OpenLineage event for the rollback run, when lineage is enabled.",
+        ),
+        _evidence(
+            EVIDENCE_FAILURE_SUMMARY,
+            CONDITION_ON_FAILURE,
+            [],
+            "Summary of objects that could not be rolled back, with originating error text.",
+        ),
+    ],
+    ACTION_FORWARD_TO_HUMAN: [],
+}
+
+
+def required_evidence_after_action() -> Dict[str, List[dict]]:
+    """Return a deep copy of the per-action evidence contract.
+
+    Returning a copy keeps callers from accidentally mutating the module
+    constant when they enrich the dict in a context document.
+    """
+    return {
+        action: [
+            dict(entry, accept_paths=list(entry["accept_paths"])) for entry in entries
+        ]
+        for action, entries in REQUIRED_EVIDENCE_AFTER_ACTION.items()
+    }
+
+
 _EVIDENCE_DBA = "context/prerequisites/DBA_INSTRUCTIONS.md"
 
 
