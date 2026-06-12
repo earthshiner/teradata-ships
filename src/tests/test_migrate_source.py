@@ -75,6 +75,114 @@ class TestParseMigrationSed:
 
 
 # ---------------------------------------------------------------
+# Regex rule syntax  (issue #259)
+# ---------------------------------------------------------------
+
+
+class TestRegexRuleSyntax:
+    def test_basic_regex_rule_parses(self):
+        rules, skipped = parse_migration_sed("regex::foo:=bar\n")
+        assert len(rules) == 1
+        assert rules[0].is_regex is True
+        assert rules[0].raw_lhs == "foo"
+        assert rules[0].rhs == "bar"
+        assert rules[0].global_ is True
+        assert skipped == []
+
+    def test_capture_group_backref_translated(self):
+        content = "regex::(\\w+)_DOM:=PREFIX_$1\n"
+        rules, skipped = parse_migration_sed(content)
+        assert len(rules) == 1
+        # $1 is translated to Python's \1 at parse time.
+        assert rules[0].rhs == "PREFIX_\\1"
+
+    def test_double_dollar_becomes_literal_dollar(self):
+        content = "regex::x:=cost is $$5\n"
+        rules, _ = parse_migration_sed(content)
+        assert rules[0].rhs == "cost is $5"
+
+    def test_dollar_followed_by_non_digit_preserved(self):
+        content = "regex::x:=use $env var\n"
+        rules, _ = parse_migration_sed(content)
+        assert rules[0].rhs == "use $env var"
+
+    def test_missing_assign_separator_is_skipped(self):
+        content = "regex::no_separator_here\n"
+        rules, skipped = parse_migration_sed(content)
+        assert rules == []
+        assert "regex::no_separator_here" in skipped
+
+    def test_invalid_regex_is_skipped(self):
+        content = "regex::(unbalanced:=irrelevant\n"
+        rules, skipped = parse_migration_sed(content)
+        assert rules == []
+        assert any("unbalanced" in s for s in skipped)
+
+    def test_user_full_example_end_to_end(self):
+        """The exact pattern from the issue request.
+
+        ``CallCentre_DOM_STD_T`` → ``{{SHIPS_PROJECT}}_DOM_STD_T``
+        """
+        content = (
+            "regex::(?i)(\\w+)_(\\w{3})_(\\w{3})_(V|T):={{SHIPS_PROJECT}}_$2_$3_$4\n"
+        )
+        rules, skipped = parse_migration_sed(content)
+        assert skipped == []
+        assert len(rules) == 1
+
+        source = (
+            "SELECT * FROM CallCentre_DOM_STD_T t "
+            "JOIN CallCentre_MEM_BUS_V v ON t.id = v.id;\n"
+        )
+        new, hits = apply_migration_rules_to_text(source, rules)
+        assert "CallCentre_" not in new
+        assert "{{SHIPS_PROJECT}}_DOM_STD_T" in new
+        assert "{{SHIPS_PROJECT}}_MEM_BUS_V" in new
+        # Hits tracked under the original PATTERN as the key.
+        assert sum(hits.values()) == 2
+
+    def test_inline_case_insensitive_flag_works(self):
+        content = "regex::(?i)foo:=BAR\n"
+        rules, _ = parse_migration_sed(content)
+        new, _ = apply_migration_rules_to_text("FOO foo Foo", rules)
+        assert new == "BAR BAR BAR"
+
+    def test_regex_does_not_match_means_no_substitution(self):
+        content = "regex::WILLNOTMATCH:=anything\n"
+        rules, _ = parse_migration_sed(content)
+        new, hits = apply_migration_rules_to_text("hello world", rules)
+        assert new == "hello world"
+        assert hits == {}
+
+    def test_literal_and_regex_rules_coexist(self):
+        content = (
+            "s/$DB_PROD/{{DB_PROD}}/g\n"
+            "regex::(?i)(\\w+)_(DOM)_STD_T:={{SHIPS_PROJECT}}_$2_STD_T\n"
+        )
+        rules, skipped = parse_migration_sed(content)
+        assert skipped == []
+        assert [r.is_regex for r in rules] == [False, True]
+
+        source = "SELECT * FROM CallCentre_DOM_STD_T WHERE x = $DB_PROD;\n"
+        new, _ = apply_migration_rules_to_text(source, rules)
+        assert "{{SHIPS_PROJECT}}_DOM_STD_T" in new
+        assert "{{DB_PROD}}" in new
+
+    def test_regex_rule_global_by_default(self):
+        # No flag syntax in the regex:: form; should always replace every match.
+        rules, _ = parse_migration_sed("regex::ab:=XY\n")
+        new, _ = apply_migration_rules_to_text("ababab", rules)
+        assert new == "XYXYXY"
+
+    def test_literal_rule_with_backslash_in_rhs_not_treated_as_backref(self):
+        """Regression: literal rules must NOT expand ``\\1`` as a back-ref."""
+        rules, _ = parse_migration_sed("s/X/cost \\$10/g\n")
+        new, _ = apply_migration_rules_to_text("price X", rules)
+        # Literal RHS preserved verbatim (no expansion).
+        assert new == "price cost \\$10"
+
+
+# ---------------------------------------------------------------
 # migrate_source_directory
 # ---------------------------------------------------------------
 

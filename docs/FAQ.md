@@ -133,6 +133,83 @@ python -m td_release_packager package \
 
 ---
 
+### I need to retokenise DDL that's already deployed on another system. How?
+
+#### Why tokenise at all? Why de-tokenise later?
+
+A SHIPS package is meant to be **one artefact that can deploy anywhere** — DEV, TEST, PROD, sandbox, a fresh customer tenant. To do that, every part of the DDL that varies between targets (project prefix, environment tier, ownership database) is replaced with a `{{TOKEN}}` placeholder during harvest. The packaged payload is then **environment-independent**: it has no idea where it will eventually run.
+
+At deploy time, the deployer reads the target's `config/env/<ENV>.conf` (e.g. `PROD.conf` with `SHIPS_PROJECT=callcentre_prod`) and substitutes each `{{TOKEN}}` with that environment's resolved value. Same payload bytes; concrete DDL on the wire. This is the "tokenise once, deploy many" cycle:
+
+```
+   Source DDL on system A              Package payload (env-independent)         Deployed DDL on system B
+   ───────────────────────             ───────────────────────────────────       ────────────────────────
+   CallCentre_DOM_STD_T   ──tokenise─► {{SHIPS_PROJECT}}_DOM_STD_T  ──deploy─►  callcentre_prod_DOM_STD_T
+                          (harvest)                                  (token
+                                                                     substitution
+                                                                     against
+                                                                     PROD.conf)
+```
+
+You **never** want a package to carry the source system's literal names baked in — that's the failure mode this avoids. Tokenisation at harvest is the moment the payload becomes portable; token substitution at deploy is the moment it gets re-bound to a specific target.
+
+#### When you need the regex form
+
+The common scenario: you've extracted DDL from a live Teradata system where the project prefix is hardcoded (`CallCentre_DOM_STD_T`, `CallCentre_MEM_BUS_V`, etc.) and you want a portable payload that can later be deployed wherever your env config says. The literal `s/.../.../g` form `import-legacy` generates is enough for `$VAR → {{VAR}}` rewrites, but it can't handle "match anything that looks like `<Project>_<DOMAIN>_<TIER>_<KIND>` and keep groups 2/3/4 while replacing group 1 with `{{SHIPS_PROJECT}}`". That's what the `regex::` form is for.
+
+Use a **regex migration rule** in `config/legacy_migration.sed`:
+
+```
+# Token the project prefix on every <Project>_<DOMAIN>_<TIER>_<KIND> name.
+regex::(?i)(\w+)_(\w{3})_(\w{3})_(V|T):={{SHIPS_PROJECT}}_$2_$3_$4
+```
+
+What this does at harvest time:
+
+- **Match**: any name shaped `<Project>_<DOMAIN>_<TIER>_<KIND>` where `KIND` is `V` (view) or `T` (table), case-insensitive.
+- **Replace**: discard the captured project prefix; substitute `{{SHIPS_PROJECT}}` and keep groups 2/3/4 verbatim.
+- **Hit**: `CallCentre_DOM_STD_T` → `{{SHIPS_PROJECT}}_DOM_STD_T` in the packaged payload.
+
+What happens at deploy time, automatically:
+
+- The deployer reads the target env config (e.g. `PROD.conf` defines `SHIPS_PROJECT=callcentre_prod`).
+- Every `{{SHIPS_PROJECT}}_DOM_STD_T` in the payload becomes `callcentre_prod_DOM_STD_T` — no further regex work needed.
+
+The file accepts both rule kinds side-by-side:
+
+```
+# Literal substitutions (what `import-legacy` generates for $VAR / &&VAR&& migration):
+s/$DB_PROD/{{DB_PROD}}/g
+s/&&CORE&&/{{CORE}}/g
+
+# Regex substitutions (hand-authored — when you need capture groups):
+regex::(?i)(\w+)_(\w{3})_(\w{3})_(V|T):={{SHIPS_PROJECT}}_$2_$3_$4
+```
+
+Conventions for the `regex::` form:
+
+- Pattern is a real Python regex. `(?i)`, alternation, character classes, anchors all work as expected.
+- Replacement supports `$1..$9` back-references. Use `$$` for a literal `$`.
+- Always replaces every match (there is no per-rule flag like `g` — that would be redundant).
+- An unparseable PATTERN is skipped with a warning, not silently dropped.
+
+Harvest and process auto-apply `legacy_migration.sed` before classification, so this works in the normal pipeline. You can also preview with:
+
+```bash
+python -m td_release_packager migrate-source \
+    --sed    config/legacy_migration.sed \
+    --source ./source \
+    --dry-run
+```
+
+A couple of things worth being deliberate about:
+
+- **Order matters.** Rules apply in file order. If one rule's output could match a later rule, the later rule will fire too.
+- **Idempotence is your responsibility.** A pattern like `(\w+)_DOM_STD_T` will match `{{SHIPS_PROJECT}}_DOM_STD_T` on a second run too. Add an anchor or a negative lookahead if you need a second run to be a no-op.
+- **Test on a small slice first.** Use `migrate-source --dry-run` to confirm the hit list before letting harvest rewrite hundreds of files.
+
+---
+
 ### I want to skip tokenisation for now. Can I?
 
 Yes. Just omit `--token-map` from harvest. Your DDL will be copied into the payload with its original hardcoded database names. Inspect will flag them as `hardcoded_name` warnings. You can suppress that rule in `config/inspect.conf` while you transition:
