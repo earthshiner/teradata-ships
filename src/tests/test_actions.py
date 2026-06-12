@@ -19,14 +19,19 @@ from td_release_packager.actions import (
     ACTION_ROLLBACK,
     ACTION_VERIFY_INTEGRITY,
     ACTIONS_RESULT_REF,
+    ALL_ACTIONS,
+    ALL_CONDITIONS,
+    ALL_EVIDENCE_TYPES,
     ActionConstraint,
     ActionsReport,
     REASON_DBA_REVIEW_REQUIRED,
     REASON_NOT_ENVIRONMENT_PREREQ,
     REASON_TRUST_BLOCKED,
     REASON_TRUST_CAVEATS,
+    REQUIRED_EVIDENCE_AFTER_ACTION,
     compute_actions_report,
     load_actions_result,
+    required_evidence_after_action,
     write_actions_result,
 )
 
@@ -251,3 +256,110 @@ class TestBuildPackageEmitsActions:
         assert "blocked_actions" in actions
         assert "requires_human_approval" in actions
         assert isinstance(actions["deploy_allowed"], bool)
+
+
+# ---------------------------------------------------------------
+# required_evidence_after_action (#148)
+# ---------------------------------------------------------------
+
+
+class TestRequiredEvidenceAfterAction:
+    def test_every_action_in_vocabulary_is_keyed(self):
+        evidence = required_evidence_after_action()
+        for action in ALL_ACTIONS:
+            assert action in evidence, f"{action} missing from evidence mapping"
+
+    def test_no_unexpected_actions(self):
+        # The mapping must not advertise actions outside the closed set.
+        for action in required_evidence_after_action():
+            assert action in ALL_ACTIONS, f"Unknown action {action} in mapping"
+
+    def test_every_entry_has_required_fields(self):
+        for action, entries in required_evidence_after_action().items():
+            for entry in entries:
+                assert set(entry.keys()) >= {
+                    "evidence_type",
+                    "condition",
+                    "accept_paths",
+                    "description",
+                }, f"{action} entry {entry} missing required fields"
+
+    def test_conditions_from_closed_set(self):
+        for entries in required_evidence_after_action().values():
+            for entry in entries:
+                assert entry["condition"] in ALL_CONDITIONS
+
+    def test_evidence_types_from_closed_set(self):
+        for entries in required_evidence_after_action().values():
+            for entry in entries:
+                assert entry["evidence_type"] in ALL_EVIDENCE_TYPES
+
+    def test_accept_paths_are_strings(self):
+        for entries in required_evidence_after_action().values():
+            for entry in entries:
+                assert isinstance(entry["accept_paths"], list)
+                for path in entry["accept_paths"]:
+                    assert isinstance(path, str)
+
+    def test_deploy_requires_report_and_manifest_always(self):
+        evidence = required_evidence_after_action()[ACTION_DEPLOY]
+        always = [e for e in evidence if e["condition"] == "always"]
+        types = {e["evidence_type"] for e in always}
+        assert "deploy_report" in types
+        assert "deploy_manifest" in types
+
+    def test_repackage_and_forward_to_human_require_no_evidence(self):
+        evidence = required_evidence_after_action()
+        assert evidence[ACTION_REPACKAGE] == []
+        assert evidence[ACTION_FORWARD_TO_HUMAN] == []
+
+    def test_returns_deep_copy(self):
+        # Mutating the returned dict must not affect subsequent calls.
+        snapshot = required_evidence_after_action()
+        snapshot[ACTION_DEPLOY].append({"poisoned": True})
+        snapshot[ACTION_DEPLOY][0]["accept_paths"].append("/tmp/garbage")
+        fresh = required_evidence_after_action()
+        assert not any("poisoned" in e for e in fresh[ACTION_DEPLOY])
+        assert "/tmp/garbage" not in fresh[ACTION_DEPLOY][0]["accept_paths"]
+
+
+class TestHandoffEmitsRequiredEvidence:
+    def test_built_package_handoff_carries_required_evidence(
+        self, tmp_path, tmp_project
+    ):
+        from td_release_packager.builder import build_package
+        from td_release_packager.models import BuildConfig
+
+        _write(
+            tmp_project / "payload/database/DDL/tables/Dev.T.tbl",
+            "CREATE MULTISET TABLE Dev.T (Id INTEGER) PRIMARY INDEX (Id);\n",
+        )
+        props = tmp_path / "DEV.conf"
+        props.write_text("SHIPS_ENV=DEV\n", encoding="utf-8")
+
+        cfg = BuildConfig(
+            source_dir=str(tmp_project),
+            environment="DEV",
+            package_name="TestPkg",
+            env_config_file=str(props),
+            build_number=1,
+            output_dir=str(tmp_path),
+        )
+        (main_arc, _manifest), _companion = build_package(cfg)
+
+        with zipfile.ZipFile(main_arc) as zf:
+            handoff_name = next(
+                n for n in zf.namelist() if n.endswith("ships.handoff.json")
+            )
+            handoff = json.loads(zf.read(handoff_name))
+
+        assert "required_evidence_after_action" in handoff
+        evidence = handoff["required_evidence_after_action"]
+        # Same closed set of action keys as the in-memory mapping.
+        assert set(evidence.keys()) == set(ALL_ACTIONS)
+        # Spot-check a representative entry round-tripped through JSON.
+        deploy_entries = evidence[ACTION_DEPLOY]
+        assert any(
+            e["evidence_type"] == "deploy_report" and e["condition"] == "always"
+            for e in deploy_entries
+        )
