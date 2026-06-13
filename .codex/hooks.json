@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"\nimport sys, json, subprocess\ntry:\n    inp = json.load(sys.stdin)\nexcept Exception:\n    sys.exit(0)\ncmd = inp.get('tool_input', {}).get('command', '')\nif not any(cmd.startswith(p) for p in ['git push', 'git commit']):\n    sys.exit(0)\nbranch = subprocess.check_output(['git', 'branch', '--show-current'], text=True).strip()\nif branch == 'main':\n    print(json.dumps({'decision': 'block', 'reason': 'BRANCHING POLICY: you are on main. Create a feature branch first: git checkout -b feat/<issue>-<slug>'}))\n    sys.exit(0)\n\"",
+            "timeout": 10,
+            "statusMessage": "Checking branch policy"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run ruff format src/",
+            "timeout": 60,
+            "statusMessage": "Running ruff format"
+          }
+        ]
+      }
+    ]
+  }
+}
