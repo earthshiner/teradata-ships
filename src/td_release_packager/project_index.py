@@ -26,9 +26,10 @@ next action is a hint — never a hard requirement.
 
 **Forward references**
 
-``actions_ref`` and ``policy_ref`` point at files that will be added
-in follow-up issues under #268. For #271 they are emitted as ``""``
-(empty string) so the schema can land before those documents exist.
+``actions_ref`` points at ``ships.project_actions.json`` (#273 — the
+project-side action vocabulary). ``policy_ref`` is still emitted as
+``""`` and will be wired up when the project-side agent policy lands
+under #268.
 """
 
 from __future__ import annotations
@@ -271,6 +272,9 @@ def compute_project_index(project_dir: str) -> ProjectIndex:
         s.format(project_dir=project_dir) for s in _NEXT_ACTIONS.get(state, [])
     ]
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    # ``actions_ref`` is wired to the project-side action vocabulary
+    # introduced by #273 — a single, read-after-index file an agent
+    # can open to learn which CLI actions are safe to take.
     return ProjectIndex(
         schema_version=PROJECT_INDEX_SCHEMA_VERSION,
         evaluated_at=now,
@@ -279,6 +283,7 @@ def compute_project_index(project_dir: str) -> ProjectIndex:
         lifecycle_state=state,
         next_recommended_actions=next_actions,
         references=refs,
+        actions_ref="ships.project_actions.json",
     )
 
 

@@ -813,7 +813,19 @@ It's the agent-discoverable index for the **project** (pre-package), same role t
 
 The file is refreshed after every project-mutating CLI command (`scaffold`, `harvest`, `inspect`, `analyse`, `package`). The lifecycle state is derived from `ships.decisions.json` plus the existence of `releases/*.zip` — never inferred.
 
-Two forward-reference fields, `actions_ref` and `policy_ref`, are emitted as empty strings for now; they'll point at the project-side action vocabulary and agent policy in follow-up issues under [#268](https://github.com/earthshiner/teradata-ships/issues/268).
+`actions_ref` now points at `ships.project_actions.json` (#273) — the project-side action vocabulary: which CLI actions are safe to take autonomously, which are blocked, and which need human approval first. Read it after the index. `policy_ref` is still emitted as an empty string and will point at the project-side agent policy when that lands under [#268](https://github.com/earthshiner/teradata-ships/issues/268).
+
+### What's in ships.project_actions.json?
+
+A closed-vocabulary view of the SHIPS pre-package CLI surface: `scaffold`, `harvest`, `inspect`, `analyse`, `scan`, `tokenise`, `import_legacy`, `decompose_names`, `package`. Each one lands in exactly one of three lists:
+
+- **`allowed_actions`** — safe to take autonomously.
+- **`blocked_actions`** — must not be taken.
+- **`requires_human_approval`** — pause and ask the operator first; entries carry `{action, reason, evidence_ref, instruction}`.
+
+`tokenise` is **always** in `requires_human_approval` because it rewrites source files in place — never autonomous. `package` moves between `allowed_actions` and `requires_human_approval` based on whether the project has been harvested yet (an empty `payload/` is a red flag worth pausing on).
+
+A `discovery_flags` block records what's on disk (`tokenise_config_present`, `env_configs_present`, `source_payload_present`) so downstream evaluators can compose without re-scanning.
 
 ### Can I package from a GitHub repository directly?
 
