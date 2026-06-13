@@ -813,7 +813,7 @@ It's the agent-discoverable index for the **project** (pre-package), same role t
 
 The file is refreshed after every project-mutating CLI command (`scaffold`, `harvest`, `inspect`, `analyse`, `package`). The lifecycle state is derived from `ships.decisions.json` plus the existence of `releases/*.zip` — never inferred.
 
-`actions_ref` now points at `ships.project_actions.json` (#273) — the project-side action vocabulary: which CLI actions are safe to take autonomously, which are blocked, and which need human approval first. Read it after the index. `policy_ref` is still emitted as an empty string and will point at the project-side agent policy when that lands under [#268](https://github.com/earthshiner/teradata-ships/issues/268).
+`actions_ref` points at `ships.project_actions.json` (#273) — the project-side action vocabulary: which CLI actions are safe to take autonomously, which are blocked, and which need human approval first. `policy_ref` points at `ships.project_policy.json` (#275) — the project-side agent policy: do-not flags, stop conditions, and approval triggers with per-condition `detect_via` / `evidence_ref` / `instruction` metadata so an agent can detect each condition and act on it from the policy doc alone. Read both files after the index. Together they form the project-side agent contract from [#268](https://github.com/earthshiner/teradata-ships/issues/268).
 
 ### What's in ships.project_actions.json?
 
