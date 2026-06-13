@@ -225,11 +225,16 @@ class TestShape:
         ):
             assert key in d
 
-    def test_actions_and_policy_refs_are_empty_for_v1(self, tmp_path):
-        # Those documents land in follow-up issues under #268.
+    def test_actions_ref_points_at_project_actions(self, tmp_path):
+        # #273 wired actions_ref to ships.project_actions.json.
         index = compute_project_index(str(_make_project(tmp_path)))
         d = index.to_dict()
-        assert d["actions_ref"] == ""
+        assert d["actions_ref"] == "ships.project_actions.json"
+
+    def test_policy_ref_still_empty_for_v1(self, tmp_path):
+        # The project-side agent policy lands in a follow-up under #268.
+        index = compute_project_index(str(_make_project(tmp_path)))
+        d = index.to_dict()
         assert d["policy_ref"] == ""
 
     def test_project_name_read_from_ships_yaml(self, tmp_path):
