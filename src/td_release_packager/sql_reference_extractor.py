@@ -260,3 +260,94 @@ def default_extractor() -> SqlReferenceExtractor:
     function in favour of constructing the AST extractor directly.
     """
     return RegexSqlReferenceExtractor()
+
+
+# ---------------------------------------------------------------
+# Compare-mode diagnostic (#234 Phase 2)
+# ---------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ExtractorMismatch:
+    """A structured description of where two extractors disagree on
+    the same SQL input.
+
+    Returned by :func:`compare_extractors`. ``method`` is one of
+    ``"statement_owner"``, ``"read_sources"``, ``"write_targets"``,
+    or ``"call_targets"``. ``primary`` / ``secondary`` are the
+    serialised outputs of each extractor — see the comparison helper
+    for the exact shape.
+    """
+
+    method: str
+    primary: object
+    secondary: object
+
+
+def _serialise_owner(owner: Optional[StatementOwner]) -> Optional[dict]:
+    if owner is None:
+        return None
+    return {
+        "database": owner.database,
+        "object_name": owner.object_name,
+        "object_type": owner.object_type,
+    }
+
+
+def _serialise_refs(refs: Set[ReferencedObject]) -> list:
+    return sorted(
+        ({"database": r.database, "object_name": r.object_name} for r in refs),
+        key=lambda r: (r["database"], r["object_name"]),
+    )
+
+
+def _serialise_targets(targets: Dict[ReferencedObject, FrozenSet[str]]) -> list:
+    return sorted(
+        (
+            {
+                "database": ref.database,
+                "object_name": ref.object_name,
+                "privileges": sorted(privs),
+            }
+            for ref, privs in targets.items()
+        ),
+        key=lambda r: (r["database"], r["object_name"]),
+    )
+
+
+def compare_extractors(
+    primary: SqlReferenceExtractor,
+    secondary: SqlReferenceExtractor,
+    sql: str,
+) -> list:
+    """Run both extractors against ``sql`` and return a list of
+    :class:`ExtractorMismatch` describing any disagreements.
+
+    An empty list means the two extractors agree on every method.
+    The returned ``primary`` / ``secondary`` payloads are deterministic
+    (sorted) so the report is suitable for inclusion in test
+    diagnostics or stage results.
+    """
+    mismatches: list = []
+
+    p_owner = _serialise_owner(primary.extract_statement_owner(sql))
+    s_owner = _serialise_owner(secondary.extract_statement_owner(sql))
+    if p_owner != s_owner:
+        mismatches.append(ExtractorMismatch("statement_owner", p_owner, s_owner))
+
+    p_reads = _serialise_refs(primary.extract_read_sources(sql))
+    s_reads = _serialise_refs(secondary.extract_read_sources(sql))
+    if p_reads != s_reads:
+        mismatches.append(ExtractorMismatch("read_sources", p_reads, s_reads))
+
+    p_writes = _serialise_targets(primary.extract_write_targets(sql))
+    s_writes = _serialise_targets(secondary.extract_write_targets(sql))
+    if p_writes != s_writes:
+        mismatches.append(ExtractorMismatch("write_targets", p_writes, s_writes))
+
+    p_calls = _serialise_targets(primary.extract_call_targets(sql))
+    s_calls = _serialise_targets(secondary.extract_call_targets(sql))
+    if p_calls != s_calls:
+        mismatches.append(ExtractorMismatch("call_targets", p_calls, s_calls))
+
+    return mismatches
