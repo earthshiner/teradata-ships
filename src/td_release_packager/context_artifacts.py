@@ -33,6 +33,10 @@ from td_release_packager.actions import (
     ACTIONS_RESULT_REF,
     required_evidence_after_action,
 )
+from td_release_packager.capabilities import (
+    CAPABILITIES_RESULT_FILENAME,
+    CAPABILITIES_RESULT_REF,
+)
 from td_release_packager.models import BuildConfig, BuildManifest
 from td_release_packager.trust import (
     STATUS_BLOCKED,
@@ -77,6 +81,7 @@ SCHEMA_FILENAMES = {
     INTEGRITY_FILENAME: "ships.integrity.schema.json",
     TRUST_RESULT_FILENAME: "ships.trust.schema.json",
     ACTIONS_RESULT_FILENAME: "ships.actions.schema.json",
+    CAPABILITIES_RESULT_FILENAME: "ships.capabilities.schema.json",
 }
 
 DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
@@ -132,6 +137,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "governance",
             "trust_ref",
             "actions_ref",
+            "capabilities_ref",
             "references",
         ],
         "properties": {
@@ -142,6 +148,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "governance": {"type": "object"},
             "trust_ref": {"type": "string"},
             "actions_ref": {"type": "string"},
+            "capabilities_ref": {"type": "string"},
             "references": {"type": "object"},
         },
         "examples": [
@@ -153,6 +160,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
                 "governance": {},
                 "trust_ref": "context/ships.trust.json",
                 "actions_ref": "context/ships.actions.json",
+                "capabilities_ref": "context/ships.capabilities.json",
                 "references": {},
             }
         ],
@@ -174,6 +182,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "governance",
             "trust_ref",
             "actions_ref",
+            "capabilities_ref",
             "evidence",
         ],
         "properties": {
@@ -186,6 +195,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "governance": {"type": "object"},
             "trust_ref": {"type": "string"},
             "actions_ref": {"type": "string"},
+            "capabilities_ref": {"type": "string"},
             "evidence": {"type": "object"},
         },
         "examples": [
@@ -199,6 +209,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
                 "governance": {},
                 "trust_ref": "context/ships.trust.json",
                 "actions_ref": "context/ships.actions.json",
+                "capabilities_ref": "context/ships.capabilities.json",
                 "evidence": {},
             }
         ],
@@ -365,6 +376,55 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
                 "schema_version": "1.0",
                 "package_hash": "0" * 64,
                 "files": {"payload/database/DDL/tables/example.tbl": "0" * 64},
+            }
+        ],
+    },
+    "ships.capabilities.schema.json": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://teradata-ships.local/schemas/ships.capabilities.schema.json",
+        "title": "SHIPS canonical package capability flags",
+        "description": "Machine-readable capability flags for a package: which deployer operations are supported and which governance requirements are enforced. Lets an agent decide what is possible without parsing deploy.py --help.",
+        "type": "object",
+        "additionalProperties": True,
+        "required": [
+            "schema_version",
+            "evaluated_at",
+            "dry_run_supported",
+            "rollback_supported",
+            "resume_supported",
+            "continue_on_error_supported",
+            "parallel_waves_supported",
+            "drift_detection_supported",
+            "approval_required",
+            "change_ref_required",
+            "integrity_check_required",
+        ],
+        "properties": {
+            "schema_version": {"type": "string"},
+            "evaluated_at": {"type": "string"},
+            "dry_run_supported": {"type": "boolean"},
+            "rollback_supported": {"type": "boolean"},
+            "resume_supported": {"type": "boolean"},
+            "continue_on_error_supported": {"type": "boolean"},
+            "parallel_waves_supported": {"type": "boolean"},
+            "drift_detection_supported": {"type": "boolean"},
+            "approval_required": {"type": "boolean"},
+            "change_ref_required": {"type": "boolean"},
+            "integrity_check_required": {"type": "boolean"},
+        },
+        "examples": [
+            {
+                "schema_version": "1.0",
+                "evaluated_at": "2026-05-19T00:00:00+00:00",
+                "dry_run_supported": True,
+                "rollback_supported": True,
+                "resume_supported": True,
+                "continue_on_error_supported": True,
+                "parallel_waves_supported": True,
+                "drift_detection_supported": True,
+                "approval_required": False,
+                "change_ref_required": False,
+                "integrity_check_required": True,
             }
         ],
     },
@@ -828,6 +888,12 @@ def _entrypoints() -> Dict[str, Dict[str, Any]]:
             "required": True,
             "audience": ["agent", "ci_cd", "dba", "governance"],
         },
+        "capabilities": {
+            "path": _context_path(CAPABILITIES_RESULT_FILENAME),
+            "description": "Canonical machine-readable capability flags for this package: which deployer operations are supported (dry-run, rollback, resume, continue-on-error, parallel waves, drift detection) and which governance requirements are enforced (approval, change_ref, integrity check).",
+            "required": True,
+            "audience": ["agent", "ci_cd", "dba", "governance"],
+        },
         "manifest": {
             "path": _context_path(MANIFEST_FILENAME),
             "description": "Compact, agent-safe package inventory describing included artefacts, object counts, token usage, dependency contract, governance settings, and deployment-relevant contents.",
@@ -1107,6 +1173,7 @@ def _build_index_document(
         },
         "trust_ref": TRUST_RESULT_REF,
         "actions_ref": ACTIONS_RESULT_REF,
+        "capabilities_ref": CAPABILITIES_RESULT_REF,
         "entrypoints": _entrypoints(),
         "recommended_read_order": _recommended_read_order(),
         "human_actions_required": (
@@ -1166,6 +1233,7 @@ def _build_context_document(
         "governance": _governance(manifest),
         "trust_ref": TRUST_RESULT_REF,
         "actions_ref": ACTIONS_RESULT_REF,
+        "capabilities_ref": CAPABILITIES_RESULT_REF,
         "agent_policy": _agent_policy(manifest, trust),
         "context_budget": {
             "preferred_agent_prompting": "Load context/ships.index.json first, then open referenced evidence only when needed.",
@@ -1217,6 +1285,7 @@ def _build_agent_manifest_document(
         "governance": _governance(manifest),
         "trust_ref": TRUST_RESULT_REF,
         "actions_ref": ACTIONS_RESULT_REF,
+        "capabilities_ref": CAPABILITIES_RESULT_REF,
         "agent_policy": _agent_policy(manifest, trust),
         "evidence": _evidence_files(),
     }
@@ -1273,6 +1342,7 @@ def _build_handoff_document(
         "current_state": _package_state(trust),
         "trust_ref": TRUST_RESULT_REF,
         "actions_ref": ACTIONS_RESULT_REF,
+        "capabilities_ref": CAPABILITIES_RESULT_REF,
         "package": {
             "name": manifest.get("package_name"),
             "filename": manifest.get("package_filename"),

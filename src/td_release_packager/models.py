@@ -260,6 +260,8 @@ class BuildManifest:
     trust: Dict[str, object] = field(default_factory=dict)
     # Pointer to context/ships.actions.json — see #143.
     actions_ref: str = ""
+    # Pointer to context/ships.capabilities.json — see #149.
+    capabilities_ref: str = ""
     discovery: Dict[str, object] = field(default_factory=dict)
     baseline_dir: str = ""
     # Security: explicit target environment lock (GAP-002).
