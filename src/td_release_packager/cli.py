@@ -10,8 +10,8 @@ Commands:
     analyze           Analyse DDL dependencies, generate waves, export graph.
     import-legacy     Import a pre-SHIPS sed substitution script and
                       emit a .conf file plus a migration sed.
-    migrate-source    Apply a legacy_migration.sed to a source tree
-                      (Windows-safe; no sed binary required).
+    migrate-source    Apply a SHIPS tokenisation config to a source
+                      tree (Windows-safe; no sed binary required).
     decompose-names   Infer composition roots from literal database
                       names and emit a cascade-form .conf file.
 
@@ -24,7 +24,7 @@ Usage:
     python -m td_release_packager analyze --source . --graph . --formats dot,json,openlineage
     python -m td_release_packager import-legacy --script legacy.sh --env DEV --output-dir ./config
     python -m td_release_packager import-legacy --scan-source ./src --env DEV --output-dir ./config
-    python -m td_release_packager migrate-source --sed config/legacy_migration.sed --source ./src
+    python -m td_release_packager migrate-source --tokenise-config config/tokenise.conf --source ./src
     python -m td_release_packager decompose-names token_map.conf --env DEV --output-dir ./config
 """
 
@@ -991,7 +991,7 @@ def _print_onboard_recommendation(state: str, source: str, env: str, scan: dict)
         print("      --output-dir ./config\n")
         print("  Step 2 — fill in token values in config/env/DEV.conf, then apply:")
         print(f"    {module} migrate-source \\")
-        print("      --sed config/legacy_migration.sed \\")
+        print("      --tokenise-config config/tokenise.conf \\")
         print(f"      --source {source}\n")
         print("  Step 3 — harvest the migrated source into a SHIPS project:")
         print(f"    {module} harvest --source {source} --project <project_dir>")
@@ -1060,7 +1060,7 @@ def _cmd_import_legacy(args):
     ``--script`` consumes an existing sed substitution script;
     ``--scan-source`` walks a source DDL tree and auto-discovers
     placeholders. Either resolves into the same shape of artefacts
-    (``.conf`` + ``legacy_migration.sed``) -- the latter mode
+    (``env/<env>.conf`` + ``tokenise.conf``) -- the latter mode
     additionally writes ``scan_report.md``.
     """
     from td_release_packager.legacy_importer import main as importer_main
@@ -1079,10 +1079,27 @@ def _cmd_import_legacy(args):
 
 
 def _cmd_migrate_source(args):
-    """Apply a legacy_migration.sed to a source tree (Windows-safe)."""
+    """Apply a tokenisation config to a source tree (Windows-safe)."""
     from td_release_packager.source_migrator import main as migrator_main
 
-    argv = ["--sed", args.sed, "--source", args.source]
+    config_path = getattr(args, "tokenise_config", None) or getattr(
+        args, "sed_legacy_flag", None
+    )
+    if not config_path:
+        print(
+            "Error: --tokenise-config is required (deprecated alias: --sed)",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    if getattr(args, "sed_legacy_flag", None) and not getattr(
+        args, "tokenise_config", None
+    ):
+        print(
+            "  ⚠ --sed is deprecated; use --tokenise-config.",
+            file=sys.stderr,
+        )
+
+    argv = ["--tokenise-config", config_path, "--source", args.source]
     if args.project:
         argv.extend(["--project", args.project])
     if args.dry_run:
@@ -1319,23 +1336,49 @@ def _resolve_path(
 
 
 def _load_project_legacy_migration_rules(project_dir: str, stage=None):
-    """Load project-local legacy migration rules when present.
+    """Load project-local tokenisation rules when present.
 
-    ``import-legacy`` writes ``config/legacy_migration.sed``. Harvest and
-    process should honour that project contract automatically so legacy
-    ``$VAR`` / ``&&VAR&&`` markers are normalised to ``{{TOKEN}}`` form
-    before classification and packaging.
+    Looks for ``config/tokenise.conf`` first (the canonical name), then
+    falls back to ``config/legacy_migration.sed`` (deprecated alias —
+    will be removed in a future release). Harvest and process honour
+    that project contract automatically so any matched markers are
+    normalised to ``{{TOKEN}}`` form before classification and packaging.
     """
-    migration_path = os.path.join(project_dir, "config", "legacy_migration.sed")
+    config_dir = os.path.join(project_dir, "config")
+    tokenise_path = os.path.join(config_dir, "tokenise.conf")
+    legacy_path = os.path.join(config_dir, "legacy_migration.sed")
+
+    has_tokenise = os.path.isfile(tokenise_path)
+    has_legacy = os.path.isfile(legacy_path)
+
+    if has_tokenise and has_legacy:
+        print(
+            f"  ⚠ Both '{tokenise_path}' and '{legacy_path}' exist. "
+            "Loading 'config/tokenise.conf'; the legacy file is ignored.",
+            file=sys.stderr,
+        )
+        migration_path = tokenise_path
+    elif has_tokenise:
+        migration_path = tokenise_path
+    elif has_legacy:
+        print(
+            "  ⚠ 'config/legacy_migration.sed' is deprecated; "
+            "rename to 'config/tokenise.conf'.",
+            file=sys.stderr,
+        )
+        migration_path = legacy_path
+    else:
+        migration_path = tokenise_path  # for the stage record below
+
     if stage is not None:
         stage.set_config_resolved(
-            "legacy_migration",
-            migration_path if os.path.isfile(migration_path) else None,
+            "tokenise_config",
+            migration_path if (has_tokenise or has_legacy) else None,
             "layer-3",
             "project config",
         )
 
-    if not os.path.isfile(migration_path):
+    if not (has_tokenise or has_legacy):
         return []
 
     from td_release_packager.source_migrator import parse_migration_sed
@@ -5074,30 +5117,38 @@ def _build_parser():
         default=".",
         help="Output directory (default: current). Files written under "
         "<output-dir>/env/<env>.conf and "
-        "<output-dir>/legacy_migration.sed. In --scan-source mode an "
+        "<output-dir>/tokenise.conf. In --scan-source mode an "
         "additional <output-dir>/scan_report.md is also written.",
     )
 
     # -- migrate-source --
     ms = subs.add_parser(
         "migrate-source",
-        help="Apply a legacy_migration.sed to a source DDL tree "
+        help="Apply a SHIPS tokenisation config to a source DDL tree "
         "(Windows-safe; no sed binary required).",
-        description="Apply a ``legacy_migration.sed`` (generated by "
-        "``import-legacy``) to every SQL-bearing file in a source "
-        "tree, converting legacy substitution markers "
-        "(``$VAR``, ``${VAR}``, ``&&VAR&&``) to SHIPS ``{{TOKEN}}`` "
-        "form. Understands only the ``s/LHS/RHS/g`` subset that "
-        "``import-legacy`` emits -- not full sed syntax. "
+        description="Apply a SHIPS tokenisation config to every "
+        "SQL-bearing file in a source tree. The config accepts two "
+        "rule forms: literal ``s/LHS/RHS/g`` (the form "
+        "``import-legacy`` generates for ``$VAR`` / ``&&VAR&&`` "
+        "substitution) and full regex ``regex::PATTERN:=REPLACEMENT`` "
+        "with capture-group back-references (``$1..$9``). "
         "Run with ``--dry-run`` first to see what would change.",
     )
     ms.add_argument(
+        "--tokenise-config",
+        dest="tokenise_config",
+        default=None,
+        metavar="CONFIG_FILE",
+        help="Path to the tokenisation config "
+        "(canonical name: ``config/tokenise.conf``).",
+    )
+    ms.add_argument(
         "--sed",
-        required=True,
+        dest="sed_legacy_flag",
+        default=None,
         metavar="SED_FILE",
-        help="Path to the ``legacy_migration.sed`` produced by "
-        "``import-legacy``. Can also be any sed script containing "
-        "``s/LHS/RHS/g`` substitution rules.",
+        help="Deprecated alias for ``--tokenise-config``. "
+        "Will be removed in a future release.",
     )
     ms.add_argument(
         "--source",

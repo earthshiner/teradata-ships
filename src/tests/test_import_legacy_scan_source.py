@@ -335,7 +335,7 @@ class TestScanSourceCLI:
 
         assert rc == 0
         assert (out_dir / "env" / "DEV.conf").exists()
-        assert (out_dir / "legacy_migration.sed").exists()
+        assert (out_dir / "tokenise.conf").exists()
         assert (out_dir / "scan_report.md").exists()
 
     def test_env_config_file_has_uncategorised_token(self, tmp_path):
@@ -386,7 +386,7 @@ class TestScanSourceCLI:
             ]
         )
 
-        sed = (out_dir / "legacy_migration.sed").read_text(encoding="utf-8")
+        sed = (out_dir / "tokenise.conf").read_text(encoding="utf-8")
         assert "s/$UTL_T/{{UTL_T}}/g" in sed
         assert "s/${UTL_T}/{{UTL_T}}/g" in sed
         assert "s/&&DATE_FORMAT&&/{{DATE_FORMAT}}/g" in sed
@@ -414,7 +414,7 @@ class TestScanSourceCLI:
 
         assert rc == 0
         assert not (out_dir / "env" / "DEV.conf").exists()
-        assert not (out_dir / "legacy_migration.sed").exists()
+        assert not (out_dir / "tokenise.conf").exists()
         assert not (out_dir / "scan_report.md").exists()
 
     def test_missing_source_dir_returns_one(self, tmp_path, capsys):
@@ -521,7 +521,7 @@ class TestCLIDispatcherScanSource:
 
         assert rc == 0
         assert (out / "env" / "DEV.conf").exists()
-        assert (out / "legacy_migration.sed").exists()
+        assert (out / "tokenise.conf").exists()
         assert (out / "scan_report.md").exists()
 
     def test_script_via_subcommand(self, tmp_path, capsys):
@@ -544,7 +544,7 @@ class TestCLIDispatcherScanSource:
 
         assert rc == 0
         assert (out / "env" / "DEV.conf").exists()
-        assert (out / "legacy_migration.sed").exists()
+        assert (out / "tokenise.conf").exists()
         # --script mode does NOT emit scan_report.md.
         assert not (out / "scan_report.md").exists()
 

@@ -247,7 +247,7 @@ class TestCLI:
         assert rc == 0
 
         props_path = tmp_path / "env" / "DEV.conf"
-        sed_path = tmp_path / "legacy_migration.sed"
+        sed_path = tmp_path / "tokenise.conf"
         assert props_path.exists()
         assert sed_path.exists()
 

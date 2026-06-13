@@ -387,3 +387,135 @@ class TestMigrateSourceCLI:
         )
         capsys.readouterr()
         assert rc == 1
+
+
+# ---------------------------------------------------------------
+# Rename: --tokenise-config / config/tokenise.conf (issue #261)
+# ---------------------------------------------------------------
+
+
+class TestTokeniseConfigRename:
+    """The canonical flag is ``--tokenise-config``; ``--sed`` is a
+    deprecated alias that still works with a one-line warning."""
+
+    def _invoke(self, argv, env=None):
+        import sys
+        from td_release_packager.cli import main
+
+        old = sys.argv
+        sys.argv = ["td_release_packager"] + argv
+        try:
+            with pytest.raises(SystemExit) as ei:
+                main()
+            return int(ei.value.code) if ei.value.code is not None else 0
+        finally:
+            sys.argv = old
+
+    def _write_demo(self, tmp_path):
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "x.db").write_text("CREATE DATABASE $OPR_M;\n", encoding="utf-8")
+        cfg = tmp_path / "tokenise.conf"
+        cfg.write_text("s/$OPR_M/{{OPR_M}}/g\n", encoding="utf-8")
+        return src, cfg
+
+    def test_tokenise_config_flag_works(self, tmp_path, capsys):
+        src, cfg = self._write_demo(tmp_path)
+        rc = self._invoke(
+            [
+                "migrate-source",
+                "--tokenise-config",
+                str(cfg),
+                "--source",
+                str(src),
+            ]
+        )
+        captured = capsys.readouterr()
+        assert rc == 0
+        assert "{{OPR_M}}" in (src / "x.db").read_text(encoding="utf-8")
+        assert "deprecated" not in captured.err
+
+    def test_sed_alias_still_works_but_warns(self, tmp_path, capsys):
+        src, cfg = self._write_demo(tmp_path)
+        rc = self._invoke(
+            [
+                "migrate-source",
+                "--sed",
+                str(cfg),
+                "--source",
+                str(src),
+            ]
+        )
+        captured = capsys.readouterr()
+        assert rc == 0
+        assert "{{OPR_M}}" in (src / "x.db").read_text(encoding="utf-8")
+        assert "--sed is deprecated" in captured.err
+
+    def test_missing_both_flags_returns_two(self, tmp_path, capsys):
+        rc = self._invoke(["migrate-source", "--source", str(tmp_path)])
+        captured = capsys.readouterr()
+        assert rc == 2
+        assert "--tokenise-config is required" in captured.err
+
+
+# ---------------------------------------------------------------
+# Loader fallback (config/tokenise.conf vs config/legacy_migration.sed)
+# ---------------------------------------------------------------
+
+
+class TestProjectLoaderFallback:
+    """``_load_project_legacy_migration_rules`` prefers
+    ``config/tokenise.conf`` and falls back to
+    ``config/legacy_migration.sed`` with a one-line warning."""
+
+    def _setup(self, tmp_path):
+        from td_release_packager.cli import _load_project_legacy_migration_rules
+
+        project = tmp_path / "project"
+        (project / "config").mkdir(parents=True)
+        return project, _load_project_legacy_migration_rules
+
+    def test_canonical_file_loads_without_warning(self, tmp_path, capsys):
+        project, load = self._setup(tmp_path)
+        (project / "config" / "tokenise.conf").write_text(
+            "s/$A/{{A}}/g\n", encoding="utf-8"
+        )
+        rules = load(str(project))
+        captured = capsys.readouterr()
+        assert len(rules) == 1
+        assert "deprecated" not in captured.err
+
+    def test_legacy_filename_loads_with_warning(self, tmp_path, capsys):
+        project, load = self._setup(tmp_path)
+        (project / "config" / "legacy_migration.sed").write_text(
+            "s/$A/{{A}}/g\n", encoding="utf-8"
+        )
+        rules = load(str(project))
+        captured = capsys.readouterr()
+        assert len(rules) == 1
+        assert "legacy_migration.sed' is deprecated" in captured.err
+        assert "tokenise.conf" in captured.err
+
+    def test_both_files_present_canonical_wins(self, tmp_path, capsys):
+        project, load = self._setup(tmp_path)
+        (project / "config" / "tokenise.conf").write_text(
+            "s/$NEW/{{NEW}}/g\n", encoding="utf-8"
+        )
+        (project / "config" / "legacy_migration.sed").write_text(
+            "s/$OLD/{{OLD}}/g\n", encoding="utf-8"
+        )
+        rules = load(str(project))
+        captured = capsys.readouterr()
+        assert len(rules) == 1
+        # Only the canonical file was parsed.
+        assert rules[0].raw_lhs == "$NEW"
+        # And the user was told the legacy file was ignored.
+        assert "legacy file is ignored" in captured.err
+
+    def test_neither_file_present_returns_empty(self, tmp_path, capsys):
+        project, load = self._setup(tmp_path)
+        rules = load(str(project))
+        captured = capsys.readouterr()
+        assert rules == []
+        # No diagnostic noise when neither file exists.
+        assert "deprecated" not in captured.err
