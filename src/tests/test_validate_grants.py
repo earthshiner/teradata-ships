@@ -947,7 +947,9 @@ class TestPassedIgnoringExtraGrants:
 
 
 class TestFixGrantsAdditiveRepair:
-    def test_fix_grants_appends_missing_inferred_grant_without_removing_extra(self, project):
+    def test_fix_grants_appends_missing_inferred_grant_without_removing_extra(
+        self, project
+    ):
         """--fix-grants appends required grants and preserves extra grants."""
         _add_view(
             project,
@@ -1001,5 +1003,14 @@ class TestFixGrantsAdditiveRepair:
         assert result.passed
         assert "GRANT SELECT ON {{DOM_T}} TO {{APP}}_READ_ROLE;" in content
         assert "WITH GRANT OPTION" not in content
-        role_ddl = project / "payload" / "database" / "system" / "roles" / "{{APP}}_READ_ROLE.rol"
-        assert role_ddl.read_text(encoding="utf-8") == "CREATE ROLE {{APP}}_READ_ROLE;\n"
+        role_ddl = (
+            project
+            / "payload"
+            / "database"
+            / "system"
+            / "roles"
+            / "{{APP}}_READ_ROLE.rol"
+        )
+        assert (
+            role_ddl.read_text(encoding="utf-8") == "CREATE ROLE {{APP}}_READ_ROLE;\n"
+        )

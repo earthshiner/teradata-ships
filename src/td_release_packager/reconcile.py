@@ -43,6 +43,7 @@ ERR_THREE_WAY_COLLISION = "E_THREE_WAY_COLLISION"
 ERR_DELETE_FAILED = "E_DELETE_FAILED"
 ERR_DIFF_READ = "E_DIFF_READ"
 
+
 # File extensions recognised as DDL artefacts in the harvested tree.
 #
 # NOTE: Do NOT extend this list here.  The canonical extension set lives in
@@ -62,6 +63,7 @@ def _build_ddl_extensions() -> frozenset:
     """
     try:
         from td_release_packager.discovery import resolve_harvest_extensions
+
         return resolve_harvest_extensions()
     except Exception:  # noqa: BLE001
         return frozenset()

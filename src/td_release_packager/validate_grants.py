@@ -285,8 +285,7 @@ def _is_database_role_grant_file(path: Path) -> bool:
 
     file_grantor = _normalise_identifier(path.stem)
     return all(
-        _normalise_identifier(grantor) == file_grantor
-        and _is_role_identifier(grantee)
+        _normalise_identifier(grantor) == file_grantor and _is_role_identifier(grantee)
         for grantor, grantee, _privs in statements
     )
 
@@ -389,7 +388,8 @@ class GrantValidationResult:
         ``warn_extra_grants`` is enabled in ships.yaml.
         """
         return [
-            s for s in self.statuses
+            s
+            for s in self.statuses
             if s.drifted and s.extra_privs and not s.missing_privs
         ]
 
@@ -1101,7 +1101,9 @@ def format_report(
     if total == 0:
         lines.append("")
         if result.statuses:
-            lines.append("  No grant findings are visible with the current inspect.conf settings.")
+            lines.append(
+                "  No grant findings are visible with the current inspect.conf settings."
+            )
         else:
             lines.append("  No cross-database grants inferred from this project.")
         return "\n".join(lines)

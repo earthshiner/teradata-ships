@@ -285,9 +285,7 @@ def _resolve_sqlj_client_file_paths(ddl_text: str, ddl_file_path: str) -> str:
     return _SQLJ_CLIENT_FILE_RE.sub(repl, ddl_text)
 
 
-def _resolve_external_name_client_file_paths(
-    ddl_text: str, ddl_file_path: str
-) -> str:
+def _resolve_external_name_client_file_paths(ddl_text: str, ddl_file_path: str) -> str:
     """
     Resolve relative C/C++ EXTERNAL NAME file paths against the owning script.
 
@@ -2506,7 +2504,9 @@ def _deploy_table(
             qn,
         )
         restore_errors = (
-            _restore_table_triggers(cursor, trigger_snapshots) if triggers_dropped else []
+            _restore_table_triggers(cursor, trigger_snapshots)
+            if triggers_dropped
+            else []
         )
         if restore_errors:
             raise RuntimeError(
@@ -2536,9 +2536,8 @@ def _deploy_table(
         )
 
     if trigger_snapshots:
-        warning = (
-            "Dropped and recreated trigger(s): "
-            + "; ".join(snapshot["blocker"] for snapshot in trigger_snapshots)
+        warning = "Dropped and recreated trigger(s): " + "; ".join(
+            snapshot["blocker"] for snapshot in trigger_snapshots
         )
         result.warnings.append(warning)
     return result
@@ -3704,9 +3703,7 @@ def _build_redeploy_checker(manifest):
     return checker
 
 
-def _object_exists(
-    cursor, database_name: str, object_name: str, table_kind
-) -> bool:
+def _object_exists(cursor, database_name: str, object_name: str, table_kind) -> bool:
     """Check if an object exists in DBC.TablesV by TableKind.
 
     Args:
@@ -3839,7 +3836,9 @@ def _format_table_trigger_blockers(trigger_records: List[dict]) -> List[str]:
 
 def _table_trigger_blockers(cursor, database_name: str, table_name: str) -> List[str]:
     """Return human-readable trigger blockers for a table replacement."""
-    return _format_table_trigger_blockers(_table_triggers(cursor, database_name, table_name))
+    return _format_table_trigger_blockers(
+        _table_triggers(cursor, database_name, table_name)
+    )
 
 
 def _capture_table_trigger_snapshots(
@@ -3871,7 +3870,9 @@ def _capture_table_trigger_snapshots(
             "rollback_file": "",
         }
         if rollback_dir:
-            rollback_file = os.path.join(rollback_dir, f"{trigger_db}.{trigger_name}.trg")
+            rollback_file = os.path.join(
+                rollback_dir, f"{trigger_db}.{trigger_name}.trg"
+            )
             with open(rollback_file, "w", encoding="utf-8") as handle:
                 handle.write(ddl_text)
             snapshot["rollback_file"] = rollback_file

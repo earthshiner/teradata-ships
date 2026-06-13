@@ -94,7 +94,9 @@ def test_single_package_archive_uses_context_metadata_only(
     tmp_path, tmp_project, sample_env_config_file
 ):
     """A normal package archive has context/ships.*.json and no root metadata."""
-    table = tmp_project / "payload" / "database" / "DDL" / "tables" / "MyDB.Customer.tbl"
+    table = (
+        tmp_project / "payload" / "database" / "DDL" / "tables" / "MyDB.Customer.tbl"
+    )
     table.write_text(
         "CREATE MULTISET TABLE MyDB.Customer (Id INTEGER) PRIMARY INDEX (Id);\n",
         encoding="utf-8",
@@ -191,8 +193,12 @@ def test_inferred_grants_are_packaged_as_dcl(
 
     with zipfile.ZipFile(archive_path) as archive:
         names = [name.replace("\\", "/") for name in archive.namelist()]
-        assert any(name.endswith("payload/02_dcl/inter_db/APP_DB.dcl") for name in names)
-        report_name = next(name for name in names if name.endswith("package_report.html"))
+        assert any(
+            name.endswith("payload/02_dcl/inter_db/APP_DB.dcl") for name in names
+        )
+        report_name = next(
+            name for name in names if name.endswith("package_report.html")
+        )
         report = archive.read(report_name).decode("utf-8")
         assert "APP_DB.dcl" in report
         assert "APP_V.dcl" in report
