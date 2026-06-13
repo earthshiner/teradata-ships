@@ -868,6 +868,27 @@ def _build_package_impl(
     write_policy_result(pkg_dir, agent_policy)
     manifest.policy_ref = POLICY_RESULT_REF
 
+    # -- Phase 8b.5: Stamp the agent-readable dependency graph (#150) --
+    # Wraps analyse_project + export_json so an agent reading the
+    # package gets the same JSON shape produced by ``analyze --formats
+    # json``, without having to parse _waves.txt or run the analyser.
+    from td_release_packager.dependencies import (
+        DEPENDENCIES_RESULT_REF,
+        write_dependencies_result,
+    )
+
+    try:
+        write_dependencies_result(pkg_dir, config.source_dir)
+        manifest.dependencies_ref = DEPENDENCIES_RESULT_REF
+    except Exception as _exc:  # pragma: no cover - defensive
+        # The analyser can raise on malformed projects; the package
+        # should still build. Surface the failure in the build log
+        # but do not abort.
+        logger.warning(
+            "dependencies artefact not produced: %s — package builds without it.",
+            _exc,
+        )
+
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest.__dict__, f, indent=2, ensure_ascii=False)
 
