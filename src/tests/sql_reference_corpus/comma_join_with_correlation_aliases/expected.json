@@ -1,0 +1,16 @@
+{
+  "summary": "Comma-style FROM with three correlation aliases (c, a, p) — the aliases must not leak as databases. KNOWN regex gap: the regex `appears_as_read_source` only matches when FROM/JOIN/USING directly precedes the qualified name; comma-continued sources are missed. The AST implementation parses the comma list structurally and gets all three. This is one of the trust-sensitive scenarios ADR 0015 cites.",
+  "skip_extractors": ["regex"],
+  "owner": {
+    "database": "{{DOM_V}}",
+    "object_name": "Customer_Snapshot_V",
+    "object_type": "VIEW"
+  },
+  "read_sources": [
+    {"database": "{{DOM_T}}", "object_name": "Customer"},
+    {"database": "{{REF_T}}", "object_name": "Address"},
+    {"database": "{{REF_T}}", "object_name": "Phone"}
+  ],
+  "write_targets": [],
+  "call_targets": []
+}

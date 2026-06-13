@@ -233,9 +233,49 @@ class TestDefaultExtractor:
     def test_returns_a_sql_reference_extractor(self):
         assert isinstance(default_extractor(), SqlReferenceExtractor)
 
-    def test_phase_1_is_regex(self):
-        # Until Phase 2/3 swap the default, the regex impl is what
-        # callers get when they don't pass one explicitly.
+    def test_env_var_regex_forces_regex(self, monkeypatch):
+        monkeypatch.setenv("SHIPS_SQL_EXTRACTOR", "regex")
+        assert isinstance(default_extractor(), RegexSqlReferenceExtractor)
+
+    def test_env_var_sqlglot_forces_sqlglot(self, monkeypatch):
+        from td_release_packager.sql_reference_extractor_sqlglot import (
+            SqlGlotSqlReferenceExtractor,
+            is_available,
+        )
+
+        if not is_available():
+            pytest.skip("sqlglot not installed")
+        monkeypatch.setenv("SHIPS_SQL_EXTRACTOR", "sqlglot")
+        assert isinstance(default_extractor(), SqlGlotSqlReferenceExtractor)
+
+    def test_env_var_ast_alias_forces_sqlglot(self, monkeypatch):
+        from td_release_packager.sql_reference_extractor_sqlglot import (
+            SqlGlotSqlReferenceExtractor,
+            is_available,
+        )
+
+        if not is_available():
+            pytest.skip("sqlglot not installed")
+        monkeypatch.setenv("SHIPS_SQL_EXTRACTOR", "ast")
+        assert isinstance(default_extractor(), SqlGlotSqlReferenceExtractor)
+
+    def test_auto_prefers_sqlglot_when_available(self, monkeypatch):
+        from td_release_packager.sql_reference_extractor_sqlglot import (
+            SqlGlotSqlReferenceExtractor,
+            is_available,
+        )
+
+        if not is_available():
+            pytest.skip("sqlglot not installed")
+        monkeypatch.setenv("SHIPS_SQL_EXTRACTOR", "auto")
+        assert isinstance(default_extractor(), SqlGlotSqlReferenceExtractor)
+
+    def test_auto_falls_back_when_sqlglot_unavailable(self, monkeypatch):
+        monkeypatch.setenv("SHIPS_SQL_EXTRACTOR", "auto")
+        monkeypatch.setattr(
+            "td_release_packager.sql_reference_extractor_sqlglot.is_available",
+            lambda: False,
+        )
         assert isinstance(default_extractor(), RegexSqlReferenceExtractor)
 
 

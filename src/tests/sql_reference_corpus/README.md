@@ -43,6 +43,24 @@ Set `owner` to `null` if the fragment is not a CREATE/REPLACE
 statement. Omit keys whose expected list is empty if you'd rather
 the test infer "extractor should return nothing."
 
+### Per-extractor opt-out
+
+A case that an extractor cannot satisfy yet (typically the regex
+implementation failing a scenario the AST handles correctly) can
+opt that extractor out via a top-level `skip_extractors` array:
+
+```json
+{
+  "summary": "Comma-style FROM — known regex gap; AST handles it.",
+  "skip_extractors": ["regex"],
+  ...
+}
+```
+
+The skipped extractor is reported as `SKIPPED` rather than failing.
+Use this sparingly and **always** document the gap in the case's
+`notes.md` so it isn't forgotten when the implementation evolves.
+
 ## Adding a case
 
 1. Create a directory named after the scenario

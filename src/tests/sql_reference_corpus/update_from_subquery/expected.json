@@ -1,0 +1,15 @@
+{
+  "summary": "Teradata UPDATE...FROM with a derived-table source; TGT is the write target (UPDATE), SRC is a read source. Derived alias `src` is excluded.",
+  "owner": {
+    "database": "{{PROC_DB}}",
+    "object_name": "RefreshCustomerSegments",
+    "object_type": "PROCEDURE"
+  },
+  "read_sources": [
+    {"database": "{{SRC}}", "object_name": "Customer_Spend"}
+  ],
+  "write_targets": [
+    {"database": "{{TGT}}", "object_name": "Customer_Segment", "privileges": ["UPDATE"]}
+  ],
+  "call_targets": []
+}

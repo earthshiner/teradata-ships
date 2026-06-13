@@ -245,8 +245,10 @@ class TestCompareExtractors:
 
     def test_seed_corpus_cases_agree(self, sg):
         """Every seed corpus case must produce identical output from
-        both extractors. As Phase 2 widens the corpus this guards
-        every newly added case the same way."""
+        both extractors, except where the case's ``expected.json``
+        opts an extractor out via ``skip_extractors`` (used to
+        document a known regex gap that the AST implementation
+        fixes)."""
         regex = RegexSqlReferenceExtractor()
         import json
         from pathlib import Path
@@ -255,7 +257,15 @@ class TestCompareExtractors:
         for case in sorted(corpus_dir.iterdir()):
             if not case.is_dir():
                 continue
-            sql = strip_sql_comments((case / "sql.sql").read_text(encoding="utf-8"))
+            sql_path = case / "sql.sql"
+            expected_path = case / "expected.json"
+            if not sql_path.is_file() or not expected_path.is_file():
+                continue
+            expected = json.loads(expected_path.read_text(encoding="utf-8"))
+            skip = set(expected.get("skip_extractors", []) or [])
+            if "regex" in skip or "sqlglot" in skip:
+                continue  # case documents a known per-extractor gap
+            sql = strip_sql_comments(sql_path.read_text(encoding="utf-8"))
             mismatches = compare_extractors(regex, sg, sql)
             assert not mismatches, f"{case.name}: extractors disagree:\n" + "\n".join(
                 f"  {m.method}: regex={m.primary!r} sqlglot={m.secondary!r}"

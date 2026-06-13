@@ -211,18 +211,29 @@ class SqlGlotSqlReferenceExtractor(SqlReferenceExtractor):
 
         owner = self.extract_statement_owner(sql)
         result: Set[ReferencedObject] = set()
+        write_verb_nodes = (exp.Insert, exp.Update, exp.Delete, exp.Merge)
         for table in tree.find_all(exp.Table):
             parent = table.parent
             if isinstance(parent, exp.UserDefinedFunction):
                 continue  # owner of a PROCEDURE / FUNCTION
             if isinstance(parent, exp.Create):
                 continue  # owner of a VIEW / MACRO
-            if isinstance(parent, (exp.Insert, exp.Update, exp.Delete, exp.Merge)):
-                # MERGE target is the .this of the Merge node, but a
-                # USING subquery's FROM is parented to a From node, so
-                # this check correctly excludes the write target from
-                # reads.
+            if isinstance(parent, write_verb_nodes):
+                # MERGE target is the .this of the Merge node, USING
+                # subquery's FROM is parented to a From node — this
+                # check excludes the write target itself.
                 if parent.args.get("this") is table:
+                    continue
+            elif isinstance(parent, exp.Schema) and isinstance(
+                parent.parent, write_verb_nodes
+            ):
+                # ``INSERT INTO db.t (col, col)`` wraps the Table in a
+                # Schema whose parent is the Insert. The Table is still
+                # the write target — not a read source.
+                if (
+                    parent.args.get("this") is table
+                    and parent.parent.args.get("this") is parent
+                ):
                     continue
             ref = self._table_to_ref(table)
             if ref is None:
