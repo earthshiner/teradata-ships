@@ -275,9 +275,8 @@ class TestHarvestStageRecording:
             ";\n",
             encoding="utf-8",
         )
-        (project / "config" / "legacy_migration.sed").write_text(
-            "s/$BASE_NODE/{{BASE_NODE}}/g\n"
-            "s/$PARENT_NODE/{{PARENT_NODE}}/g\n",
+        (project / "config" / "tokenise.conf").write_text(
+            "s/$BASE_NODE/{{BASE_NODE}}/g\ns/$PARENT_NODE/{{PARENT_NODE}}/g\n",
             encoding="utf-8",
         )
 
@@ -294,9 +293,9 @@ class TestHarvestStageRecording:
         )
         assert harvested.exists()
         assert "{{PARENT_NODE}}" in harvested.read_text(encoding="utf-8")
-        assert "$BASE_NODE" in (
-            source / "Step_01_CreateDatabases_v0.1.db"
-        ).read_text(encoding="utf-8")
+        assert "$BASE_NODE" in (source / "Step_01_CreateDatabases_v0.1.db").read_text(
+            encoding="utf-8"
+        )
 
         d = _read_decisions(project)
         harvest_run = next(r for r in d["runs"] if r["stages"][0]["stage"] == "harvest")
