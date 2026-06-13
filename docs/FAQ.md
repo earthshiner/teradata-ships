@@ -805,6 +805,16 @@ The SHIPS Deployment Dashboard also generates this query for you — see the Com
 
 ## General
 
+### I'm an agent — what's the read-first file in a SHIPS project?
+
+Open `<project_dir>/ships.project.json`.
+
+It's the agent-discoverable index for the **project** (pre-package), same role that `context/ships.index.json` plays inside a built package. From one file you get the project name, the current lifecycle state (`scaffolded` → `harvested` → `inspected` → `analysed` → `packaged`), the recommended next CLI invocation, and pointers to every other evidence file in the tree (ships.yaml, ships.decisions.json, config/tokenise.conf, config/env/*.conf, latest release archive).
+
+The file is refreshed after every project-mutating CLI command (`scaffold`, `harvest`, `inspect`, `analyse`, `package`). The lifecycle state is derived from `ships.decisions.json` plus the existence of `releases/*.zip` — never inferred.
+
+Two forward-reference fields, `actions_ref` and `policy_ref`, are emitted as empty strings for now; they'll point at the project-side action vocabulary and agent policy in follow-up issues under [#268](https://github.com/earthshiner/teradata-ships/issues/268).
+
 ### Can I package from a GitHub repository directly?
 
 SHIPS always works on a **local directory** — it has no built-in GitHub client. But in practice this is rarely a constraint because the three common patterns all give you a local directory with minimal setup:
