@@ -2847,6 +2847,36 @@ def _run_build(args, stage, issue_codes) -> int:
     for w in manifest.warnings:
         stage.add_issue("warning", issue_codes.PACKAGE_WARNING, w)
 
+    # -- #145: emit per-stage result files into every built archive --
+    # When the package was built via ``ships process`` the run already
+    # carries every stage and ``_cmd_process`` writes them at run-end.
+    # Standalone builds (``ships package`` after individual
+    # harvest/inspect/analyse runs) need the same per-stage results so
+    # an agent inspecting the archive never has to scrape decisions.json.
+    try:
+        archive_paths_for_stage_results = [archive_path]
+        if companion_pair is not None:
+            archive_paths_for_stage_results.insert(0, companion_pair[0])
+        stage_results = _build_standalone_stage_results(
+            args.project,
+            current_stage_entry=getattr(stage, "_stage_entry", None),
+        )
+        if stage_results:
+            for _arc in archive_paths_for_stage_results:
+                if not _arc or not os.path.exists(_arc):
+                    continue
+                if _arc.endswith(".zip"):
+                    _write_process_results_to_zip(_arc, stage_results)
+                elif _arc.endswith(".tar.gz"):
+                    _write_process_results_to_tar_gz(_arc, stage_results)
+    except Exception as _stage_results_exc:  # pragma: no cover - defensive
+        # Per-stage results are an enrichment, not a blocker. A failure
+        # here must not abort the build.
+        logger.warning(
+            "stage result artefacts not produced: %s — package builds without them.",
+            _stage_results_exc,
+        )
+
     print(f"\n{'=' * 64}")
     print("  ✓ Package built successfully")
     print(f"{'=' * 64}")
@@ -2894,10 +2924,73 @@ def _run_build(args, stage, issue_codes) -> int:
     return 0
 
 
+# ---------------------------------------------------------------
+# Per-stage result derivation (#145)
+# ---------------------------------------------------------------
+
+STAGE_RESULT_SCHEMA = "teradata-ships/stage-result/v1"
+
+# Default next-action suggestions for an agent or CI/CD tool that just
+# consumed a stage result. The map covers the canonical pipeline
+# (harvest → inspect → analyse → package → ship → verify). Override
+# semantics: an explicit ``next_action`` field on the stage entry's
+# ``decisions`` wins; otherwise the rule below applies based on the
+# stage name and status. The rule is intentionally simple — a richer
+# state machine (e.g. "remediate on inspect errors") can be layered on
+# without changing the result-file shape.
+_STAGE_NEXT_ACTIONS: Dict[str, Dict[str, str]] = {
+    "harvest": {
+        "success": "Run `ships inspect` to validate the harvested payload.",
+        "error": "Resolve the harvest errors before re-running.",
+    },
+    "inspect": {
+        "success": "Run `ships analyse` to compute the deployment dependency graph.",
+        "error": "Remediate inspect findings — see context/ships.rules.json for per-rule guidance.",
+    },
+    "analyse": {
+        "success": "Run `ships package` to build a deployment archive.",
+        "error": "Resolve dependency / cycle issues before packaging.",
+    },
+    "package": {
+        "success": "Run `ships ship` (or hand the archive to a deployer) to deploy the package.",
+        "error": "Resolve packaging errors and rebuild.",
+    },
+    "ship": {
+        "success": "Run `ships verify` to confirm the deployed state matches the package.",
+        "error": "Investigate deployment failures via context/stages/ship.result.json and decisions.json.",
+    },
+    "verify": {
+        "success": "Deployment complete — archive the package and decisions for the audit trail.",
+        "error": "Investigate drift between expected and deployed state.",
+    },
+    "scan": {
+        "success": "Review the scan summary; proceed with harvest when ready.",
+        "error": "Resolve scan errors before harvesting.",
+    },
+}
+
+
+def _next_action_for(stage_entry: Dict[str, Any]) -> str:
+    """Derive a one-line ``next_action`` hint for ``stage_entry``."""
+    decisions = stage_entry.get("decisions") or {}
+    explicit = decisions.get("next_action") if isinstance(decisions, dict) else None
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()
+
+    name = stage_entry.get("stage") or ""
+    status = str(stage_entry.get("status", "success")).lower()
+    bucket = _STAGE_NEXT_ACTIONS.get(name, {})
+    if status == "success":
+        return bucket.get("success", "")
+    # Any non-success status (error/warning/partial/failed) falls through
+    # to the error suggestion.
+    return bucket.get("error") or bucket.get("success", "")
+
+
 def _normalise_stage_result(stage_entry: Dict[str, Any]) -> Dict[str, Any]:
     """Return a package-local JSON-safe stage result document."""
     return {
-        "schema": "teradata-ships/stage-result/v1",
+        "schema": STAGE_RESULT_SCHEMA,
         "stage": stage_entry.get("stage"),
         "status": stage_entry.get("status"),
         "started_at": stage_entry.get("started_at"),
@@ -2908,7 +3001,64 @@ def _normalise_stage_result(stage_entry: Dict[str, Any]) -> Dict[str, Any]:
         "decisions": stage_entry.get("decisions", {}),
         "issues": stage_entry.get("issues", []),
         "issue_counts": _count_stage_issues(stage_entry),
+        "next_action": _next_action_for(stage_entry),
     }
+
+
+def _collect_latest_stage_entries(
+    decisions_data: Dict[str, Any],
+) -> Dict[str, Dict[str, Any]]:
+    """Return the most-recent stage entry per stage name across all runs.
+
+    Walks ``decisions_data["runs"]`` from newest to oldest. The first
+    occurrence of each stage name wins, so a re-run of ``inspect``
+    overrides the prior entry. Stages without a ``stage`` key or
+    without a ``finished_at`` timestamp are skipped — partial /
+    interrupted runs do not override completed ones.
+    """
+    latest: Dict[str, Dict[str, Any]] = {}
+    for run in reversed(decisions_data.get("runs", []) or []):
+        for stage_entry in run.get("stages", []) or []:
+            name = stage_entry.get("stage")
+            if not isinstance(name, str):
+                continue
+            if not stage_entry.get("finished_at"):
+                continue
+            if name in latest:
+                continue
+            latest[name] = stage_entry
+    return latest
+
+
+def _build_standalone_stage_results(
+    project_dir: str,
+    current_stage_entry: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Return per-stage result documents for the most recent run of each
+    stage in the project's ``ships.decisions.json``.
+
+    When ``current_stage_entry`` is provided it overrides any existing
+    entry for the same stage name — used so the in-flight ``package``
+    stage shows up in the freshly-built archive even though
+    ``DecisionsManifest.save()`` runs slightly after the archive write.
+    """
+    results: Dict[str, Dict[str, Any]] = {}
+    decisions_path = os.path.join(project_dir, "ships.decisions.json")
+    decisions_data: Dict[str, Any] = {}
+    if os.path.exists(decisions_path):
+        try:
+            with open(decisions_path, "r", encoding="utf-8") as f:
+                decisions_data = json.load(f)
+        except (OSError, ValueError):
+            decisions_data = {}
+
+    latest = _collect_latest_stage_entries(decisions_data)
+    if current_stage_entry and isinstance(current_stage_entry.get("stage"), str):
+        latest[current_stage_entry["stage"]] = current_stage_entry
+
+    for name, entry in latest.items():
+        results[f"{name}.result.json"] = _normalise_stage_result(entry)
+    return results
 
 
 def _count_stage_issues(stage_entry: Dict[str, Any]) -> Dict[str, int]:
