@@ -540,6 +540,17 @@ def _stage_recording(project_dir: str, stage_name: str):
             # exited and RunRecorder.__exit__ has already finalised it.
             _propagate_stage_to_otel_span(stage, otel_span)
 
+            # Refresh ships.project.json after every stage so an agent
+            # opening the project sees the latest lifecycle state and
+            # next-recommended actions (#271). Best-effort: errors here
+            # must never break the stage recording path.
+            try:
+                from td_release_packager.project_index import write_project_index
+
+                write_project_index(project_dir)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug("project_index refresh failed: %s", exc)
+
     return _ctx()
 
 
