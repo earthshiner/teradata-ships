@@ -377,8 +377,7 @@ def signal_name_cell(name: str, navy: str = _NAVY, orange: str = _ORANGE) -> str
     entry = SIGNAL_EXPLANATIONS.get(name)
     if entry is None:
         return (
-            f"<span style='font-family:monospace;font-size:13px'>"
-            f"{_escape(name)}</span>"
+            f"<span style='font-family:monospace;font-size:13px'>{_escape(name)}</span>"
         )
 
     short_title, what_it_checks, what_to_do = entry

@@ -885,8 +885,7 @@ class TestIngestDirectory:
             encoding="utf-8",
         )
         rules, skipped = parse_migration_sed(
-            "s/$BASE_NODE/{{BASE_NODE}}/g\n"
-            "s/$PARENT_NODE/{{PARENT_NODE}}/g\n"
+            "s/$BASE_NODE/{{BASE_NODE}}/g\ns/$PARENT_NODE/{{PARENT_NODE}}/g\n"
         )
 
         result = ingest_directory(
@@ -1503,11 +1502,7 @@ INSERT INTO x.log_two (id) VALUES (2);
         assert result.placement_index_files == 1
 
         readme = (
-            tmp_project
-            / ".ships"
-            / "harvest"
-            / "by_database"
-            / "README.md"
+            tmp_project / ".ships" / "harvest" / "by_database" / "README.md"
         ).read_text(encoding="utf-8")
 
         assert (
@@ -1516,8 +1511,7 @@ INSERT INTO x.log_two (id) VALUES (2);
         )
         assert (
             "view is currently owned by a table-layer database; move the view "
-            "owner to the matching _V token if this is a business view"
-            in readme
+            "owner to the matching _V token if this is a business view" in readme
         )
 
     def test_remove_view_type_affixes_renames_views_and_references(
@@ -1554,9 +1548,7 @@ INSERT INTO x.log_two (id) VALUES (2);
         assert "REPLACE VIEW {{DB_MEMORY_V}}.Cookbook_Active AS" in renamed.read_text(
             encoding="utf-8"
         )
-        assert "{{DB_MEMORY_V}}.Cookbook_Active" in consumer.read_text(
-            encoding="utf-8"
-        )
+        assert "{{DB_MEMORY_V}}.Cookbook_Active" in consumer.read_text(encoding="utf-8")
         assert "{{DB_MEMORY_V}}.v_Cookbook_Active" not in consumer.read_text(
             encoding="utf-8"
         )
@@ -1871,8 +1863,12 @@ INSERT INTO x.log_two (id) VALUES (2);
 
         result = ingest_directory(str(src), str(tmp_project), detect_tokens=False)
 
-        ordered = tmp_project / "payload" / "database" / "DML" / (
-            "temporary_access.ordered.osql"
+        ordered = (
+            tmp_project
+            / "payload"
+            / "database"
+            / "DML"
+            / ("temporary_access.ordered.osql")
         )
         assert ordered.exists()
         body = ordered.read_text(encoding="utf-8")

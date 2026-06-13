@@ -198,17 +198,17 @@ _ALIAS_STOPLIST = frozenset(
         # (Teradata Error 3706) because the parser reads them as commands
         # rather than identifiers.  The rule is: if you have to double-quote
         # it to make it work, it is wrong — use a meaningful alias instead.
-        "CT",    # CREATE TABLE
-        "BT",    # BEGIN TRANSACTION
-        "ET",    # END TRANSACTION
-        "DEL",   # DELETE
-        "INS",   # INSERT
-        "SEL",   # SELECT
-        "UPD",   # UPDATE
-        "CV",    # CREATE VIEW
-        "CM",    # CREATE MACRO
-        "CP",    # CREATE PROCEDURE
-        "CS",    # CASESPECIFIC
+        "CT",  # CREATE TABLE
+        "BT",  # BEGIN TRANSACTION
+        "ET",  # END TRANSACTION
+        "DEL",  # DELETE
+        "INS",  # INSERT
+        "SEL",  # SELECT
+        "UPD",  # UPDATE
+        "CV",  # CREATE VIEW
+        "CM",  # CREATE MACRO
+        "CP",  # CREATE PROCEDURE
+        "CS",  # CASESPECIFIC
     }
 )
 
@@ -519,7 +519,6 @@ def parse_table_columns(ddl_text: str) -> List[str]:
         ):
             continue
 
-
         # Skip bare SQL keyword entries that are column *definition*
         # continuation clauses rather than column names.  The most
         # common case is a DEFAULT value clause that was split from
@@ -538,21 +537,23 @@ def parse_table_columns(ddl_text: str) -> List[str]:
         # share these spellings must be double-quoted in the DDL
         # source; the parser will still recognise them via the
         # quoted-name branch of the regex below.
-        _CLAUSE_KEYWORDS = frozenset({
-            "DEFAULT",
-            "GENERATED",
-            "NOT",
-            "NULL",
-            "WITH",
-            "FORMAT",
-            "TITLE",
-            "COMPRESS",
-            "CASESPECIFIC",
-            "UPPERCASE",
-            "LATIN",
-            "UNICODE",
-            "CHARACTER",
-        })
+        _CLAUSE_KEYWORDS = frozenset(
+            {
+                "DEFAULT",
+                "GENERATED",
+                "NOT",
+                "NULL",
+                "WITH",
+                "FORMAT",
+                "TITLE",
+                "COMPRESS",
+                "CASESPECIFIC",
+                "UPPERCASE",
+                "LATIN",
+                "UNICODE",
+                "CHARACTER",
+            }
+        )
         first_word = upper.split()[0] if upper.split() else ""
         if first_word in _CLAUSE_KEYWORDS:
             continue

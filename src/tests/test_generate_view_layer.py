@@ -402,7 +402,6 @@ def two_table_index():
     }
 
 
-
 class TestTeradataAliasBlocklist:
     """Regression tests — Teradata syntax shortcuts must be rejected as aliases.
 
@@ -449,8 +448,7 @@ class TestTeradataAliasBlocklist:
         result = parse_from_clause(sql)
         # CT should have been stripped; the source is recorded with an empty alias.
         ct_entries = [
-            spec for spec in result
-            if spec.object_name == "Call_Topic_Current"
+            spec for spec in result if spec.object_name == "Call_Topic_Current"
         ]
         assert ct_entries, "Call_Topic_Current not found in parsed FROM clause"
         assert ct_entries[0].alias == "", (
@@ -460,14 +458,10 @@ class TestTeradataAliasBlocklist:
 
     def test_cs_alias_treated_as_no_alias(self):
         """CS used as an alias must be stripped — it is CASESPECIFIC in Teradata."""
-        sql = (
-            "SELECT cs.conversation_summary "
-            "FROM {{DB_V}}.Call_Summary_Current cs"
-        )
+        sql = "SELECT cs.conversation_summary FROM {{DB_V}}.Call_Summary_Current cs"
         result = parse_from_clause(sql)
         cs_entries = [
-            spec for spec in result
-            if spec.object_name == "Call_Summary_Current"
+            spec for spec in result if spec.object_name == "Call_Summary_Current"
         ]
         assert cs_entries, "Call_Summary_Current not found in parsed FROM clause"
         assert cs_entries[0].alias == "", (
@@ -802,17 +796,13 @@ class TestEndToEnd:
 
         assert result.errors == []
         locking_view = (
-            root
-            / "payload/database/DDL/views"
-            / "{{DB_DOMAIN_V}}.Agent_H.viw"
+            root / "payload/database/DDL/views" / "{{DB_DOMAIN_V}}.Agent_H.viw"
         )
         assert locking_view.exists()
         assert "CREATE VIEW {{DB_DOMAIN_V}}.Agent_H" in locking_view.read_text()
 
         business_view = (
-            root
-            / "payload/database/DDL/views"
-            / "{{DB_DOMAIN_V}}.Agent_Current.viw"
+            root / "payload/database/DDL/views" / "{{DB_DOMAIN_V}}.Agent_Current.viw"
         ).read_text()
         assert "SELECT *" not in business_view
         assert "{{DB_DOMAIN_T}}" not in business_view
@@ -991,10 +981,11 @@ class TestDefaultKeywordNotEmittedAsColumn:
         # Neither the column-list section nor the SELECT list should
         # contain a bare DEFAULT identifier.
         import re as _re
+
         # Match ', DEFAULT' or '  DEFAULT' as a standalone column reference
         # (not part of a longer name like 'default_value').
         bare_default = _re.search(
-            r'(?:,\s*|\bSELECT\s+)\bDEFAULT\b(?!\s*\w)',
+            r"(?:,\s*|\bSELECT\s+)\bDEFAULT\b(?!\s*\w)",
             ddl,
             _re.IGNORECASE,
         )
