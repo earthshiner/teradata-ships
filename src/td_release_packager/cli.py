@@ -1082,24 +1082,7 @@ def _cmd_migrate_source(args):
     """Apply a tokenisation config to a source tree (Windows-safe)."""
     from td_release_packager.source_migrator import main as migrator_main
 
-    config_path = getattr(args, "tokenise_config", None) or getattr(
-        args, "sed_legacy_flag", None
-    )
-    if not config_path:
-        print(
-            "Error: --tokenise-config is required (deprecated alias: --sed)",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-    if getattr(args, "sed_legacy_flag", None) and not getattr(
-        args, "tokenise_config", None
-    ):
-        print(
-            "  ⚠ --sed is deprecated; use --tokenise-config.",
-            file=sys.stderr,
-        )
-
-    argv = ["--tokenise-config", config_path, "--source", args.source]
+    argv = ["--tokenise-config", args.tokenise_config, "--source", args.source]
     if args.project:
         argv.extend(["--project", args.project])
     if args.dry_run:
@@ -1338,47 +1321,23 @@ def _resolve_path(
 def _load_project_legacy_migration_rules(project_dir: str, stage=None):
     """Load project-local tokenisation rules when present.
 
-    Looks for ``config/tokenise.conf`` first (the canonical name), then
-    falls back to ``config/legacy_migration.sed`` (deprecated alias —
-    will be removed in a future release). Harvest and process honour
-    that project contract automatically so any matched markers are
-    normalised to ``{{TOKEN}}`` form before classification and packaging.
+    Reads ``config/tokenise.conf`` from the project. Harvest and process
+    honour that project contract automatically so any matched markers
+    are normalised to ``{{TOKEN}}`` form before classification and
+    packaging.
     """
-    config_dir = os.path.join(project_dir, "config")
-    tokenise_path = os.path.join(config_dir, "tokenise.conf")
-    legacy_path = os.path.join(config_dir, "legacy_migration.sed")
-
-    has_tokenise = os.path.isfile(tokenise_path)
-    has_legacy = os.path.isfile(legacy_path)
-
-    if has_tokenise and has_legacy:
-        print(
-            f"  ⚠ Both '{tokenise_path}' and '{legacy_path}' exist. "
-            "Loading 'config/tokenise.conf'; the legacy file is ignored.",
-            file=sys.stderr,
-        )
-        migration_path = tokenise_path
-    elif has_tokenise:
-        migration_path = tokenise_path
-    elif has_legacy:
-        print(
-            "  ⚠ 'config/legacy_migration.sed' is deprecated; "
-            "rename to 'config/tokenise.conf'.",
-            file=sys.stderr,
-        )
-        migration_path = legacy_path
-    else:
-        migration_path = tokenise_path  # for the stage record below
+    migration_path = os.path.join(project_dir, "config", "tokenise.conf")
+    has_config = os.path.isfile(migration_path)
 
     if stage is not None:
         stage.set_config_resolved(
             "tokenise_config",
-            migration_path if (has_tokenise or has_legacy) else None,
+            migration_path if has_config else None,
             "layer-3",
             "project config",
         )
 
-    if not (has_tokenise or has_legacy):
+    if not has_config:
         return []
 
     from td_release_packager.source_migrator import parse_migration_sed
@@ -5137,18 +5096,10 @@ def _build_parser():
     ms.add_argument(
         "--tokenise-config",
         dest="tokenise_config",
-        default=None,
+        required=True,
         metavar="CONFIG_FILE",
         help="Path to the tokenisation config "
         "(canonical name: ``config/tokenise.conf``).",
-    )
-    ms.add_argument(
-        "--sed",
-        dest="sed_legacy_flag",
-        default=None,
-        metavar="SED_FILE",
-        help="Deprecated alias for ``--tokenise-config``. "
-        "Will be removed in a future release.",
     )
     ms.add_argument(
         "--source",

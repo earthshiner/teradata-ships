@@ -20,10 +20,6 @@ Preview / apply::
         --tokenise-config  config/tokenise.conf \\
         --source           <source_dir> [--dry-run]
 
-For backwards compatibility, ``--sed`` and
-``config/legacy_migration.sed`` are still accepted as deprecated
-aliases — they emit a one-line warning and will be removed in a
-future release.
 """
 
 from __future__ import annotations
@@ -384,18 +380,10 @@ def main(argv=None):
     p.add_argument(
         "--tokenise-config",
         dest="tokenise_config",
-        default=None,
+        required=True,
         metavar="CONFIG_FILE",
         help="Path to the tokenisation config "
         "(canonical name: ``config/tokenise.conf``).",
-    )
-    p.add_argument(
-        "--sed",
-        dest="sed_legacy_flag",
-        default=None,
-        metavar="SED_FILE",
-        help="Deprecated alias for ``--tokenise-config``. "
-        "Will be removed in a future release.",
     )
     p.add_argument(
         "--source",
@@ -427,20 +415,7 @@ def main(argv=None):
         format="%(levelname)s: %(message)s",
     )
 
-    config_path_arg = args.tokenise_config or args.sed_legacy_flag
-    if not config_path_arg:
-        print(
-            "ERROR: --tokenise-config is required (deprecated alias: --sed)",
-            file=sys.stderr,
-        )
-        return 2
-    if args.sed_legacy_flag and not args.tokenise_config:
-        print(
-            "  ⚠ --sed is deprecated; use --tokenise-config.",
-            file=sys.stderr,
-        )
-
-    config_path = Path(config_path_arg)
+    config_path = Path(args.tokenise_config)
     if not config_path.is_file():
         print(
             f"ERROR: tokenisation config not found: {config_path}",

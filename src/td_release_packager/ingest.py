@@ -263,9 +263,8 @@ class IngestResult:
     #: substitution at all).
     legacy_placeholders: List["LegacyPlaceholderFinding"] = field(default_factory=list)
     #: Tokenisation substitutions applied in memory before
-    #: classification, via config/tokenise.conf (or the deprecated
-    #: config/legacy_migration.sed) or an explicit caller-supplied
-    #: migration rule set.
+    #: classification, via config/tokenise.conf or an explicit
+    #: caller-supplied migration rule set.
     legacy_migration_files: int = 0
     legacy_migration_substitutions: int = 0
     #: Human-facing harvest mirror grouped by database/token. This is

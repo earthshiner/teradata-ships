@@ -157,7 +157,7 @@ You **never** want a package to carry the source system's literal names baked in
 
 The common scenario: you've extracted DDL from a live Teradata system where the project prefix is hardcoded (`CallCentre_DOM_STD_T`, `CallCentre_MEM_BUS_V`, etc.) and you want a portable payload that can later be deployed wherever your env config says. The literal `s/.../.../g` form `import-legacy` generates is enough for `$VAR → {{VAR}}` rewrites, but it can't handle "match anything that looks like `<Project>_<DOMAIN>_<TIER>_<KIND>` and keep groups 2/3/4 while replacing group 1 with `{{SHIPS_PROJECT}}`". That's what the `regex::` form is for.
 
-Use a **regex tokenisation rule** in `config/tokenise.conf` (the canonical name; `config/legacy_migration.sed` is still accepted as a deprecated alias with a one-line warning):
+Use a **regex tokenisation rule** in `config/tokenise.conf`:
 
 ```
 # Token the project prefix on every <Project>_<DOMAIN>_<TIER>_<KIND> name.
