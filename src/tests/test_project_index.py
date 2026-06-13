@@ -231,11 +231,11 @@ class TestShape:
         d = index.to_dict()
         assert d["actions_ref"] == "ships.project_actions.json"
 
-    def test_policy_ref_still_empty_for_v1(self, tmp_path):
-        # The project-side agent policy lands in a follow-up under #268.
+    def test_policy_ref_points_at_project_policy(self, tmp_path):
+        # #275 wired policy_ref to ships.project_policy.json.
         index = compute_project_index(str(_make_project(tmp_path)))
         d = index.to_dict()
-        assert d["policy_ref"] == ""
+        assert d["policy_ref"] == "ships.project_policy.json"
 
     def test_project_name_read_from_ships_yaml(self, tmp_path):
         project = _make_project(tmp_path, name="customised_name")

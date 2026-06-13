@@ -560,6 +560,14 @@ def _stage_recording(project_dir: str, stage_name: str):
                 write_project_actions(project_dir)
             except Exception as exc:  # pragma: no cover - defensive
                 logger.debug("project_actions refresh failed: %s", exc)
+            try:
+                from td_release_packager.project_policy import (
+                    write_project_policy,
+                )
+
+                write_project_policy(project_dir)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug("project_policy refresh failed: %s", exc)
 
     return _ctx()
 

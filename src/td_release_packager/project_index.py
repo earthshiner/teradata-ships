@@ -24,12 +24,11 @@ The ladder reflects the canonical SHIPS pipeline. Stages can be skipped
 (e.g. you can package without running analyse), so the recommended
 next action is a hint — never a hard requirement.
 
-**Forward references**
-
 ``actions_ref`` points at ``ships.project_actions.json`` (#273 — the
-project-side action vocabulary). ``policy_ref`` is still emitted as
-``""`` and will be wired up when the project-side agent policy lands
-under #268.
+project-side action vocabulary). ``policy_ref`` points at
+``ships.project_policy.json`` (#275 — the project-side agent policy).
+Together with this index, those two files make up the project-side
+agent contract under #268.
 """
 
 from __future__ import annotations
@@ -272,9 +271,10 @@ def compute_project_index(project_dir: str) -> ProjectIndex:
         s.format(project_dir=project_dir) for s in _NEXT_ACTIONS.get(state, [])
     ]
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
-    # ``actions_ref`` is wired to the project-side action vocabulary
-    # introduced by #273 — a single, read-after-index file an agent
-    # can open to learn which CLI actions are safe to take.
+    # ``actions_ref`` (#273) and ``policy_ref`` (#275) wire up the
+    # project-side action vocabulary and agent policy respectively.
+    # Together with this index they form the project-side agent
+    # contract from #268.
     return ProjectIndex(
         schema_version=PROJECT_INDEX_SCHEMA_VERSION,
         evaluated_at=now,
@@ -284,6 +284,7 @@ def compute_project_index(project_dir: str) -> ProjectIndex:
         next_recommended_actions=next_actions,
         references=refs,
         actions_ref="ships.project_actions.json",
+        policy_ref="ships.project_policy.json",
     )
 
 
