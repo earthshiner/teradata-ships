@@ -42,6 +42,10 @@ from td_release_packager.policy import (
     POLICY_RESULT_REF,
     load_policy_result,
 )
+from td_release_packager.dependencies import (
+    DEPENDENCIES_RESULT_FILENAME,
+    DEPENDENCIES_RESULT_REF,
+)
 from td_release_packager.models import BuildConfig, BuildManifest
 from td_release_packager.trust import (
     STATUS_BLOCKED,
@@ -88,6 +92,7 @@ SCHEMA_FILENAMES = {
     ACTIONS_RESULT_FILENAME: "ships.actions.schema.json",
     CAPABILITIES_RESULT_FILENAME: "ships.capabilities.schema.json",
     POLICY_RESULT_FILENAME: "ships.policy.schema.json",
+    DEPENDENCIES_RESULT_FILENAME: "ships.dependencies.schema.json",
 }
 
 DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
@@ -527,6 +532,99 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
                 ],
                 "ask_for_human_approval_when": [],
                 "instruction": "When any stop_conditions[*].condition is detected, follow that entry's instruction; do not proceed via inference or by bypassing SHIPS controls.",
+            }
+        ],
+    },
+    "ships.dependencies.schema.json": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://teradata-ships.local/schemas/ships.dependencies.schema.json",
+        "title": "SHIPS canonical dependency graph",
+        "description": "Machine-readable dependency graph for the package: object inventory, deployment waves, internal/external edges, and any cycles. Same shape produced by `td_release_packager analyze --formats json` so existing D3 / vis.js / cytoscape.js / Graph Discipline consumers keep working.",
+        "type": "object",
+        "additionalProperties": True,
+        "required": [
+            "schema_version",
+            "metadata",
+            "nodes",
+            "edges",
+            "waves",
+            "cycles",
+            "external_dependencies",
+        ],
+        "properties": {
+            "schema_version": {"type": "string"},
+            "metadata": {"type": "object"},
+            "nodes": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": [
+                        "id",
+                        "type",
+                        "database",
+                        "object_name",
+                        "file",
+                        "wave",
+                    ],
+                    "properties": {
+                        "id": {"type": "string"},
+                        "type": {"type": "string"},
+                        "database": {"type": "string"},
+                        "object_name": {"type": "string"},
+                        "file": {"type": "string"},
+                        "wave": {"type": "integer"},
+                    },
+                },
+            },
+            "edges": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["source", "target", "type"],
+                    "properties": {
+                        "source": {"type": "string"},
+                        "target": {"type": "string"},
+                        "type": {"enum": ["internal", "external"]},
+                    },
+                },
+            },
+            "waves": {"type": "array"},
+            "cycles": {"type": "array"},
+            "external_dependencies": {"type": "object"},
+        },
+        "examples": [
+            {
+                "schema_version": "1.0",
+                "metadata": {
+                    "generator": "td_release_packager.graph_export",
+                    "generated_at": "2026-05-19T00:00:00+00:00",
+                    "object_count": 2,
+                    "edge_count": 1,
+                    "wave_count": 2,
+                    "cycle_count": 0,
+                },
+                "nodes": [
+                    {
+                        "id": "DB.T",
+                        "type": "TABLE",
+                        "database": "DB",
+                        "object_name": "T",
+                        "file": "payload/database/DDL/tables/DB.T.tbl",
+                        "wave": 1,
+                    },
+                    {
+                        "id": "DB.V",
+                        "type": "VIEW",
+                        "database": "DB",
+                        "object_name": "V",
+                        "file": "payload/database/DDL/views/DB.V.viw",
+                        "wave": 2,
+                    },
+                ],
+                "edges": [{"source": "DB.T", "target": "DB.V", "type": "internal"}],
+                "waves": [["DB.T"], ["DB.V"]],
+                "cycles": [],
+                "external_dependencies": {},
             }
         ],
     },
@@ -1002,6 +1100,12 @@ def _entrypoints() -> Dict[str, Dict[str, Any]]:
             "required": True,
             "audience": ["agent", "ci_cd", "dba", "governance"],
         },
+        "dependencies": {
+            "path": _context_path(DEPENDENCIES_RESULT_FILENAME),
+            "description": "Machine-readable dependency graph for the package: object inventory, deployment waves, internal/external edges, and any cycles. Same shape as `analyze --formats json` so D3 / vis.js / cytoscape.js / Graph Discipline consumers keep working. An agent reads this instead of parsing _waves.txt.",
+            "required": False,
+            "audience": ["agent", "ci_cd", "governance"],
+        },
         "manifest": {
             "path": _context_path(MANIFEST_FILENAME),
             "description": "Compact, agent-safe package inventory describing included artefacts, object counts, token usage, dependency contract, governance settings, and deployment-relevant contents.",
@@ -1233,6 +1337,7 @@ def _build_index_document(
         "actions_ref": ACTIONS_RESULT_REF,
         "capabilities_ref": CAPABILITIES_RESULT_REF,
         "policy_ref": POLICY_RESULT_REF,
+        "dependencies_ref": DEPENDENCIES_RESULT_REF,
         "entrypoints": _entrypoints(),
         "recommended_read_order": _recommended_read_order(),
         "human_actions_required": (
@@ -1293,6 +1398,7 @@ def _build_context_document(
         "actions_ref": ACTIONS_RESULT_REF,
         "capabilities_ref": CAPABILITIES_RESULT_REF,
         "policy_ref": POLICY_RESULT_REF,
+        "dependencies_ref": DEPENDENCIES_RESULT_REF,
         "context_budget": {
             "preferred_agent_prompting": "Load context/ships.index.json first, then open referenced evidence only when needed.",
             "detailed_evidence_is_referenced_not_repeated": True,
@@ -1345,6 +1451,7 @@ def _build_agent_manifest_document(
         "actions_ref": ACTIONS_RESULT_REF,
         "capabilities_ref": CAPABILITIES_RESULT_REF,
         "policy_ref": POLICY_RESULT_REF,
+        "dependencies_ref": DEPENDENCIES_RESULT_REF,
         "evidence": _evidence_files(),
     }
 
@@ -1402,6 +1509,7 @@ def _build_handoff_document(
         "actions_ref": ACTIONS_RESULT_REF,
         "capabilities_ref": CAPABILITIES_RESULT_REF,
         "policy_ref": POLICY_RESULT_REF,
+        "dependencies_ref": DEPENDENCIES_RESULT_REF,
         "package": {
             "name": manifest.get("package_name"),
             "filename": manifest.get("package_filename"),
