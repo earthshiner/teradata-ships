@@ -661,8 +661,11 @@ def _summary_tab(records: List[Dict]) -> str:
     flags = _summary_flags(summary)
 
     def render_category(name: str, counts: Dict[str, int]) -> str:
+        # Issue #277 — highlight rows where count > 0 so a DBA can
+        # skim the Summary tab for what's actually in the package.
         rows = "\n".join(
-            f"<tr><td>{_h(label)}</td><td>{count}</td></tr>"
+            f'<tr class="{"has-count" if count > 0 else "zero-count"}">'
+            f"<td>{_h(label)}</td><td>{count}</td></tr>"
             for label, count in sorted(counts.items(), key=lambda item: item[0])
         )
         return f"""
@@ -1108,6 +1111,10 @@ pre {{ white-space: pre-wrap; word-break: break-all; }}
 .summary-table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
 .summary-table td {{ padding: 8px 12px; border-bottom: 1px solid #f0f0f0; }}
 .summary-table td:last-child {{ text-align: right; font-weight: 700; font-family: monospace; }}
+/* Issue #277 — emphasise rows with count > 0, fade rows that are zero. */
+.summary-table tr.has-count td {{ background: #F5F8FA; color: {_NAVY}; }}
+.summary-table tr.has-count td:last-child {{ color: {_ORANGE}; }}
+.summary-table tr.zero-count td {{ color: #ADB5BD; }}
 .summary-flags {{ background: #fff3cd; border: 1px solid #ffca2c; border-left: 6px solid {_ORANGE};
                   padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; }}
 .summary-flags ul {{ margin: 8px 0 0 18px; color: #7a3b00; }}
