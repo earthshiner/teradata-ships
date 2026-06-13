@@ -48,6 +48,7 @@ def test_write_context_artifacts_emits_agent_context_contract(tmp_path):
         "schemas/ships.manifest.schema.json",
         "schemas/ships.policy.schema.json",
         "schemas/ships.provenance.schema.json",
+        "schemas/ships.rules.schema.json",
         "schemas/ships.trust.schema.json",
         "ships.context.json",
         "ships.handoff.json",

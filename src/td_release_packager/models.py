@@ -266,6 +266,8 @@ class BuildManifest:
     policy_ref: str = ""
     # Pointer to context/ships.dependencies.json — see #150.
     dependencies_ref: str = ""
+    # Pointer to context/ships.rules.json — see #144.
+    rules_ref: str = ""
     discovery: Dict[str, object] = field(default_factory=dict)
     baseline_dir: str = ""
     # Security: explicit target environment lock (GAP-002).

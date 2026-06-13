@@ -871,6 +871,15 @@ def _build_package_impl(
             _exc,
         )
 
+    # -- Phase 8b.6: Stamp the agent-readable rules catalogue (#144) --
+    from td_release_packager.rules_catalogue import (
+        RULES_RESULT_REF,
+        write_rules_result,
+    )
+
+    write_rules_result(pkg_dir)
+    manifest.rules_ref = RULES_RESULT_REF
+
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest.__dict__, f, indent=2, ensure_ascii=False)
 

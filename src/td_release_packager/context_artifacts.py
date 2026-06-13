@@ -46,6 +46,10 @@ from td_release_packager.dependencies import (
     DEPENDENCIES_RESULT_FILENAME,
     DEPENDENCIES_RESULT_REF,
 )
+from td_release_packager.rules_catalogue import (
+    RULES_RESULT_FILENAME,
+    RULES_RESULT_REF,
+)
 from td_release_packager.models import BuildConfig, BuildManifest
 from td_release_packager.trust import (
     STATUS_BLOCKED,
@@ -93,6 +97,7 @@ SCHEMA_FILENAMES = {
     CAPABILITIES_RESULT_FILENAME: "ships.capabilities.schema.json",
     POLICY_RESULT_FILENAME: "ships.policy.schema.json",
     DEPENDENCIES_RESULT_FILENAME: "ships.dependencies.schema.json",
+    RULES_RESULT_FILENAME: "ships.rules.schema.json",
 }
 
 DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
@@ -628,6 +633,69 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             }
         ],
     },
+    "ships.rules.schema.json": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://teradata-ships.local/schemas/ships.rules.schema.json",
+        "title": "SHIPS canonical inspect-rule remediation catalogue",
+        "description": "Per-rule remediation metadata so an agent consuming inspect findings in ships.decisions.json can decide whether to auto-apply a safe fix, surface a guided remediation, or escalate for human review.",
+        "type": "object",
+        "additionalProperties": True,
+        "required": ["schema_version", "rules"],
+        "properties": {
+            "schema_version": {"type": "string"},
+            "generated_by": {"type": "string"},
+            "rules": {
+                "type": "object",
+                "additionalProperties": {
+                    "type": "object",
+                    "required": [
+                        "description",
+                        "default_severity",
+                        "safe_fix_available",
+                        "automation_level",
+                        "recommended_action",
+                        "risk",
+                        "requires_human_review",
+                    ],
+                    "properties": {
+                        "description": {"type": "string"},
+                        "default_severity": {"enum": ["ERROR", "WARNING", "OFF"]},
+                        "safe_fix_available": {"type": "boolean"},
+                        "automation_level": {"enum": ["auto", "guided", "manual"]},
+                        "recommended_action": {"type": "string"},
+                        "risk": {"enum": ["low", "medium", "high"]},
+                        "requires_human_review": {"type": "boolean"},
+                    },
+                },
+            },
+        },
+        "examples": [
+            {
+                "schema_version": "1.0",
+                "generated_by": "td_release_packager.rules_catalogue",
+                "rules": {
+                    "db_qualifier": {
+                        "description": "Every object reference must be qualified with its database.",
+                        "default_severity": "ERROR",
+                        "safe_fix_available": True,
+                        "automation_level": "auto",
+                        "recommended_action": "Add the database qualifier before the object name.",
+                        "risk": "low",
+                        "requires_human_review": False,
+                    },
+                    "secret_scan": {
+                        "description": "DDL/DML bodies must not contain hard-coded credentials.",
+                        "default_severity": "ERROR",
+                        "safe_fix_available": False,
+                        "automation_level": "manual",
+                        "recommended_action": "Remove the credential and replace with a vault reference.",
+                        "risk": "high",
+                        "requires_human_review": True,
+                    },
+                },
+            }
+        ],
+    },
     "ships.actions.schema.json": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "https://teradata-ships.local/schemas/ships.actions.schema.json",
@@ -1106,6 +1174,12 @@ def _entrypoints() -> Dict[str, Dict[str, Any]]:
             "required": False,
             "audience": ["agent", "ci_cd", "governance"],
         },
+        "rules": {
+            "path": _context_path(RULES_RESULT_FILENAME),
+            "description": "Per-rule remediation catalogue for inspect findings: safe_fix_available, automation_level (auto/guided/manual), recommended_action, risk, and requires_human_review. An agent resolves each finding code in ships.decisions.json against this catalogue to decide whether to auto-fix, surface a guided remediation, or escalate.",
+            "required": False,
+            "audience": ["agent", "ci_cd", "governance"],
+        },
         "manifest": {
             "path": _context_path(MANIFEST_FILENAME),
             "description": "Compact, agent-safe package inventory describing included artefacts, object counts, token usage, dependency contract, governance settings, and deployment-relevant contents.",
@@ -1338,6 +1412,7 @@ def _build_index_document(
         "capabilities_ref": CAPABILITIES_RESULT_REF,
         "policy_ref": POLICY_RESULT_REF,
         "dependencies_ref": DEPENDENCIES_RESULT_REF,
+        "rules_ref": RULES_RESULT_REF,
         "entrypoints": _entrypoints(),
         "recommended_read_order": _recommended_read_order(),
         "human_actions_required": (
@@ -1399,6 +1474,7 @@ def _build_context_document(
         "capabilities_ref": CAPABILITIES_RESULT_REF,
         "policy_ref": POLICY_RESULT_REF,
         "dependencies_ref": DEPENDENCIES_RESULT_REF,
+        "rules_ref": RULES_RESULT_REF,
         "context_budget": {
             "preferred_agent_prompting": "Load context/ships.index.json first, then open referenced evidence only when needed.",
             "detailed_evidence_is_referenced_not_repeated": True,
@@ -1452,6 +1528,7 @@ def _build_agent_manifest_document(
         "capabilities_ref": CAPABILITIES_RESULT_REF,
         "policy_ref": POLICY_RESULT_REF,
         "dependencies_ref": DEPENDENCIES_RESULT_REF,
+        "rules_ref": RULES_RESULT_REF,
         "evidence": _evidence_files(),
     }
 
@@ -1510,6 +1587,7 @@ def _build_handoff_document(
         "capabilities_ref": CAPABILITIES_RESULT_REF,
         "policy_ref": POLICY_RESULT_REF,
         "dependencies_ref": DEPENDENCIES_RESULT_REF,
+        "rules_ref": RULES_RESULT_REF,
         "package": {
             "name": manifest.get("package_name"),
             "filename": manifest.get("package_filename"),
