@@ -37,6 +37,11 @@ from td_release_packager.capabilities import (
     CAPABILITIES_RESULT_FILENAME,
     CAPABILITIES_RESULT_REF,
 )
+from td_release_packager.policy import (
+    POLICY_RESULT_FILENAME,
+    POLICY_RESULT_REF,
+    load_policy_result,
+)
 from td_release_packager.models import BuildConfig, BuildManifest
 from td_release_packager.trust import (
     STATUS_BLOCKED,
@@ -82,6 +87,7 @@ SCHEMA_FILENAMES = {
     TRUST_RESULT_FILENAME: "ships.trust.schema.json",
     ACTIONS_RESULT_FILENAME: "ships.actions.schema.json",
     CAPABILITIES_RESULT_FILENAME: "ships.capabilities.schema.json",
+    POLICY_RESULT_FILENAME: "ships.policy.schema.json",
 }
 
 DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
@@ -99,7 +105,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "read_first",
             "entrypoints",
             "recommended_read_order",
-            "agent_policy",
+            "policy_ref",
         ],
         "properties": {
             "schema": {"const": "teradata-ships/package-index/v1"},
@@ -108,7 +114,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "read_first": {"const": "context/ships.index.json"},
             "entrypoints": {"type": "object"},
             "recommended_read_order": {"type": "array", "items": {"type": "string"}},
-            "agent_policy": {"type": "object"},
+            "policy_ref": {"type": "string"},
         },
         "examples": [
             {
@@ -118,7 +124,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
                 "read_first": "context/ships.index.json",
                 "entrypoints": {},
                 "recommended_read_order": ["index", "handoff", "context", "build"],
-                "agent_policy": {},
+                "policy_ref": "context/ships.policy.json",
             }
         ],
     },
@@ -138,6 +144,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "trust_ref",
             "actions_ref",
             "capabilities_ref",
+            "policy_ref",
             "references",
         ],
         "properties": {
@@ -149,6 +156,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "trust_ref": {"type": "string"},
             "actions_ref": {"type": "string"},
             "capabilities_ref": {"type": "string"},
+            "policy_ref": {"type": "string"},
             "references": {"type": "object"},
         },
         "examples": [
@@ -161,6 +169,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
                 "trust_ref": "context/ships.trust.json",
                 "actions_ref": "context/ships.actions.json",
                 "capabilities_ref": "context/ships.capabilities.json",
+                "policy_ref": "context/ships.policy.json",
                 "references": {},
             }
         ],
@@ -183,6 +192,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "trust_ref",
             "actions_ref",
             "capabilities_ref",
+            "policy_ref",
             "evidence",
         ],
         "properties": {
@@ -196,6 +206,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "trust_ref": {"type": "string"},
             "actions_ref": {"type": "string"},
             "capabilities_ref": {"type": "string"},
+            "policy_ref": {"type": "string"},
             "evidence": {"type": "object"},
         },
         "examples": [
@@ -210,6 +221,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
                 "trust_ref": "context/ships.trust.json",
                 "actions_ref": "context/ships.actions.json",
                 "capabilities_ref": "context/ships.capabilities.json",
+                "policy_ref": "context/ships.policy.json",
                 "evidence": {},
             }
         ],
@@ -425,6 +437,96 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
                 "approval_required": False,
                 "change_ref_required": False,
                 "integrity_check_required": True,
+            }
+        ],
+    },
+    "ships.policy.schema.json": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://teradata-ships.local/schemas/ships.policy.schema.json",
+        "title": "SHIPS canonical agent policy",
+        "description": "Machine-readable agent safety policy: do-not-* flags, stop conditions, and approval triggers with per-condition detect_via and evidence_ref metadata so an agent can detect and act on each condition from the policy doc alone.",
+        "type": "object",
+        "additionalProperties": True,
+        "required": [
+            "schema_version",
+            "evaluated_at",
+            "purpose",
+            "trust_status_at_build",
+            "do_not_infer_missing_tokens",
+            "do_not_modify_payload",
+            "do_not_deploy_if_blocked",
+            "do_not_ignore_failed_integrity",
+            "stop_conditions",
+            "ask_for_human_approval_when",
+            "instruction",
+        ],
+        "properties": {
+            "schema_version": {"type": "string"},
+            "evaluated_at": {"type": "string"},
+            "purpose": {"type": "string"},
+            "trust_status_at_build": {"type": "string"},
+            "do_not_infer_missing_tokens": {"type": "boolean"},
+            "do_not_modify_payload": {"type": "boolean"},
+            "do_not_deploy_if_blocked": {"type": "boolean"},
+            "do_not_ignore_failed_integrity": {"type": "boolean"},
+            "stop_conditions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": [
+                        "condition",
+                        "detect_via",
+                        "evidence_ref",
+                        "instruction",
+                    ],
+                    "properties": {
+                        "condition": {"type": "string"},
+                        "detect_via": {"type": "string"},
+                        "evidence_ref": {"type": "string"},
+                        "instruction": {"type": "string"},
+                    },
+                },
+            },
+            "ask_for_human_approval_when": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": [
+                        "condition",
+                        "detect_via",
+                        "evidence_ref",
+                        "instruction",
+                    ],
+                    "properties": {
+                        "condition": {"type": "string"},
+                        "detect_via": {"type": "string"},
+                        "evidence_ref": {"type": "string"},
+                        "instruction": {"type": "string"},
+                    },
+                },
+            },
+            "instruction": {"type": "string"},
+        },
+        "examples": [
+            {
+                "schema_version": "1.0",
+                "evaluated_at": "2026-05-19T00:00:00+00:00",
+                "purpose": "Bound downstream agent behaviour and prevent unsafe inference or bypass of SHIPS controls.",
+                "trust_status_at_build": "READY",
+                "do_not_infer_missing_tokens": True,
+                "do_not_modify_payload": True,
+                "do_not_deploy_if_blocked": True,
+                "do_not_ignore_failed_integrity": True,
+                "stop_conditions": [
+                    {
+                        "condition": "trust_status_blocked",
+                        "detect_via": "ships.trust.json.status == 'BLOCKED'",
+                        "evidence_ref": "context/ships.trust.json",
+                        "instruction": "Stop. Return the trust result and the blocking_signals list. Do not deploy.",
+                    }
+                ],
+                "ask_for_human_approval_when": [],
+                "instruction": "When any stop_conditions[*].condition is detected, follow that entry's instruction; do not proceed via inference or by bypassing SHIPS controls.",
             }
         ],
     },
@@ -894,6 +996,12 @@ def _entrypoints() -> Dict[str, Dict[str, Any]]:
             "required": True,
             "audience": ["agent", "ci_cd", "dba", "governance"],
         },
+        "policy": {
+            "path": _context_path(POLICY_RESULT_FILENAME),
+            "description": "Canonical machine-readable agent safety policy: do-not-* flags, stop_conditions, and ask_for_human_approval_when triggers with per-condition detect_via, evidence_ref, and instruction fields. The policy entries point at trust/integrity/manifest evidence so an agent can detect and act on each condition without out-of-band knowledge.",
+            "required": True,
+            "audience": ["agent", "ci_cd", "dba", "governance"],
+        },
         "manifest": {
             "path": _context_path(MANIFEST_FILENAME),
             "description": "Compact, agent-safe package inventory describing included artefacts, object counts, token usage, dependency contract, governance settings, and deployment-relevant contents.",
@@ -1045,56 +1153,6 @@ def _environment_prereq_human_action(manifest: Dict[str, Any]) -> Dict[str, Any]
     }
 
 
-def _agent_policy(manifest: Dict[str, Any], trust: Dict[str, Any]) -> Dict[str, Any]:
-    """Return explicit do-not-guess safety controls for agents.
-
-    The policy is intentionally conservative. It tells a downstream agent what
-    it must not infer and which package states require a hard stop or human
-    approval instead of autonomous action.
-    """
-    trust_status = str(trust.get("status", "")).upper()
-    governance = _governance(manifest)
-
-    ask_for_human_approval_when = [
-        "trust_status_blocked",
-        "package_integrity_failed",
-        "target_environment_mismatch",
-        "missing_required_approval",
-        "required_companion_package_not_deployed",
-    ]
-    if governance["require_change_ref"]:
-        ask_for_human_approval_when.append("missing_change_ref")
-    if governance["require_signature"] or governance["require_asymmetric_signature"]:
-        ask_for_human_approval_when.append("missing_or_invalid_signature")
-    if governance["require_tls"]:
-        ask_for_human_approval_when.append("tls_policy_not_satisfied")
-
-    return {
-        "policy_version": "1.0",
-        "purpose": "Bound downstream agent behaviour and prevent unsafe inference or bypass of SHIPS controls.",
-        "do_not_infer_missing_tokens": True,
-        "do_not_modify_payload": True,
-        "do_not_deploy_if_blocked": True,
-        "do_not_ignore_failed_integrity": True,
-        "trust_status_at_build": trust_status or "UNKNOWN",
-        "payload_modification_allowed": False,
-        "deployment_allowed_when_trust_blocked": False,
-        "ask_for_human_approval_when": ask_for_human_approval_when,
-        "stop_conditions": [
-            "trust_status_blocked",
-            "package_integrity_failed",
-            "signature_verification_failed",
-            "target_environment_mismatch",
-            "unresolved_tokens",
-            "missing_required_approval",
-            "missing_required_change_ref",
-            "required_companion_package_not_deployed",
-            "preflight_error",
-        ],
-        "instruction": "When any stop_condition is present, stop and return the evidence instead of guessing, bypassing controls, modifying payload, or proceeding to deployment.",
-    }
-
-
 def _agent_instructions() -> Dict[str, Any]:
     """Return standing instructions for downstream SHIPS-aware agents."""
     return {
@@ -1174,6 +1232,7 @@ def _build_index_document(
         "trust_ref": TRUST_RESULT_REF,
         "actions_ref": ACTIONS_RESULT_REF,
         "capabilities_ref": CAPABILITIES_RESULT_REF,
+        "policy_ref": POLICY_RESULT_REF,
         "entrypoints": _entrypoints(),
         "recommended_read_order": _recommended_read_order(),
         "human_actions_required": (
@@ -1181,7 +1240,6 @@ def _build_index_document(
             if _is_environment_prereq(manifest)
             else []
         ),
-        "agent_policy": _agent_policy(manifest, trust),
         "agent_instructions": _agent_instructions(),
     }
 
@@ -1234,7 +1292,7 @@ def _build_context_document(
         "trust_ref": TRUST_RESULT_REF,
         "actions_ref": ACTIONS_RESULT_REF,
         "capabilities_ref": CAPABILITIES_RESULT_REF,
-        "agent_policy": _agent_policy(manifest, trust),
+        "policy_ref": POLICY_RESULT_REF,
         "context_budget": {
             "preferred_agent_prompting": "Load context/ships.index.json first, then open referenced evidence only when needed.",
             "detailed_evidence_is_referenced_not_repeated": True,
@@ -1286,7 +1344,7 @@ def _build_agent_manifest_document(
         "trust_ref": TRUST_RESULT_REF,
         "actions_ref": ACTIONS_RESULT_REF,
         "capabilities_ref": CAPABILITIES_RESULT_REF,
-        "agent_policy": _agent_policy(manifest, trust),
+        "policy_ref": POLICY_RESULT_REF,
         "evidence": _evidence_files(),
     }
 
@@ -1343,6 +1401,7 @@ def _build_handoff_document(
         "trust_ref": TRUST_RESULT_REF,
         "actions_ref": ACTIONS_RESULT_REF,
         "capabilities_ref": CAPABILITIES_RESULT_REF,
+        "policy_ref": POLICY_RESULT_REF,
         "package": {
             "name": manifest.get("package_name"),
             "filename": manifest.get("package_filename"),
@@ -1380,6 +1439,5 @@ def _build_handoff_document(
             "any drift, skipped, failed, or waived object details",
         ],
         "required_evidence_after_action": required_evidence_after_action(),
-        "agent_policy": _agent_policy(manifest, trust),
         "references": _evidence_files(),
     }
