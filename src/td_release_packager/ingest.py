@@ -262,9 +262,10 @@ class IngestResult:
     #: list when the source uses only SHIPS {{TOKEN}} form (or no
     #: substitution at all).
     legacy_placeholders: List["LegacyPlaceholderFinding"] = field(default_factory=list)
-    #: Legacy placeholder substitutions applied in memory before
-    #: classification, via config/legacy_migration.sed or an explicit
-    #: caller-supplied migration rule set.
+    #: Tokenisation substitutions applied in memory before
+    #: classification, via config/tokenise.conf (or the deprecated
+    #: config/legacy_migration.sed) or an explicit caller-supplied
+    #: migration rule set.
     legacy_migration_files: int = 0
     legacy_migration_substitutions: int = 0
     #: Human-facing harvest mirror grouped by database/token. This is
@@ -367,8 +368,8 @@ def _ingest_directory_impl(
                         by ``force``.
         legacy_migration_rules:
                         Optional parsed rules from
-                        ``legacy_migration.sed``. When supplied,
-                        legacy placeholders are converted to SHIPS
+                        ``tokenise.conf``. When supplied,
+                        source-side markers are converted to SHIPS
                         ``{{TOKEN}}`` form in memory before
                         classification, naming, token scanning, and
                         payload writing.
@@ -1201,7 +1202,9 @@ def _emit_database_placement_mirror(
             f" — {interpretation}"
         )
 
-    (mirror_root / "README.md").write_text("\n".join(index_lines) + "\n", encoding="utf-8")
+    (mirror_root / "README.md").write_text(
+        "\n".join(index_lines) + "\n", encoding="utf-8"
+    )
 
     return os.path.relpath(mirror_root, project_dir), copied
 

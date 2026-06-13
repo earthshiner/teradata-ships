@@ -79,9 +79,21 @@ mcp = FastMCP(
 
 
 def _load_legacy_migration_rules(project: str):
-    """Return parsed project-local legacy migration rules, if present."""
-    migration_path = os.path.join(project, "config", "legacy_migration.sed")
-    if not os.path.isfile(migration_path):
+    """Return parsed project-local tokenisation rules, if present.
+
+    Prefers ``config/tokenise.conf``; falls back to the deprecated
+    ``config/legacy_migration.sed`` for projects that have not been
+    renamed yet.
+    """
+    config_dir = os.path.join(project, "config")
+    tokenise_path = os.path.join(config_dir, "tokenise.conf")
+    legacy_path = os.path.join(config_dir, "legacy_migration.sed")
+
+    if os.path.isfile(tokenise_path):
+        migration_path = tokenise_path
+    elif os.path.isfile(legacy_path):
+        migration_path = legacy_path
+    else:
         return []
 
     from td_release_packager.source_migrator import parse_migration_sed
