@@ -1,0 +1,14 @@
+{
+  "summary": "Derived-table alias (sRV_ProcessSumByBusDate) must not leak as a database — the canonical ADR 0015 regression case.",
+  "owner": {
+    "database": "{{DOM_V}}",
+    "object_name": "ProcessStatus_V",
+    "object_type": "VIEW"
+  },
+  "read_sources": [
+    {"database": "{{REF_T}}", "object_name": "ProcessRun"},
+    {"database": "{{REF_T}}", "object_name": "ProcessSum"}
+  ],
+  "write_targets": [],
+  "call_targets": []
+}

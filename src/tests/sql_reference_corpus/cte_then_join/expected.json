@@ -1,0 +1,14 @@
+{
+  "summary": "CTE name (cte_recent) must not leak as a database; both real refs must surface.",
+  "owner": {
+    "database": "{{DOM_V}}",
+    "object_name": "Recent_Customers_V",
+    "object_type": "VIEW"
+  },
+  "read_sources": [
+    {"database": "{{DOM_T}}", "object_name": "Orders"},
+    {"database": "{{REF_T}}", "object_name": "Customer"}
+  ],
+  "write_targets": [],
+  "call_targets": []
+}
