@@ -3,6 +3,7 @@ cli.py — Standalone command-line interface for the DDL Deployer.
 
 Commands:
     deploy     Deploy all DDL files in a directory.
+    explain    Run EXPLAIN against the live system for every DDL statement.
     analyze    Analyse dependencies and export graph.
     resume     Resume a previously failed deployment.
     rollback   Roll back a deployment to pre-deployment state.
@@ -11,6 +12,7 @@ Commands:
 Usage:
     python -m database_package_deployer deploy /path/to/ddl/ --host myserver --user dbc
     python -m database_package_deployer deploy /path/to/ddl/ --dry-run
+    python -m database_package_deployer explain /path/to/ddl/ --host myserver --user dbc
     python -m database_package_deployer analyze /path/to/project/ --graph /path/to/output/
     python -m database_package_deployer analyze /path/to/project/ --graph . --formats dot,json
     python -m database_package_deployer resume /path/to/ddl/.deploy_manifest.json --host myserver
@@ -103,6 +105,8 @@ def main():
 
     if args.command == "deploy":
         _cmd_deploy(args)
+    elif args.command == "explain":
+        _cmd_explain(args)
     elif args.command == "analyze":
         _cmd_analyze(args)
     elif args.command == "resume":
@@ -176,7 +180,9 @@ def _cmd_deploy(args):
                 connection_params=_conn_params,
                 public_key_path=getattr(args, "public_key", "") or "",
                 table_trigger_action=(
-                    "recreate" if getattr(args, "recreate_table_triggers", False) else "fail"
+                    "recreate"
+                    if getattr(args, "recreate_table_triggers", False)
+                    else "fail"
                 ),
             )
             otel_span.set_attribute("ships.deploy.completed", result.completed)
@@ -265,6 +271,52 @@ def _download_github_package(args, tmp_dir: str) -> str:
     args.package_dir = pkg_dir
     logger.info("github_source: package directory set to '%s'", pkg_dir)
     return tmp_dir
+
+
+# ---------------------------------------------------------------
+# explain command -- EXPLAIN-against-live-system validation
+# ---------------------------------------------------------------
+
+
+def _cmd_explain(args):
+    """Execute the 'explain' command — issue #269.
+
+    Connects to the target Teradata system and runs ``EXPLAIN`` against
+    every DDL statement in deploy order. Returns non-zero on any
+    EXPLAIN failure that is not a dependency on an object created
+    earlier in the same package (the engine already classifies those
+    as PASS).
+    """
+    from database_package_deployer.deployer import explain_package
+
+    if not getattr(args, "package_dir", None):
+        print("ERROR: package_dir is required.", file=sys.stderr)
+        sys.exit(1)
+
+    log_file = _attach_deploy_file_logger(args)
+    if log_file:
+        logger.info("Full explain log: %s", log_file)
+
+    cursor = _connect(args)
+
+    ordered_files = None
+    if getattr(args, "order_file", None):
+        ordered_files = _read_order_file(args.order_file, args.package_dir)
+
+    try:
+        result = explain_package(
+            cursor=cursor,
+            package_dir=args.package_dir,
+            ordered_files=ordered_files,
+        )
+        _print_package_result(result, quiet=args.quiet, log_file=log_file)
+        sys.exit(0 if result.success else 1)
+    except FileNotFoundError as e:
+        print(f"\nERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+    finally:
+        cursor.close()
+        cursor.connection.close()
 
 
 # ---------------------------------------------------------------
@@ -1035,6 +1087,35 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     _add_conn_args(dp)
+
+    # -- explain --
+    ex = subs.add_parser(
+        "explain",
+        help=(
+            "Run EXPLAIN against the live system for every DDL statement. "
+            "Validates syntax, object resolution, column types, and "
+            "permissions without modifying anything."
+        ),
+    )
+    ex.add_argument(
+        "package_dir",
+        help="Directory containing the package to explain.",
+    )
+    ex.add_argument(
+        "--order-file",
+        help=(
+            "Path to a text file listing DDL filenames in deployment "
+            "order (one per line). Defaults to package-side wave order."
+        ),
+    )
+    ex.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Show a compact console summary; detailed logs and reports remain available.",
+    )
+    _add_conn_args(ex)
 
     # -- analyze --
     az = subs.add_parser(

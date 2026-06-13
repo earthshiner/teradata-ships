@@ -201,7 +201,13 @@ The deployer has two CLI-exposed modes plus an EXPLAIN engine and an automatic R
 
 **REPLAY** is automatic. When you re-run `deploy` against a package whose manifest already records every object as `COMPLETED`, SHIPS verifies each object against the live database (resetting any stale entries to `PENDING`) and, if there's nothing new to deploy, produces a `REPLAY Report` rather than a misleading `DEPLOYMENT Report`. The summary cards switch to `Verified (prior)` / `Deployed (this run)=0` so a DBA reading the report can tell at a glance that this run did no work.
 
-**Explain** is implemented at the engine level (`database_package_deployer.deployer.explain_package`) — it wraps each DDL in Teradata's `EXPLAIN` to validate syntax, object resolution, column types, and permissions against the live catalogue without modifying anything. It is **not currently wired to the `database_package_deployer` subcommand list**; call it programmatically if you need it before that lands.
+**Explain** wraps each DDL in Teradata's `EXPLAIN` to validate syntax, object resolution, column types, and permissions against the live catalogue without modifying anything. Run it via:
+
+```bash
+python -m database_package_deployer explain <package_dir> --host <host> --user <user> ...
+```
+
+The engine entry point is `database_package_deployer.deployer.explain_package`; the CLI subcommand is a thin pass-through to it. EXPLAIN failures caused by an object that's created earlier in the same package (e.g. a view that references a not-yet-created table) are classified as PASS rather than FAIL — the engine cross-references each failure against the package's object index.
 
 | | Dry-run | Deploy | REPLAY (auto) |
 |---|---|---|---|
