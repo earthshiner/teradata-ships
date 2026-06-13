@@ -286,6 +286,21 @@ class TestSummaryTab:
         assert "MERGE" in html
         assert "DCL contains REVOKE scripts but no GRANT scripts" in html
 
+    def test_nonzero_rows_get_has_count_class(self):
+        """Issue #277 — rows with a non-zero count are tagged so the
+        Summary tab can visually emphasise what's actually in the
+        package, and faded-out rows are tagged separately."""
+        records = [
+            {"phase": "DCL", "intent": "REVOKE", "type": "GRANT"},
+            {"phase": "DML", "intent": "DELETE", "type": "DML"},
+        ]
+        html = _summary_tab(records)
+        # The two intents with records produce has-count rows.
+        assert '<tr class="has-count"><td>REVOKE</td><td>1</td></tr>' in html
+        assert '<tr class="has-count"><td>DELETE</td><td>1</td></tr>' in html
+        # A baseline row that stayed at zero is tagged zero-count.
+        assert '<tr class="zero-count"><td>MERGE</td><td>0</td></tr>' in html
+
 
 # ---------------------------------------------------------------
 # _objects_tab
@@ -695,6 +710,18 @@ class TestGeneratePackageReport:
         assert "tab-summary" in html
         assert "Summary" in html
         assert "REPLACE/MACRO" in html
+
+    def test_summary_count_highlight_css_rules_present(self, tmp_path):
+        """Issue #277 — the CSS that drives row emphasis is in the
+        generated document."""
+        _make_payload(
+            tmp_path,
+            [("03_ddl/tables/DB.T.tbl", "CREATE TABLE DB.T (Id INTEGER);")],
+        )
+        generate_package_report(str(tmp_path), _minimal_manifest())
+        html = (tmp_path / "package_report.html").read_text(encoding="utf-8")
+        assert ".summary-table tr.has-count td" in html
+        assert ".summary-table tr.zero-count td" in html
 
     def test_environment_prereq_banner_names_extracted_package_dir(self, tmp_path):
         manifest = _minimal_manifest()
