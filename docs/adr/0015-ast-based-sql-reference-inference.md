@@ -2,6 +2,8 @@
 
 ## Status
 
+Accepted | 2026-06-14 (Phase 1 landed; see issue #234 and PR introducing
+`src/td_release_packager/sql_reference_extractor.py`)
 Proposed | 2026-05-21
 
 ## Context

@@ -623,6 +623,7 @@ def analyse_file(
     filepath: Path,
     verbose: bool = False,
     view_dependency_index: Optional[Dict[Tuple[str, str], Set[str]]] = None,
+    extractor=None,
 ) -> Optional[Dict]:
     """
     Analyse a single DDL file and extract its grant implications.
@@ -636,6 +637,10 @@ def analyse_file(
         filepath: Path to the DDL file.
         verbose:  If True, print diagnostic information.
         view_dependency_index: Optional packaged view to base database mapping.
+        extractor: Optional ``SqlReferenceExtractor`` (#234 / ADR 0015).
+                   Defaults to the regex implementation. Provided so
+                   tests and future phases can substitute an AST-backed
+                   extractor without changing this function.
 
     Returns:
         A dict with keys:
@@ -655,23 +660,24 @@ def analyse_file(
     # Strip comments before analysis
     sql = strip_sql_comments(raw_sql)
 
+    # All SQL reference extraction now flows through the abstraction
+    # (#234 / ADR 0015). The default is the regex implementation, but
+    # callers and tests can inject an AST extractor for Phase 2+.
+    if extractor is None:
+        from td_release_packager.sql_reference_extractor import default_extractor
+
+        extractor = default_extractor()
+
     # --- Step 1: Identify the owning database from the CREATE statement ---
-    create_match = RE_CREATE_STMT.search(sql)
-    if not create_match:
+    owner = extractor.extract_statement_owner(sql)
+    if owner is None:
         if verbose:
             print(f"  SKIP: No CREATE statement found in {filepath.name}")
         return None
 
-    obj_type_raw = create_match.group(1).upper().strip()
-    # Normalise compound object types
-    if "TABLE" in obj_type_raw:
-        obj_type = "TABLE"
-    else:
-        obj_type = obj_type_raw
-
-    # Extract owning database
-    grantee = extract_db_ref(create_match, token_group=2, literal_group=3)
-    obj_name = create_match.group(4)
+    obj_type = owner.object_type
+    grantee = owner.database
+    obj_name = owner.object_name
 
     if verbose:
         print(f"  Analysing: {filepath.name}")
@@ -693,90 +699,36 @@ def analyse_file(
         as_match = re.search(r"\bAS\b", sql, re.IGNORECASE)
         if as_match:
             body = sql[as_match.end() :]
-            all_refs = find_all_db_references(body, tokens_only=False)
-            for db_ref in all_refs:
-                grants_map[db_ref].add(PRIV_SELECT)
+            for ref in extractor.extract_read_sources(body):
+                grants_map[ref.database].add(PRIV_SELECT)
 
     # For procedures, macros, triggers, functions — parse DML intent
     elif obj_type in ("PROCEDURE", "MACRO", "TRIGGER", "FUNCTION"):
-        # --- Write targets: identify databases being written to ---
+        # --- Write targets (INSERT / UPDATE / DELETE / MERGE) ---
         # Both tokenised and literal Database.Object references infer
         # container-level grants. SHIPS deliberately never infers
         # object-level grants.
+        for ref, privs in extractor.extract_write_targets(sql).items():
+            key = _ref_key(ref.database, ref.object_name)
+            object_databases[key] = ref.database
+            object_privs[key].update(privs)
+            grants_map[ref.database].update(privs)
 
-        # INSERT targets
-        for match in RE_INSERT_TARGET.finditer(sql):
-            db, obj = extract_object_ref(match)
-            if _is_excluded_db_ref(db):
-                continue
-            key = _ref_key(db, obj)
-            object_databases[key] = db
-            object_privs[key].add(PRIV_INSERT)
-            grants_map[db].add(PRIV_INSERT)
-
-        # UPDATE targets
-        for match in RE_UPDATE_TARGET.finditer(sql):
-            db, obj = extract_object_ref(match)
-            if _is_excluded_db_ref(db):
-                continue
-            key = _ref_key(db, obj)
-            object_databases[key] = db
-            object_privs[key].add(PRIV_UPDATE)
-            grants_map[db].add(PRIV_UPDATE)
-
-        # DELETE targets
-        for match in RE_DELETE_TARGET.finditer(sql):
-            db, obj = extract_object_ref(match)
-            if _is_excluded_db_ref(db):
-                continue
-            key = _ref_key(db, obj)
-            object_databases[key] = db
-            object_privs[key].add(PRIV_DELETE)
-            grants_map[db].add(PRIV_DELETE)
-
-        # MERGE targets — implies both INSERT and UPDATE
-        for match in RE_MERGE_TARGET.finditer(sql):
-            db, obj = extract_object_ref(match)
-            if _is_excluded_db_ref(db):
-                continue
-            key = _ref_key(db, obj)
-            object_databases[key] = db
-            object_privs[key].update({PRIV_INSERT, PRIV_UPDATE})
-            grants_map[db].add(PRIV_INSERT)
-            grants_map[db].add(PRIV_UPDATE)
-
-        # CALL targets — implies EXECUTE PROCEDURE
-        for match in RE_CALL_TARGET.finditer(sql):
-            db, obj = extract_object_ref(match)
-            if _is_excluded_db_ref(db):
-                continue
-            key = _ref_key(db, obj)
-            object_databases[key] = db
-            object_privs[key].add(PRIV_EXEC_PROC)
-            grants_map[db].add(PRIV_EXEC_PROC)
-
-        # EXEC/EXECUTE targets — implies EXECUTE (macros)
-        for match in RE_EXEC_TARGET.finditer(sql):
-            db, obj = extract_object_ref(match)
-            if _is_excluded_db_ref(db):
-                continue
-            key = _ref_key(db, obj)
-            object_databases[key] = db
-            object_privs[key].add(PRIV_EXEC)
-            grants_map[db].add(PRIV_EXEC)
+        # --- Call targets (CALL → EXECUTE PROCEDURE, EXEC → EXECUTE) ---
+        for ref, privs in extractor.extract_call_targets(sql).items():
+            key = _ref_key(ref.database, ref.object_name)
+            object_databases[key] = ref.database
+            object_privs[key].update(privs)
+            grants_map[ref.database].update(privs)
 
         # --- Read sources: all FROM/JOIN references → SELECT ---
         # This covers standalone SELECTs, INSERT...SELECT FROM,
-        # UPDATE...FROM, DELETE with subqueries, MERGE...USING
-        all_refs = find_all_db_references(sql, tokens_only=False)
-        for db_ref in all_refs:
-            if appears_as_read_source(sql, db_ref):
-                grants_map[db_ref].add(PRIV_SELECT)
-        for db_ref, obj_name in find_all_object_references(sql, tokens_only=False):
-            if appears_as_read_source(sql, db_ref):
-                key = _ref_key(db_ref, obj_name)
-                object_databases[key] = db_ref
-                object_privs[key].add(PRIV_SELECT)
+        # UPDATE...FROM, DELETE with subqueries, MERGE...USING.
+        for ref in extractor.extract_read_sources(sql):
+            key = _ref_key(ref.database, ref.object_name)
+            object_databases[key] = ref.database
+            object_privs[key].add(PRIV_SELECT)
+            grants_map[ref.database].add(PRIV_SELECT)
 
         if view_dependency_index:
             for ref_key, privs in object_privs.items():

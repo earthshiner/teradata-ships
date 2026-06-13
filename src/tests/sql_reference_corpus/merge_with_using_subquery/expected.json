@@ -1,0 +1,15 @@
+{
+  "summary": "MERGE target gets INSERT+UPDATE; USING subquery's FROM is a read source; derived alias `s` is excluded.",
+  "owner": {
+    "database": "{{PROC_DB}}",
+    "object_name": "RefreshCustomerScores",
+    "object_type": "PROCEDURE"
+  },
+  "read_sources": [
+    {"database": "{{SRC}}", "object_name": "Score_Events"}
+  ],
+  "write_targets": [
+    {"database": "{{TGT}}", "object_name": "Customer_Scores", "privileges": ["INSERT", "UPDATE"]}
+  ],
+  "call_targets": []
+}
