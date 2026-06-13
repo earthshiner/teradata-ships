@@ -25,15 +25,22 @@ from td_release_packager.sql_reference_extractor import (
     SqlReferenceExtractor,
     StatementOwner,
 )
+from td_release_packager.sql_reference_extractor_sqlglot import (
+    SqlGlotSqlReferenceExtractor,
+    is_available as _sqlglot_available,
+)
 
 
 CORPUS_DIR = Path(__file__).parent / "sql_reference_corpus"
 
 
-# (label, factory) — Phase 2 will append the SqlGlot extractor here.
+# (label, factory) — every registered extractor must produce the
+# documented results for every corpus entry.
 _EXTRACTORS: list[Tuple[str, callable]] = [
     ("regex", RegexSqlReferenceExtractor),
 ]
+if _sqlglot_available():
+    _EXTRACTORS.append(("sqlglot", SqlGlotSqlReferenceExtractor))
 
 
 def _discover_cases() -> list[Path]:

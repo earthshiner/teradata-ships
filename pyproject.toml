@@ -34,6 +34,12 @@ dashboard = [
 signing = [
     "cryptography>=42.0",
 ]
+# Install with: uv pip install -e ".[ast]"
+# Enables the AST-based SqlReferenceExtractor (Phase 2+ of #234 / ADR 0015).
+# SHIPS works without this extra — the default extractor falls back to regex.
+ast = [
+    "sqlglot>=25.0",
+]
 
 [dependency-groups]
 dev = [
@@ -42,6 +48,9 @@ dev = [
     # Dashboard test dependencies — fastapi TestClient requires httpx
     "fastapi>=0.115",
     "httpx>=0.27",
+    # Phase 2+ of #234 — the SqlGlot extractor is opt-in for users but
+    # mandatory for the test suite so the compare-mode corpus runs.
+    "sqlglot>=25.0",
 ]
 
 [tool.pytest.ini_options]
