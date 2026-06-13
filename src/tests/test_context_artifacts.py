@@ -45,6 +45,7 @@ def test_write_context_artifacts_emits_agent_context_contract(tmp_path):
         "schemas/ships.index.schema.json",
         "schemas/ships.integrity.schema.json",
         "schemas/ships.manifest.schema.json",
+        "schemas/ships.policy.schema.json",
         "schemas/ships.provenance.schema.json",
         "schemas/ships.trust.schema.json",
         "ships.context.json",
@@ -92,26 +93,20 @@ def test_write_context_artifacts_emits_agent_context_contract(tmp_path):
     assert index["agent_instructions"]["before_action"][0].startswith(
         "Read context/ships.index.json"
     )
-    assert index["agent_policy"]["do_not_infer_missing_tokens"] is True
-    assert index["agent_policy"]["do_not_modify_payload"] is True
-    assert index["agent_policy"]["do_not_deploy_if_blocked"] is True
-    assert index["agent_policy"]["do_not_ignore_failed_integrity"] is True
-    assert index["agent_policy"]["payload_modification_allowed"] is False
-    assert "preflight_error" in index["agent_policy"]["stop_conditions"]
-    assert (
-        "tls_policy_not_satisfied"
-        in index["agent_policy"]["ask_for_human_approval_when"]
-    )
+
+    # Each context doc now carries a top-level pointer at the canonical
+    # ships.policy.json; the full policy document is not embedded.
+    assert index["policy_ref"] == "context/ships.policy.json"
+    assert context["policy_ref"] == "context/ships.policy.json"
+    assert agent_manifest["policy_ref"] == "context/ships.policy.json"
+    assert handoff["policy_ref"] == "context/ships.policy.json"
 
     assert context["current_state"] == "package-built-awaiting-deployment"
     assert context["source_of_truth"]["source_commit"] == "abc123"
     assert context["references"]["index"] == "context/ships.index.json"
-    assert context["agent_policy"]["do_not_modify_payload"] is True
-    assert agent_manifest["agent_policy"]["do_not_ignore_failed_integrity"] is True
     assert agent_manifest["tokens"]["values_redacted"] is True
     assert agent_manifest["tokens"]["token_names"] == ["CORE_T", "CORE_V"]
     assert handoff["preconditions"]["tls_required"] is True
-    assert handoff["agent_policy"]["deployment_allowed_when_trust_blocked"] is False
     assert handoff["required_actions"][0].startswith("Read context/ships.index.json")
 
     prompts_dir = tmp_path / "context" / "prompts"
@@ -132,7 +127,7 @@ def test_write_context_artifacts_emits_agent_context_contract(tmp_path):
         "read_first",
         "entrypoints",
         "recommended_read_order",
-        "agent_policy",
+        "policy_ref",
     ]
     assert index["$schema"] == "./schemas/ships.index.schema.json"
 

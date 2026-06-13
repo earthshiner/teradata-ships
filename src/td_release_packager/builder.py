@@ -848,6 +848,26 @@ def _build_package_impl(
     write_capabilities_result(pkg_dir, capabilities_report)
     manifest.capabilities_ref = CAPABILITIES_RESULT_REF
 
+    # -- Phase 8b.4: Stamp the formal agent policy (issue #151) --
+    from td_release_packager.policy import (
+        POLICY_RESULT_REF,
+        compute_agent_policy,
+        write_policy_result,
+    )
+
+    agent_policy = compute_agent_policy(
+        trust=trust_report.to_dict(),
+        governance={
+            "require_change_ref": manifest.require_change_ref,
+            "require_signature": manifest.require_signature,
+            "require_asymmetric_signature": manifest.require_asymmetric_signature,
+            "require_approvals": manifest.require_approvals,
+            "require_tls": manifest.require_tls,
+        },
+    )
+    write_policy_result(pkg_dir, agent_policy)
+    manifest.policy_ref = POLICY_RESULT_REF
+
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest.__dict__, f, indent=2, ensure_ascii=False)
 
@@ -1215,6 +1235,25 @@ def _create_environment_prereqs_package_if_needed(
     )
     write_capabilities_result(env_pkg_dir, env_capabilities)
     env_manifest.capabilities_ref = CAPABILITIES_RESULT_REF
+
+    from td_release_packager.policy import (
+        POLICY_RESULT_REF,
+        compute_agent_policy,
+        write_policy_result,
+    )
+
+    env_policy = compute_agent_policy(
+        trust=env_trust_report.to_dict(),
+        governance={
+            "require_change_ref": env_manifest.require_change_ref,
+            "require_signature": env_manifest.require_signature,
+            "require_asymmetric_signature": env_manifest.require_asymmetric_signature,
+            "require_approvals": env_manifest.require_approvals,
+            "require_tls": env_manifest.require_tls,
+        },
+    )
+    write_policy_result(env_pkg_dir, env_policy)
+    env_manifest.policy_ref = POLICY_RESULT_REF
 
     manifest_path = _context_file(env_pkg_dir, "ships.build.json")
     with open(manifest_path, "w", encoding="utf-8") as f:
@@ -1831,6 +1870,25 @@ def _refresh_environment_prereq_trust(pkg_dir: str, manifest: BuildManifest) -> 
     )
     write_capabilities_result(pkg_dir, refreshed_capabilities)
     manifest.capabilities_ref = CAPABILITIES_RESULT_REF
+
+    from td_release_packager.policy import (
+        POLICY_RESULT_REF,
+        compute_agent_policy,
+        write_policy_result,
+    )
+
+    refreshed_policy = compute_agent_policy(
+        trust=report.to_dict(),
+        governance={
+            "require_change_ref": manifest.require_change_ref,
+            "require_signature": manifest.require_signature,
+            "require_asymmetric_signature": manifest.require_asymmetric_signature,
+            "require_approvals": manifest.require_approvals,
+            "require_tls": manifest.require_tls,
+        },
+    )
+    write_policy_result(pkg_dir, refreshed_policy)
+    manifest.policy_ref = POLICY_RESULT_REF
 
 
 def _collect_release_group_archives(
