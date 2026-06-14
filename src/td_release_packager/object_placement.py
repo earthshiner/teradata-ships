@@ -321,7 +321,11 @@ class ObjectPlacement:
                 f"  Valid strategies: {', '.join(sorted(self.VALID_STRATEGIES))}"
             )
 
-        self._locking_views: bool = config.get("locking_views", False)
+        # Default to True per the Teradata field standard: every table
+        # should have a 1:1 locking view in front of it.  Configs that
+        # explicitly set ``locking_views: false`` keep their existing
+        # behaviour — only the missing-key case changes.
+        self._locking_views: bool = config.get("locking_views", True)
 
         # ----- separated -----
         self._tables_pattern: Optional[str] = None

@@ -776,11 +776,25 @@ class TestConfigValidation:
         )
         assert op.strategy == "colocated"
 
-    def test_locking_views_defaults_false(self):
-        """locking_views defaults to False when not specified."""
+    def test_locking_views_defaults_true(self):
+        """locking_views defaults to True when not specified — Teradata
+        field standard is to always layer a 1:1 locking view in front
+        of every table.  See #307."""
         op = ObjectPlacement(
             {
                 "strategy": "colocated",
+            }
+        )
+        assert op.locking_views is True
+
+    def test_locking_views_explicit_false_honoured(self):
+        """An explicit ``locking_views: false`` still wins over the
+        default.  Existing projects that opted out keep their
+        behaviour."""
+        op = ObjectPlacement(
+            {
+                "strategy": "colocated",
+                "locking_views": False,
             }
         )
         assert op.locking_views is False
