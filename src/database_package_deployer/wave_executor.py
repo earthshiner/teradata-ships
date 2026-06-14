@@ -28,7 +28,12 @@ import logging
 import os
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed, Future
+from concurrent.futures import (
+    Future,
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+    as_completed,
+)
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -56,6 +61,27 @@ class WaveExecutor:
         environment:    For query band tagging.
     """
 
+    # Recognised engine values for ``--parallel-engine`` (#211).
+    #
+    #   serial    — the post-#210 safe behaviour: a process-wide
+    #               ``_driver_lock`` is acquired in addition to the
+    #               per-cursor lock so every teradatasql call is
+    #               serialised. Eliminates "X is not a valid rows
+    #               handle" errors at the cost of true parallelism.
+    #   cursors   — drop the process-wide driver lock. Each stream
+    #               still has its own cursor and its own per-cursor
+    #               lock, and DCL / system-catalogue statements stay
+    #               serialised by the deployer's separate ``_dcl_lock``.
+    #               Restores true parallel execution for ordinary DDL
+    #               work. Opt-in until proven on real Teradata.
+    #   processes — handled by a sibling ProcessPoolExecutor path
+    #               (see :meth:`execute_waves_with_processes`). Each
+    #               worker is a separate Python process with its own
+    #               teradatasql state; full driver isolation at the
+    #               cost of pickle constraints on the deploy
+    #               callable.
+    VALID_ENGINES = frozenset({"serial", "cursors", "processes"})
+
     def __init__(
         self,
         num_streams: int,
@@ -63,6 +89,10 @@ class WaveExecutor:
         build_number: str = "",
         package_name: str = "",
         environment: str = "",
+        engine: str = "serial",
+        process_worker_initializer: Optional[Callable[..., None]] = None,
+        process_worker_initargs: Tuple[Any, ...] = (),
+        process_worker_fn: Optional[Callable[[str], dict]] = None,
     ):
         """
         Initialise the wave executor.
@@ -74,13 +104,33 @@ class WaveExecutor:
             build_number:   Build number for query band.
             package_name:   Package name for query band.
             environment:    Environment name for query band.
+            engine:         Parallel engine — ``"serial"`` (default,
+                            current behaviour), ``"cursors"`` (drop
+                            the process-wide driver lock, true
+                            per-cursor parallelism), or
+                            ``"processes"`` (one worker process per
+                            stream). See ``VALID_ENGINES``.
 
         Raises:
-            ValueError: If num_streams is outside 1–8 range.
+            ValueError: If num_streams is outside 1–8 range or
+                        engine is not a recognised value.
         """
         if num_streams < MIN_STREAMS or num_streams > MAX_STREAMS:
             raise ValueError(
                 f"Stream count must be {MIN_STREAMS}–{MAX_STREAMS}, got {num_streams}."
+            )
+        if engine not in self.VALID_ENGINES:
+            raise ValueError(
+                f"Unknown parallel engine {engine!r}. "
+                f"Expected one of: {sorted(self.VALID_ENGINES)}."
+            )
+
+        if engine == "processes" and process_worker_fn is None:
+            raise ValueError(
+                "processes engine requires process_worker_fn (and usually "
+                "process_worker_initializer + process_worker_initargs). "
+                "These callables must be importable module-level functions "
+                "so multiprocessing can pickle them."
             )
 
         self.num_streams = num_streams
@@ -88,11 +138,19 @@ class WaveExecutor:
         self.build_number = build_number
         self.package_name = package_name
         self.environment = environment
+        self.engine = engine
+        self.process_worker_initializer = process_worker_initializer
+        self.process_worker_initargs = process_worker_initargs
+        self.process_worker_fn = process_worker_fn
 
         self._cursors: List[Any] = []
         self._cursor_locks: List[threading.Lock] = []
+        # Held only when engine == "serial". The catalogue-safety lock
+        # for DCL/GRANT/DATABASE/USER/ROLE/PROFILE lives in the deployer
+        # (deployer._dcl_lock) and remains in force in every engine.
         self._driver_lock = threading.Lock()
         self._pool_created = False
+        self._process_pool: Optional[ProcessPoolExecutor] = None
 
     def create_pool(self):
         """
@@ -145,6 +203,12 @@ class WaveExecutor:
         self._cursors.clear()
         self._cursor_locks.clear()
         self._pool_created = False
+
+        if self._process_pool is not None:
+            logger.debug("Shutting down process pool")
+            self._process_pool.shutdown(wait=True)
+            self._process_pool = None
+
         logger.info("Connection pool closed.")
 
     def execute_waves(
@@ -181,7 +245,7 @@ class WaveExecutor:
         Returns:
             WaveExecutionResult with per-wave and per-object outcomes.
         """
-        if not self._pool_created:
+        if self.engine != "processes" and not self._pool_created:
             self.create_pool()
 
         total_objects = sum(len(w) for w in waves)
@@ -242,9 +306,14 @@ class WaveExecutor:
                     "ships.num_streams": self.num_streams,
                 },
             ) as _wspan:
-                w_result = self._execute_single_wave(
-                    wave_num, wave, deploy_fn, on_complete
-                )
+                if self.engine == "processes":
+                    w_result = self._execute_single_wave_processes(
+                        wave_num, wave, on_complete
+                    )
+                else:
+                    w_result = self._execute_single_wave(
+                        wave_num, wave, deploy_fn, on_complete
+                    )
                 w_result.duration_ms = int((time.monotonic() - wave_start) * 1000)
                 _wspan.set_attribute("ships.wave_completed", w_result.completed)
                 _wspan.set_attribute("ships.wave_failed", w_result.failed)
@@ -436,6 +505,100 @@ class WaveExecutor:
             object_results=object_results,
         )
 
+    def _ensure_process_pool(self) -> ProcessPoolExecutor:
+        """Lazily start the ProcessPoolExecutor for ``processes`` mode.
+
+        The pool is created on first wave so initialiser failures
+        surface at the first task instead of at constructor time
+        (matching how :meth:`create_pool` lazies the cursor pool).
+        Each worker process runs ``process_worker_initializer`` once
+        to set up its own driver connection — that's the whole point
+        of ``processes`` mode: per-process driver state isolation.
+        """
+        if self._process_pool is None:
+            logger.info(
+                "Starting process pool: %d workers (engine=processes)",
+                self.num_streams,
+            )
+            self._process_pool = ProcessPoolExecutor(
+                max_workers=self.num_streams,
+                initializer=self.process_worker_initializer,
+                initargs=self.process_worker_initargs,
+            )
+        return self._process_pool
+
+    def _execute_single_wave_processes(
+        self,
+        wave_num: int,
+        file_paths: List[str],
+        on_complete: Optional[Callable] = None,
+    ) -> "WaveResult":
+        """Execute a single wave by dispatching to a ProcessPoolExecutor.
+
+        Wave semantics — barriers, drain-and-stop on failure,
+        per-object result collection, ``on_complete`` callback — are
+        identical to :meth:`_execute_single_wave`. Only the dispatch
+        mechanism differs: each task runs in a separate Python
+        process so the teradatasql driver state cannot leak between
+        streams.
+        """
+        if self.process_worker_fn is None:
+            raise RuntimeError(
+                "process_worker_fn not set; processes engine cannot dispatch."
+            )
+
+        pool = self._ensure_process_pool()
+        completed = 0
+        failed_count = 0
+        object_results: List[dict] = []
+        futures: Dict[Future, str] = {}
+
+        for fpath in file_paths:
+            futures[pool.submit(self.process_worker_fn, fpath)] = fpath
+
+        for fut in as_completed(futures):
+            fpath = futures[fut]
+            try:
+                result = fut.result()
+                if not isinstance(result, dict):
+                    result = {
+                        "file": fpath,
+                        "state": "FAILED",
+                        "error": (
+                            f"process worker returned {type(result).__name__}, "
+                            "expected dict"
+                        ),
+                    }
+            except Exception as exc:
+                result = {
+                    "file": fpath,
+                    "state": "FAILED",
+                    "wave": wave_num,
+                    "error": str(exc),
+                }
+
+            result.setdefault("wave", wave_num)
+            result.setdefault("file", fpath)
+
+            if result.get("state") == "FAILED":
+                failed_count += 1
+            else:
+                completed += 1
+
+            object_results.append(result)
+            if on_complete:
+                on_complete(fpath, result)
+
+        skipped = len(file_paths) - completed - failed_count
+        return WaveResult(
+            wave_number=wave_num,
+            total=len(file_paths),
+            completed=completed,
+            failed=failed_count,
+            skipped=skipped,
+            object_results=object_results,
+        )
+
     def _deploy_on_stream(
         self,
         cursor,
@@ -465,7 +628,18 @@ class WaveExecutor:
         Returns:
             Result dict from deploy_fn.
         """
-        with self._driver_lock, cursor_lock:
+        # In ``serial`` mode (the post-#210 default) the process-wide
+        # ``_driver_lock`` serialises every teradatasql call. In
+        # ``cursors`` mode the lock is dropped so independent cursors
+        # can drive the database concurrently — the per-cursor lock
+        # below still prevents a single cursor being used by two
+        # threads, and the deployer's separate ``_dcl_lock`` still
+        # serialises catalogue-heavy statements.
+        if self.engine == "serial":
+            with self._driver_lock, cursor_lock:
+                self._update_stream_query_band(cursor, stream_id, wave_num, file_path)
+                return deploy_fn(cursor, file_path)
+        with cursor_lock:
             self._update_stream_query_band(cursor, stream_id, wave_num, file_path)
             return deploy_fn(cursor, file_path)
 

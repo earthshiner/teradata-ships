@@ -3432,6 +3432,7 @@ def main():
                 dry_run=args.dry_run,
                 skip_preflight=no_connection,
                 table_trigger_action="recreate" if args.recreate_table_triggers else "fail",
+                parallel_engine=args.parallel_engine,
             )
         else:
             result = deploy_package(
@@ -3709,6 +3710,23 @@ def parse_args():
                         "errors before deployment.")
     p.add_argument("--streams", type=int, default=4,
                    help="Parallel deployment streams (1-8, default: 4).")
+    p.add_argument("--parallel-engine", choices=["serial", "cursors", "processes"],
+                   default="serial",
+                   help=(
+                       "Parallel deployment engine — issue #211. "
+                       "'serial' (default, post-#210 safe behaviour): a process-wide "
+                       "lock serialises every teradatasql call so rows-handle errors "
+                       "cannot occur, at the cost of true parallelism. "
+                       "'cursors': drop the process-wide driver lock and let "
+                       "independent cursors run concurrently. DCL / catalogue "
+                       "statements stay serialised by the deployer's separate lock. "
+                       "Opt-in until proven on real Teradata. "
+                       "'processes': one worker process per stream with full driver "
+                       "isolation. WaveExecutor wiring is in place but the deployer's "
+                       "worker callables are not yet picklable; selecting 'processes' "
+                       "raises an error until #211 Phase 2 lands the deployer-side "
+                       "refactor."
+                   ))
     p.add_argument("--continue-on-error", action="store_true",
                    help="Continue past failures.")
     p.add_argument("--recreate-table-triggers", action="store_true",
