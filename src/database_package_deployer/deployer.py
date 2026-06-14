@@ -431,6 +431,7 @@ def deploy_package(
     connection_params: Optional[dict] = None,
     public_key_path: str = "",
     table_trigger_action: str = "fail",
+    parallel_engine: str = "serial",
 ) -> PackageDeployResult:
     """
     Deploy all DDL files in a directory idempotently.
@@ -503,6 +504,7 @@ def deploy_package(
                 connection_params=connection_params,
                 public_key_path=public_key_path,
                 table_trigger_action=table_trigger_action,
+                parallel_engine=parallel_engine,
             )
         except Exception as exc:
             fail_deploy_run(
@@ -587,6 +589,7 @@ def _deploy_package_impl(
     connection_params: Optional[dict] = None,
     public_key_path: str = "",
     table_trigger_action: str = "fail",
+    parallel_engine: str = "serial",
 ) -> PackageDeployResult:
     """
     Deploy all DDL files in a directory idempotently.
@@ -1004,6 +1007,7 @@ def _deploy_package_impl(
             baseline_dir=baseline_dir,
             on_drift=on_drift,
             table_trigger_action=table_trigger_action,
+            parallel_engine=parallel_engine,
         )
         results.extend(wave_results)
     elif waves is not None:
@@ -1223,6 +1227,7 @@ def _execute_waves_parallel(
     baseline_dir="",
     on_drift="abort",
     table_trigger_action="fail",
+    parallel_engine: str = "serial",
 ):
     """
     Execute waves in parallel across multiple streams.
@@ -1305,9 +1310,26 @@ def _execute_waves_parallel(
         if "result" in wave_result and wave_result["result"] is not None:
             all_results.append(wave_result["result"])
 
+    if parallel_engine == "processes":
+        # The deployer's deploy_fn is a closure that captures the
+        # mutable manifest, the dcl_lock, parsed_by_path, and several
+        # other in-process objects. Pickling that across to a worker
+        # process would silently break manifest writes and DCL
+        # serialisation. Phase 2 of #211 will refactor the dispatch
+        # so worker processes report results back via IPC and the
+        # main process owns the manifest. Until that lands, surface
+        # a clear error rather than a confusing crash.
+        raise NotImplementedError(
+            "parallel-engine 'processes' is reserved for #211 Phase 2 — "
+            "the deployer's per-task callable is not yet picklable for "
+            "ProcessPoolExecutor. Use 'cursors' for true parallelism or "
+            "'serial' for the post-#210 safe behaviour."
+        )
+
     executor = WaveExecutor(
         num_streams=min(max(num_streams, 1), 8),
         connect_fn=connect_fn,
+        engine=parallel_engine,
     )
 
     try:
