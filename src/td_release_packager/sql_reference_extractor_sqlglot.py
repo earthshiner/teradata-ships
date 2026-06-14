@@ -40,8 +40,10 @@ for the migration plan.
 
 from __future__ import annotations
 
+import hashlib
+import logging
 import re
-from typing import Dict, FrozenSet, Optional, Set
+from typing import Any, Dict, FrozenSet, Optional, Set
 
 from td_release_packager.sql_reference_extractor import (
     PRIV_DELETE,
@@ -52,6 +54,116 @@ from td_release_packager.sql_reference_extractor import (
     SqlReferenceExtractor,
     StatementOwner,
 )
+
+
+# ---------------------------------------------------------------
+# Known-unsupported Teradata DDL shapes (#303)
+# ---------------------------------------------------------------
+#
+# sqlglot's Teradata dialect emits a WARNING when it cannot model a
+# statement structurally and falls back to a generic ``Command`` node:
+#
+#     'create database ... as perm = 0' contains unsupported syntax.
+#     Falling back to parsing as a 'Command'.
+#
+# The two shapes below dominate the noise on real Teradata payloads.
+# Recognising them BEFORE calling sqlglot stops the parser from
+# emitting the WARNING and short-circuits straight to the regex
+# fallback extractor, which already classifies both correctly.
+
+#: ``COLLECT STATISTICS [COLUMN | INDEX] ( ... ) ON db.obj``
+_COLLECT_STATS_RE = re.compile(
+    r"^\s*COLLECT\s+STATISTICS\b",
+    re.IGNORECASE,
+)
+
+#: ``CREATE DATABASE name FROM parent AS PERM = n [SPOOL = n] [FALLBACK]``
+#: — including signed-scientific-notation numerics and token sentinels.
+_CREATE_DATABASE_AS_PERM_RE = re.compile(
+    r"^\s*CREATE\s+(?:DATABASE|USER)\b[\s\S]*?\bAS\s+PERM\b",
+    re.IGNORECASE,
+)
+
+_KNOWN_UNSUPPORTED_RES: tuple[re.Pattern[str], ...] = (
+    _COLLECT_STATS_RE,
+    _CREATE_DATABASE_AS_PERM_RE,
+)
+
+
+class _KnownUnsupported(Exception):
+    """Raised by :meth:`SqlGlotSqlReferenceExtractor._parse` when the
+    input matches a known-unsupported shape, so the existing
+    ``except Exception`` fallback paths in the extractor pick up the
+    regex extractor without sqlglot ever being invoked.  Subclass of
+    :class:`Exception` so it threads through unmodified."""
+
+
+def _is_known_unsupported(sql: str) -> bool:
+    """Return ``True`` when ``sql`` is one of the Teradata DDL shapes
+    that sqlglot's dialect cannot model structurally."""
+    for pattern in _KNOWN_UNSUPPORTED_RES:
+        if pattern.search(sql):
+            return True
+    return False
+
+
+# ---------------------------------------------------------------
+# sqlglot WARNING downgrade
+# ---------------------------------------------------------------
+#
+# Any residual ``Falling back to parsing as a 'Command'`` warnings —
+# from statement shapes not covered by ``_KNOWN_UNSUPPORTED_RES`` —
+# are downgraded to DEBUG.  We do NOT drop them: under a DEBUG handler
+# they remain visible for diagnosis.
+
+_SQLGLOT_FALLBACK_MSG_RE = re.compile(
+    r"Falling back to parsing as a 'Command'", re.IGNORECASE
+)
+
+
+class _SqlGlotFallbackFilter(logging.Filter):
+    """Logging filter that downgrades sqlglot's parser-fallback
+    WARNINGs to DEBUG.  Attached to the ``sqlglot`` logger at import
+    time of this module."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno >= logging.WARNING and _SQLGLOT_FALLBACK_MSG_RE.search(
+            record.getMessage()
+        ):
+            record.levelno = logging.DEBUG
+            record.levelname = "DEBUG"
+        return True
+
+
+# Module-level idempotent install (attaches at most one filter per
+# process even if this module is re-imported).
+_sqlglot_logger = logging.getLogger("sqlglot")
+if not any(isinstance(f, _SqlGlotFallbackFilter) for f in _sqlglot_logger.filters):
+    _sqlglot_logger.addFilter(_SqlGlotFallbackFilter())
+
+
+# ---------------------------------------------------------------
+# Per-process parse-once cache (#303)
+# ---------------------------------------------------------------
+#
+# Harvest → inspect → analyse → package each re-parse the same DDL,
+# accounting for the ~5x duplication in the noise budget.  A single
+# in-memory cache keyed on the content hash lets every later phase
+# reuse the parse tree.  The cache is in-process only and is bounded
+# by ``_PARSE_CACHE_MAX`` to keep memory predictable on huge payloads.
+
+_PARSE_CACHE_MAX = 4096
+_parse_cache: Dict[str, Any] = {}
+
+
+def _cache_key(dialect: str, sql: str) -> str:
+    return f"{dialect}:{hashlib.sha256(sql.encode('utf-8')).hexdigest()}"
+
+
+def clear_parse_cache() -> None:
+    """Empty the parse-once cache.  Used by tests; harmless to call
+    from production code if memory pressure becomes a concern."""
+    _parse_cache.clear()
 
 
 # ---------------------------------------------------------------
@@ -132,9 +244,43 @@ class SqlGlotSqlReferenceExtractor(SqlReferenceExtractor):
     # -----------------------------------------------------------
 
     def _parse(self, sql: str):
+        """Parse ``sql`` with sqlglot, using a process-wide content-keyed
+        cache and short-circuiting on Teradata DDL shapes the parser is
+        known not to model structurally.
+
+        Raises :class:`_KnownUnsupported` (a plain :class:`Exception`) for
+        ``COLLECT STATISTICS`` and ``CREATE DATABASE … AS PERM …``, so
+        every caller's existing ``except Exception`` falls through to
+        the regex extractor without sqlglot ever logging a fallback
+        WARNING — and without re-parsing the same statement when the
+        next pipeline phase asks again.
+        """
+        if _is_known_unsupported(sql):
+            raise _KnownUnsupported(
+                "known-unsupported Teradata DDL shape (see "
+                "_KNOWN_UNSUPPORTED_RES) — fall back to regex"
+            )
+
+        key = _cache_key(self.DIALECT, sql)
+        cached = _parse_cache.get(key)
+        if cached is not None:
+            return cached
+
         import sqlglot
 
-        return sqlglot.parse_one(_to_sentinels(sql), dialect=self.DIALECT)
+        tree = sqlglot.parse_one(_to_sentinels(sql), dialect=self.DIALECT)
+
+        # Bound the cache so a long-running server doesn't grow it
+        # unboundedly.  Eviction policy: drop the oldest insertion
+        # (Python 3.7+ dicts preserve insertion order).
+        if len(_parse_cache) >= _PARSE_CACHE_MAX:
+            try:
+                oldest_key = next(iter(_parse_cache))
+                _parse_cache.pop(oldest_key, None)
+            except StopIteration:  # pragma: no cover — cache empty
+                pass
+        _parse_cache[key] = tree
+        return tree
 
     @staticmethod
     def _table_to_ref(table) -> Optional[ReferencedObject]:
