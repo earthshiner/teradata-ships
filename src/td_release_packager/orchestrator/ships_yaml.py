@@ -252,6 +252,68 @@ def validate(data: Dict[str, Any]) -> List[ValidationError]:
                                 )
                             )
 
+    # -- mcp block — optional; default settings for `python -m ships_mcp`.
+    #    CLI flags and FASTMCP_* env vars still take precedence over these
+    #    values at server start; this block exists so projects can pin a
+    #    repeatable default instead of relying on memorised CLI strings.
+    mcp_block = data.get("mcp")
+    if mcp_block is not None:
+        if not isinstance(mcp_block, dict):
+            errors.append(ValidationError("mcp", "must be a mapping"))
+        else:
+            valid_transports = ("stdio", "sse", "streamable-http")
+            if (
+                "transport" in mcp_block
+                and mcp_block["transport"] not in valid_transports
+            ):
+                errors.append(
+                    ValidationError(
+                        "mcp.transport",
+                        f"must be one of {list(valid_transports)}, "
+                        f"got {mcp_block['transport']!r}",
+                    )
+                )
+            if "host" in mcp_block and (
+                not isinstance(mcp_block["host"], str) or not mcp_block["host"].strip()
+            ):
+                errors.append(ValidationError("mcp.host", "must be a non-empty string"))
+            if "port" in mcp_block:
+                port = mcp_block["port"]
+                if (
+                    not isinstance(port, int)
+                    or isinstance(port, bool)
+                    or not (1 <= port <= 65535)
+                ):
+                    errors.append(
+                        ValidationError(
+                            "mcp.port", "must be an integer between 1 and 65535"
+                        )
+                    )
+            if "path" in mcp_block and (
+                not isinstance(mcp_block["path"], str)
+                or not mcp_block["path"].startswith("/")
+            ):
+                errors.append(
+                    ValidationError("mcp.path", "must be a string beginning with '/'")
+                )
+            if "stateless" in mcp_block and not isinstance(
+                mcp_block["stateless"], bool
+            ):
+                errors.append(ValidationError("mcp.stateless", "must be a boolean"))
+            if "log_level" in mcp_block and mcp_block["log_level"] not in (
+                "DEBUG",
+                "INFO",
+                "WARNING",
+                "ERROR",
+                "CRITICAL",
+            ):
+                errors.append(
+                    ValidationError(
+                        "mcp.log_level",
+                        "must be one of DEBUG, INFO, WARNING, ERROR, CRITICAL",
+                    )
+                )
+
     # -- deployment block — optional; configures runtime deployment behaviour --
     deployment_block = data.get("deployment")
     if deployment_block is not None:

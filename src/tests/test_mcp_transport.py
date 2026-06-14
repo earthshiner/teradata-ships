@@ -301,29 +301,99 @@ class TestSettingsMutation:
 
 
 class TestStartupBanner:
-    """HTTP transports emit a startup log line; stdio does not."""
+    """Every transport prints a visible startup banner to stderr."""
 
-    def test_streamable_http_emits_banner(self, caplog):
-        import logging
+    def test_streamable_http_emits_banner(self, capsys):
+        _run_main(["--transport", "streamable-http", "--port", "8888"])
+        err = capsys.readouterr().err
+        assert "SHIPS MCP server" in err
+        assert "STARTED" in err
+        assert "streamable-http" in err
+        assert "8888" in err
+        assert "ships.yaml" in err  # banner now points at the real config file
 
-        with caplog.at_level(logging.INFO, logger="ships_mcp"):
-            _run_main(["--transport", "streamable-http", "--port", "8888"])
-        assert any("streamable-http" in r.message for r in caplog.records)
-        assert any("8888" in r.message for r in caplog.records)
+    def test_sse_emits_banner(self, capsys):
+        _run_main(["--transport", "sse", "--port", "7070"])
+        err = capsys.readouterr().err
+        assert "SHIPS MCP server" in err
+        assert "sse" in err
+        assert "7070" in err
 
-    def test_sse_emits_banner(self, caplog):
-        import logging
+    def test_stdio_emits_banner(self, capsys):
+        _run_main([])
+        err = capsys.readouterr().err
+        assert "SHIPS MCP server" in err
+        assert "stdio" in err
+        # stdio has no port — banner says so explicitly
+        assert "no network port" in err
 
-        with caplog.at_level(logging.INFO, logger="ships_mcp"):
-            _run_main(["--transport", "sse", "--port", "7070"])
-        assert any("sse" in r.message for r in caplog.records)
 
-    def test_stdio_emits_no_banner(self, caplog):
-        import logging
+# ---------------------------------------------------------------------------
+# ships.yaml mcp: block — defaults sourced from config
+# ---------------------------------------------------------------------------
 
-        with caplog.at_level(logging.INFO, logger="ships_mcp"):
-            _run_main([])
-        assert not any(
-            any(t in r.message for t in ("streamable-http", "sse", "endpoint"))
-            for r in caplog.records
-        )
+
+def _write_ships_yaml(tmp_path, mcp_block: dict) -> str:
+    import yaml
+
+    doc = {
+        "project": "test-proj",
+        "environments": ["DEV"],
+        "mcp": mcp_block,
+    }
+    path = tmp_path / "ships.yaml"
+    path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+    return str(path)
+
+
+class TestShipsYamlMcpBlock:
+    """The mcp: block in ships.yaml supplies defaults below CLI and env vars."""
+
+    def test_yaml_port_used_when_no_cli_or_env(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("FASTMCP_PORT", raising=False)
+        cfg = _write_ships_yaml(tmp_path, {"port": 9999, "transport": "sse"})
+        _run_main(["--config", cfg])
+        assert _settings().port == 9999
+        _run_mock().assert_called_once_with(transport="sse")
+
+    def test_cli_port_overrides_yaml(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("FASTMCP_PORT", raising=False)
+        cfg = _write_ships_yaml(tmp_path, {"port": 9999, "transport": "sse"})
+        _run_main(["--config", cfg, "--port", "1234"])
+        assert _settings().port == 1234
+
+    def test_env_var_overrides_yaml(self, tmp_path, monkeypatch):
+        # When FASTMCP_PORT is set, the yaml value is ignored (env > yaml).
+        # We can't make the FakeSettings honour the env, so we just assert
+        # that ships.yaml does NOT clobber the existing settings value.
+        monkeypatch.setenv("FASTMCP_PORT", "5555")
+        cfg = _write_ships_yaml(tmp_path, {"port": 9999})
+        _run_main(["--config", cfg])
+        # FakeSettings default is 8000; with env set, yaml must not overwrite it.
+        assert _settings().port == 8000
+
+    def test_banner_names_the_yaml_file(self, tmp_path, capsys):
+        cfg = _write_ships_yaml(tmp_path, {"port": 9999})
+        _run_main(["--config", cfg])
+        err = capsys.readouterr().err
+        assert "ships.yaml" in err
+        assert "mcp: block in effect" in err
+        assert str(tmp_path) in err
+
+    def test_banner_says_no_yaml_when_absent(self, tmp_path, capsys, monkeypatch):
+        # Point cwd at a dir with no ships.yaml so the auto-detect misses.
+        monkeypatch.chdir(tmp_path)
+        _run_main([])
+        err = capsys.readouterr().err
+        assert "no ships.yaml found" in err
+
+    def test_invalid_yaml_port_is_fatal(self, tmp_path):
+        cfg = _write_ships_yaml(tmp_path, {"port": 70000})
+        with pytest.raises(SystemExit) as exc_info:
+            _run_main(["--config", cfg])
+        assert exc_info.value.code != 0
+
+    def test_yaml_transport_used_when_no_cli(self, tmp_path):
+        cfg = _write_ships_yaml(tmp_path, {"transport": "streamable-http"})
+        _run_main(["--config", cfg])
+        _run_mock().assert_called_once_with(transport="streamable-http")

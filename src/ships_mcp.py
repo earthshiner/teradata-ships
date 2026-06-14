@@ -2470,7 +2470,7 @@ def main() -> None:
     parser.add_argument(
         "--transport",
         choices=["stdio", "sse", "streamable-http"],
-        default="stdio",
+        default=None,
         help=(
             "MCP transport to use. "
             "'stdio' (default) for subprocess clients (Claude Desktop, Claude Code). "
@@ -2517,6 +2517,16 @@ def main() -> None:
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         default=None,
         help="Log level for the MCP server (default: INFO).",
+    )
+    parser.add_argument(
+        "--config",
+        default=None,
+        help=(
+            "Path to a ships.yaml file whose 'mcp:' block supplies defaults "
+            "for --transport / --host / --port / --path / --stateless / "
+            "--log-level (default: ./ships.yaml if present). "
+            "Precedence: CLI flag > FASTMCP_* env var > ships.yaml > built-in."
+        ),
     )
     parser.add_argument(
         "-V",
@@ -2591,6 +2601,37 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    # -- Load ships.yaml mcp: block (if present) ------------------------
+    # Precedence applied below: CLI flag > FASTMCP_* env var > ships.yaml
+    # > FastMCP built-in default.  The block is only consulted for keys
+    # not already supplied by a higher-precedence source.
+    yaml_mcp: dict = {}
+    yaml_config_path: Optional[str] = None
+    candidate_path = args.config or os.path.join(os.getcwd(), "ships.yaml")
+    if os.path.exists(candidate_path):
+        try:
+            from td_release_packager.orchestrator import ships_yaml as _sy
+
+            doc = _sy.load(candidate_path)
+            yaml_errors = _sy.validate(doc)
+            mcp_errors = [e for e in yaml_errors if e.path.startswith("mcp")]
+            if mcp_errors:
+                parser.error(
+                    "ships.yaml mcp: block is invalid:\n  "
+                    + "\n  ".join(f"{e.path}: {e.message}" for e in mcp_errors)
+                )
+            yaml_mcp = doc.get("mcp") or {}
+            yaml_config_path = candidate_path
+        except Exception as e:
+            # Bad YAML when --config was explicit is fatal; otherwise warn.
+            if args.config:
+                parser.error(f"--config {candidate_path}: {e}")
+            logger.warning("Could not read %s: %s", candidate_path, e)
+
+    # Resolve transport: CLI > ships.yaml > built-in "stdio".
+    if args.transport is None:
+        args.transport = yaml_mcp.get("transport", "stdio")
+
     # -- Validate: HTTP-only flags must not be used with stdio ----------
     http_flags_set = any([args.host, args.port, args.http_path, args.stateless])
     if args.transport == "stdio" and http_flags_set:
@@ -2622,23 +2663,49 @@ def main() -> None:
 
     # -- Apply settings to the FastMCP instance -------------------------
     # mcp.settings is a mutable Pydantic model; update it before run().
-    # CLI flags override defaults; FASTMCP_* env vars are already folded
-    # in by pydantic-settings at Settings construction time.
+    # Precedence (highest first):
+    #   1. CLI flag (args.*)
+    #   2. FASTMCP_* env var (already folded in by pydantic-settings)
+    #   3. ships.yaml mcp.* block (applied here)
+    #   4. FastMCP built-in default (left untouched)
+    def _yaml_if_env_absent(env_name: str, yaml_key: str):
+        if env_name in os.environ:
+            return None
+        return yaml_mcp.get(yaml_key)
+
+    yaml_host = _yaml_if_env_absent("FASTMCP_HOST", "host")
+    yaml_port = _yaml_if_env_absent("FASTMCP_PORT", "port")
+    yaml_log_level = _yaml_if_env_absent("FASTMCP_LOG_LEVEL", "log_level")
+    yaml_stateless = _yaml_if_env_absent("FASTMCP_STATELESS_HTTP", "stateless")
+
     if args.host is not None:
         mcp.settings.host = args.host
+    elif yaml_host is not None:
+        mcp.settings.host = yaml_host
+
     if args.port is not None:
         mcp.settings.port = args.port
+    elif yaml_port is not None:
+        mcp.settings.port = yaml_port
+
     if args.log_level is not None:
         mcp.settings.log_level = args.log_level
+    elif yaml_log_level is not None:
+        mcp.settings.log_level = yaml_log_level
+
     if args.stateless:
         mcp.settings.stateless_http = True
+    elif yaml_stateless:
+        mcp.settings.stateless_http = True
 
-    # Apply custom path for the chosen transport
-    if args.http_path is not None:
+    # Apply custom path: CLI flag wins, else ships.yaml mcp.path.
+    yaml_path = yaml_mcp.get("path")
+    chosen_path = args.http_path if args.http_path is not None else yaml_path
+    if chosen_path is not None:
         if args.transport == "streamable-http":
-            mcp.settings.streamable_http_path = args.http_path
+            mcp.settings.streamable_http_path = chosen_path
         elif args.transport == "sse":
-            mcp.settings.sse_path = args.http_path
+            mcp.settings.sse_path = chosen_path
 
     # -- Configure JWT/Bearer authentication ---------------------------
     # Auth is applied to HTTP transports only; wired by setting
@@ -2683,24 +2750,59 @@ def main() -> None:
             args.auth_required_scopes or "(none)",
         )
 
-    # -- Emit startup banner for HTTP transports ------------------------
-    if args.transport in ("streamable-http", "sse"):
-        host = mcp.settings.host
-        port = mcp.settings.port
-        if args.transport == "streamable-http":
-            path = mcp.settings.streamable_http_path
-        else:
-            path = mcp.settings.sse_path
-        logger.info(
-            "SHIPS MCP server starting — transport=%s  endpoint=http://%s:%d%s%s",
-            args.transport,
-            host,
-            port,
-            path,
-            "  [stateless]" if args.stateless else "",
+    # -- Emit startup banner --------------------------------------------
+    # Banner is printed to stderr so it never collides with the stdio
+    # transport's JSON-RPC stream on stdout.  The "Config" line is
+    # honest about where the active values actually came from.
+    import sys as _sys
+
+    if args.transport == "stdio":
+        endpoint = "stdio (subprocess transport — no network port)"
+    else:
+        endpoint = (
+            f"http://{mcp.settings.host}:{mcp.settings.port}"
+            f"{mcp.settings.streamable_http_path if args.transport == 'streamable-http' else mcp.settings.sse_path}"
+            f"{'  [stateless]' if mcp.settings.stateless_http else ''}"
         )
 
-    mcp.run(transport=args.transport)
+    if yaml_config_path:
+        config_line = f"ships.yaml: {yaml_config_path}  (mcp: block in effect)"
+    else:
+        config_line = (
+            "no ships.yaml found — using FastMCP built-in defaults "
+            "(pass --config <path> to point at one)"
+        )
+
+    override_hint = (
+        "CLI flag > FASTMCP_* env var > ships.yaml mcp: block "
+        "(see --help for full key list)"
+    )
+
+    banner_lines = [
+        "",
+        "=" * 72,
+        f"  SHIPS MCP server v{SHIPS_VERSION} — STARTED",
+        f"  Transport : {args.transport}",
+        f"  Endpoint  : {endpoint}",
+        f"  Config    : {config_line}",
+        f"  Override  : {override_hint}",
+        "=" * 72,
+        "",
+    ]
+    print("\n".join(banner_lines), file=_sys.stderr, flush=True)
+
+    try:
+        mcp.run(transport=args.transport)
+    except KeyboardInterrupt:
+        shutdown = [
+            "",
+            "=" * 72,
+            f"  SHIPS MCP server v{SHIPS_VERSION} — SHUTDOWN (Ctrl+C)",
+            "=" * 72,
+            "",
+        ]
+        print("\n".join(shutdown), file=_sys.stderr, flush=True)
+        raise SystemExit(0)
 
 
 if __name__ == "__main__":
