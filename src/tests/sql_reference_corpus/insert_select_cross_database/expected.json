@@ -1,0 +1,16 @@
+{
+  "summary": "INSERT...SELECT crossing three databases — TGT is the write target (INSERT only); SRC and REF_T are read sources.",
+  "owner": {
+    "database": "{{PROC_DB}}",
+    "object_name": "LoadDailyFacts",
+    "object_type": "PROCEDURE"
+  },
+  "read_sources": [
+    {"database": "{{REF_T}}", "object_name": "Customer"},
+    {"database": "{{SRC}}", "object_name": "Sale_Events"}
+  ],
+  "write_targets": [
+    {"database": "{{TGT}}", "object_name": "Daily_Facts", "privileges": ["INSERT"]}
+  ],
+  "call_targets": []
+}

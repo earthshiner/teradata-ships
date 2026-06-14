@@ -251,14 +251,54 @@ class RegexSqlReferenceExtractor(SqlReferenceExtractor):
 # ---------------------------------------------------------------
 
 
+_EXTRACTOR_ENV_VAR = "SHIPS_SQL_EXTRACTOR"
+
+
 def default_extractor() -> SqlReferenceExtractor:
     """Return the extractor SHIPS uses by default.
 
-    Phase 1: regex. Phase 2 will add an environment-driven switch so
-    operators can opt into the AST implementation; Phase 3 flips the
-    default once the regression corpus is green; Phase 5 retires this
-    function in favour of constructing the AST extractor directly.
+    Phase 3 flipped the default from regex to AST. The selection
+    honours the ``SHIPS_SQL_EXTRACTOR`` environment variable so an
+    operator can roll back without a code change:
+
+    * ``SHIPS_SQL_EXTRACTOR=auto`` (default) — prefer SQLGlot when
+      installed, fall back to regex otherwise.
+    * ``SHIPS_SQL_EXTRACTOR=sqlglot`` — force SQLGlot; raises
+      ``SqlGlotUnavailable`` if the ``[ast]`` extra is missing.
+    * ``SHIPS_SQL_EXTRACTOR=regex`` — force the Phase-1 regex
+      implementation (a defensive escape hatch while AST coverage
+      grows).
+
+    Phase 5 will retire this function in favour of constructing the
+    AST extractor directly.
     """
+    import os
+
+    pref = os.environ.get(_EXTRACTOR_ENV_VAR, "auto").strip().lower()
+
+    if pref == "regex":
+        return RegexSqlReferenceExtractor()
+
+    if pref in ("sqlglot", "ast"):
+        from td_release_packager.sql_reference_extractor_sqlglot import (
+            SqlGlotSqlReferenceExtractor,
+        )
+
+        return SqlGlotSqlReferenceExtractor()
+
+    # "auto" — prefer SQLGlot when available, otherwise fall back to
+    # the regex implementation so a workstation without the [ast]
+    # extra still works.
+    try:
+        from td_release_packager.sql_reference_extractor_sqlglot import (
+            SqlGlotSqlReferenceExtractor,
+            is_available,
+        )
+
+        if is_available():
+            return SqlGlotSqlReferenceExtractor()
+    except ImportError:
+        pass
     return RegexSqlReferenceExtractor()
 
 

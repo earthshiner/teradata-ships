@@ -1,0 +1,13 @@
+{
+  "summary": "DBC system tables must not appear as grant targets — only the real {{REF_T}}.Department reference survives.",
+  "owner": {
+    "database": "{{DOM_V}}",
+    "object_name": "Audit_Log_V",
+    "object_type": "VIEW"
+  },
+  "read_sources": [
+    {"database": "{{REF_T}}", "object_name": "Department"}
+  ],
+  "write_targets": [],
+  "call_targets": []
+}
