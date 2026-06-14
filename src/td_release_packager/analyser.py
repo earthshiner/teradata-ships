@@ -600,6 +600,7 @@ def _scan_references(
     object_type: str,
     own_qualified: str,
     known_databases: Set[str],
+    extractor=None,
 ) -> Tuple[Set[str], Set[str]]:
     """
     Scan DDL body for object references using structural anchors.
@@ -634,11 +635,31 @@ def _scan_references(
                           self-references).
         known_databases:  Set of database names found in the package
                           (upper-cased).
+        extractor:        Optional ``SqlReferenceExtractor`` (#234 /
+                          ADR 0015 Phase 3b). When provided (or when
+                          ``default_extractor()`` returns one) the 10
+                          trust-sensitive anchors (FROM, JOIN×7,
+                          INSERT/UPDATE/DELETE/MERGE, USING, CALL,
+                          EXEC) are sourced from the abstraction
+                          instead of regex. DDL-specific anchors
+                          (INDEX ON, COMMENT ON, FK REFERENCES,
+                          RENAME, DROP, LOCKING, COLLECT STATS,
+                          GRANT ON, trigger event ON) remain on the
+                          regex path — they don't have alias-leak
+                          risk and the abstraction has no equivalent
+                          shape yet.
 
     Returns:
         Tuple of (internal_refs, external_refs) — both sets of
         qualified names.
     """
+    # Resolve the extractor once. Lazy import avoids a circular import
+    # at module load (sql_reference_extractor imports infer_grants).
+    if extractor is None:
+        from td_release_packager.sql_reference_extractor import default_extractor
+
+        extractor = default_extractor()
+
     # Strip comments and string literals
     clean = _strip_noise(ddl_text)
 
@@ -656,6 +677,19 @@ def _scan_references(
 
     # -- Collect all raw references from structural anchors --
     raw_refs = []
+
+    # AST-sourced references (#234 Phase 3b). The extractor's
+    # scope-aware walking fixes the comma-join, derived-table, and
+    # CTE alias leaks the regex anchors used to suffer from. We
+    # union the extractor output with the regex anchors below
+    # rather than replace them — the regex anchors still catch
+    # Teradata abbreviations (UPD, DEL), legacy token formats
+    # (``{TOKEN}``, ``&TOKEN``), and DDL-specific verbs the
+    # abstraction does not model (DROP, RENAME, COMMENT ON,
+    # CREATE INDEX, LOCKING, COLLECT STATISTICS, GRANT ON, FK).
+    # Duplicates are dropped by the internal/external sets below.
+    for ref in extractor.extract_all_references(clean):
+        raw_refs.append(f"{ref.database}.{ref.object_name}")
 
     # FROM clauses (with comma-separated list support)
     raw_refs.extend(_extract_from_refs(body))

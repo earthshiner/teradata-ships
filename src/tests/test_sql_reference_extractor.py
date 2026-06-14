@@ -284,6 +284,43 @@ class TestDefaultExtractor:
 # ---------------------------------------------------------------
 
 
+class TestExtractAllReferences:
+    """The default ``extract_all_references`` should be the union of
+    reads, writes, and calls minus the statement owner (#234 Phase
+    3b)."""
+
+    def test_union_of_reads_writes_calls(self, regex):
+        sql = _strip(
+            """
+            CREATE PROCEDURE {{PROC_DB}}.LoadFacts ()
+            BEGIN
+                INSERT INTO {{TGT}}.Facts
+                SELECT * FROM {{SRC}}.Source;
+                CALL {{OTHER_DB}}.Helper();
+            END;
+            """
+        )
+        refs = regex.extract_all_references(sql)
+        databases = {r.database for r in refs}
+        assert "{{TGT}}" in databases
+        assert "{{SRC}}" in databases
+        assert "{{OTHER_DB}}" in databases
+
+    def test_owner_excluded(self, regex):
+        sql = _strip(
+            "REPLACE VIEW {{DOM_V}}.Customer_V AS SELECT * FROM {{REF_T}}.Customer;"
+        )
+        refs = regex.extract_all_references(sql)
+        databases = {r.database for r in refs}
+        # The view's own object is not a read source.
+        assert "{{DOM_V}}" not in databases
+        assert "{{REF_T}}" in databases
+
+    def test_empty_for_isolated_select(self, regex):
+        sql = _strip("SELECT 1;")
+        assert regex.extract_all_references(sql) == set()
+
+
 class TestAnalyseFileAcceptsExtractor:
     """A second extractor (compare-mode, AST, mock) can be wired into
     ``analyse_file`` without touching its body. Phase-2 lever."""

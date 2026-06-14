@@ -135,6 +135,28 @@ class SqlReferenceExtractor(ABC):
           * ``EXEC`` / ``EXECUTE`` → ``{EXECUTE}`` (macro)
         """
 
+    def extract_all_references(self, sql: str) -> Set[ReferencedObject]:
+        """Return every database-qualified reference in ``sql`` regardless
+        of intent — the union of read sources, write targets, and call
+        targets, but excluding the statement owner.
+
+        Convenience for consumers that just want graph edges (e.g.
+        :mod:`td_release_packager.analyser` building the deploy
+        dependency graph). Default implementation derives the union
+        from the other four methods; subclasses may override for a
+        faster path.
+        """
+        refs: Set[ReferencedObject] = set()
+        refs.update(self.extract_read_sources(sql))
+        refs.update(self.extract_write_targets(sql).keys())
+        refs.update(self.extract_call_targets(sql).keys())
+        owner = self.extract_statement_owner(sql)
+        if owner is not None:
+            refs.discard(
+                ReferencedObject(database=owner.database, object_name=owner.object_name)
+            )
+        return refs
+
 
 # ---------------------------------------------------------------
 # Regex implementation

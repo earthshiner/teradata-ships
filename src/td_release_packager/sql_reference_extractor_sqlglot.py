@@ -259,17 +259,32 @@ class SqlGlotSqlReferenceExtractor(SqlReferenceExtractor):
 
         accumulated: Dict[ReferencedObject, Set[str]] = {}
 
+        def _target_tables(node) -> list:
+            """Return the candidate target ``exp.Table`` nodes for a
+            DML node. SQLGlot exposes the write target through
+            ``this`` for INSERT / UPDATE / MERGE / classical DELETE,
+            but the Teradata ``DEL`` abbreviation (no FROM) sets
+            ``this=False`` and puts the table in ``tables``."""
+            candidates = []
+            this = node.args.get("this")
+            if isinstance(this, exp.Table):
+                candidates.append(this)
+            elif this is not None and not isinstance(this, bool):
+                # ``this`` may be a Schema(table=..., expressions=[cols]).
+                nested = this.find(exp.Table) if hasattr(this, "find") else None
+                if nested is not None:
+                    candidates.append(nested)
+            for entry in node.args.get("tables") or []:
+                if isinstance(entry, exp.Table):
+                    candidates.append(entry)
+            return candidates
+
         def _add(node, privileges: FrozenSet[str]) -> None:
-            target = node.args.get("this") if node else None
-            if target is None:
-                return
-            table = target if isinstance(target, exp.Table) else target.find(exp.Table)
-            if table is None:
-                return
-            ref = self._table_to_ref(table)
-            if ref is None:
-                return
-            accumulated.setdefault(ref, set()).update(privileges)
+            for table in _target_tables(node):
+                ref = self._table_to_ref(table)
+                if ref is None:
+                    continue
+                accumulated.setdefault(ref, set()).update(privileges)
 
         for node in tree.find_all(exp.Insert):
             _add(node, frozenset({PRIV_INSERT}))
