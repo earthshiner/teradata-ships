@@ -542,6 +542,10 @@ class TestToolRegistration:
             "ships_validate_ships_yaml",
             "ships_author_ships_yaml",
             "ships_apply_diff",
+            "ships_validate_env_config",
+            "ships_validate_inspect_config",
+            "ships_author_env_config",
+            "ships_author_inspect_config",
         ]
         for name in expected:
             assert name in tool_names, f"Tool {name!r} not registered"
@@ -784,3 +788,271 @@ class TestShipsApplyDiff:
         data = _sy.load(proposal["path"])
         assert data["project"] == "EndToEnd"
         assert data["environments"] == ["DEV", "TST", "PRD"]
+
+
+# ---------------------------------------------------------------
+# Phase B — .conf authoring tools (#293)
+# ---------------------------------------------------------------
+
+
+class TestConfFileEditor:
+    def test_round_trip_committed_env_configs(self):
+        """dump(parse(content)) == content on every committed .conf."""
+        import pathlib
+
+        from td_release_packager.mcp_authoring import ConfFile
+
+        repo_root = pathlib.Path(__file__).resolve().parents[2]
+        candidates = sorted((repo_root / "config" / "env").glob("*.conf"))
+        assert candidates, "expected committed env .conf fixtures"
+        for fixture in candidates:
+            text = fixture.read_text(encoding="utf-8", newline="")
+            assert ConfFile.parse(text).dump() == text, fixture
+
+    def test_set_existing_key_in_place(self):
+        from td_release_packager.mcp_authoring import ConfFile
+
+        original = "# header\nA=1\nB=2\n# tail\n"
+        conf = ConfFile.parse(original)
+        conf.set("A", "99")
+        out = conf.dump()
+        assert out == "# header\nA=99\nB=2\n# tail\n"
+
+    def test_set_new_key_appends(self):
+        from td_release_packager.mcp_authoring import ConfFile
+
+        conf = ConfFile.parse("A=1\n")
+        conf.set("B", "2")
+        assert conf.dump() == "A=1\nB=2\n"
+
+    def test_unset_removes_only_target_line(self):
+        from td_release_packager.mcp_authoring import ConfFile
+
+        original = "# header\nA=1\n\nB=2\n"
+        conf = ConfFile.parse(original)
+        assert conf.unset("A") is True
+        assert conf.dump() == "# header\n\nB=2\n"
+
+    def test_set_rejects_newline_in_value(self):
+        import pytest
+
+        from td_release_packager.mcp_authoring import ConfFile
+
+        with pytest.raises(ValueError):
+            ConfFile.parse("").set("K", "bad\nvalue")
+
+    def test_set_rejects_bad_key(self):
+        import pytest
+
+        from td_release_packager.mcp_authoring import ConfFile
+
+        for bad in ["", "  ", "K=Y", "K\nL", "#X"]:
+            with pytest.raises(ValueError):
+                ConfFile.parse("").set(bad, "v")
+
+
+class TestShipsValidateEnvConfig:
+    def test_missing_file(self, tmp_path: Path):
+        from ships_mcp import ships_validate_env_config
+
+        result = ships_validate_env_config(project=str(tmp_path), env="DEV")
+        assert result["success"] is True
+        assert result["exists"] is False
+        assert result["valid"] is False
+
+    def test_valid_file(self, tmp_path: Path):
+        from ships_mcp import ships_validate_env_config
+
+        env_dir = tmp_path / "config" / "env"
+        env_dir.mkdir(parents=True)
+        (env_dir / "DEV.conf").write_text(
+            "SHIPS_ENV=DEV\nENV_PREFIX=PDE\n", encoding="utf-8"
+        )
+        result = ships_validate_env_config(project=str(tmp_path), env="DEV")
+        assert result["success"] is True
+        assert result["exists"] is True
+        assert result["valid"] is True
+        assert result["errors"] == []
+
+
+class TestShipsValidateInspectConfig:
+    def test_missing_file(self, tmp_path: Path):
+        from ships_mcp import ships_validate_inspect_config
+
+        result = ships_validate_inspect_config(project=str(tmp_path))
+        assert result["success"] is True
+        assert result["exists"] is False
+        assert result["valid"] is False
+
+    def test_invalid_severity_flagged(self, tmp_path: Path):
+        from ships_mcp import ships_validate_inspect_config
+
+        cfg_dir = tmp_path / "config"
+        cfg_dir.mkdir()
+        (cfg_dir / "inspect.conf").write_text("db_qualifier=FATAL\n", encoding="utf-8")
+        result = ships_validate_inspect_config(project=str(tmp_path))
+        assert result["valid"] is False
+        assert any("FATAL" in e["message"] for e in result["errors"])
+
+    def test_domain_value_validated(self, tmp_path: Path):
+        from ships_mcp import ships_validate_inspect_config
+
+        cfg_dir = tmp_path / "config"
+        cfg_dir.mkdir()
+        (cfg_dir / "inspect.conf").write_text(
+            "comma_style=sideways\n", encoding="utf-8"
+        )
+        result = ships_validate_inspect_config(project=str(tmp_path))
+        assert result["valid"] is False
+        assert any("sideways" in e["message"] for e in result["errors"])
+
+
+class TestShipsAuthorEnvConfig:
+    def test_create_proposes_with_header_and_seed_keys(self, tmp_path: Path):
+        from ships_mcp import ships_author_env_config
+
+        result = ships_author_env_config(
+            project=str(tmp_path),
+            env="DEV",
+            action="create",
+            changes={"SHIPS_ENV": "DEV", "ENV_PREFIX": "PDE"},
+        )
+        assert result["success"] is True
+        assert "DEV.conf" in result["proposed_content"]
+        assert "SHIPS_ENV=DEV" in result["proposed_content"]
+        assert "ENV_PREFIX=PDE" in result["proposed_content"]
+        # Not written
+        assert not (tmp_path / "config" / "env" / "DEV.conf").exists()
+
+    def test_set_preserves_comments(self, tmp_path: Path):
+        from ships_mcp import ships_author_env_config
+
+        env_dir = tmp_path / "config" / "env"
+        env_dir.mkdir(parents=True)
+        original = "# section 1\nSHIPS_ENV=DEV\n\n# section 2\nENV_PREFIX=PDE\n"
+        (env_dir / "DEV.conf").write_text(original, encoding="utf-8")
+
+        result = ships_author_env_config(
+            project=str(tmp_path),
+            env="DEV",
+            action="set",
+            changes={"ENV_PREFIX": "NEW"},
+        )
+        assert result["success"] is True
+        out = result["proposed_content"]
+        assert "# section 1" in out
+        assert "# section 2" in out
+        assert "ENV_PREFIX=NEW" in out
+        assert "ENV_PREFIX=PDE" not in out
+
+    def test_set_requires_existing_file(self, tmp_path: Path):
+        from ships_mcp import ships_author_env_config
+
+        result = ships_author_env_config(
+            project=str(tmp_path),
+            env="DEV",
+            action="set",
+            changes={"SHIPS_ENV": "DEV"},
+        )
+        assert result["success"] is False
+        assert "not found" in result["error"]
+
+    def test_create_refuses_if_exists(self, tmp_path: Path):
+        from ships_mcp import ships_author_env_config
+
+        env_dir = tmp_path / "config" / "env"
+        env_dir.mkdir(parents=True)
+        (env_dir / "DEV.conf").write_text("X=Y\n", encoding="utf-8")
+
+        result = ships_author_env_config(
+            project=str(tmp_path), env="DEV", action="create"
+        )
+        assert result["success"] is False
+        assert "already exists" in result["error"]
+
+    def test_unset_removes_key(self, tmp_path: Path):
+        from ships_mcp import ships_author_env_config
+
+        env_dir = tmp_path / "config" / "env"
+        env_dir.mkdir(parents=True)
+        (env_dir / "DEV.conf").write_text("A=1\nB=2\n", encoding="utf-8")
+        result = ships_author_env_config(
+            project=str(tmp_path),
+            env="DEV",
+            action="unset",
+            unset_keys=["A"],
+        )
+        assert result["success"] is True
+        assert "A=" not in result["proposed_content"]
+        assert "B=2" in result["proposed_content"]
+
+
+class TestShipsAuthorInspectConfig:
+    def test_set_flags_invalid_severity_in_validation(self, tmp_path: Path):
+        from ships_mcp import ships_author_inspect_config
+
+        cfg_dir = tmp_path / "config"
+        cfg_dir.mkdir()
+        (cfg_dir / "inspect.conf").write_text("# defaults\n", encoding="utf-8")
+        result = ships_author_inspect_config(
+            project=str(tmp_path),
+            action="set",
+            changes={"db_qualifier": "FATAL"},
+        )
+        # Proposal succeeds; validation flags the issue
+        assert result["success"] is True
+        assert result["validation"]["valid"] is False
+        assert any("FATAL" in e["message"] for e in result["validation"]["errors"])
+
+    def test_create_then_apply_writes_and_validates(self, tmp_path: Path):
+        from ships_mcp import (
+            ships_apply_diff,
+            ships_author_inspect_config,
+            ships_validate_inspect_config,
+        )
+
+        proposal = ships_author_inspect_config(
+            project=str(tmp_path),
+            action="create",
+            changes={"db_qualifier": "WARNING", "comma_style": "trailing"},
+        )
+        assert proposal["success"] is True
+        assert proposal["validation"]["valid"] is True
+
+        applied = ships_apply_diff(
+            path=proposal["path"],
+            proposed_content=proposal["proposed_content"],
+            expected_hash=proposal["expected_hash"],
+        )
+        assert applied["success"] is True
+        result = ships_validate_inspect_config(project=str(tmp_path))
+        assert result["valid"] is True
+
+
+class TestPhaseBHashGate:
+    def test_concurrent_edit_blocks_apply_of_conf(self, tmp_path: Path):
+        from ships_mcp import ships_apply_diff, ships_author_env_config
+
+        env_dir = tmp_path / "config" / "env"
+        env_dir.mkdir(parents=True)
+        path = env_dir / "DEV.conf"
+        path.write_text("A=1\n", encoding="utf-8")
+
+        proposal = ships_author_env_config(
+            project=str(tmp_path),
+            env="DEV",
+            action="set",
+            changes={"A": "2"},
+        )
+        # Simulate concurrent edit
+        path.write_text("A=1\nB=3\n", encoding="utf-8")
+
+        applied = ships_apply_diff(
+            path=proposal["path"],
+            proposed_content=proposal["proposed_content"],
+            expected_hash=proposal["expected_hash"],
+        )
+        assert applied["success"] is False
+        assert applied["code"] == "hash_mismatch"
+        # File untouched
+        assert path.read_text() == "A=1\nB=3\n"
