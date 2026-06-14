@@ -487,6 +487,61 @@ class TestScanReferences:
         # Should appear exactly once (as a target)
         assert "MyDB.TempData" in internal
 
+    # -- #234 Phase 3b: SqlReferenceExtractor wiring --
+
+    def test_custom_extractor_used_when_provided(self):
+        """_scan_references accepts an explicit extractor parameter
+        (#234 Phase 3b). The injected extractor's extract_all_references
+        result is unioned with the regex anchors, so the analyser gets
+        the union of both."""
+        from td_release_packager.sql_reference_extractor import (
+            ReferencedObject,
+            RegexSqlReferenceExtractor,
+        )
+
+        captured: list[str] = []
+
+        class _SpyExtractor(RegexSqlReferenceExtractor):
+            def extract_all_references(self, sql):  # type: ignore[override]
+                captured.append("called")
+                return super().extract_all_references(sql)
+
+        ddl = "SELECT * FROM MyDB.Source WHERE 1=1;"
+        internal, _external = _scan_references(
+            ddl, "VIEW", "MyDB.V", {"MYDB"}, extractor=_SpyExtractor()
+        )
+        assert captured, "custom extractor should have been called"
+        assert "MyDB.Source" in internal
+
+    def test_ast_extractor_finds_comma_join_references(self):
+        """The AST extractor adds correctly-scoped references the
+        regex anchors miss (e.g. comma-join continuations in
+        infer-grants style). For the analyser this is belt-and-braces:
+        the existing regex `_extract_from_refs` already handles
+        comma joins, so this test just guards that wiring the AST
+        extractor in does not regress the case."""
+        from td_release_packager.sql_reference_extractor_sqlglot import (
+            SqlGlotSqlReferenceExtractor,
+            is_available,
+        )
+
+        if not is_available():
+            import pytest
+
+            pytest.skip("sqlglot not installed")
+
+        ddl = (
+            "REPLACE VIEW MyDB.V AS "
+            "SELECT c.id FROM MyDB.A c, MyDB.B b, MyDB.C bb "
+            "WHERE c.id = b.id;"
+        )
+        internal, _external = _scan_references(
+            ddl, "VIEW", "MyDB.V", {"MYDB"}, extractor=SqlGlotSqlReferenceExtractor()
+        )
+        assert "MyDB.A" in internal
+        assert "MyDB.B" in internal
+        assert "MyDB.C" in internal
+
 
 # ---------------------------------------------------------------
 # _detect_cycles
