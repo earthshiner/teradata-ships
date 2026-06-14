@@ -2030,6 +2030,217 @@ def ships_fix(project: str, rule_id: str, dry_run: bool = True) -> dict:
 
 
 # ---------------------------------------------------------------
+# [G] Guidance — Phase D of #291 (#299)
+#
+# Read-only navigation: where am I in the pipeline (ships_status)
+# and what's actually in the package I built (ships_describe_package).
+# Wraps the existing project_index / project_actions / package-context
+# substrate; no new state is invented.
+# ---------------------------------------------------------------
+
+
+@mcp.tool()
+def ships_status(project: str) -> dict:
+    """Report where the project sits in the SHIPS pipeline.
+
+    Wraps ``project_index.compute_project_index`` and
+    ``project_actions.compute_project_actions``.  Read-only; nothing
+    is written.
+
+    Use as the entry point for an agent that's just been asked to
+    "look at this project" — the lifecycle state tells you what
+    already happened, ``next_recommended_actions`` tells you what
+    to do next, and the allowed / blocked / approval-required lists
+    tell you what's currently safe to call.
+
+    Args:
+        project: SHIPS project directory.
+
+    Returns:
+        {"success": bool,
+         "project_name": str,
+         "project_dir": str,
+         "lifecycle_state": str (scaffolded|harvested|inspected|analysed|packaged),
+         "next_recommended_actions": [str],
+         "evaluated_at": str,
+         "references": {...},
+         "discovery_flags": {...},
+         "allowed_actions": [str],
+         "blocked_actions": [{action, reason, evidence_ref, instruction}],
+         "requires_human_approval": [{action, reason, ...}]}
+    """
+    try:
+        from td_release_packager.project_actions import compute_project_actions
+        from td_release_packager.project_index import compute_project_index
+
+        if not os.path.isdir(project):
+            return {
+                "success": False,
+                "error": f"project directory not found: {project}",
+            }
+
+        index = compute_project_index(project).to_dict()
+        actions = compute_project_actions(project).to_dict()
+        return {
+            "success": True,
+            "project_name": index.get("project_name"),
+            "project_dir": index.get("project_dir"),
+            "lifecycle_state": index.get("lifecycle_state"),
+            "next_recommended_actions": index.get("next_recommended_actions", []),
+            "evaluated_at": index.get("evaluated_at"),
+            "references": index.get("references", {}),
+            "discovery_flags": actions.get("discovery_flags", {}),
+            "allowed_actions": actions.get("allowed_actions", []),
+            "blocked_actions": actions.get("blocked_actions", []),
+            "requires_human_approval": actions.get("requires_human_approval", []),
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def _latest_package_archive(project: str) -> Optional[str]:
+    """Return the newest *.zip under ``<project>/releases/`` by mtime."""
+    releases = os.path.join(project, "releases")
+    if not os.path.isdir(releases):
+        return None
+    candidates: list = []
+    for root, _dirs, files in os.walk(releases):
+        for name in files:
+            if name.lower().endswith(".zip"):
+                full = os.path.join(root, name)
+                try:
+                    candidates.append((os.path.getmtime(full), full))
+                except OSError:
+                    continue
+    if not candidates:
+        return None
+    candidates.sort(key=lambda t: t[0])
+    return candidates[-1][1]
+
+
+def _summarise_package(
+    archive_path: str,
+    build: Optional[dict],
+    trust: Optional[dict],
+    manifest: Optional[dict],
+) -> dict:
+    """Flatten the trio of context JSONs into a small summary dict."""
+    summary: dict = {
+        "archive_path": archive_path,
+        "archive_name": os.path.basename(archive_path),
+        "size_bytes": None,
+    }
+    try:
+        summary["size_bytes"] = os.path.getsize(archive_path)
+    except OSError:
+        pass
+
+    if build:
+        summary["project_name"] = build.get("project_name") or build.get("name")
+        summary["target_env"] = build.get("target_env") or build.get("env")
+        summary["build_counter"] = build.get("build_counter")
+        summary["built_at"] = build.get("built_at") or build.get("build_timestamp")
+        summary["source_commit"] = build.get("source_commit")
+        summary["ships_version"] = build.get("ships_version")
+
+    if trust:
+        summary["trust_status"] = trust.get("status") or trust.get("trust_status")
+        summary["trust_label"] = trust.get("label")
+        signals = trust.get("signals") or trust.get("checks")
+        if signals:
+            summary["trust_signals"] = signals
+
+    if manifest:
+        objects = manifest.get("objects") or manifest.get("entries")
+        if isinstance(objects, list):
+            summary["object_count"] = len(objects)
+            kinds: dict = {}
+            for obj in objects:
+                kind = (obj or {}).get("kind") or (obj or {}).get("type") or "unknown"
+                kinds[kind] = kinds.get(kind, 0) + 1
+            summary["object_counts_by_kind"] = kinds
+        waves = manifest.get("waves")
+        if isinstance(waves, list):
+            summary["wave_count"] = len(waves)
+
+    return summary
+
+
+def _render_summary_text(summary: dict) -> str:
+    """Render a short human-readable header for review-before-deploy."""
+    lines = []
+    name = summary.get("project_name") or summary.get("archive_name", "package")
+    env = summary.get("target_env") or "unspecified env"
+    lines.append(f"Package {name} for {env}")
+    trust = summary.get("trust_status")
+    if trust:
+        lines.append(f"Trust: {trust}")
+    obj_count = summary.get("object_count")
+    waves = summary.get("wave_count")
+    if obj_count is not None and waves is not None:
+        lines.append(f"Contents: {obj_count} object(s) across {waves} wave(s)")
+    elif obj_count is not None:
+        lines.append(f"Contents: {obj_count} object(s)")
+    if summary.get("built_at"):
+        lines.append(f"Built at: {summary['built_at']}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def ships_describe_package(project: str, archive: Optional[str] = None) -> dict:
+    """Summarise a built package for review-before-deploy.
+
+    Auto-discovers the newest ``*.zip`` under ``<project>/releases/``
+    when ``archive`` is omitted, then reads ``context/ships.build.json``,
+    ``context/ships.trust.json``, and (if present)
+    ``context/ships.manifest.json`` from inside the archive.  Returns
+    a structured summary plus ``summary_text`` — a short
+    human-readable header suitable for surfacing in a chat reply.
+
+    Read-only; never extracts the archive.
+
+    Args:
+        project: SHIPS project directory.
+        archive: Optional explicit archive path; overrides
+                 latest-archive auto-discovery.
+
+    Returns:
+        {"success": bool, "archive_path": str, "summary_text": str,
+         "summary": {project_name, target_env, build_counter,
+                     trust_status, object_count, wave_count, ...},
+         "context": {...standard ships context handoff fields...}}
+    """
+    try:
+        if archive:
+            archive_path = archive
+        else:
+            archive_path = _latest_package_archive(project)
+        if not archive_path or not os.path.isfile(archive_path):
+            return {
+                "success": False,
+                "error": (
+                    f"no archive found at {archive!r}"
+                    if archive
+                    else f"no package archive found under {project}/releases/"
+                ),
+            }
+
+        build = _find_build_json(archive_path)
+        trust = _find_trust_json(archive_path)
+        manifest = _find_archive_json(archive_path, "context/ships.manifest.json")
+        summary = _summarise_package(archive_path, build, trust, manifest)
+        return {
+            "success": True,
+            "archive_path": archive_path,
+            "summary_text": _render_summary_text(summary),
+            "summary": summary,
+            "context": _ships_context_response(archive_path),
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------
 
