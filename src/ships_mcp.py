@@ -58,6 +58,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import tempfile
 from typing import Optional
 
@@ -1625,6 +1626,243 @@ def ships_author_inspect_config(
             unset_keys,
             create_header=_INSPECT_CONF_HEADER,
             validator=_validate_inspect_conf_content,
+        )
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------
+# [A] Authoring — Phase B.5 of #291 (#295)
+#
+# token_map analyser + author.  Read-only payload scan surfaces
+# candidates; structural clustering helps the author see DRY
+# opportunities; ships_author_token_map writes via the same
+# diff-first / hash-gate pattern.
+# ---------------------------------------------------------------
+
+
+_TOKEN_MAP_HEADER = (
+    "# ===================================================================\n"
+    "# token_map.conf — Literal database name → {{TOKEN}} mapping.\n"
+    "#\n"
+    "# Format:  LITERAL_DB_NAME={{TOKEN_NAME}}\n"
+    "# Run `ships harvest` to (re-)generate the baseline, or use\n"
+    "# `ships_analyse_token_candidates` to inspect candidates and\n"
+    "# structure this file for DRY before adding entries by hand.\n"
+    "# ===================================================================\n"
+    "\n"
+)
+
+
+def _token_map_path(project: str) -> str:
+    return os.path.join(project, "config", "token_map.conf")
+
+
+_TOKEN_VALUE_RE = re.compile(r"^\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}$")
+
+
+def _validate_token_map_content(content: str) -> list:
+    """Inline validator for token_map.conf content.
+
+    Returns a list of {path, message} dicts. Empty == valid.
+    Catches: missing '=', empty key, value not in ``{{TOKEN_NAME}}``
+    shape, and duplicate keys.
+    """
+    errors: list = []
+    seen: dict = {}
+    for lineno, line in enumerate(content.splitlines(), 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "=" not in stripped:
+            errors.append(
+                {"path": f"line {lineno}", "message": f"missing '=': {stripped!r}"}
+            )
+            continue
+        key, _, value = stripped.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            errors.append({"path": f"line {lineno}", "message": "empty literal name"})
+            continue
+        if key in seen:
+            errors.append(
+                {
+                    "path": key,
+                    "message": (f"duplicate entry (also defined at line {seen[key]})"),
+                }
+            )
+        else:
+            seen[key] = lineno
+        if not _TOKEN_VALUE_RE.match(value):
+            errors.append(
+                {
+                    "path": key,
+                    "message": (
+                        f"value {value!r} is not in {{{{TOKEN_NAME}}}} form "
+                        "(letters / digits / underscore, must start with "
+                        "a letter or underscore)"
+                    ),
+                }
+            )
+    return errors
+
+
+@mcp.tool()
+def ships_analyse_token_candidates(project: str) -> dict:
+    """Read-only analysis of database-literal candidates for tokenisation.
+
+    Walks ``<project>/payload/`` (without modifying anything), extracts
+    qualified database names from every DDL file, filters out system
+    databases, and groups the remaining literals by structural
+    similarity so the author can spot DRY opportunities before editing
+    ``config/token_map.conf``.
+
+    Cross-references each candidate against:
+      - the existing token_map.conf (already mapped → in ``mapped``)
+      - per-env config tokens (token name already defined → in
+        ``defined_tokens``).
+
+    Args:
+        project: SHIPS project directory.
+
+    Returns:
+        {"success": bool,
+         "literal_count": int,
+         "literals": [{"name": str, "ref_count": int, "files": [...],
+                       "already_mapped_to": str|None}],
+         "prefix_clusters": [{"prefix": str, "members": [...], "count": int}],
+         "suffix_clusters": [{"suffix": str, "members": [...], "count": int}],
+         "existing_token_map": {literal: token, ...},
+         "defined_env_tokens": [token_name, ...]}
+    """
+    try:
+        from td_release_packager import mcp_authoring as _ma
+        from td_release_packager.ingest import _build_token_candidates
+        from td_release_packager.token_engine import read_env_config, read_token_map
+
+        raw_db_names = _ma.scan_payload_databases(project)
+        filtered = _build_token_candidates(raw_db_names)
+        view = _ma.cluster_token_candidates(filtered)
+
+        # Cross-reference: existing token_map.conf
+        existing_map: dict = {}
+        tm_path = _token_map_path(project)
+        if os.path.exists(tm_path):
+            try:
+                existing_map = read_token_map(tm_path)
+            except Exception as e:
+                logger.warning("Could not read token_map.conf: %s", e)
+
+        for entry in view["literals"]:
+            entry["already_mapped_to"] = existing_map.get(entry["name"])
+
+        # Cross-reference: env-conf token names already defined.
+        defined_tokens: set = set()
+        env_dir = os.path.join(project, "config", "env")
+        if os.path.isdir(env_dir):
+            for f in os.listdir(env_dir):
+                if not f.endswith(".conf"):
+                    continue
+                try:
+                    defined_tokens.update(read_env_config(os.path.join(env_dir, f)))
+                except Exception as e:
+                    logger.warning("Could not read %s: %s", f, e)
+
+        return {
+            "success": True,
+            "literal_count": view["literal_count"],
+            "literals": view["literals"],
+            "prefix_clusters": view["prefix_clusters"],
+            "suffix_clusters": view["suffix_clusters"],
+            "existing_token_map": existing_map,
+            "defined_env_tokens": sorted(defined_tokens),
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@mcp.tool()
+def ships_validate_token_map(project: str) -> dict:
+    """Validate config/token_map.conf against the SHIPS token-map schema.
+
+    Surfaces: missing ``=`` lines, empty keys, duplicate keys, and
+    values that are not in ``{{TOKEN_NAME}}`` shape.  Token-name
+    characters: letters / digits / underscore, must start with a
+    letter or underscore (matches the parser used elsewhere).
+
+    Args:
+        project: SHIPS project directory.
+
+    Returns:
+        {"success": bool, "exists": bool, "valid": bool, "path": str,
+         "errors": [{"path": str, "message": str}]}
+    """
+    try:
+        path = _token_map_path(project)
+        if not os.path.exists(path):
+            return {
+                "success": True,
+                "exists": False,
+                "valid": False,
+                "path": path,
+                "errors": [
+                    {"path": "", "message": f"token_map.conf not found at {path}"}
+                ],
+            }
+        with open(path, "r", encoding="utf-8") as f:
+            errors = _validate_token_map_content(f.read())
+        return {
+            "success": True,
+            "exists": True,
+            "valid": not errors,
+            "path": path,
+            "errors": errors,
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@mcp.tool()
+def ships_author_token_map(
+    project: str,
+    action: str,
+    changes: Optional[dict] = None,
+    unset_keys: Optional[list] = None,
+) -> dict:
+    """Propose a change to config/token_map.conf.
+
+    Same diff-first / hash-gated flow as the other authoring tools.
+    The structure-preserving editor keeps comments and reference-count
+    annotations intact on every line not directly touched.
+
+    Actions:
+        create   Generate token_map.conf with the stock header.
+                 Optionally seeds initial mappings from ``changes``.
+                 Fails if the file already exists.
+        set      Apply ``{LITERAL: "{{TOKEN_NAME}}"}`` pairs. Values
+                 must be in ``{{TOKEN_NAME}}`` shape — invalid values
+                 surface in the proposal envelope's validation list.
+        unset    Remove the listed literal keys.
+
+    Args:
+        project:    SHIPS project directory.
+        action:     One of "create", "set", "unset".
+        changes:    {LITERAL: "{{TOKEN_NAME}}"} dict.
+        unset_keys: List of literal keys to remove.
+
+    Returns:
+        Standard proposal envelope.
+    """
+    try:
+        path = _token_map_path(project)
+        return _propose_conf_edit(
+            path,
+            action,
+            changes,
+            unset_keys,
+            create_header=_TOKEN_MAP_HEADER,
+            validator=_validate_token_map_content,
         )
     except Exception as e:
         return {"success": False, "error": str(e)}
