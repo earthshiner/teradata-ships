@@ -315,6 +315,12 @@ class TestStartupBanner:
         assert "ships.yaml" in err  # banner advertises where settings come from
         assert "Log file" in err  # Workstream A — log path advertised
         assert "ships-mcp.log" in err
+        # Banner must include the launch command so a restart doesn't
+        # require remembering the exact flags.
+        assert "Command" in err
+        assert "python -m ships_mcp" in err
+        assert "--transport streamable-http" in err
+        assert "--port 8888" in err
 
     def test_sse_emits_banner(self, capsys, tmp_path, monkeypatch):
         monkeypatch.setenv("SHIPS_LOG_DIR", str(tmp_path))
@@ -334,6 +340,10 @@ class TestStartupBanner:
         # stdio has no port — banner says so explicitly
         assert "no network port" in err
         assert "Log file" in err
+        # With no extra args the command falls back to the bare
+        # `python -m ships_mcp` form — still actionable on restart.
+        assert "Command" in err
+        assert "python -m ships_mcp" in err
 
 
 # ---------------------------------------------------------------------------

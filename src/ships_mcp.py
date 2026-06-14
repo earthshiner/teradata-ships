@@ -2787,6 +2787,15 @@ def main() -> None:
         "(see --help for full key list)"
     )
 
+    # Reconstruct the launch command so a restart doesn't require
+    # the operator to remember the exact flags.  shlex.join quotes
+    # only what needs quoting, so the line stays readable.
+    import shlex as _shlex
+
+    _command = "python -m ships_mcp"
+    if len(_sys.argv) > 1:
+        _command = f"{_command} {_shlex.join(_sys.argv[1:])}"
+
     banner = [
         "",
         "=" * 72,
@@ -2795,6 +2804,7 @@ def main() -> None:
         f"  Endpoint  : {endpoint}",
         f"  Config    : {config_line}",
         f"  Override  : {override_hint}",
+        f"  Command   : {_command}",
         *_log_banner_lines(_log_path),
         "=" * 72,
         "",
