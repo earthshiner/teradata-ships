@@ -52,8 +52,12 @@ class FakeFastMCP:
         self._tool_manager = MagicMock()
         self._tool_manager._tools = {}
 
-    def tool(self):
-        """No-op decorator so @mcp.tool() works at ships_mcp module level."""
+    def tool(self, *_args, **_kwargs):
+        """No-op decorator so @mcp.tool() works at ships_mcp module level.
+
+        Accepts arbitrary args/kwargs (e.g. ``name="..."``) so the fake
+        mirrors FastMCP's overloaded decorator surface.
+        """
 
         def decorator(fn):
             return fn
@@ -74,6 +78,8 @@ def _install_fake_mcp() -> FakeFastMCP:
     fake_fastmcp_mod = types.ModuleType("mcp.server.fastmcp")
     # The lambda ignores construction args and returns our shared instance.
     fake_fastmcp_mod.FastMCP = lambda *a, **kw: instance  # type: ignore
+    # ships_mcp also imports Context for tool type-hints (#302).
+    fake_fastmcp_mod.Context = type("Context", (), {})  # type: ignore
 
     sys.modules.setdefault("mcp", types.ModuleType("mcp"))
     sys.modules.setdefault("mcp.server", types.ModuleType("mcp.server"))

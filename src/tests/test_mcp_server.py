@@ -96,7 +96,7 @@ class TestShipsScaffold:
 
 class TestShipsHarvest:
     def test_classifies_table(self, tmp_path):
-        from ships_mcp import ships_harvest
+        from ships_mcp import _ships_harvest_impl as ships_harvest
 
         project = _make_project(tmp_path)
         source = tmp_path / "src"
@@ -112,7 +112,7 @@ class TestShipsHarvest:
         assert result["unclassified"] == 0
 
     def test_unclassified_file(self, tmp_path):
-        from ships_mcp import ships_harvest
+        from ships_mcp import _ships_harvest_impl as ships_harvest
 
         project = _make_project(tmp_path)
         source = tmp_path / "src"
@@ -124,7 +124,7 @@ class TestShipsHarvest:
         assert result["unclassified"] == 1
 
     def test_missing_source_error(self, tmp_path):
-        from ships_mcp import ships_harvest
+        from ships_mcp import _ships_harvest_impl as ships_harvest
 
         project = _make_project(tmp_path)
         result = ships_harvest(source="/nonexistent", project=str(project))
@@ -135,7 +135,7 @@ class TestShipsHarvest:
         rewrites the database-name prefix in placed payload files,
         without ever producing a malformed ``{{PREFIX_*}}`` token.
         See issue #309 (Model B)."""
-        from ships_mcp import ships_harvest
+        from ships_mcp import _ships_harvest_impl as ships_harvest
 
         project = _make_project(tmp_path)
         source = tmp_path / "src"
@@ -167,7 +167,7 @@ class TestShipsHarvest:
         assert "CallCentre_DOM_STD_T" not in contents
 
     def test_prefix_token_malformed_kv_returns_error(self, tmp_path):
-        from ships_mcp import ships_harvest
+        from ships_mcp import _ships_harvest_impl as ships_harvest
 
         project = _make_project(tmp_path)
         source = tmp_path / "src"
@@ -190,7 +190,7 @@ class TestShipsHarvest:
 
 class TestShipsInspect:
     def test_clean_project_passes(self, tmp_path):
-        from ships_mcp import ships_inspect
+        from ships_mcp import _ships_inspect_impl as ships_inspect
 
         project = _make_project(tmp_path)
         _seed_table(project)
@@ -199,7 +199,7 @@ class TestShipsInspect:
         assert "findings" in result
 
     def test_returns_finding_schema(self, tmp_path):
-        from ships_mcp import ships_inspect
+        from ships_mcp import _ships_inspect_impl as ships_inspect
 
         project = _make_project(tmp_path)
         _seed_table(project)
@@ -218,7 +218,7 @@ class TestShipsInspect:
 
 class TestShipsAnalyse:
     def test_analyses_single_table(self, tmp_path):
-        from ships_mcp import ships_analyse
+        from ships_mcp import _ships_analyse_impl as ships_analyse
 
         project = _make_project(tmp_path)
         _seed_table(project)
@@ -228,7 +228,7 @@ class TestShipsAnalyse:
         assert "wave_count" in result
 
     def test_writes_waves_file(self, tmp_path):
-        from ships_mcp import ships_analyse
+        from ships_mcp import _ships_analyse_impl as ships_analyse
 
         project = _make_project(tmp_path)
         _seed_table(project)
@@ -245,7 +245,7 @@ class TestShipsAnalyse:
 
 class TestShipsPackage:
     def test_builds_archive(self, tmp_path):
-        from ships_mcp import ships_package
+        from ships_mcp import _ships_package_impl as ships_package
 
         project = _make_project(tmp_path)
         _seed_table(project)
@@ -265,7 +265,7 @@ class TestShipsPackage:
         assert result["trust_status"] in ("READY", "READY_WITH_CAVEATS", "BLOCKED")
 
     def test_missing_env_config_error(self, tmp_path):
-        from ships_mcp import ships_package
+        from ships_mcp import _ships_package_impl as ships_package
 
         project = _make_project(tmp_path)
         result = ships_package(
@@ -284,7 +284,7 @@ class TestShipsPackage:
 
 class TestShipsProcess:
     def test_process_without_source_skips_harvest(self, tmp_path):
-        from ships_mcp import ships_process
+        from ships_mcp import _ships_process_impl as ships_process
 
         project = _make_project(tmp_path)
         _seed_table(project)
@@ -295,7 +295,7 @@ class TestShipsProcess:
         assert "analyse" in result["stages"]
 
     def test_process_with_source_includes_harvest(self, tmp_path):
-        from ships_mcp import ships_process
+        from ships_mcp import _ships_process_impl as ships_process
 
         project = _make_project(tmp_path)
         source = tmp_path / "src"
@@ -479,7 +479,7 @@ class TestShipsExplainRun:
 
 class TestShipsRollbackDryRun:
     def test_dry_run_works_without_connection(self, tmp_path):
-        from ships_mcp import ships_rollback
+        from ships_mcp import _ships_rollback_impl as ships_rollback
         from database_package_deployer.manifest import DeploymentManifest
         from database_package_deployer.models import DeployState
 
@@ -502,7 +502,7 @@ class TestShipsRollbackDryRun:
         assert result.get("completed", 0) + result.get("rolled_back", 0) >= 0
 
     def test_missing_manifest_error(self, tmp_path):
-        from ships_mcp import ships_rollback
+        from ships_mcp import _ships_rollback_impl as ships_rollback
 
         result = ships_rollback(
             manifest_path=str(tmp_path / "nonexistent.json"),
@@ -1474,7 +1474,8 @@ class TestShipsDescribePackage:
         path-length safe) and describe it via the explicit ``archive``
         parameter.
         """
-        from ships_mcp import ships_describe_package, ships_package
+        from ships_mcp import _ships_package_impl as ships_package
+        from ships_mcp import ships_describe_package
 
         project = _make_project(tmp_path)
         _seed_table(project)
