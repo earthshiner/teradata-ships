@@ -329,6 +329,168 @@ class ConfFile:
 
 
 # ---------------------------------------------------------------
+# Token-candidate analysis (Phase B.5)
+# ---------------------------------------------------------------
+#
+# Read-only payload scanner + simple clustering heuristics that
+# surface DRY opportunities in a flat token_map.conf.  Crucially
+# does NOT mutate payload/ — unlike ingest_directory's detect
+# mode, which still rewrites files during classification.
+
+
+_PAYLOAD_DDL_EXTENSIONS = {
+    ".tbl",
+    ".sql",
+    ".ddl",
+    ".ddml",
+    ".dml",
+    ".dcl",
+    ".vw",
+    ".mac",
+    ".spl",
+    ".udf",
+    ".trg",
+    ".idx",
+    ".bteq",
+    ".db",
+}
+
+
+def scan_payload_databases(project_dir: str) -> Dict[str, List[str]]:
+    """Walk ``<project>/payload/`` for DDL files and collect the
+    qualified database name from each.
+
+    Returns a dict of ``database_name → [relative file paths]``.
+    Comment-stripping and qualified-name extraction reuse the same
+    primitives as harvest, so the literals returned match what
+    ``ships harvest`` would discover — without rewriting any file.
+    """
+    from td_release_packager.ingest import _extract_qualified_name
+    from td_release_packager.sql_text import strip_comments_preserving_positions
+
+    payload_root = os.path.join(project_dir, "payload")
+    out: Dict[str, List[str]] = {}
+    if not os.path.isdir(payload_root):
+        return out
+
+    for root, _dirs, files in os.walk(payload_root):
+        for name in files:
+            if os.path.splitext(name)[1].lower() not in _PAYLOAD_DDL_EXTENSIONS:
+                continue
+            src = os.path.join(root, name)
+            try:
+                with open(src, "r", encoding="utf-8", errors="replace") as f:
+                    raw = f.read()
+            except OSError:
+                continue
+            clean = strip_comments_preserving_positions(raw)
+            db_name, _obj = _extract_qualified_name(clean)
+            if not db_name:
+                continue
+            rel = os.path.relpath(src, project_dir).replace(os.sep, "/")
+            out.setdefault(db_name, []).append(rel)
+    return out
+
+
+def _shared_prefix_tokens(names: List[str], min_tokens: int = 2) -> str:
+    """Return the longest leading ``_``-separated token sequence shared
+    by every name in ``names``.  Empty string if fewer than
+    ``min_tokens`` segments are shared.
+    """
+    if not names:
+        return ""
+    split = [n.split("_") for n in names]
+    common: List[str] = []
+    for column in zip(*split):
+        if all(c == column[0] and c for c in column):
+            common.append(column[0])
+        else:
+            break
+    if len(common) < min_tokens:
+        return ""
+    return "_".join(common)
+
+
+def cluster_token_candidates(
+    db_names: Dict[str, List[str]],
+) -> Dict[str, Any]:
+    """Group ``db_names`` by structural similarity.
+
+    Produces three lenses for the same set of literals:
+
+    * ``literals`` — every candidate with its reference count and
+      file list, sorted by descending count then by name.
+    * ``prefix_clusters`` — groups of two or more names sharing a
+      leading ``_``-separated prefix of at least two tokens.
+    * ``suffix_clusters`` — groups of two or more names sharing
+      the trailing token (commonly ``_T`` / ``_V`` / ``_M`` for
+      object-kind suffixes).
+
+    System databases are NOT filtered here — the caller should pass
+    a pre-filtered dict (e.g. via
+    :func:`td_release_packager.ingest._build_token_candidates`) so
+    the lens output is meaningful.
+    """
+    literals = [
+        {
+            "name": name,
+            "ref_count": len(files),
+            "files": sorted(set(files)),
+        }
+        for name, files in sorted(
+            db_names.items(),
+            key=lambda kv: (-len(kv[1]), kv[0]),
+        )
+    ]
+
+    # Prefix clusters — group names by their leading two-segment prefix.
+    by_prefix: Dict[str, List[str]] = {}
+    for name in db_names:
+        head = "_".join(name.split("_")[:2])
+        if not head or "_" not in name:
+            continue
+        by_prefix.setdefault(head, []).append(name)
+    prefix_clusters = []
+    for prefix, members in by_prefix.items():
+        if len(members) < 2:
+            continue
+        shared = _shared_prefix_tokens(members, min_tokens=2)
+        if not shared:
+            continue
+        prefix_clusters.append(
+            {
+                "prefix": shared,
+                "members": sorted(members),
+                "count": len(members),
+            }
+        )
+    prefix_clusters.sort(key=lambda c: (-c["count"], c["prefix"]))
+
+    # Suffix clusters — group by trailing token (eg _T / _V / _M).
+    by_suffix: Dict[str, List[str]] = {}
+    for name in db_names:
+        if "_" not in name:
+            continue
+        tail = name.rsplit("_", 1)[-1]
+        if not tail:
+            continue
+        by_suffix.setdefault(tail, []).append(name)
+    suffix_clusters = [
+        {"suffix": suffix, "members": sorted(members), "count": len(members)}
+        for suffix, members in by_suffix.items()
+        if len(members) >= 2
+    ]
+    suffix_clusters.sort(key=lambda c: (-c["count"], c["suffix"]))
+
+    return {
+        "literal_count": len(literals),
+        "literals": literals,
+        "prefix_clusters": prefix_clusters,
+        "suffix_clusters": suffix_clusters,
+    }
+
+
+# ---------------------------------------------------------------
 # Hash-gated write
 # ---------------------------------------------------------------
 

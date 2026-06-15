@@ -546,6 +546,9 @@ class TestToolRegistration:
             "ships_validate_inspect_config",
             "ships_author_env_config",
             "ships_author_inspect_config",
+            "ships_analyse_token_candidates",
+            "ships_validate_token_map",
+            "ships_author_token_map",
         ]
         for name in expected:
             assert name in tool_names, f"Tool {name!r} not registered"
@@ -1056,3 +1059,195 @@ class TestPhaseBHashGate:
         assert applied["code"] == "hash_mismatch"
         # File untouched
         assert path.read_text() == "A=1\nB=3\n"
+
+
+# ---------------------------------------------------------------
+# Phase B.5 — token_map analyser + author (#295)
+# ---------------------------------------------------------------
+
+
+def _seed_payload_ddl(project: Path, db: str, obj: str, kind: str = "tbl") -> None:
+    """Drop a minimal DDL file under payload/ with a known qualified name."""
+    target = (
+        project / "payload" / "database" / "DDL" / f"{kind}s" / f"{db}.{obj}.{kind}"
+    )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        f"CREATE MULTISET TABLE {db}.{obj} (Id INTEGER) PRIMARY INDEX (Id);\n",
+        encoding="utf-8",
+    )
+
+
+class TestShipsAnalyseTokenCandidates:
+    def test_empty_project_returns_no_literals(self, tmp_path: Path):
+        from ships_mcp import ships_analyse_token_candidates
+
+        result = ships_analyse_token_candidates(project=str(tmp_path))
+        assert result["success"] is True
+        assert result["literal_count"] == 0
+        assert result["literals"] == []
+        assert result["prefix_clusters"] == []
+
+    def test_collects_and_clusters_literals(self, tmp_path: Path):
+        from ships_mcp import ships_analyse_token_candidates
+
+        # Three DBs share PDE_DEV_00_ prefix and _T suffix
+        _seed_payload_ddl(tmp_path, "PDE_DEV_00_MDL_0_T", "Customer")
+        _seed_payload_ddl(tmp_path, "PDE_DEV_00_OPR_0_T", "OrderHeader")
+        _seed_payload_ddl(tmp_path, "PDE_DEV_00_STG_0_T", "RawFeed")
+        # Lone DB outside any cluster
+        _seed_payload_ddl(tmp_path, "OtherDb", "Lookup")
+
+        result = ships_analyse_token_candidates(project=str(tmp_path))
+        assert result["success"] is True
+        names = {lit["name"] for lit in result["literals"]}
+        assert "PDE_DEV_00_MDL_0_T" in names
+        assert "OtherDb" in names
+
+        prefixes = {c["prefix"] for c in result["prefix_clusters"]}
+        # At least one cluster covers the shared PDE_DEV* prefix
+        assert any(p.startswith("PDE_DEV") for p in prefixes)
+
+        suffixes = {c["suffix"] for c in result["suffix_clusters"]}
+        assert "T" in suffixes
+
+    def test_filters_system_databases(self, tmp_path: Path):
+        from ships_mcp import ships_analyse_token_candidates
+
+        _seed_payload_ddl(tmp_path, "DBC", "SessionInfoV")
+        _seed_payload_ddl(tmp_path, "PDE_DEV_00_MDL_0_T", "Customer")
+        result = ships_analyse_token_candidates(project=str(tmp_path))
+        names = {lit["name"] for lit in result["literals"]}
+        assert "DBC" not in names
+        assert "PDE_DEV_00_MDL_0_T" in names
+
+    def test_cross_references_existing_token_map(self, tmp_path: Path):
+        from ships_mcp import ships_analyse_token_candidates
+
+        _seed_payload_ddl(tmp_path, "PDE_DEV_00_MDL_0_T", "Customer")
+        cfg = tmp_path / "config"
+        cfg.mkdir()
+        (cfg / "token_map.conf").write_text(
+            "PDE_DEV_00_MDL_0_T={{BASE_T}}\n", encoding="utf-8"
+        )
+        result = ships_analyse_token_candidates(project=str(tmp_path))
+        match = next(
+            lit for lit in result["literals"] if lit["name"] == "PDE_DEV_00_MDL_0_T"
+        )
+        assert match["already_mapped_to"] == "{{BASE_T}}"
+        assert result["existing_token_map"]["PDE_DEV_00_MDL_0_T"] == "{{BASE_T}}"
+
+
+class TestShipsValidateTokenMap:
+    def test_missing_file(self, tmp_path: Path):
+        from ships_mcp import ships_validate_token_map
+
+        result = ships_validate_token_map(project=str(tmp_path))
+        assert result["success"] is True
+        assert result["exists"] is False
+        assert result["valid"] is False
+
+    def test_valid_file(self, tmp_path: Path):
+        from ships_mcp import ships_validate_token_map
+
+        cfg = tmp_path / "config"
+        cfg.mkdir()
+        (cfg / "token_map.conf").write_text(
+            "# header\nPDE_DEV_00_MDL_0_T={{BASE_T}}\n", encoding="utf-8"
+        )
+        result = ships_validate_token_map(project=str(tmp_path))
+        assert result["valid"] is True
+
+    def test_non_token_value_flagged(self, tmp_path: Path):
+        from ships_mcp import ships_validate_token_map
+
+        cfg = tmp_path / "config"
+        cfg.mkdir()
+        (cfg / "token_map.conf").write_text("FOO=barebones\n", encoding="utf-8")
+        result = ships_validate_token_map(project=str(tmp_path))
+        assert result["valid"] is False
+        assert any(
+            "not in {{TOKEN_NAME}} form" in e["message"] for e in result["errors"]
+        )
+
+    def test_duplicate_key_flagged(self, tmp_path: Path):
+        from ships_mcp import ships_validate_token_map
+
+        cfg = tmp_path / "config"
+        cfg.mkdir()
+        (cfg / "token_map.conf").write_text("A={{X}}\nA={{Y}}\n", encoding="utf-8")
+        result = ships_validate_token_map(project=str(tmp_path))
+        assert result["valid"] is False
+        assert any("duplicate" in e["message"] for e in result["errors"])
+
+
+class TestShipsAuthorTokenMap:
+    def test_create_with_seed_keys(self, tmp_path: Path):
+        from ships_mcp import ships_author_token_map
+
+        result = ships_author_token_map(
+            project=str(tmp_path),
+            action="create",
+            changes={"PDE_DEV_00_MDL_0_T": "{{BASE_T}}"},
+        )
+        assert result["success"] is True
+        assert "PDE_DEV_00_MDL_0_T={{BASE_T}}" in result["proposed_content"]
+        assert "token_map.conf" in result["proposed_content"]
+        assert result["validation"]["valid"] is True
+        assert not (tmp_path / "config" / "token_map.conf").exists()
+
+    def test_set_flags_bad_value_in_validation(self, tmp_path: Path):
+        from ships_mcp import ships_author_token_map
+
+        cfg = tmp_path / "config"
+        cfg.mkdir()
+        (cfg / "token_map.conf").write_text("# header\nA={{B}}\n", encoding="utf-8")
+        result = ships_author_token_map(
+            project=str(tmp_path),
+            action="set",
+            changes={"C": "not_a_token"},
+        )
+        assert result["success"] is True
+        assert result["validation"]["valid"] is False
+        assert any(
+            "not in {{TOKEN_NAME}} form" in e["message"]
+            for e in result["validation"]["errors"]
+        )
+
+    def test_create_then_apply_roundtrip(self, tmp_path: Path):
+        from ships_mcp import (
+            ships_apply_diff,
+            ships_author_token_map,
+            ships_validate_token_map,
+        )
+
+        proposal = ships_author_token_map(
+            project=str(tmp_path),
+            action="create",
+            changes={
+                "PDE_DEV_00_MDL_0_T": "{{BASE_T}}",
+                "PDE_DEV_00_OPR_0_T": "{{OPR_T}}",
+            },
+        )
+        applied = ships_apply_diff(
+            path=proposal["path"],
+            proposed_content=proposal["proposed_content"],
+            expected_hash=proposal["expected_hash"],
+        )
+        assert applied["success"] is True
+        assert ships_validate_token_map(project=str(tmp_path))["valid"] is True
+
+    def test_unset_removes_entry(self, tmp_path: Path):
+        from ships_mcp import ships_author_token_map
+
+        cfg = tmp_path / "config"
+        cfg.mkdir()
+        (cfg / "token_map.conf").write_text("A={{X}}\nB={{Y}}\n", encoding="utf-8")
+        result = ships_author_token_map(
+            project=str(tmp_path),
+            action="unset",
+            unset_keys=["A"],
+        )
+        assert result["success"] is True
+        assert "A=" not in result["proposed_content"]
+        assert "B={{Y}}" in result["proposed_content"]
