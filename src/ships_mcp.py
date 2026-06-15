@@ -62,8 +62,9 @@ import re
 import tempfile
 from typing import Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 
+from ships_async import run_blocking_with_heartbeat
 from td_release_packager._version import __version__ as SHIPS_VERSION
 
 logger = logging.getLogger(__name__)
@@ -170,8 +171,7 @@ def _parse_prefix_token_kv(spec: Optional[str]) -> Optional[dict]:
     return mapping or None
 
 
-@mcp.tool()
-def ships_harvest(
+def _ships_harvest_impl(
     source: str,
     project: str,
     token_map: Optional[str] = None,
@@ -273,8 +273,7 @@ def ships_harvest(
 # ---------------------------------------------------------------
 
 
-@mcp.tool()
-def ships_generate(
+def _ships_generate_impl(
     project: str,
     modules: Optional[str] = None,
     dry_run: bool = False,
@@ -328,8 +327,7 @@ def ships_generate(
 # ---------------------------------------------------------------
 
 
-@mcp.tool()
-def ships_inspect(
+def _ships_inspect_impl(
     project: str,
     config: Optional[str] = None,
     strict: bool = False,
@@ -402,8 +400,7 @@ def ships_inspect(
 # ---------------------------------------------------------------
 
 
-@mcp.tool()
-def ships_analyse(
+def _ships_analyse_impl(
     project: str,
     overwrite: bool = True,
 ) -> dict:
@@ -449,8 +446,7 @@ def ships_analyse(
 # ---------------------------------------------------------------
 
 
-@mcp.tool()
-def ships_package(
+def _ships_package_impl(
     project: str,
     env: str,
     name: str,
@@ -528,8 +524,7 @@ def ships_package(
 # ---------------------------------------------------------------
 
 
-@mcp.tool()
-def ships_process(
+def _ships_process_impl(
     project: str,
     source: Optional[str] = None,
     token_map: Optional[str] = None,
@@ -568,9 +563,12 @@ def ships_process(
     stages: dict = {}
     failed: list = []
 
-    # Harvest
+    # Stage handlers are sync impls so we stay on a single thread for the
+    # duration of a process() call; the async wrapper (registered with
+    # @mcp.tool below) handles off-loop execution and heartbeats for the
+    # whole sequence.
     if source:
-        r = ships_harvest(
+        r = _ships_harvest_impl(
             source=source,
             project=project,
             token_map=token_map,
@@ -584,34 +582,32 @@ def ships_process(
         if not r.get("success"):
             failed.append("harvest")
 
-    # Generate
     if not skip_generate:
-        r = ships_generate(project=project)
+        r = _ships_generate_impl(project=project)
         stages["generate"] = r
         if not r.get("success") and strict:
             return {"success": False, "stages": stages, "aborted_at": "generate"}
         if not r.get("success"):
             failed.append("generate")
 
-    # Inspect
-    r = ships_inspect(project=project)
+    r = _ships_inspect_impl(project=project)
     stages["inspect"] = r
     if not r.get("success") and strict:
         return {"success": False, "stages": stages, "aborted_at": "inspect"}
     if not r.get("success"):
         failed.append("inspect")
 
-    # Analyse
-    r = ships_analyse(project=project)
+    r = _ships_analyse_impl(project=project)
     stages["analyse"] = r
     if not r.get("success") and strict:
         return {"success": False, "stages": stages, "aborted_at": "analyse"}
     if not r.get("success"):
         failed.append("analyse")
 
-    # Package (optional)
     if env and env_config and name:
-        r = ships_package(project=project, env=env, env_config=env_config, name=name)
+        r = _ships_package_impl(
+            project=project, env=env, env_config=env_config, name=name
+        )
         stages["package"] = r
         if not r.get("success"):
             failed.append("package")
@@ -628,8 +624,7 @@ def ships_process(
 # ---------------------------------------------------------------
 
 
-@mcp.tool()
-def ships_deploy(
+def _ships_deploy_impl(
     package_dir: str,
     host: str,
     user: str,
@@ -700,8 +695,7 @@ def ships_deploy(
         return {"success": False, "error": str(e)}
 
 
-@mcp.tool()
-def ships_deploy_explain(
+def _ships_deploy_explain_impl(
     package_dir: str,
     host: str,
     user: str,
@@ -761,8 +755,7 @@ def ships_deploy_explain(
         return {"success": False, "error": str(e)}
 
 
-@mcp.tool()
-def ships_rollback(
+def _ships_rollback_impl(
     manifest_path: str,
     host: str,
     user: str,
@@ -827,6 +820,243 @@ def ships_rollback(
                 cursor.connection.close()
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------
+# Async tool wrappers — Workstream B (#302)
+# ---------------------------------------------------------------
+#
+# Each heavy tool body lives in a private ``_<name>_impl`` function
+# above.  The wrappers below are what FastMCP registers as tools: they
+# run the impl on a worker thread via :func:`ships_async.run_blocking_with_heartbeat`
+# so the event loop stays free to service the JSON-RPC transport,
+# preventing the in-call client timeouts documented in #302.  Each
+# wrapper accepts an optional ``ctx`` parameter; when FastMCP injects a
+# :class:`mcp.server.fastmcp.Context`, its ``report_progress`` callback
+# is forwarded as the heartbeat reporter so clients see live progress
+# during long runs.
+#
+# Light tools (scaffold / decisions / verify / explain_run and the
+# authoring + introspection tools below) return in milliseconds and
+# stay sync — the off-loop cost would dwarf the work.
+
+
+@mcp.tool(name="ships_harvest")
+async def ships_harvest(
+    source: str,
+    project: str,
+    token_map: Optional[str] = None,
+    auto_tokenise: bool = False,
+    env_prefix: Optional[str] = None,
+    remove_view_type_affixes: bool = False,
+    prefix_token: Optional[str] = None,
+    ctx: Optional[Context] = None,
+) -> dict:
+    """Off-loop wrapper for :func:`_ships_harvest_impl`."""
+    report = ctx.report_progress if ctx is not None else None
+    return await run_blocking_with_heartbeat(
+        _ships_harvest_impl,
+        source=source,
+        project=project,
+        token_map=token_map,
+        auto_tokenise=auto_tokenise,
+        env_prefix=env_prefix,
+        remove_view_type_affixes=remove_view_type_affixes,
+        prefix_token=prefix_token,
+        report=report,
+    )
+
+
+@mcp.tool(name="ships_generate")
+async def ships_generate(
+    project: str,
+    modules: Optional[str] = None,
+    dry_run: bool = False,
+    ctx: Optional[Context] = None,
+) -> dict:
+    """Off-loop wrapper for :func:`_ships_generate_impl`."""
+    report = ctx.report_progress if ctx is not None else None
+    return await run_blocking_with_heartbeat(
+        _ships_generate_impl,
+        project=project,
+        modules=modules,
+        dry_run=dry_run,
+        report=report,
+    )
+
+
+@mcp.tool(name="ships_inspect")
+async def ships_inspect(
+    project: str,
+    config: Optional[str] = None,
+    strict: bool = False,
+    skip_grants: bool = False,
+    ctx: Optional[Context] = None,
+) -> dict:
+    """Off-loop wrapper for :func:`_ships_inspect_impl`."""
+    report = ctx.report_progress if ctx is not None else None
+    return await run_blocking_with_heartbeat(
+        _ships_inspect_impl,
+        project=project,
+        config=config,
+        strict=strict,
+        skip_grants=skip_grants,
+        report=report,
+    )
+
+
+@mcp.tool(name="ships_analyse")
+async def ships_analyse(
+    project: str,
+    overwrite: bool = True,
+    ctx: Optional[Context] = None,
+) -> dict:
+    """Off-loop wrapper for :func:`_ships_analyse_impl`."""
+    report = ctx.report_progress if ctx is not None else None
+    return await run_blocking_with_heartbeat(
+        _ships_analyse_impl,
+        project=project,
+        overwrite=overwrite,
+        report=report,
+    )
+
+
+@mcp.tool(name="ships_package")
+async def ships_package(
+    project: str,
+    env: str,
+    name: str,
+    env_config: str,
+    output: Optional[str] = None,
+    author: str = "",
+    description: str = "",
+    commit: str = "",
+    ctx: Optional[Context] = None,
+) -> dict:
+    """Off-loop wrapper for :func:`_ships_package_impl`."""
+    report = ctx.report_progress if ctx is not None else None
+    return await run_blocking_with_heartbeat(
+        _ships_package_impl,
+        project=project,
+        env=env,
+        name=name,
+        env_config=env_config,
+        output=output,
+        author=author,
+        description=description,
+        commit=commit,
+        report=report,
+    )
+
+
+@mcp.tool(name="ships_process")
+async def ships_process(
+    project: str,
+    source: Optional[str] = None,
+    token_map: Optional[str] = None,
+    auto_tokenise: bool = False,
+    env_prefix: Optional[str] = None,
+    env: Optional[str] = None,
+    env_config: Optional[str] = None,
+    name: Optional[str] = None,
+    skip_generate: bool = False,
+    strict: bool = False,
+    prefix_token: Optional[str] = None,
+    ctx: Optional[Context] = None,
+) -> dict:
+    """Off-loop wrapper for :func:`_ships_process_impl`."""
+    report = ctx.report_progress if ctx is not None else None
+    return await run_blocking_with_heartbeat(
+        _ships_process_impl,
+        project=project,
+        source=source,
+        token_map=token_map,
+        auto_tokenise=auto_tokenise,
+        env_prefix=env_prefix,
+        env=env,
+        env_config=env_config,
+        name=name,
+        skip_generate=skip_generate,
+        strict=strict,
+        prefix_token=prefix_token,
+        report=report,
+    )
+
+
+@mcp.tool(name="ships_deploy")
+async def ships_deploy(
+    package_dir: str,
+    host: str,
+    user: str,
+    password: str,
+    logmech: str = "TD2",
+    dry_run: bool = False,
+    streams: int = 1,
+    continue_on_error: bool = False,
+    ctx: Optional[Context] = None,
+) -> dict:
+    """Off-loop wrapper for :func:`_ships_deploy_impl`."""
+    report = ctx.report_progress if ctx is not None else None
+    return await run_blocking_with_heartbeat(
+        _ships_deploy_impl,
+        package_dir=package_dir,
+        host=host,
+        user=user,
+        password=password,
+        logmech=logmech,
+        dry_run=dry_run,
+        streams=streams,
+        continue_on_error=continue_on_error,
+        report=report,
+    )
+
+
+@mcp.tool(name="ships_deploy_explain")
+async def ships_deploy_explain(
+    package_dir: str,
+    host: str,
+    user: str,
+    password: str,
+    logmech: str = "TD2",
+    ctx: Optional[Context] = None,
+) -> dict:
+    """Off-loop wrapper for :func:`_ships_deploy_explain_impl`."""
+    report = ctx.report_progress if ctx is not None else None
+    return await run_blocking_with_heartbeat(
+        _ships_deploy_explain_impl,
+        package_dir=package_dir,
+        host=host,
+        user=user,
+        password=password,
+        logmech=logmech,
+        report=report,
+    )
+
+
+@mcp.tool(name="ships_rollback")
+async def ships_rollback(
+    manifest_path: str,
+    host: str,
+    user: str,
+    password: str,
+    logmech: str = "TD2",
+    wave: Optional[int] = None,
+    dry_run: bool = False,
+    ctx: Optional[Context] = None,
+) -> dict:
+    """Off-loop wrapper for :func:`_ships_rollback_impl`."""
+    report = ctx.report_progress if ctx is not None else None
+    return await run_blocking_with_heartbeat(
+        _ships_rollback_impl,
+        manifest_path=manifest_path,
+        host=host,
+        user=user,
+        password=password,
+        logmech=logmech,
+        wave=wave,
+        dry_run=dry_run,
+        report=report,
+    )
 
 
 # ---------------------------------------------------------------
