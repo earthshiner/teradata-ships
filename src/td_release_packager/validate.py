@@ -1445,7 +1445,9 @@ def _compute_terminator_insertions(stripped: str, raw: str) -> List[int]:
     return insertions
 
 
-def fix_ddl_terminators(source_dir: str) -> DDLTerminatorFixResult:
+def fix_ddl_terminators(
+    source_dir: str, dry_run: bool = False
+) -> DDLTerminatorFixResult:
     """Add missing ``;`` terminators to deployable DDL statements.
 
     Walks ``source_dir`` using the same file-discovery rules as
@@ -1461,6 +1463,12 @@ def fix_ddl_terminators(source_dir: str) -> DDLTerminatorFixResult:
 
     The fix is idempotent: running it twice on a clean tree leaves the
     second run with ``files_written == 0``.
+
+    Args:
+        source_dir: Directory to walk.
+        dry_run:    When True, compute the fix list but do not write
+                    any file.  The returned result still reports
+                    ``files_fixed`` (i.e. what *would* have changed).
     """
     from td_release_packager.discovery import resolve_harvest_extensions
 
@@ -1499,11 +1507,12 @@ def fix_ddl_terminators(source_dir: str) -> DDLTerminatorFixResult:
             for offset in sorted(insertions, reverse=True):
                 new_content = new_content[:offset] + ";" + new_content[offset:]
 
-            try:
-                with open(file_path, "w", encoding="utf-8", newline="") as fh:
-                    fh.write(new_content)
-            except OSError:
-                continue
+            if not dry_run:
+                try:
+                    with open(file_path, "w", encoding="utf-8", newline="") as fh:
+                        fh.write(new_content)
+                except OSError:
+                    continue
 
             rel_path = os.path.relpath(file_path, source_dir)
             result.files_fixed.append(
@@ -1576,7 +1585,7 @@ class NonAsciiFixResult:
         }
 
 
-def fix_non_ascii(source_dir: str) -> NonAsciiFixResult:
+def fix_non_ascii(source_dir: str, dry_run: bool = False) -> NonAsciiFixResult:
     """Substitute non-ASCII characters that have a known ASCII equivalent.
 
     Walks ``source_dir`` using the same file-discovery rules as
@@ -1636,11 +1645,12 @@ def fix_non_ascii(source_dir: str) -> NonAsciiFixResult:
             if new_content == raw:
                 continue
 
-            try:
-                with open(file_path, "w", encoding="utf-8", newline="") as fh:
-                    fh.write(new_content)
-            except OSError:
-                continue
+            if not dry_run:
+                try:
+                    with open(file_path, "w", encoding="utf-8", newline="") as fh:
+                        fh.write(new_content)
+                except OSError:
+                    continue
 
             rel_path = os.path.relpath(file_path, source_dir)
             result.files_fixed.append(NonAsciiFix(file=rel_path, substitutions=counts))

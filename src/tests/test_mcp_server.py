@@ -549,6 +549,9 @@ class TestToolRegistration:
             "ships_analyse_token_candidates",
             "ships_validate_token_map",
             "ships_author_token_map",
+            "ships_explain_violation",
+            "ships_list_fixable_rules",
+            "ships_fix",
         ]
         for name in expected:
             assert name in tool_names, f"Tool {name!r} not registered"
@@ -1251,3 +1254,145 @@ class TestShipsAuthorTokenMap:
         assert result["success"] is True
         assert "A=" not in result["proposed_content"]
         assert "B={{Y}}" in result["proposed_content"]
+
+
+# ---------------------------------------------------------------
+# Phase C — repair tools (#297)
+# ---------------------------------------------------------------
+
+
+def _seed_ddl_missing_terminator(project: Path) -> Path:
+    """Write a .tbl file with a CREATE TABLE statement lacking a ';'."""
+    target = project / "payload" / "database" / "DDL" / "tables" / "Dev.T.tbl"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        "CREATE MULTISET TABLE Dev.T (Id INTEGER) PRIMARY INDEX (Id)\n",
+        encoding="utf-8",
+    )
+    return target
+
+
+def _seed_ddl_with_em_dash(project: Path) -> Path:
+    target = project / "payload" / "database" / "DDL" / "tables" / "Dev.U.tbl"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # em-dash is in the auto-fix replacement map -> spaced hyphen
+    target.write_text(
+        "CREATE MULTISET TABLE Dev.U (Id INTEGER) PRIMARY INDEX (Id); "
+        "-- comment with — em-dash\n",
+        encoding="utf-8",
+    )
+    return target
+
+
+class TestShipsExplainViolation:
+    def test_unknown_rule_returns_found_false(self):
+        from ships_mcp import ships_explain_violation
+
+        result = ships_explain_violation(rule_id="not_a_real_rule")
+        assert result["success"] is True
+        assert result["found"] is False
+        assert result["automated_fix_available"] is False
+
+    def test_known_rule_returns_remediation(self):
+        from ships_mcp import ships_explain_violation
+
+        result = ships_explain_violation(rule_id="db_qualifier")
+        assert result["success"] is True
+        assert result["found"] is True
+        rem = result["remediation"]
+        assert "description" in rem
+        assert "recommended_action" in rem
+        assert "automation_level" in rem
+        assert "default_severity" in rem
+
+    def test_fixable_rule_flagged(self):
+        from ships_mcp import ships_explain_violation
+
+        result = ships_explain_violation(rule_id="ddl_terminator")
+        assert result["found"] is True
+        assert result["automated_fix_available"] is True
+
+    def test_non_fixable_rule_not_flagged(self):
+        from ships_mcp import ships_explain_violation
+
+        # db_qualifier is in the catalogue but has no MCP-dispatchable
+        # automated fixer registered in Phase C.
+        result = ships_explain_violation(rule_id="db_qualifier")
+        assert result["found"] is True
+        assert result["automated_fix_available"] is False
+
+
+class TestShipsListFixableRules:
+    def test_includes_both_registered_fixers(self):
+        from ships_mcp import ships_list_fixable_rules
+
+        result = ships_list_fixable_rules()
+        assert result["success"] is True
+        ids = {r["rule_id"] for r in result["rules"]}
+        assert "ddl_terminator" in ids
+        assert "non_ascii" in ids
+
+    def test_entries_carry_catalogue_fields(self):
+        from ships_mcp import ships_list_fixable_rules
+
+        result = ships_list_fixable_rules()
+        for entry in result["rules"]:
+            assert "automation_level" in entry
+            assert "recommended_action" in entry
+            assert "risk" in entry
+            assert "default_severity" in entry
+
+
+class TestShipsFix:
+    def test_unknown_rule_id_errors(self, tmp_path: Path):
+        from ships_mcp import ships_fix
+
+        result = ships_fix(project=str(tmp_path), rule_id="not_a_real_rule")
+        assert result["success"] is False
+        assert "no automated fix" in result["error"]
+
+    def test_dry_run_reports_without_writing(self, tmp_path: Path):
+        from ships_mcp import ships_fix
+
+        target = _seed_ddl_missing_terminator(tmp_path)
+        before = target.read_text(encoding="utf-8")
+
+        result = ships_fix(
+            project=str(tmp_path), rule_id="ddl_terminator", dry_run=True
+        )
+        assert result["success"] is True
+        assert result["dry_run"] is True
+        assert result["files_changed"] >= 1
+        # File untouched
+        assert target.read_text(encoding="utf-8") == before
+
+    def test_apply_writes_and_is_idempotent(self, tmp_path: Path):
+        from ships_mcp import ships_fix
+
+        target = _seed_ddl_missing_terminator(tmp_path)
+
+        first = ships_fix(
+            project=str(tmp_path), rule_id="ddl_terminator", dry_run=False
+        )
+        assert first["success"] is True
+        assert first["files_changed"] >= 1
+        assert target.read_text(encoding="utf-8").rstrip().endswith(";")
+
+        # Second pass on a clean tree -> nothing to do.
+        second = ships_fix(
+            project=str(tmp_path), rule_id="ddl_terminator", dry_run=False
+        )
+        assert second["success"] is True
+        assert second["files_changed"] == 0
+
+    def test_non_ascii_dry_run(self, tmp_path: Path):
+        from ships_mcp import ships_fix
+
+        target = _seed_ddl_with_em_dash(tmp_path)
+        before = target.read_text(encoding="utf-8")
+
+        result = ships_fix(project=str(tmp_path), rule_id="non_ascii", dry_run=True)
+        assert result["success"] is True
+        assert result["files_changed"] >= 1
+        # Untouched
+        assert target.read_text(encoding="utf-8") == before

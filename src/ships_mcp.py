@@ -1869,6 +1869,167 @@ def ships_author_token_map(
 
 
 # ---------------------------------------------------------------
+# [R] Repair — Phase C of #291 (#297)
+#
+# Wraps the rules-catalogue remediation metadata and the existing
+# tree-level fixers (fix_ddl_terminators, fix_non_ascii) so an
+# agent can: (a) explain any inspect finding, (b) discover which
+# rules have automated fixes, (c) dry-run or apply those fixes
+# through MCP without leaving the conversation.
+# ---------------------------------------------------------------
+
+
+def _fix_registry() -> dict:
+    """Map inspect rule_code → registered tree-level fixer.
+
+    Built lazily so importing ships_mcp does not pull in
+    ``validate``'s heavyweight dependency graph at module load.
+    """
+    from td_release_packager.validate import fix_ddl_terminators, fix_non_ascii
+
+    return {
+        "ddl_terminator": fix_ddl_terminators,
+        "non_ascii": fix_non_ascii,
+    }
+
+
+@mcp.tool()
+def ships_explain_violation(rule_id: str) -> dict:
+    """Return the full remediation profile for an inspect rule.
+
+    Wraps ``rules_catalogue.remediation_for``.  The catalogue is
+    hand-curated metadata: description, default severity, whether a
+    safe fix exists, automation level (auto / guided / manual),
+    recommended action, risk, and whether human review is required.
+
+    Use after ``ships_inspect`` returns findings: pass the
+    ``finding.rule`` value to this tool to learn what to do about it.
+
+    Args:
+        rule_id: Rule code from a ``ships_inspect`` finding
+                 (e.g. ``"db_qualifier"``).
+
+    Returns:
+        {"success": bool, "rule_id": str, "found": bool,
+         "automated_fix_available": bool,
+         "remediation": {description, default_severity,
+                         safe_fix_available, automation_level,
+                         recommended_action, risk,
+                         requires_human_review}}
+    """
+    try:
+        from td_release_packager.rules_catalogue import remediation_for
+
+        meta = remediation_for(rule_id)
+        if meta is None:
+            return {
+                "success": True,
+                "rule_id": rule_id,
+                "found": False,
+                "automated_fix_available": False,
+                "error": f"unknown rule {rule_id!r}",
+            }
+        return {
+            "success": True,
+            "rule_id": rule_id,
+            "found": True,
+            "automated_fix_available": rule_id in _fix_registry(),
+            "remediation": meta,
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@mcp.tool()
+def ships_list_fixable_rules() -> dict:
+    """List inspect rules with an MCP-dispatchable automated fix.
+
+    Combines the rules-catalogue entries with the in-process fix
+    registry, so only rules that ``ships_fix`` can actually act on
+    appear here.  Each entry carries the catalogue's
+    ``automation_level``, ``recommended_action``, and ``risk`` so an
+    agent can decide whether to call ``ships_fix`` unattended or
+    surface the diff first.
+
+    Returns:
+        {"success": bool, "rules": [{"rule_id": str,
+                                     "automation_level": str,
+                                     "recommended_action": str,
+                                     "risk": str,
+                                     "default_severity": str}]}
+    """
+    try:
+        from td_release_packager.rules_catalogue import remediation_for
+
+        out = []
+        for rule_id in _fix_registry().keys():
+            meta = remediation_for(rule_id)
+            if meta is None:
+                continue
+            out.append(
+                {
+                    "rule_id": rule_id,
+                    "automation_level": meta.get("automation_level"),
+                    "recommended_action": meta.get("recommended_action"),
+                    "risk": meta.get("risk"),
+                    "default_severity": meta.get("default_severity"),
+                }
+            )
+        out.sort(key=lambda r: r["rule_id"])
+        return {"success": True, "rules": out}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@mcp.tool()
+def ships_fix(project: str, rule_id: str, dry_run: bool = True) -> dict:
+    """Run a registered automated fix for an inspect rule.
+
+    Dispatches to the tree-level fixer registered for ``rule_id``.
+    Defaults to dry-run: counts what *would* change without writing
+    so an agent can preview safely.  Pass ``dry_run=False`` to apply.
+
+    Idempotent: a second apply on a clean tree reports
+    ``files_changed=0``.
+
+    Args:
+        project: SHIPS project directory (the fixer walks
+                 ``payload/`` and other DDL-bearing roots inside it).
+        rule_id: Rule code listed by ``ships_list_fixable_rules``.
+        dry_run: When True (default) no file is written; the result
+                 reports what would change.
+
+    Returns:
+        {"success": bool, "rule_id": str, "dry_run": bool,
+         "files_scanned": int, "files_changed": int,
+         "files": [{"file": str, ...rule-specific counts...}]}
+    """
+    try:
+        registry = _fix_registry()
+        if rule_id not in registry:
+            return {
+                "success": False,
+                "error": (
+                    f"no automated fix registered for rule {rule_id!r}; "
+                    "call ships_list_fixable_rules for the full list"
+                ),
+            }
+        fixer = registry[rule_id]
+        result = fixer(source_dir=project, dry_run=dry_run)
+        summary = result.to_dict()
+        return {
+            "success": True,
+            "rule_id": rule_id,
+            "dry_run": dry_run,
+            "files_scanned": summary.get("files_scanned", 0),
+            "files_changed": summary.get("files_written", 0),
+            "files": summary.get("files", []),
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------
 
