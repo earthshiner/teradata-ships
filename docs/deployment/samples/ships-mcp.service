@@ -1,0 +1,58 @@
+# /etc/systemd/system/ships-mcp.service
+#
+# Drop into /etc/systemd/system/ and:
+#     sudo systemctl daemon-reload
+#     sudo systemctl enable --now ships-mcp
+#
+# Edit WorkingDirectory and ExecStart to match where the repo and venv
+# live on this host.  See docs/deployment/linux-systemd.md for the full
+# walkthrough.
+
+[Unit]
+Description=SHIPS MCP Server (Teradata deployment over MCP)
+Documentation=https://github.com/earthshiner/teradata-ships
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ships
+Group=ships
+WorkingDirectory=/opt/ships/teradata-deployment-agent
+
+# Per-service log location.  Defaults to ~/.local/state/ships/logs/ —
+# unsuitable for a service account with no home directory.
+Environment="SHIPS_LOG_DIR=/var/log/ships"
+
+# Bind to 127.0.0.1 and front it with nginx / HAProxy / Caddy for TLS.
+# To expose directly (NOT recommended for production), change --host to
+# 0.0.0.0 and set up auth via --auth-jwks-uri etc.
+ExecStart=/opt/ships/teradata-deployment-agent/.venv/bin/python -m ships_mcp \
+    --transport streamable-http --host 127.0.0.1 --port 8000
+
+# SIGINT triggers the SHIPS shutdown banner + logging.shutdown() flush.
+# Plain SIGTERM (the systemd default) bypasses the KeyboardInterrupt
+# handler and truncates the rotating log.
+KillSignal=SIGINT
+TimeoutStopSec=15
+
+# Restart on crash with 5 s back-off; never restart on a clean exit
+# (so `systemctl stop` actually stops).
+Restart=on-failure
+RestartSec=5
+
+# Lightweight sandboxing.  These contain accidental damage from a
+# misbehaving tool body; they do NOT defend against a compromised
+# server.  Tighten progressively once the workflows are validated.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+# Resource hints — tune for the host.
+LimitNOFILE=8192
+# MemoryMax=2G
+# CPUQuota=200%
+
+[Install]
+WantedBy=multi-user.target
