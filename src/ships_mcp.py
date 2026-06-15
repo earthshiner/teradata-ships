@@ -2750,12 +2750,21 @@ def main() -> None:
             args.auth_required_scopes or "(none)",
         )
 
-    # -- Emit startup banner --------------------------------------------
-    # Banner is printed to stderr so it never collides with the stdio
-    # transport's JSON-RPC stream on stdout.  The "Config" line is
-    # honest about where the active values actually came from.
+    # -- Configure logging --------------------------------------------------
+    # Wire up the rotating file handler + stderr handler BEFORE printing the
+    # banner so the banner can advertise the resolved log path, and nothing
+    # on stdout corrupts the JSON-RPC transport.
     import sys as _sys
 
+    from ships_logging import banner_lines as _log_banner_lines
+    from ships_logging import configure_logging as _configure_logging
+
+    _log_path = _configure_logging()
+
+    # -- Emit startup banner (every transport, on stderr) -------------------
+    # stdout is reserved for JSON-RPC.  Print to stderr regardless of
+    # transport so operators always see where the server is, where its log
+    # file lives, and which ships.yaml mcp: block (if any) is in effect.
     if args.transport == "stdio":
         endpoint = "stdio (subprocess transport — no network port)"
     else:
@@ -2778,7 +2787,16 @@ def main() -> None:
         "(see --help for full key list)"
     )
 
-    banner_lines = [
+    # Reconstruct the launch command so a restart doesn't require
+    # the operator to remember the exact flags.  shlex.join quotes
+    # only what needs quoting, so the line stays readable.
+    import shlex as _shlex
+
+    _command = "python -m ships_mcp"
+    if len(_sys.argv) > 1:
+        _command = f"{_command} {_shlex.join(_sys.argv[1:])}"
+
+    banner = [
         "",
         "=" * 72,
         f"  SHIPS MCP server v{SHIPS_VERSION} — STARTED",
@@ -2786,14 +2804,18 @@ def main() -> None:
         f"  Endpoint  : {endpoint}",
         f"  Config    : {config_line}",
         f"  Override  : {override_hint}",
+        f"  Command   : {_command}",
+        *_log_banner_lines(_log_path),
         "=" * 72,
         "",
     ]
-    print("\n".join(banner_lines), file=_sys.stderr, flush=True)
+    print("\n".join(banner), file=_sys.stderr, flush=True)
 
     try:
         mcp.run(transport=args.transport)
     except KeyboardInterrupt:
+        # Clean stderr shutdown banner — beats a SIGINT traceback for the
+        # operator and gives logging.shutdown() a chance to flush rotations.
         shutdown = [
             "",
             "=" * 72,
@@ -2802,7 +2824,8 @@ def main() -> None:
             "",
         ]
         print("\n".join(shutdown), file=_sys.stderr, flush=True)
-        raise SystemExit(0)
+    finally:
+        logging.shutdown()
 
 
 if __name__ == "__main__":

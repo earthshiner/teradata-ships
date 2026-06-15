@@ -301,31 +301,49 @@ class TestSettingsMutation:
 
 
 class TestStartupBanner:
-    """Every transport prints a visible startup banner to stderr."""
+    """Every transport prints a stderr banner including the log path and
+    ships.yaml advertisement."""
 
-    def test_streamable_http_emits_banner(self, capsys):
+    def test_streamable_http_emits_banner(self, capsys, tmp_path, monkeypatch):
+        monkeypatch.setenv("SHIPS_LOG_DIR", str(tmp_path))
         _run_main(["--transport", "streamable-http", "--port", "8888"])
         err = capsys.readouterr().err
         assert "SHIPS MCP server" in err
         assert "STARTED" in err
         assert "streamable-http" in err
         assert "8888" in err
-        assert "ships.yaml" in err  # banner now points at the real config file
+        assert "ships.yaml" in err  # banner advertises where settings come from
+        assert "Log file" in err  # Workstream A — log path advertised
+        assert "ships-mcp.log" in err
+        # Banner must include the launch command so a restart doesn't
+        # require remembering the exact flags.
+        assert "Command" in err
+        assert "python -m ships_mcp" in err
+        assert "--transport streamable-http" in err
+        assert "--port 8888" in err
 
-    def test_sse_emits_banner(self, capsys):
+    def test_sse_emits_banner(self, capsys, tmp_path, monkeypatch):
+        monkeypatch.setenv("SHIPS_LOG_DIR", str(tmp_path))
         _run_main(["--transport", "sse", "--port", "7070"])
         err = capsys.readouterr().err
         assert "SHIPS MCP server" in err
         assert "sse" in err
         assert "7070" in err
+        assert "Log file" in err
 
-    def test_stdio_emits_banner(self, capsys):
+    def test_stdio_emits_banner(self, capsys, tmp_path, monkeypatch):
+        monkeypatch.setenv("SHIPS_LOG_DIR", str(tmp_path))
         _run_main([])
         err = capsys.readouterr().err
         assert "SHIPS MCP server" in err
         assert "stdio" in err
         # stdio has no port — banner says so explicitly
         assert "no network port" in err
+        assert "Log file" in err
+        # With no extra args the command falls back to the bare
+        # `python -m ships_mcp` form — still actionable on restart.
+        assert "Command" in err
+        assert "python -m ships_mcp" in err
 
 
 # ---------------------------------------------------------------------------
@@ -372,7 +390,8 @@ class TestShipsYamlMcpBlock:
         # FakeSettings default is 8000; with env set, yaml must not overwrite it.
         assert _settings().port == 8000
 
-    def test_banner_names_the_yaml_file(self, tmp_path, capsys):
+    def test_banner_names_the_yaml_file(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setenv("SHIPS_LOG_DIR", str(tmp_path))
         cfg = _write_ships_yaml(tmp_path, {"port": 9999})
         _run_main(["--config", cfg])
         err = capsys.readouterr().err
@@ -382,18 +401,21 @@ class TestShipsYamlMcpBlock:
 
     def test_banner_says_no_yaml_when_absent(self, tmp_path, capsys, monkeypatch):
         # Point cwd at a dir with no ships.yaml so the auto-detect misses.
+        monkeypatch.setenv("SHIPS_LOG_DIR", str(tmp_path))
         monkeypatch.chdir(tmp_path)
         _run_main([])
         err = capsys.readouterr().err
         assert "no ships.yaml found" in err
 
-    def test_invalid_yaml_port_is_fatal(self, tmp_path):
+    def test_invalid_yaml_port_is_fatal(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SHIPS_LOG_DIR", str(tmp_path))
         cfg = _write_ships_yaml(tmp_path, {"port": 70000})
         with pytest.raises(SystemExit) as exc_info:
             _run_main(["--config", cfg])
         assert exc_info.value.code != 0
 
-    def test_yaml_transport_used_when_no_cli(self, tmp_path):
+    def test_yaml_transport_used_when_no_cli(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("SHIPS_LOG_DIR", str(tmp_path))
         cfg = _write_ships_yaml(tmp_path, {"transport": "streamable-http"})
         _run_main(["--config", cfg])
         _run_mock().assert_called_once_with(transport="streamable-http")
