@@ -1040,6 +1040,228 @@ def ships_explain_run(
 
 
 # ---------------------------------------------------------------
+# [A] Authoring (Phase A of #291)
+#
+# Diff-first, hash-gated authoring tools.  Each authoring tool
+# returns a proposal — current_content, proposed_content, unified
+# diff, expected_hash, and validation — without touching the
+# filesystem.  ``ships_apply_diff`` re-hashes the file and writes
+# only if the hash matches, so concurrent edits cannot be silently
+# overwritten.
+# ---------------------------------------------------------------
+
+
+@mcp.tool()
+def ships_validate_ships_yaml(project: str) -> dict:
+    """Validate the project's ships.yaml against the SHIPS schema.
+
+    Thin wrapper over
+    ``td_release_packager.orchestrator.ships_yaml.{load,validate}``.
+
+    Args:
+        project: SHIPS project directory containing ships.yaml.
+
+    Returns:
+        {"success": bool, "valid": bool, "exists": bool,
+         "path": str, "errors": [{"path": str, "message": str}]}
+    """
+    try:
+        from td_release_packager.orchestrator import ships_yaml as _sy
+
+        path = os.path.join(project, "ships.yaml")
+        if not os.path.exists(path):
+            return {
+                "success": True,
+                "exists": False,
+                "valid": False,
+                "path": path,
+                "errors": [
+                    {"path": "", "message": "ships.yaml not found at project root"}
+                ],
+            }
+
+        data = _sy.load(path)
+        errors = _sy.validate(data)
+        return {
+            "success": True,
+            "exists": True,
+            "valid": not errors,
+            "path": path,
+            "errors": [{"path": e.path, "message": e.message} for e in errors],
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@mcp.tool()
+def ships_author_ships_yaml(
+    project: str,
+    action: str,
+    project_name: Optional[str] = None,
+    environments: Optional[list] = None,
+    version: Optional[str] = "1.0",
+    changes: Optional[dict] = None,
+    unset_keys: Optional[list] = None,
+) -> dict:
+    """Propose a change to ships.yaml without writing to disc.
+
+    Returns a proposal envelope describing the change.  Apply via
+    ``ships_apply_diff`` with the returned ``expected_hash``.
+
+    Actions:
+        create   Generate a fresh ships.yaml.  Requires ``project_name``
+                 and ``environments``.  Fails if the file already exists.
+        set      Apply ``changes`` (a flat dotted-key dict) to the
+                 existing ships.yaml.  Each value replaces whatever is
+                 at that key, creating intermediate dicts as needed.
+        unset    Remove the dotted keys listed in ``unset_keys`` from
+                 the existing ships.yaml.
+
+    The proposed content is schema-validated before return; any
+    validation errors are included in the envelope so the caller can
+    self-correct without re-prompting.
+
+    Args:
+        project:       SHIPS project directory.
+        action:        One of "create", "set", "unset".
+        project_name:  Project identifier (create only).
+        environments:  Non-empty list of env names (create only).
+        version:       Project version string for create (default "1.0").
+        changes:       Flat dotted-key dict for set, e.g.
+                       {"stages.inspect.strict": true}.
+        unset_keys:    List of dotted keys to remove for unset.
+
+    Returns:
+        {"success": bool, "path": str, "current_content": str,
+         "proposed_content": str, "diff": str, "expected_hash": str,
+         "validation": {"valid": bool, "errors": [...]},
+         "unchanged": bool}
+    """
+    try:
+        from td_release_packager.orchestrator import ships_yaml as _sy
+        from td_release_packager import mcp_authoring as _ma
+
+        path = os.path.join(project, "ships.yaml")
+        action_l = (action or "").lower()
+        if action_l not in {"create", "set", "unset"}:
+            return {
+                "success": False,
+                "error": f"unknown action {action!r}; expected create/set/unset",
+            }
+
+        if action_l == "create":
+            if os.path.exists(path):
+                return {
+                    "success": False,
+                    "error": f"ships.yaml already exists at {path}; "
+                    "use action=set to modify",
+                }
+            if not project_name or not environments:
+                return {
+                    "success": False,
+                    "error": "action=create requires project_name and environments",
+                }
+            try:
+                data = _sy.generate_default(
+                    project_name=project_name,
+                    environments=list(environments),
+                    version=version,
+                )
+            except ValueError as ve:
+                return {"success": False, "error": str(ve)}
+
+        else:
+            # set or unset — must read existing file
+            if not os.path.exists(path):
+                return {
+                    "success": False,
+                    "error": f"ships.yaml not found at {path}; use action=create first",
+                }
+            data = _sy.load(path)
+
+            if action_l == "set":
+                if not isinstance(changes, dict) or not changes:
+                    return {
+                        "success": False,
+                        "error": "action=set requires non-empty changes dict",
+                    }
+                try:
+                    for dotted_key, value in changes.items():
+                        _ma.set_dotted(data, dotted_key, value)
+                except (TypeError, ValueError) as ke:
+                    return {"success": False, "error": str(ke)}
+
+            else:  # unset
+                if not isinstance(unset_keys, list) or not unset_keys:
+                    return {
+                        "success": False,
+                        "error": "action=unset requires non-empty unset_keys list",
+                    }
+                try:
+                    for dotted_key in unset_keys:
+                        _ma.unset_dotted(data, dotted_key)
+                except ValueError as ke:
+                    return {"success": False, "error": str(ke)}
+
+        proposed_content = _ma.dump_yaml(data)
+        validation_errors = [
+            {"path": e.path, "message": e.message} for e in _sy.validate(data)
+        ]
+        proposal = _ma.build_proposal(
+            path,
+            proposed_content,
+            validation_errors=validation_errors,
+        )
+        proposal["success"] = True
+        return proposal
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@mcp.tool()
+def ships_apply_diff(
+    path: str,
+    proposed_content: str,
+    expected_hash: str,
+) -> dict:
+    """Hash-gated apply of a proposal returned by an authoring tool.
+
+    Re-hashes the current file (or detects absence) and refuses to
+    write if the hash does not match ``expected_hash``.  Apply uses
+    ``proposed_content`` directly — the unified diff returned with the
+    proposal is a display artifact, not the apply payload.
+
+    Pass ``expected_hash`` exactly as returned by the authoring tool.
+    For creating a new file, the authoring tool returns the sentinel
+    ``"absent"`` — pass it through unchanged.
+
+    Args:
+        path:             Target filesystem path.
+        proposed_content: Full file contents to write.
+        expected_hash:    Hash of the current file (or "absent" if new).
+
+    Returns:
+        {"success": bool, "applied": bool, "path": str,
+         "created": bool, "new_hash": str, "error": str?}
+    """
+    try:
+        from td_release_packager import mcp_authoring as _ma
+
+        try:
+            result = _ma.safe_write(path, proposed_content, expected_hash)
+        except _ma.HashMismatchError as hme:
+            return {
+                "success": False,
+                "applied": False,
+                "error": str(hme),
+                "code": "hash_mismatch",
+            }
+        return {"success": True, "applied": True, **result}
+    except Exception as e:
+        return {"success": False, "applied": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------
 

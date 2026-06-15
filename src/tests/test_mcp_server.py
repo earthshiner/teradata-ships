@@ -539,6 +539,9 @@ class TestToolRegistration:
             "ships_decisions",
             "ships_verify",
             "ships_explain_run",
+            "ships_validate_ships_yaml",
+            "ships_author_ships_yaml",
+            "ships_apply_diff",
         ]
         for name in expected:
             assert name in tool_names, f"Tool {name!r} not registered"
@@ -548,3 +551,236 @@ class TestToolRegistration:
 
         for name, tool in ships_mcp.mcp._tool_manager._tools.items():
             assert tool.description, f"Tool {name!r} has no description"
+
+
+# ---------------------------------------------------------------
+# Phase A — authoring tools (#291)
+# ---------------------------------------------------------------
+
+
+class TestShipsValidateShipsYaml:
+    def test_missing_file_returns_not_exists(self, tmp_path: Path):
+        from ships_mcp import ships_validate_ships_yaml
+
+        result = ships_validate_ships_yaml(project=str(tmp_path))
+        assert result["success"] is True
+        assert result["exists"] is False
+        assert result["valid"] is False
+        assert result["errors"]
+
+    def test_valid_file_returns_no_errors(self, tmp_path: Path):
+        from ships_mcp import ships_validate_ships_yaml
+
+        (tmp_path / "ships.yaml").write_text(
+            "project: Demo\nenvironments:\n  - DEV\n  - PRD\n",
+            encoding="utf-8",
+        )
+        result = ships_validate_ships_yaml(project=str(tmp_path))
+        assert result["success"] is True
+        assert result["exists"] is True
+        assert result["valid"] is True
+        assert result["errors"] == []
+
+    def test_invalid_file_returns_errors(self, tmp_path: Path):
+        from ships_mcp import ships_validate_ships_yaml
+
+        # missing 'environments'
+        (tmp_path / "ships.yaml").write_text("project: Demo\n", encoding="utf-8")
+        result = ships_validate_ships_yaml(project=str(tmp_path))
+        assert result["success"] is True
+        assert result["valid"] is False
+        paths = [e["path"] for e in result["errors"]]
+        assert "environments" in paths
+
+
+class TestShipsAuthorShipsYaml:
+    def test_create_proposes_new_file(self, tmp_path: Path):
+        from ships_mcp import ships_author_ships_yaml
+
+        result = ships_author_ships_yaml(
+            project=str(tmp_path),
+            action="create",
+            project_name="Demo",
+            environments=["DEV", "TST", "PRD"],
+        )
+        assert result["success"] is True
+        assert result["current_content"] == ""
+        assert "project: Demo" in result["proposed_content"]
+        assert "DEV" in result["proposed_content"]
+        assert result["expected_hash"] == "absent"
+        assert result["validation"]["valid"] is True
+        assert result["diff"]  # non-empty unified diff
+        # Authoring tools NEVER write
+        assert not (tmp_path / "ships.yaml").exists()
+
+    def test_create_refuses_if_file_exists(self, tmp_path: Path):
+        from ships_mcp import ships_author_ships_yaml
+
+        (tmp_path / "ships.yaml").write_text(
+            "project: Demo\nenvironments: [DEV]\n", encoding="utf-8"
+        )
+        result = ships_author_ships_yaml(
+            project=str(tmp_path),
+            action="create",
+            project_name="Demo",
+            environments=["DEV"],
+        )
+        assert result["success"] is False
+        assert "already exists" in result["error"]
+
+    def test_create_requires_project_name_and_envs(self, tmp_path: Path):
+        from ships_mcp import ships_author_ships_yaml
+
+        result = ships_author_ships_yaml(project=str(tmp_path), action="create")
+        assert result["success"] is False
+        assert "project_name" in result["error"]
+
+    def test_set_applies_dotted_key(self, tmp_path: Path):
+        from ships_mcp import ships_author_ships_yaml
+
+        (tmp_path / "ships.yaml").write_text(
+            "project: Demo\nenvironments:\n  - DEV\n",
+            encoding="utf-8",
+        )
+        result = ships_author_ships_yaml(
+            project=str(tmp_path),
+            action="set",
+            changes={"stages.inspect.strict": True},
+        )
+        assert result["success"] is True
+        assert "stages:" in result["proposed_content"]
+        assert "strict: true" in result["proposed_content"]
+        assert result["validation"]["valid"] is True
+        # Not written
+        assert "stages" not in (tmp_path / "ships.yaml").read_text()
+
+    def test_set_returns_validation_errors_without_failing(self, tmp_path: Path):
+        from ships_mcp import ships_author_ships_yaml
+
+        (tmp_path / "ships.yaml").write_text(
+            "project: Demo\nenvironments:\n  - DEV\n",
+            encoding="utf-8",
+        )
+        # on_error must be 'halt' or 'continue' — 'maybe' is invalid
+        result = ships_author_ships_yaml(
+            project=str(tmp_path),
+            action="set",
+            changes={"stages.inspect.on_error": "maybe"},
+        )
+        assert result["success"] is True
+        assert result["validation"]["valid"] is False
+        assert any("on_error" in e["path"] for e in result["validation"]["errors"])
+
+    def test_set_requires_existing_file(self, tmp_path: Path):
+        from ships_mcp import ships_author_ships_yaml
+
+        result = ships_author_ships_yaml(
+            project=str(tmp_path),
+            action="set",
+            changes={"project": "X"},
+        )
+        assert result["success"] is False
+        assert "not found" in result["error"]
+
+    def test_unset_removes_key(self, tmp_path: Path):
+        from ships_mcp import ships_author_ships_yaml
+
+        (tmp_path / "ships.yaml").write_text(
+            "project: Demo\nenvironments:\n  - DEV\nversion: '1.0'\n",
+            encoding="utf-8",
+        )
+        result = ships_author_ships_yaml(
+            project=str(tmp_path),
+            action="unset",
+            unset_keys=["version"],
+        )
+        assert result["success"] is True
+        assert "version" not in result["proposed_content"]
+
+    def test_unknown_action_is_rejected(self, tmp_path: Path):
+        from ships_mcp import ships_author_ships_yaml
+
+        result = ships_author_ships_yaml(project=str(tmp_path), action="frobnicate")
+        assert result["success"] is False
+        assert "unknown action" in result["error"]
+
+
+class TestShipsApplyDiff:
+    def test_create_then_apply_writes_file(self, tmp_path: Path):
+        from ships_mcp import ships_apply_diff, ships_author_ships_yaml
+
+        proposal = ships_author_ships_yaml(
+            project=str(tmp_path),
+            action="create",
+            project_name="Demo",
+            environments=["DEV"],
+        )
+        assert proposal["success"] is True
+
+        applied = ships_apply_diff(
+            path=proposal["path"],
+            proposed_content=proposal["proposed_content"],
+            expected_hash=proposal["expected_hash"],
+        )
+        assert applied["success"] is True
+        assert applied["applied"] is True
+        assert applied["created"] is True
+        on_disc = (tmp_path / "ships.yaml").read_text()
+        assert "project: Demo" in on_disc
+
+    def test_hash_mismatch_blocks_write(self, tmp_path: Path):
+        from ships_mcp import ships_apply_diff, ships_author_ships_yaml
+
+        (tmp_path / "ships.yaml").write_text(
+            "project: Demo\nenvironments:\n  - DEV\n",
+            encoding="utf-8",
+        )
+        proposal = ships_author_ships_yaml(
+            project=str(tmp_path),
+            action="set",
+            changes={"project": "Renamed"},
+        )
+        assert proposal["success"] is True
+
+        # Simulate a concurrent edit between propose and apply
+        (tmp_path / "ships.yaml").write_text(
+            "project: Demo\nenvironments:\n  - DEV\n  - PRD\n",
+            encoding="utf-8",
+        )
+        applied = ships_apply_diff(
+            path=proposal["path"],
+            proposed_content=proposal["proposed_content"],
+            expected_hash=proposal["expected_hash"],
+        )
+        assert applied["success"] is False
+        assert applied["applied"] is False
+        assert applied["code"] == "hash_mismatch"
+        # File untouched
+        assert "PRD" in (tmp_path / "ships.yaml").read_text()
+        assert "Renamed" not in (tmp_path / "ships.yaml").read_text()
+
+    def test_end_to_end_create_apply_reload_validate(self, tmp_path: Path):
+        from td_release_packager.orchestrator import ships_yaml as _sy
+
+        from ships_mcp import (
+            ships_apply_diff,
+            ships_author_ships_yaml,
+            ships_validate_ships_yaml,
+        )
+
+        proposal = ships_author_ships_yaml(
+            project=str(tmp_path),
+            action="create",
+            project_name="EndToEnd",
+            environments=["DEV", "TST", "PRD"],
+        )
+        ships_apply_diff(
+            path=proposal["path"],
+            proposed_content=proposal["proposed_content"],
+            expected_hash=proposal["expected_hash"],
+        )
+        assert ships_validate_ships_yaml(project=str(tmp_path))["valid"] is True
+        # Substrate parse also succeeds
+        data = _sy.load(proposal["path"])
+        assert data["project"] == "EndToEnd"
+        assert data["environments"] == ["DEV", "TST", "PRD"]
