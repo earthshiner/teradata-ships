@@ -428,8 +428,18 @@ def _ingest_directory_impl(
     # a {db.obj → kind} index.  The main loop uses this index to emit
     # {{TOKEN_T}} vs {{TOKEN_V}} per reference rather than a monolithic token.
     kind_index: Optional[Dict[str, str]] = None
+    prefix_mode_literals: Set[str] = set()
     if apply_tokens:
         kind_index = _build_source_kind_index(source_files)
+        # Classify each token_map literal as prefix vs full-DB shape so
+        # the kind-aware machinery never injects a ``_T``/``_V`` suffix
+        # into the braces of a prefix-shape token (see issue #311).
+        prefix_mode_literals = _detect_prefix_mode_literals(source_files, apply_tokens)
+        if prefix_mode_literals:
+            logger.info(
+                "Prefix-mode token-map entries (no kind suffix): %s",
+                ", ".join(sorted(prefix_mode_literals)),
+            )
 
     view_affix_renames: Dict[Tuple[str, str], str] = {}
     if remove_view_type_affixes:
@@ -579,6 +589,7 @@ def _ingest_directory_impl(
                     apply_tokens=apply_tokens,
                     kind_index=kind_index,
                     result=result,
+                    prefix_mode_literals=prefix_mode_literals,
                 )
                 continue  # next source file
 
@@ -599,6 +610,7 @@ def _ingest_directory_impl(
                     kind_index=kind_index,
                     dml_targets=dml_targets,
                     result=result,
+                    prefix_mode_literals=prefix_mode_literals,
                 )
                 continue  # next source file
 
@@ -671,7 +683,11 @@ def _ingest_directory_impl(
 
                     file_kind = TYPE_TO_KIND.get(obj_type, "T")
                     content = _apply_kind_aware_tokens(
-                        content, file_kind, apply_tokens, kind_index or {}
+                        content,
+                        file_kind,
+                        apply_tokens,
+                        kind_index or {},
+                        prefix_mode_literals=prefix_mode_literals,
                     )
 
                     # Defense in depth: if substitution produced any
@@ -1018,6 +1034,7 @@ def _place_multi_table_dml(
     kind_index: Optional[Dict[str, str]],
     dml_targets: Set[Tuple[Optional[str], Optional[str]]],
     result: "IngestResult",
+    prefix_mode_literals: Optional[Set[str]] = None,
 ) -> None:
     """Place a multi-target DML source file as a single
     ``<source_basename>.multi_table.dml`` artefact.
@@ -1054,7 +1071,13 @@ def _place_multi_table_dml(
 
     if apply_tokens:
         # Multi-table DML targets are always tables (_T kind).
-        content = _apply_kind_aware_tokens(content, "T", apply_tokens, kind_index or {})
+        content = _apply_kind_aware_tokens(
+            content,
+            "T",
+            apply_tokens,
+            kind_index or {},
+            prefix_mode_literals=prefix_mode_literals,
+        )
         bad = find_malformed_tokens(content)
         if bad:
             result.warnings.append(
@@ -1091,6 +1114,7 @@ def _place_ordered_sql(
     apply_tokens: Optional[Dict[str, str]],
     kind_index: Optional[Dict[str, str]],
     result: IngestResult,
+    prefix_mode_literals: Optional[Set[str]] = None,
 ) -> None:
     """Place a mixed DCL/non-DCL source as one ordered SQL artefact.
 
@@ -1109,7 +1133,13 @@ def _place_ordered_sql(
 
     content = raw_content
     if apply_tokens:
-        content = _apply_kind_aware_tokens(content, "T", apply_tokens, kind_index or {})
+        content = _apply_kind_aware_tokens(
+            content,
+            "T",
+            apply_tokens,
+            kind_index or {},
+            prefix_mode_literals=prefix_mode_literals,
+        )
 
     dest_path = os.path.join(dest_dir, dest_name)
     with open(dest_path, "w", encoding="utf-8") as f:
@@ -2315,24 +2345,94 @@ def _build_source_kind_index(source_files: List[str]) -> Dict[str, str]:
     return kind_index
 
 
+def _detect_prefix_mode_literals(
+    source_files: List[str], apply_tokens: Dict[str, str]
+) -> Set[str]:
+    """Classify each ``apply_tokens`` literal as prefix or full-DB shape.
+
+    A literal qualifies as **prefix mode** when it appears as the
+    leading identifier segment (``literal`` followed by ``_`` and at
+    least one identifier character) anywhere in ``source_files``.
+    Such literals are routed to identifier-aware substitution in
+    :func:`_apply_kind_aware_tokens`, which emits the token value
+    verbatim and never injects a ``_T`` / ``_V`` suffix inside the
+    braces — eliminating the ``{{PREFIX_T}}`` malformation reported
+    against the original substring-based ``--token-map`` behaviour
+    (see issue #311).
+
+    Args:
+        source_files: Raw DDL source paths to scan.
+        apply_tokens: Token-map dict (literal → ``"{{TOKEN}}"``).
+
+    Returns:
+        Set of literals that should use prefix mode.
+    """
+    if not apply_tokens:
+        return set()
+
+    # Literals that the user has explicitly mapped as a longer
+    # extension of another mapped literal (e.g. ``A_B`` and ``A_B_V``
+    # in the same token map) are full-DB entries, not prefix shapes —
+    # the user intends each to match its own full name.  Exclude the
+    # shorter literal from prefix-mode classification so the kind-
+    # aware path is preserved for it.
+    literals = list(apply_tokens)
+    extended_by_another: Set[str] = set()
+    for short in literals:
+        for longer in literals:
+            if longer is short:
+                continue
+            if longer.lower().startswith(short.lower() + "_"):
+                extended_by_another.add(short)
+                break
+
+    patterns = {
+        literal: re.compile(
+            r"(?<![A-Za-z0-9_])" + re.escape(literal) + r"_[A-Za-z0-9]",
+            re.IGNORECASE,
+        )
+        for literal in apply_tokens
+        if literal not in extended_by_another
+    }
+
+    found: Set[str] = set()
+    pending = set(patterns)
+    for src_path in source_files:
+        if not pending:
+            break
+        try:
+            with open(src_path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+        except OSError:
+            continue
+        for literal in list(pending):
+            if patterns[literal].search(content):
+                found.add(literal)
+                pending.discard(literal)
+    return found
+
+
 def _apply_kind_aware_tokens(
     content: str,
     file_kind: str,
     apply_tokens: Dict[str, str],
     kind_index: Dict[str, str],
+    prefix_mode_literals: Optional[Set[str]] = None,
 ) -> str:
-    """Apply kind-aware token substitution to DDL content.
+    """Apply token substitution to DDL content.
 
-    Replaces each literal database name with a kind-specific token:
-    ``{{TOKEN_T}}`` when the qualified reference resolves to a table
-    context, ``{{TOKEN_V}}`` for a view context, etc.
+    Two modes per ``apply_tokens`` entry:
 
-    Layer A (owner clause): the containing file's *file_kind* is used
-    for bare DB references that are not followed by a ``.ObjectName``.
-
-    Layer B (cross-references): ``DB.ObjectName`` pairs are looked up in
-    *kind_index*.  If the pair is missing (external reference), the
-    ``EXTERNAL_KIND_DEFAULT`` (``'V'``) is used.
+    * **prefix mode** — the literal appears as the *leading segment*
+      of identifiers in the payload (e.g. ``CallCentre`` in
+      ``CallCentre_DOM_STD_T``).  Substitution is identifier-aware and
+      emits the token value **verbatim** with no ``_T`` / ``_V``
+      suffix.  This is the mode required by Model B (issue #309 / #311)
+      and the one that fixes the ``{{PREFIX_T}}`` malformation bug.
+    * **full-DB / kind-aware mode** — every other literal.  Each
+      qualified ``DB.ObjectName`` reference picks its kind suffix from
+      ``kind_index`` (``EXTERNAL_KIND_DEFAULT`` for external refs);
+      bare DB references use ``file_kind``.
 
     All matching is done against a scratch copy with SQL comments and
     string literals blanked so that semicolons, dots, and identifiers
@@ -2345,17 +2445,24 @@ def _apply_kind_aware_tokens(
     after each substitution (length changes after each replacement).
 
     Args:
-        content:      Raw DDL text to rewrite.
-        file_kind:    Kind suffix for this file's owner clause (``'T'``,
-                      ``'V'``, etc.).  Derived from the classified type.
-        apply_tokens: Dict of ``{literal_db_name: "{{BASE_TOKEN}}"}``
-                      as produced by ``token_engine.read_token_map()``.
-        kind_index:   Dict of ``{"db.obj" (lowercased): kind_suffix}``
-                      as produced by ``_build_source_kind_index()``.
+        content:              Raw DDL text to rewrite.
+        file_kind:            Kind suffix for this file's owner clause
+                              (``'T'``, ``'V'``, etc.).  Derived from
+                              the classified type.
+        apply_tokens:         Dict of ``{literal_db_name: "{{BASE_TOKEN}}"}``
+                              as produced by ``token_engine.read_token_map()``.
+        kind_index:           Dict of ``{"db.obj" (lowercased): kind_suffix}``
+                              as produced by ``_build_source_kind_index()``.
+        prefix_mode_literals: Optional set of literals that should use
+                              identifier-aware prefix substitution
+                              instead of kind-aware substitution.  When
+                              ``None`` or empty, every entry uses the
+                              kind-aware path (the pre-#311 behaviour).
 
     Returns:
         Rewritten content with kind-suffixed tokens in place of literals.
     """
+    prefix_mode_literals = prefix_mode_literals or set()
     from td_release_packager.sql_text import strip_comments_and_string_literals
     from td_release_packager.kind_suffix import (
         EXTERNAL_KIND_DEFAULT,
@@ -2379,6 +2486,23 @@ def _apply_kind_aware_tokens(
     for literal, token_with_braces in apply_tokens.items():
         # Extract base token name: "{{MortgagePlatform_Domain}}" → "MortgagePlatform_Domain"
         base_token = token_with_braces.strip("{}")
+
+        # ---- Prefix mode (issue #311) ----
+        # The literal appears as the leading segment of identifiers in
+        # the payload; emit the token verbatim and let the structural
+        # remainder (``_DOM_STD_T`` etc.) stay literal outside the
+        # braces.  The right-edge look-ahead is non-consuming so no
+        # adjacent character ever lands inside ``{{ }}``.
+        if literal in prefix_mode_literals:
+            prefix_re = re.compile(
+                r"(?<![A-Za-z0-9_])"
+                + re.escape(literal)
+                + r"(?=_[A-Za-z0-9]|[^A-Za-z0-9_]|$)",
+                re.IGNORECASE,
+            )
+            for m in prefix_re.finditer(scratch):
+                replacements.append((m.start(), m.end(), token_with_braces))
+            continue
 
         # ---- Compatibility / fall-through guards ----
         # If the literal is a system DB (DBC, SYSLIB, etc.), or if the
