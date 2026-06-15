@@ -48,9 +48,9 @@ Wants=network-online.target
 Type=simple
 User=ships
 Group=ships
-WorkingDirectory=/opt/ships/teradata-deployment-agent
+WorkingDirectory=/opt/ships/teradata-ships
 Environment="SHIPS_LOG_DIR=/var/log/ships"
-ExecStart=/opt/ships/teradata-deployment-agent/.venv/bin/python -m ships_mcp \
+ExecStart=/opt/ships/teradata-ships/.venv/bin/python -m ships_mcp \
     --transport streamable-http --host 127.0.0.1 --port 8000
 
 # Clean shutdown — SIGINT fires the SHIPS shutdown banner +
@@ -96,7 +96,7 @@ curl -sSf -X POST http://localhost:8000/mcp \
    sample unit already binds to `127.0.0.1` for this reason.
 2. **Auth** — Append `--auth-jwks-uri` and friends to `ExecStart`:
    ```ini
-   ExecStart=/opt/ships/teradata-deployment-agent/.venv/bin/python -m ships_mcp \
+   ExecStart=/opt/ships/teradata-ships/.venv/bin/python -m ships_mcp \
        --transport streamable-http --host 127.0.0.1 --port 8000 \
        --auth-jwks-uri  https://login.microsoftonline.com/<tenant>/discovery/v2.0/keys \
        --auth-issuer    https://login.microsoftonline.com/<tenant>/v2.0 \
