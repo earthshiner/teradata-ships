@@ -17,7 +17,7 @@
 SERVICE=ships-mcp
 SHIPS_USER=ships
 SHIPS_GROUP=ships
-SHIPS_ROOT=/opt/ships/teradata-deployment-agent
+SHIPS_ROOT=/opt/ships/teradata-ships
 PYTHON=$SHIPS_ROOT/.venv/bin/python
 PIDFILE=/var/run/$SERVICE.pid
 LOGDIR=/var/log/ships

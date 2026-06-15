@@ -31,7 +31,7 @@ PowerShell:
 If you'd rather run the commands by hand:
 
 ```powershell
-$repo = "C:\SCM\teradata-deployment-agent"
+$repo = "C:\SCM\teradata-ships"
 $python = "$repo\.venv\Scripts\python.exe"
 $logdir = "C:\ProgramData\SHIPS\logs"
 

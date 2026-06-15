@@ -16,8 +16,8 @@
 param(
     [string] $ServiceName  = "SHIPS-MCP",
     [string] $DisplayName  = "SHIPS MCP Server",
-    [string] $Repo         = "C:\SCM\teradata-deployment-agent",
-    [string] $Python       = "C:\SCM\teradata-deployment-agent\.venv\Scripts\python.exe",
+    [string] $Repo         = "C:\SCM\teradata-ships",
+    [string] $Python       = "C:\SCM\teradata-ships\.venv\Scripts\python.exe",
     [string] $LogDir       = "C:\ProgramData\SHIPS\logs",
     [string] $BindHost     = "127.0.0.1",
     [int]    $Port         = 8000
