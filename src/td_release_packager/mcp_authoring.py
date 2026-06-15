@@ -338,21 +338,39 @@ class ConfFile:
 # mode, which still rewrites files during classification.
 
 
+#: Extensions that SHIPS-harvested payload files use, used by
+#: :func:`scan_payload_databases` to find every DDL file whose owner
+#: database should be considered a token candidate.
+#:
+#: This set mirrors ``td_release_packager.kind_suffix.EXTENSION_TO_KIND``
+#: plus the database / DCL / DML extensions that don't appear there.  The
+#: previous list missed ``.viw`` (the canonical SHIPS extension for
+#: views) which silently dropped every view from the candidate analyser
+#: (issue #311 — view-target databases under-reported).  Keep this in
+#: lock-step with ``EXTENSION_TO_KIND`` if the harvest convention grows
+#: new extensions.
 _PAYLOAD_DDL_EXTENSIONS = {
-    ".tbl",
-    ".sql",
+    ".bteq",
+    ".db",
+    ".dcl",
     ".ddl",
     ".ddml",
     ".dml",
-    ".dcl",
-    ".vw",
-    ".mac",
-    ".spl",
-    ".udf",
-    ".trg",
+    ".fnc",
     ".idx",
-    ".bteq",
-    ".db",
+    ".ins",
+    ".jix",
+    ".mac",
+    ".mcr",
+    ".sjr",
+    ".spl",
+    ".sql",
+    ".sto",
+    ".tbl",
+    ".trg",
+    ".udf",
+    ".viw",
+    ".vw",
 }
 
 
