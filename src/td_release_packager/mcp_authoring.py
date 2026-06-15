@@ -21,7 +21,9 @@ import difflib
 import hashlib
 import io
 import os
+import re
 import tempfile
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import yaml
@@ -164,6 +166,166 @@ def unset_dotted(data: Dict[str, Any], dotted_key: str) -> bool:
         return False
     del cursor[parts[-1]]
     return True
+
+
+# ---------------------------------------------------------------
+# Structure-preserving KEY=VALUE editor (Phase B)
+# ---------------------------------------------------------------
+#
+# .conf files in SHIPS are hand-curated with comments, numbered
+# sections, and meaningful blank lines. A YAML-style "load → mutate
+# dict → dump" round-trip would discard all of that. ``ConfFile``
+# parses a file into an ordered list of items and only rewrites the
+# lines that actually changed; unmodified lines (including comments
+# and blanks) are passed through byte-for-byte.
+#
+# Format (matches read_env_config / read_inspect_config):
+#     # comments start with '#'
+#     KEY=VALUE
+#     KEY = VALUE       (spaces around '=' allowed; preserved on
+#                        unmodified lines, normalised on edited lines)
+
+
+_KEY_RE = re.compile(r"^\s*([^#=\s][^=]*?)\s*=")
+
+
+@dataclass(frozen=True)
+class _ConfLine:
+    """A single physical line in a .conf file.
+
+    ``raw`` retains the original text including its line terminator,
+    so dumping an unmodified file is byte-identical to the input.
+    ``key`` is set only when the line declares a KEY=VALUE pair.
+    """
+
+    raw: str
+    key: Optional[str] = None
+
+
+class ConfFile:
+    """An ordered, structure-preserving view of a KEY=VALUE .conf file.
+
+    Round-trip property: ``ConfFile.parse(text).dump() == text`` for
+    any well-formed input.  Edits replace only the targeted line(s);
+    everything else is passed through verbatim.
+
+    Edited / appended lines are written in canonical ``KEY=VALUE`` form
+    (no spaces around ``=``).  Unmodified lines keep their original
+    spacing, comments, and trailing whitespace.
+    """
+
+    def __init__(self, lines: List[_ConfLine]) -> None:
+        self._lines: List[_ConfLine] = list(lines)
+
+    # -- parsing / serialising ----------------------------------
+
+    @classmethod
+    def parse(cls, content: str) -> "ConfFile":
+        lines: List[_ConfLine] = []
+        for raw in content.splitlines(keepends=True):
+            key = cls._extract_key(raw)
+            lines.append(_ConfLine(raw=raw, key=key))
+        return cls(lines)
+
+    def dump(self) -> str:
+        return "".join(line.raw for line in self._lines)
+
+    @staticmethod
+    def _extract_key(raw: str) -> Optional[str]:
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            return None
+        match = _KEY_RE.match(raw)
+        if not match:
+            return None
+        name = match.group(1).strip()
+        return name or None
+
+    # -- reads --------------------------------------------------
+
+    def keys(self) -> List[str]:
+        return [line.key for line in self._lines if line.key is not None]
+
+    def get(self, key: str) -> Optional[str]:
+        for line in self._lines:
+            if line.key == key:
+                # Split on first '=' and strip; matches read_env_config
+                _, _, value = line.raw.partition("=")
+                return value.strip().rstrip("\r\n").strip()
+        return None
+
+    def has(self, key: str) -> bool:
+        return any(line.key == key for line in self._lines)
+
+    # -- mutations ----------------------------------------------
+
+    def set(self, key: str, value: str) -> None:
+        """Set ``key`` to ``value``.  Replaces existing entry in place;
+        appends at end-of-file if the key is absent.
+
+        Replaced lines are normalised to ``KEY=VALUE`` form, preserving
+        only the original line terminator.  Appended lines use the
+        dominant terminator already present in the file (``\\n``-only
+        when the file is empty).
+        """
+        self._reject_bad_key(key)
+        if "\n" in value or "\r" in value:
+            raise ValueError(f"value for {key!r} must not contain newlines")
+
+        for i, line in enumerate(self._lines):
+            if line.key == key:
+                ending = self._line_ending(line.raw)
+                self._lines[i] = _ConfLine(raw=f"{key}={value}{ending}", key=key)
+                return
+
+        # Append. Ensure the previous line ends with a newline so the
+        # new entry starts on its own line.
+        ending = self._dominant_ending()
+        if self._lines:
+            last = self._lines[-1]
+            if not last.raw.endswith(("\n", "\r")):
+                self._lines[-1] = _ConfLine(raw=last.raw + ending, key=last.key)
+        self._lines.append(_ConfLine(raw=f"{key}={value}{ending}", key=key))
+
+    def unset(self, key: str) -> bool:
+        """Remove the line declaring ``key``.  Returns True if removed,
+        False if the key was not present.
+
+        Surrounding blank lines and comments are left untouched —
+        minimal-change is more important than tidying.
+        """
+        self._reject_bad_key(key)
+        for i, line in enumerate(self._lines):
+            if line.key == key:
+                del self._lines[i]
+                return True
+        return False
+
+    # -- helpers ------------------------------------------------
+
+    @staticmethod
+    def _reject_bad_key(key: str) -> None:
+        if not isinstance(key, str) or not key.strip():
+            raise ValueError("key must be a non-empty string")
+        if "=" in key or "\n" in key or "\r" in key or key.startswith("#"):
+            raise ValueError(f"invalid key: {key!r}")
+
+    @staticmethod
+    def _line_ending(raw: str) -> str:
+        if raw.endswith("\r\n"):
+            return "\r\n"
+        if raw.endswith("\n"):
+            return "\n"
+        if raw.endswith("\r"):
+            return "\r"
+        return ""
+
+    def _dominant_ending(self) -> str:
+        for line in reversed(self._lines):
+            ending = self._line_ending(line.raw)
+            if ending:
+                return ending
+        return "\n"
 
 
 # ---------------------------------------------------------------

@@ -58,6 +58,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
@@ -1259,6 +1260,374 @@ def ships_apply_diff(
         return {"success": True, "applied": True, **result}
     except Exception as e:
         return {"success": False, "applied": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------
+# [A] Authoring — Phase B of #291 (#293)
+#
+# .conf authoring tools.  Same diff-first / hash-gated flow as
+# Phase A; structure-preserving editor preserves comments and
+# blank lines in hand-curated files.  Apply via ships_apply_diff.
+# ---------------------------------------------------------------
+
+
+def _env_config_path(project: str, env: str) -> str:
+    return os.path.join(project, "config", "env", f"{env}.conf")
+
+
+def _inspect_config_path(project: str) -> str:
+    return os.path.join(project, "config", "inspect.conf")
+
+
+def _propose_conf_edit(
+    path: str,
+    action: str,
+    changes: Optional[dict],
+    unset_keys: Optional[list],
+    *,
+    create_header: str,
+    validator,
+) -> dict:
+    """Shared core for ships_author_env_config / inspect_config.
+
+    Returns a proposal envelope.  ``validator`` is a callable taking
+    the proposed content and returning a list of {path, message} dicts
+    (empty if valid).
+    """
+    from td_release_packager import mcp_authoring as _ma
+
+    action_l = (action or "").lower()
+    if action_l not in {"create", "set", "unset"}:
+        return {
+            "success": False,
+            "error": f"unknown action {action!r}; expected create/set/unset",
+        }
+
+    if action_l == "create":
+        if os.path.exists(path):
+            return {
+                "success": False,
+                "error": f"file already exists at {path}; use action=set to modify",
+            }
+        conf = _ma.ConfFile.parse(create_header)
+        if isinstance(changes, dict):
+            try:
+                for key, value in changes.items():
+                    conf.set(str(key), str(value))
+            except ValueError as ve:
+                return {"success": False, "error": str(ve)}
+    else:
+        if not os.path.exists(path):
+            return {
+                "success": False,
+                "error": f"file not found at {path}; use action=create first",
+            }
+        current = _ma.read_or_empty(path)
+        conf = _ma.ConfFile.parse(current)
+
+        if action_l == "set":
+            if not isinstance(changes, dict) or not changes:
+                return {
+                    "success": False,
+                    "error": "action=set requires non-empty changes dict",
+                }
+            try:
+                for key, value in changes.items():
+                    conf.set(str(key), str(value))
+            except ValueError as ve:
+                return {"success": False, "error": str(ve)}
+        else:
+            if not isinstance(unset_keys, list) or not unset_keys:
+                return {
+                    "success": False,
+                    "error": "action=unset requires non-empty unset_keys list",
+                }
+            try:
+                for key in unset_keys:
+                    conf.unset(str(key))
+            except ValueError as ve:
+                return {"success": False, "error": str(ve)}
+
+    proposed_content = conf.dump()
+    validation_errors = validator(proposed_content)
+    proposal = _ma.build_proposal(
+        path,
+        proposed_content,
+        validation_errors=validation_errors,
+    )
+    proposal["success"] = True
+    return proposal
+
+
+def _validate_env_conf_content(content: str) -> list:
+    """Run env-config content through read_env_config; collect errors."""
+    from td_release_packager.token_engine import read_env_config
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".conf", delete=False, encoding="utf-8"
+    ) as tf:
+        tf.write(content)
+        tmp = tf.name
+    try:
+        try:
+            read_env_config(tmp)
+            return []
+        except ValueError as ve:
+            return [{"path": "", "message": str(ve)}]
+        except Exception as e:
+            return [{"path": "", "message": f"{type(e).__name__}: {e}"}]
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+def _validate_inspect_conf_content(content: str) -> list:
+    """Validate inspect.conf content against severity / domain vocab."""
+    from td_release_packager.validate import (
+        _DOMAIN_VALUE_RULES,
+        _RULE_LOG_LEVEL_KEY,
+        _VALID_SEVERITIES,
+    )
+
+    errors: list = []
+    for lineno, line in enumerate(content.splitlines(), 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "=" not in stripped:
+            errors.append(
+                {"path": f"line {lineno}", "message": f"missing '=': {stripped!r}"}
+            )
+            continue
+        name, _, value = stripped.partition("=")
+        name = name.strip()
+        value = value.strip()
+        if not name:
+            errors.append({"path": f"line {lineno}", "message": "empty rule name"})
+            continue
+
+        if name in _DOMAIN_VALUE_RULES:
+            allowed = _DOMAIN_VALUE_RULES[name]
+            if value not in allowed:
+                errors.append(
+                    {
+                        "path": name,
+                        "message": (
+                            f"value {value!r} not in allowed domain values "
+                            f"{sorted(allowed)}"
+                        ),
+                    }
+                )
+        elif name in _RULE_LOG_LEVEL_KEY.values() or name not in _RULE_LOG_LEVEL_KEY:
+            # severity-valued rule (including comma_log_level and any
+            # rule not in the domain-value or log-level companion maps)
+            if value.upper() not in _VALID_SEVERITIES:
+                errors.append(
+                    {
+                        "path": name,
+                        "message": (
+                            f"severity {value!r} not in {sorted(_VALID_SEVERITIES)}"
+                        ),
+                    }
+                )
+    return errors
+
+
+@mcp.tool()
+def ships_validate_env_config(project: str, env: str) -> dict:
+    """Validate a per-environment config file (config/env/<ENV>.conf).
+
+    Wraps ``td_release_packager.token_engine.read_env_config`` — token
+    format, internal {{TOKEN}} resolution, and value-character checks
+    are reused unchanged.
+
+    Args:
+        project: SHIPS project directory.
+        env:     Environment name (e.g. ``DEV``, ``TST``, ``PRD``).
+
+    Returns:
+        {"success": bool, "exists": bool, "valid": bool, "path": str,
+         "errors": [{"path": str, "message": str}]}
+    """
+    try:
+        path = _env_config_path(project, env)
+        if not os.path.exists(path):
+            return {
+                "success": True,
+                "exists": False,
+                "valid": False,
+                "path": path,
+                "errors": [{"path": "", "message": f"env config not found at {path}"}],
+            }
+        with open(path, "r", encoding="utf-8") as f:
+            errors = _validate_env_conf_content(f.read())
+        return {
+            "success": True,
+            "exists": True,
+            "valid": not errors,
+            "path": path,
+            "errors": errors,
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@mcp.tool()
+def ships_validate_inspect_config(project: str) -> dict:
+    """Validate config/inspect.conf against the SHIPS rule vocabulary.
+
+    Checks every key/value against ``_VALID_SEVERITIES`` and the
+    domain-value vocabulary (``comma_style``).  Unknown rule names
+    are accepted (future-proofing for custom rules); invalid
+    severities or domain values are flagged.
+
+    Args:
+        project: SHIPS project directory.
+
+    Returns:
+        {"success": bool, "exists": bool, "valid": bool, "path": str,
+         "errors": [{"path": str, "message": str}]}
+    """
+    try:
+        path = _inspect_config_path(project)
+        if not os.path.exists(path):
+            return {
+                "success": True,
+                "exists": False,
+                "valid": False,
+                "path": path,
+                "errors": [
+                    {"path": "", "message": f"inspect.conf not found at {path}"}
+                ],
+            }
+        with open(path, "r", encoding="utf-8") as f:
+            errors = _validate_inspect_conf_content(f.read())
+        return {
+            "success": True,
+            "exists": True,
+            "valid": not errors,
+            "path": path,
+            "errors": errors,
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+_ENV_CONF_HEADER = (
+    "# ===================================================================\n"
+    "# <ENV>.conf — per-environment token values for this SHIPS project.\n"
+    "#\n"
+    "# Format:  TOKEN_NAME=value         (one per line)\n"
+    "# Lines starting with '#' are comments.\n"
+    "# {{TOKEN}} references inside values are resolved at package time.\n"
+    "# ===================================================================\n"
+    "\n"
+)
+
+_INSPECT_CONF_HEADER = (
+    "# ===================================================================\n"
+    "# inspect.conf — SHIPS Coding Discipline rule severities.\n"
+    "#\n"
+    "# Format:  rule_name=SEVERITY        (ERROR|WARNING|WARN|INFO|OFF)\n"
+    "# Special: comma_style=leading|trailing|as-per-source\n"
+    "# Only override rules that need to differ from the defaults in\n"
+    "# td_release_packager.validate.DEFAULT_RULES.\n"
+    "# ===================================================================\n"
+    "\n"
+)
+
+
+@mcp.tool()
+def ships_author_env_config(
+    project: str,
+    env: str,
+    action: str,
+    changes: Optional[dict] = None,
+    unset_keys: Optional[list] = None,
+) -> dict:
+    """Propose a change to a per-environment config file.
+
+    Returns a proposal envelope describing the change.  Apply via
+    ``ships_apply_diff`` with the returned ``expected_hash``.  The
+    underlying editor preserves comments and blank lines on every
+    line not touched by ``changes`` / ``unset_keys``.
+
+    Actions:
+        create   Generate ``config/env/<ENV>.conf`` with the stock
+                 header.  Optionally seeds initial keys from ``changes``.
+                 Fails if the file already exists.
+        set      Apply ``changes`` to the existing file (replace in
+                 place, append at end if absent).
+        unset    Remove the listed keys.
+
+    Args:
+        project:    SHIPS project directory.
+        env:        Environment name (DEV / TST / PRD / ...).
+        action:     One of "create", "set", "unset".
+        changes:    {KEY: value} dict for set / create.
+        unset_keys: List of keys for unset.
+
+    Returns:
+        Standard proposal envelope (see ships_author_ships_yaml).
+    """
+    try:
+        path = _env_config_path(project, env)
+        header = _ENV_CONF_HEADER.replace("<ENV>", env)
+        return _propose_conf_edit(
+            path,
+            action,
+            changes,
+            unset_keys,
+            create_header=header,
+            validator=_validate_env_conf_content,
+        )
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@mcp.tool()
+def ships_author_inspect_config(
+    project: str,
+    action: str,
+    changes: Optional[dict] = None,
+    unset_keys: Optional[list] = None,
+) -> dict:
+    """Propose a change to config/inspect.conf.
+
+    Returns a proposal envelope.  Apply via ``ships_apply_diff``.  The
+    editor preserves comments and blank lines on every line not
+    touched by ``changes`` / ``unset_keys``.
+
+    Actions:
+        create   Generate inspect.conf with the stock header.
+                 Optionally seeds initial overrides from ``changes``.
+                 Fails if the file already exists.
+        set      Apply rule-severity overrides (and ``comma_style``).
+        unset    Remove rule overrides (reverts them to defaults).
+
+    Args:
+        project:    SHIPS project directory.
+        action:     One of "create", "set", "unset".
+        changes:    {rule_name: SEVERITY|domain_value} dict.
+        unset_keys: List of rule names to remove from overrides.
+
+    Returns:
+        Standard proposal envelope.
+    """
+    try:
+        path = _inspect_config_path(project)
+        return _propose_conf_edit(
+            path,
+            action,
+            changes,
+            unset_keys,
+            create_header=_INSPECT_CONF_HEADER,
+            validator=_validate_inspect_conf_content,
+        )
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 # ---------------------------------------------------------------
