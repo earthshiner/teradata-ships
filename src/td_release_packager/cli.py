@@ -39,7 +39,7 @@ import tarfile
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from td_release_packager.builder import build_package
 from td_release_packager.build_counter import read_build_number
@@ -1347,6 +1347,40 @@ def _resolve_path(
     sys.exit(1)
 
 
+def _parse_prefix_token_args(values: List[str]) -> Optional[Dict[str, str]]:
+    """Parse ``--prefix-token SOURCE=TOKEN`` CLI values into a dict.
+
+    Each value is split on the first ``=``.  Both sides are stripped.
+    Empty or malformed entries exit with a friendly error so a typo
+    surfaces at argparse time rather than producing silently-wrong
+    tokenisation.
+
+    :param values: List of ``--prefix-token`` strings (may be empty).
+    :returns:      ``None`` if ``values`` is empty, else a dict.
+    """
+    if not values:
+        return None
+    mapping: Dict[str, str] = {}
+    for raw in values:
+        if "=" not in raw:
+            print(
+                f"ERROR: --prefix-token expects SOURCE=TOKEN, got {raw!r}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        src, _, tok = raw.partition("=")
+        src = src.strip()
+        tok = tok.strip()
+        if not src or not tok:
+            print(
+                f"ERROR: --prefix-token has empty source or token: {raw!r}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        mapping[src] = tok
+    return mapping
+
+
 def _load_project_legacy_migration_rules(project_dir: str, stage=None):
     """Load project-local tokenisation rules when present.
 
@@ -1605,6 +1639,16 @@ def _run_ingest(args, stage, issue_codes, apply_tokens) -> int:
         "cli",
     )
 
+    # -- Parse --prefix-token SOURCE=TOKEN flags (Model B, issue #309) --
+    prefix_tokens = _parse_prefix_token_args(getattr(args, "prefix_token", None) or [])
+    if prefix_tokens:
+        stage.set_config_resolved(
+            "prefix_tokens",
+            ", ".join(f"{src}={tok}" for src, tok in prefix_tokens.items()),
+            "layer-5",
+            "cli",
+        )
+
     result = ingest_directory(
         source_dir=args.source,
         project_dir=args.project,
@@ -1614,7 +1658,17 @@ def _run_ingest(args, stage, issue_codes, apply_tokens) -> int:
         clean_payload=not args.keep_existing,
         legacy_migration_rules=legacy_migration_rules,
         remove_view_type_affixes=getattr(args, "remove_view_type_affixes", False),
+        prefix_tokens=prefix_tokens,
     )
+
+    if prefix_tokens and result.prefix_token_substitutions:
+        print(
+            f"  Prefix tokenised: "
+            f"{', '.join(f'{src} -> {{{{{tok}}}}}' for src, tok in prefix_tokens.items())} "
+            f"({result.prefix_token_substitutions} substitution(s) "
+            f"across {result.prefix_token_files} file(s)). "
+            f"Remember to define each token in every env config."
+        )
 
     # -- Record inputs and outputs --
     stage.set_inputs(
@@ -4721,6 +4775,20 @@ def _build_parser():
         "becomes the token (e.g. 'CORE_STD' → '{{CORE_STD}}').",
     )
     ig.add_argument(
+        "--prefix-token",
+        action="append",
+        default=None,
+        metavar="SOURCE=TOKEN",
+        help="Identifier-aware prefix tokenisation (Model B). "
+        "Rewrites a database-name PREFIX to a single {{TOKEN}} while "
+        "preserving the structural remainder. "
+        "E.g. '--prefix-token CallCentre=PREFIX' turns "
+        "'CallCentre_DOM_STD_T' into '{{PREFIX}}_DOM_STD_T' and a "
+        "standalone 'CallCentre' into '{{PREFIX}}'. Repeatable; "
+        "longest prefix wins. Different from --token-map "
+        "(literal/substring) and --env-prefix (strip + per-database).",
+    )
+    ig.add_argument(
         "--apply-tokens",
         help="(Legacy) Comma-separated name=token pairs. "
         "Prefer --token-map instead. "
@@ -5408,6 +5476,15 @@ def _build_parser():
         "--env-prefix",
         default=None,
         help="Env prefix for auto-tokenise token derivation.",
+    )
+    pr.add_argument(
+        "--prefix-token",
+        action="append",
+        default=None,
+        metavar="SOURCE=TOKEN",
+        help="Identifier-aware prefix tokenisation (Model B). "
+        "Same surface as on `harvest` — see its --help for details. "
+        "Repeatable; longest prefix wins.",
     )
     pr.add_argument(
         "--remove-view-type-affixes",

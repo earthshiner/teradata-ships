@@ -988,3 +988,163 @@ def read_token_map(path: str) -> Dict[str, str]:
     logger.info("Token map loaded: %s (%d mappings)", path, len(token_map))
 
     return token_map
+
+
+# ---------------------------------------------------------------------------
+# Prefix tokeniser — Model B  (issue #309)
+# ---------------------------------------------------------------------------
+#
+# A third substitution mechanism that sits alongside literal token maps
+# (``read_token_map`` + ``substitute_tokens``) and the env-prefix derivation
+# (``derive_token_name``).  Where ``--token-map`` does literal substring
+# substitution and ``--env-prefix`` strips the prefix and tokenises the
+# remainder, the prefix tokeniser rewrites the database-name *prefix* to a
+# single token and preserves the structural remainder verbatim outside the
+# braces.
+#
+# Identifier-aware match:
+#
+#   * LEFT boundary  — start of string or any non-identifier character
+#     (prevents ``XCallCentre`` and ``MyCallCentreThing`` from matching).
+#   * RIGHT boundary — either ``_`` followed by an identifier character
+#     (the leading-segment case, e.g. ``CallCentre_DOM_STD_T``) or a
+#     non-identifier character / end of string (the standalone case,
+#     e.g. ``from CallCentre``).
+#   * The right-edge predicate is a LOOK-AHEAD, so the remainder is not
+#     consumed and stays as literal text after the ``{{TOKEN}}``.
+#
+# Default ``case_insensitive=True`` because Teradata identifiers are
+# case-insensitive; exact-case matching would tokenise inconsistently if
+# reflected DDL ever emits mixed case.
+
+
+def build_prefix_pattern(
+    prefix: str, *, case_insensitive: bool = True
+) -> "re.Pattern[str]":
+    """Compile an identifier-aware pattern matching a database-name prefix.
+
+    The prefix matches only when it forms the leading segment of a
+    Teradata identifier, or stands alone as a whole identifier — never
+    as an interior substring.
+
+    The match requires:
+
+    * a LEFT boundary: start-of-string or a non-identifier character, so
+      ``XCallCentre`` / ``MyCallCentre`` are not matched; and
+    * a RIGHT boundary that is either ``_`` followed by an identifier
+      character (the leading-segment case, e.g.
+      ``CallCentre_DOM_STD_T``) or a non-identifier character /
+      end-of-string (the standalone case, e.g. ``from CallCentre``).
+
+    Crucially the trailing ``_remainder`` is matched by a look-ahead and
+    is therefore NOT consumed, so it stays as literal text outside the
+    resulting ``{{TOKEN}}``.
+
+    :param prefix:           The literal source prefix, e.g.
+                             ``"CallCentre"``.  Must be non-empty.
+    :param case_insensitive: Match the prefix case-insensitively
+                             (default ``True``, since Teradata
+                             identifiers are case-insensitive).
+    :returns:                A compiled :class:`re.Pattern`.
+    :raises ValueError:      If ``prefix`` is empty.
+    """
+    if not prefix:
+        raise ValueError("prefix must be a non-empty string")
+
+    flags = re.IGNORECASE if case_insensitive else 0
+    return re.compile(
+        r"(?<![A-Za-z0-9_])"  # left identifier boundary
+        + re.escape(prefix)  # the configured prefix
+        + r"(?=_[A-Za-z0-9]|[^A-Za-z0-9_]|$)",  # leading-segment OR standalone
+        flags,
+    )
+
+
+def tokenise_prefix(
+    text: str,
+    prefix: str,
+    token_name: str,
+    *,
+    case_insensitive: bool = True,
+) -> Tuple[str, int]:
+    """Replace identifier-aligned occurrences of ``prefix`` with ``{{token_name}}``.
+
+    Only the prefix is replaced; any ``_remainder`` after it is
+    preserved, so ``CallCentre_DOM_STD_T`` becomes
+    ``{{PREFIX}}_DOM_STD_T`` and a standalone ``CallCentre`` becomes
+    ``{{PREFIX}}``.  The function never produces a malformed token
+    such as ``{{PREFIX_T}}`` because no characters adjacent to the
+    prefix are absorbed (regression guard for the bug in the original
+    ``--token-map`` literal-substring mechanism).
+
+    Idempotent — re-running over already-tokenised text makes no
+    further changes, because ``{{`` and ``}}`` are non-identifier
+    characters that break the left/right boundaries the pattern
+    requires.
+
+    :param text:             Source text (typically a DDL file body).
+    :param prefix:           The literal source prefix to match.
+    :param token_name:       The token name to emit, without braces.
+                             E.g. ``"PREFIX"`` produces ``{{PREFIX}}``.
+    :param case_insensitive: Match the prefix case-insensitively
+                             (default ``True``).
+    :returns:                ``(rewritten_text, substitution_count)``.
+    :raises ValueError:      If ``prefix`` or ``token_name`` is empty,
+                             or ``token_name`` is not a valid
+                             ``{{NAME}}`` identifier.
+    """
+    if not prefix:
+        raise ValueError("prefix must be a non-empty string")
+    if not token_name:
+        raise ValueError("token_name must be a non-empty string")
+    if not re.match(r"^[A-Za-z_][A-Za-z0-9_-]*$", token_name):
+        raise ValueError(
+            f"token_name {token_name!r} is not a valid identifier "
+            "(must start with a letter or underscore and contain only "
+            "letters, digits, underscores or hyphens)"
+        )
+
+    pattern = build_prefix_pattern(prefix, case_insensitive=case_insensitive)
+    rewritten, count = pattern.subn("{{" + token_name + "}}", text)
+    return rewritten, count
+
+
+def tokenise_prefixes(
+    text: str,
+    prefix_map: Dict[str, str],
+    *,
+    case_insensitive: bool = True,
+) -> Tuple[str, int, Dict[str, int]]:
+    """Apply :func:`tokenise_prefix` for every ``(prefix, token_name)``
+    pair in ``prefix_map``.
+
+    Prefixes are applied longest-first to avoid partial shadowing
+    (e.g. if the map contains both ``Call`` and ``CallCentre``,
+    ``CallCentre_X`` must be tokenised under ``CallCentre``, not the
+    shorter ``Call`` prefix).
+
+    :param text:             Source text.
+    :param prefix_map:       Mapping of source prefix to token name,
+                             e.g. ``{"CallCentre": "PREFIX"}``.
+    :param case_insensitive: Forwarded to :func:`tokenise_prefix`.
+    :returns:                ``(rewritten_text, total_count, per_prefix_counts)``
+                             where ``per_prefix_counts`` maps each
+                             source prefix to the number of
+                             substitutions it produced.
+    """
+    if not prefix_map:
+        return text, 0, {}
+
+    # Longest first so a generic prefix can't shadow a specific one.
+    ordered = sorted(prefix_map.items(), key=lambda kv: -len(kv[0]))
+
+    total = 0
+    per_prefix: Dict[str, int] = {}
+    out = text
+    for prefix, token_name in ordered:
+        out, n = tokenise_prefix(
+            out, prefix, token_name, case_insensitive=case_insensitive
+        )
+        per_prefix[prefix] = n
+        total += n
+    return out, total, per_prefix
