@@ -50,7 +50,14 @@ nssm set $ServiceName AppParameters         $AppParameters             | Out-Nul
 nssm set $ServiceName AppDirectory          $Repo                      | Out-Null
 nssm set $ServiceName DisplayName           $DisplayName               | Out-Null
 nssm set $ServiceName Description           "Teradata SHIPS deployment framework exposed over MCP." | Out-Null
-nssm set $ServiceName AppEnvironmentExtra   "SHIPS_LOG_DIR=$LogDir"    | Out-Null
+# ships_mcp.py is a top-level module under src/, not a packaged entry
+# point.  When NSSM invokes python.exe directly (rather than via
+# `uv run`), src/ is not on sys.path and `python -m ships_mcp` fails
+# with `No module named ships_mcp`.  PYTHONPATH adds it back.
+$PythonPath = Join-Path $Repo "src"
+nssm set $ServiceName AppEnvironmentExtra `
+    "SHIPS_LOG_DIR=$LogDir" `
+    "PYTHONPATH=$PythonPath" | Out-Null
 
 # Auto-start at boot; restart on crash with 5 s back-off.
 nssm set $ServiceName Start                 SERVICE_AUTO_START         | Out-Null
