@@ -497,40 +497,35 @@ def _generate_object_placement_yaml(
 
 
 # ----------------------------------------------------------------
-# DEFAULT — colocated (no enforcement)
+# DEFAULT — separated (recommended SHIPS standard)
 # ----------------------------------------------------------------
 #
-# Switch to one of the alternatives below when ready to enforce
-# the SHIPS placement standard. Switching is non-breaking — your
-# DDL files do not need to change unless they reference databases
-# explicitly.
+# Tables and views live in distinct databases related by the
+# suffix convention below. Every table has a 1:1 locking view in
+# the sibling views database — the recommended Teradata security
+# pattern.
+#
+# Example: tables in 'D01_PROJECT_DOM_T'; matching views database
+# is 'D01_PROJECT_DOM_V'.
+#
+# Swap to a prefix or midfix variant by editing the patterns:
+#   prefix:  database_pattern_tables: "T_{BASE}"
+#            database_pattern_views:  "V_{BASE}"
+#   midfix:  database_pattern_tables: "{REGION}_T_{DOMAIN}"
+#            database_pattern_views:  "{REGION}_V_{DOMAIN}"
 
-strategy: colocated
-locking_views: false
-
-
-# ----------------------------------------------------------------
-# Alternative — separated (pattern-based)
-# ----------------------------------------------------------------
-#
-# Suffix convention (recommended):
-#
-#   strategy: separated
-#   database_pattern_tables: "{BASE}_T"
-#   database_pattern_views: "{BASE}_V"
-#   locking_views: true
-#
-# Means: 'D01_PROJECT_DOM_T' is a tables database; the matching
-# views database is 'D01_PROJECT_DOM_V'. Every tables database
-# requires a 1:1 locking view in its sibling views database.
-#
-# Other patterns (prefix, midfix) are also supported — see the
-# SHIPS documentation for examples.
+strategy: separated
+database_pattern_tables: "{BASE}_T"
+database_pattern_views: "{BASE}_V"
+locking_views: true
 
 
 # ----------------------------------------------------------------
 # Alternative — mapped (explicit pairs)
 # ----------------------------------------------------------------
+#
+# Use when project naming is irregular, or when migrating from a
+# legacy schema that doesn't follow a consistent convention.
 #
 #   strategy: mapped
 #   locking_views: true
@@ -539,9 +534,20 @@ locking_views: false
 #       views_database: MyProject_Domain_V
 #     - tables_database: "{{DOM_DATABASE_T}}"
 #       views_database: "{{DOM_DATABASE_V}}"
+
+
+# ----------------------------------------------------------------
+# Alternative — colocated (disable the standard)
+# ----------------------------------------------------------------
 #
-# Use when project naming is irregular, or when migrating from a
-# legacy schema that doesn't follow a consistent convention.
+# Tables and views share the same database — no architectural
+# enforcement. Reserved for projects that legitimately cannot
+# separate tables from views; the placement-related lint rules
+# (object_placement, public_grant_on_tables,
+# review_unmapped_grants) skip silently under colocated.
+#
+#   strategy: colocated
+#   locking_views: true
 """
 
     with open(yaml_path, "w", encoding="utf-8") as f:
