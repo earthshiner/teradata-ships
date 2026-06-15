@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Install the SHIPS MCP Server as a Windows Service via NSSM.
 
@@ -31,7 +31,7 @@ if (-not (Get-Command nssm -ErrorAction SilentlyContinue)) {
     throw "nssm.exe not found in PATH.  Install it (choco install nssm) and re-run."
 }
 if (-not (Test-Path $Python)) {
-    throw "Python venv not found at $Python — run 'uv sync' under $Repo first."
+    throw "Python venv not found at $Python - run 'uv sync' under $Repo first."
 }
 
 Write-Host "Creating log directory $LogDir"
