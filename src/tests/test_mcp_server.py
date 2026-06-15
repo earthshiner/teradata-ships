@@ -552,6 +552,8 @@ class TestToolRegistration:
             "ships_explain_violation",
             "ships_list_fixable_rules",
             "ships_fix",
+            "ships_status",
+            "ships_describe_package",
         ]
         for name in expected:
             assert name in tool_names, f"Tool {name!r} not registered"
@@ -1396,3 +1398,107 @@ class TestShipsFix:
         assert result["files_changed"] >= 1
         # Untouched
         assert target.read_text(encoding="utf-8") == before
+
+
+# ---------------------------------------------------------------
+# Phase D — guidance tools (#299)
+# ---------------------------------------------------------------
+
+
+class TestShipsStatus:
+    def test_missing_project_errors(self, tmp_path: Path):
+        from ships_mcp import ships_status
+
+        result = ships_status(project=str(tmp_path / "nope"))
+        assert result["success"] is False
+        assert "not found" in result["error"]
+
+    def test_scaffolded_project_reports_scaffolded(self, tmp_path: Path):
+        from ships_mcp import ships_status
+
+        project = _make_project(tmp_path)
+        result = ships_status(project=str(project))
+        assert result["success"] is True
+        assert result["lifecycle_state"] == "scaffolded"
+        # next-action hint should mention harvest
+        assert any("harvest" in a.lower() for a in result["next_recommended_actions"])
+        # allowed_actions list is populated even at scaffold time
+        assert isinstance(result["allowed_actions"], list)
+
+    def test_post_inspect_lifecycle_advances(self, tmp_path: Path):
+        """After seeding payload + running inspect, lifecycle reflects it.
+
+        Avoids the full package flow because Windows path-length limits
+        bite when releases/ is written under a tmp_path-rooted project.
+        """
+        from ships_mcp import ships_inspect, ships_status
+
+        project = _make_project(tmp_path)
+        _seed_table(project)
+        ships_inspect(project=str(project))
+
+        result = ships_status(project=str(project))
+        assert result["success"] is True
+        # lifecycle should be at least scaffolded; if decisions.json
+        # was written, it will have advanced.
+        assert result["lifecycle_state"] in {
+            "scaffolded",
+            "harvested",
+            "inspected",
+            "analysed",
+            "packaged",
+        }
+        assert isinstance(result["next_recommended_actions"], list)
+
+
+class TestShipsDescribePackage:
+    def test_no_archive_returns_error(self, tmp_path: Path):
+        from ships_mcp import ships_describe_package
+
+        project = _make_project(tmp_path)
+        result = ships_describe_package(project=str(project))
+        assert result["success"] is False
+        assert "no package archive" in result["error"]
+
+    def test_explicit_missing_archive_errors(self, tmp_path: Path):
+        from ships_mcp import ships_describe_package
+
+        project = _make_project(tmp_path)
+        result = ships_describe_package(
+            project=str(project), archive=str(tmp_path / "missing.zip")
+        )
+        assert result["success"] is False
+
+    def test_describes_built_archive(self, tmp_path: Path):
+        """Build an archive with output outside the project (Windows
+        path-length safe) and describe it via the explicit ``archive``
+        parameter.
+        """
+        from ships_mcp import ships_describe_package, ships_package
+
+        project = _make_project(tmp_path)
+        _seed_table(project)
+        props = tmp_path / "DEV.conf"
+        props.write_text("SHIPS_ENV=DEV\n", encoding="utf-8")
+
+        pkg = ships_package(
+            project=str(project),
+            env="DEV",
+            name="DescribePkg",
+            env_config=str(props),
+            output=str(tmp_path / "r"),
+        )
+        assert pkg["success"], f"Package failed: {pkg}"
+
+        result = ships_describe_package(
+            project=str(project), archive=pkg["archive_path"]
+        )
+        assert result["success"] is True
+        assert isinstance(result["summary"], dict)
+        # trust_status comes from ships.trust.json
+        assert "trust_status" in result["summary"]
+        # context handoff fields are present
+        assert "context_entrypoint" in result["context"]
+        # summary_text is non-empty and references the archive
+        assert result["summary_text"]
+        assert "package" in result["summary_text"].lower()

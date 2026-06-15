@@ -324,6 +324,59 @@ class TestWriteIfMissing:
 # ---------------------------------------------------------------
 
 
+class TestMcpBlock:
+    """Schema validation for the optional `mcp:` block."""
+
+    BASE = {"project": "p", "environments": ["DEV"]}
+
+    def _err(self, mcp_block, path_prefix="mcp"):
+        from td_release_packager.orchestrator.ships_yaml import validate
+
+        errors = validate({**self.BASE, "mcp": mcp_block})
+        return [e for e in errors if e.path.startswith(path_prefix)]
+
+    def test_empty_block_is_valid(self):
+        assert self._err({}) == []
+
+    def test_full_valid_block(self):
+        assert (
+            self._err(
+                {
+                    "transport": "streamable-http",
+                    "host": "0.0.0.0",
+                    "port": 8000,
+                    "path": "/mcp",
+                    "stateless": True,
+                    "log_level": "INFO",
+                }
+            )
+            == []
+        )
+
+    def test_must_be_mapping(self):
+        errs = self._err("not-a-mapping")
+        assert any(e.path == "mcp" for e in errs)
+
+    def test_unknown_transport_rejected(self):
+        errs = self._err({"transport": "websocket"})
+        assert any("transport" in e.path for e in errs)
+
+    def test_port_out_of_range_rejected(self):
+        assert self._err({"port": 0})
+        assert self._err({"port": 70000})
+
+    def test_port_must_be_int_not_bool(self):
+        assert self._err({"port": True})
+
+    def test_path_must_start_with_slash(self):
+        assert self._err({"path": "mcp"})
+        assert self._err({"path": ""})
+
+    def test_log_level_vocabulary(self):
+        assert self._err({"log_level": "VERBOSE"})
+        assert not self._err({"log_level": "DEBUG"})
+
+
 class TestModuleInvariants:
     def test_token_pattern_is_built_in(self):
         assert TOKEN_PATTERN == "{{TOKEN}}"
