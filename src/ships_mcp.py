@@ -142,6 +142,32 @@ def ships_scaffold(
 # ---------------------------------------------------------------
 
 
+def _parse_prefix_token_kv(spec: Optional[str]) -> Optional[dict]:
+    """Parse a ``"SOURCE=TOKEN[,SOURCE2=TOKEN2,...]"`` spec into a dict.
+
+    Returns ``None`` for an empty / whitespace-only input.  Raises
+    :class:`ValueError` with a friendly message on any malformed
+    entry so the MCP tool returns ``success=False`` instead of
+    silently tokenising nothing.
+    """
+    if not spec or not spec.strip():
+        return None
+    mapping: dict = {}
+    for raw in spec.split(","):
+        entry = raw.strip()
+        if not entry:
+            continue
+        if "=" not in entry:
+            raise ValueError(f"prefix_token expects SOURCE=TOKEN, got {entry!r}")
+        src, _, tok = entry.partition("=")
+        src = src.strip()
+        tok = tok.strip()
+        if not src or not tok:
+            raise ValueError(f"prefix_token has empty source or token: {entry!r}")
+        mapping[src] = tok
+    return mapping or None
+
+
 @mcp.tool()
 def ships_harvest(
     source: str,
@@ -150,6 +176,7 @@ def ships_harvest(
     auto_tokenise: bool = False,
     env_prefix: Optional[str] = None,
     remove_view_type_affixes: bool = False,
+    prefix_token: Optional[str] = None,
 ) -> dict:
     """Harvest raw DDL files from a source directory into a SHIPS project.
 
@@ -168,10 +195,20 @@ def ships_harvest(
         remove_view_type_affixes: Remove redundant view object affixes
                                   (leading v_ and trailing _v) and update
                                   qualified references during harvest.
+        prefix_token: Identifier-aware prefix tokenisation (Model B, issue #309).
+                      One or more ``SOURCE=TOKEN`` pairs separated by commas.
+                      Rewrites the database-name PREFIX to ``{{TOKEN}}`` while
+                      preserving the structural remainder.  E.g.
+                      ``"CallCentre=PREFIX"`` turns ``CallCentre_DOM_STD_T``
+                      into ``{{PREFIX}}_DOM_STD_T`` and a standalone
+                      ``CallCentre`` into ``{{PREFIX}}``.  Distinct from
+                      ``token_map`` (literal substring) and ``env_prefix``
+                      (strip + per-database).
 
     Returns:
         {"classified": int, "unclassified": int, "files_placed": int,
-         "token_candidates": int, "warnings": list, "unclassified_files": list}
+         "token_candidates": int, "warnings": list, "unclassified_files": list,
+         "prefix_token_substitutions": int, "prefix_token_files": int}
     """
     try:
         from td_release_packager.ingest import ingest_directory
@@ -180,6 +217,7 @@ def ships_harvest(
             generate_token_map,
         )
 
+        prefix_tokens = _parse_prefix_token_kv(prefix_token)
         legacy_migration_rules = _load_legacy_migration_rules(project)
         apply_tokens = None
         if token_map:
@@ -192,6 +230,7 @@ def ships_harvest(
                 apply_tokens=None,
                 legacy_migration_rules=legacy_migration_rules,
                 remove_view_type_affixes=remove_view_type_affixes,
+                prefix_tokens=prefix_tokens,
             )
             if detect.token_candidates:
                 apply_tokens = generate_token_map(detect.token_candidates, env_prefix)
@@ -203,6 +242,7 @@ def ships_harvest(
             apply_tokens=apply_tokens,
             legacy_migration_rules=legacy_migration_rules,
             remove_view_type_affixes=remove_view_type_affixes,
+            prefix_tokens=prefix_tokens,
         )
         return {
             "success": True,
@@ -216,6 +256,8 @@ def ships_harvest(
             "placement_index_dir": result.placement_index_dir,
             "placement_index_files": result.placement_index_files,
             "view_type_affix_renames": result.view_type_affix_renames,
+            "prefix_token_substitutions": result.prefix_token_substitutions,
+            "prefix_token_files": result.prefix_token_files,
             "warnings": result.warnings,
             "classification_warnings": result.classification_warnings,
             "unclassified_files": result.unclassified_files,
@@ -496,6 +538,7 @@ def ships_process(
     name: Optional[str] = None,
     skip_generate: bool = False,
     strict: bool = False,
+    prefix_token: Optional[str] = None,
 ) -> dict:
     """Run the full SHIPS pipeline: harvest → generate → inspect → analyse → [package].
 
@@ -513,6 +556,9 @@ def ships_process(
         name: Package name (enables package stage).
         skip_generate: Skip the view-layer generate stage.
         strict: Abort on first stage error (developer mode: continue).
+        prefix_token: Identifier-aware prefix tokenisation (Model B, issue #309).
+                      Same shape as on ``ships_harvest`` — see its docstring.
+                      E.g. ``"CallCentre=PREFIX"``.
 
     Returns:
         {"stages": {"harvest": {...}, "inspect": {...}, ...}, "label": str}
@@ -528,6 +574,7 @@ def ships_process(
             token_map=token_map,
             auto_tokenise=auto_tokenise,
             env_prefix=env_prefix,
+            prefix_token=prefix_token,
         )
         stages["harvest"] = r
         if not r.get("success") and strict:

@@ -238,6 +238,9 @@ class IngestResult:
     token_candidates: Dict[str, List[str]] = field(default_factory=dict)
     files_placed: List[Tuple[str, str, str]] = field(default_factory=list)
     multiset_injected: int = 0
+    #: Identifier-aware prefix tokenisation tallies (issue #309).
+    prefix_token_substitutions: int = 0
+    prefix_token_files: int = 0
     warnings: List[str] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
     unclassified_files: List[str] = field(default_factory=list)
@@ -285,6 +288,7 @@ def ingest_directory(
     clean_payload: bool = True,
     legacy_migration_rules: Optional[List[MigrationRule]] = None,
     remove_view_type_affixes: bool = False,
+    prefix_tokens: Optional[Dict[str, str]] = None,
 ) -> IngestResult:
     """
     Ingest raw DDL files from a source directory into a project.
@@ -309,6 +313,7 @@ def ingest_directory(
             clean_payload=clean_payload,
             legacy_migration_rules=legacy_migration_rules,
             remove_view_type_affixes=remove_view_type_affixes,
+            prefix_tokens=prefix_tokens,
         )
         _span.set_attribute("ships.files_total", result.total_files)
         _span.set_attribute("ships.files_classified", result.classified)
@@ -328,6 +333,7 @@ def _ingest_directory_impl(
     clean_payload: bool = True,
     legacy_migration_rules: Optional[List[MigrationRule]] = None,
     remove_view_type_affixes: bool = False,
+    prefix_tokens: Optional[Dict[str, str]] = None,
 ) -> IngestResult:
     """
     Ingest raw DDL files from a source directory into a project.
@@ -494,6 +500,22 @@ def _ingest_directory_impl(
                 raw_content = _apply_view_type_affix_renames(
                     raw_content, view_affix_renames
                 )
+
+            # -- Apply prefix tokenisation (Model B, issue #309) --
+            # Rewrite a database-name prefix to a single {{TOKEN}} while
+            # preserving the structural remainder.  Runs BEFORE statement
+            # splitting and literal-token substitution so every downstream
+            # code path (single-statement, multi-target DML, ordered SQL)
+            # sees pre-tokenised content.
+            if prefix_tokens:
+                from td_release_packager.token_engine import tokenise_prefixes
+
+                raw_content, _pfx_total, _pfx_per = tokenise_prefixes(
+                    raw_content, prefix_tokens
+                )
+                if _pfx_total:
+                    result.prefix_token_substitutions += _pfx_total
+                    result.prefix_token_files += 1
 
             # -- Split multi-statement files into individual DDL --
             # A file like create_databases.sql with 5 CREATE DATABASE

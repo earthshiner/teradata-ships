@@ -130,6 +130,58 @@ class TestShipsHarvest:
         result = ships_harvest(source="/nonexistent", project=str(project))
         assert not result["success"]
 
+    def test_prefix_token_rewrites_database_prefix(self, tmp_path):
+        """End-to-end check that --prefix-token / prefix_token actually
+        rewrites the database-name prefix in placed payload files,
+        without ever producing a malformed ``{{PREFIX_*}}`` token.
+        See issue #309 (Model B)."""
+        from ships_mcp import ships_harvest
+
+        project = _make_project(tmp_path)
+        source = tmp_path / "src"
+        source.mkdir()
+        _write(
+            source / "CallCentre_DOM_STD_T.tbl",
+            "CREATE MULTISET TABLE CallCentre_DOM_STD_T.Call "
+            "(Id INTEGER) PRIMARY INDEX (Id);\n",
+        )
+
+        result = ships_harvest(
+            source=str(source),
+            project=str(project),
+            prefix_token="CallCentre=PREFIX",
+        )
+        assert result["success"], result
+        assert result["prefix_token_substitutions"] >= 1
+        assert result["prefix_token_files"] >= 1
+
+        # The placed file must contain {{PREFIX}}_DOM_STD_T, NOT the
+        # original literal, and NEVER the malformed {{PREFIX_T}}.
+        from pathlib import Path
+
+        placed = list(Path(project).rglob("*.tbl"))
+        assert placed, "harvest placed no .tbl file"
+        contents = "\n".join(p.read_text(encoding="utf-8") for p in placed)
+        assert "{{PREFIX}}_DOM_STD_T" in contents
+        assert "{{PREFIX_" not in contents
+        assert "CallCentre_DOM_STD_T" not in contents
+
+    def test_prefix_token_malformed_kv_returns_error(self, tmp_path):
+        from ships_mcp import ships_harvest
+
+        project = _make_project(tmp_path)
+        source = tmp_path / "src"
+        source.mkdir()
+        _write(source / "Dev.T.tbl", "CREATE MULTISET TABLE Dev.T (Id INTEGER);\n")
+
+        result = ships_harvest(
+            source=str(source),
+            project=str(project),
+            prefix_token="not_a_kv_pair",
+        )
+        assert not result["success"]
+        assert "SOURCE=TOKEN" in result["error"]
+
 
 # ---------------------------------------------------------------
 # ships_inspect
