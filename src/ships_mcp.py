@@ -59,7 +59,12 @@ import json
 import logging
 import os
 import re
+import subprocess
+import sys
 import tempfile
+import time
+import uuid
+from pathlib import Path
 from typing import Optional
 
 from mcp.server.fastmcp import Context, FastMCP
@@ -92,6 +97,211 @@ def _load_legacy_migration_rules(project: str):
     with open(migration_path, encoding="utf-8") as f:
         rules, _skipped = parse_migration_sed(f.read())
     return rules
+
+
+# ---------------------------------------------------------------------
+# Fire-and-forget subprocess dispatch (issue #319)
+# ---------------------------------------------------------------------
+#
+# Claude Desktop enforces a hard ~4-minute deadline on every MCP tool
+# call.  The heartbeat-based off-loop helper added in #302 keeps most
+# clients alive past that window via ``ctx.report_progress``, but
+# Claude Desktop's particular implementation honours the deadline
+# regardless of progress notifications.  On a CallCentre-scale
+# payload, ``ships_package`` exceeds the deadline every time, the MCP
+# transport is killed mid-run, and the packager leaves no result on
+# disc.
+#
+# For the four heavy tools (harvest, inspect, package, process) we
+# now spawn ``td_release_packager`` as a detached subprocess.  The
+# tool returns immediately with a ``run_id``; the caller polls via
+# :func:`ships_poll_build` until ``status=done`` then evaluates
+# trust / archive metadata via the existing ``ships_verify`` and
+# ``ships_describe_package`` tools.
+#
+# Sentinel files under ``<project>/.ships/runs/`` are the only IPC
+# mechanism — the dispatch tool never inherits a process handle.
+# This also means the operator can stop / restart the MCP server
+# without affecting in-flight builds.
+
+
+#: Subprocess existence-check access right used on Windows.  The value
+#: ``0x1000`` is ``PROCESS_QUERY_LIMITED_INFORMATION`` — enough to
+#: confirm "the PID still maps to a live process" without requiring
+#: PROCESS_QUERY_INFORMATION (which is unavailable across user
+#: boundaries).
+_WIN_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    """Write ``payload`` to ``path`` atomically via a sibling tempfile.
+
+    Writes ``<path>.tmp`` then renames into place.  Callers that read
+    the sentinel concurrently always see either the previous content
+    or the new content, never a half-written file.
+
+    :param path:    Destination path (typically a ``run_<id>.json``
+                    sentinel file).
+    :param payload: JSON-serialisable mapping.
+    """
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _launch_background(module: str, args: list, project_dir: str) -> dict:
+    """Spawn ``python -m <module> <args>`` as a detached subprocess.
+
+    The process writes stdout / stderr to a per-run log file and a
+    sentinel JSON file under ``<project>/.ships/runs/``.  The sentinel
+    is the rendezvous point for :func:`ships_poll_build` — nothing
+    polls the process handle directly, so the MCP server can be
+    restarted mid-build without losing track of in-flight work.
+
+    On Windows, ``CREATE_NO_WINDOW | DETACHED_PROCESS`` ensures no
+    console flashes up and the child does not inherit the MCP
+    server's console handle.  On POSIX, ``start_new_session=True``
+    promotes the child to its own session leader so it survives the
+    parent's exit.
+
+    :param module:      Python module string (e.g.
+                        ``"td_release_packager"``).
+    :param args:        CLI argument list passed after ``-m <module>``.
+    :param project_dir: Absolute path to the SHIPS project root.
+                        ``<project_dir>/.ships/runs/`` is created
+                        if absent.
+    :returns:           Dispatch receipt:
+                        ``{"dispatched": True, "run_id": str,
+                          "pid": int, "log_path": str,
+                          "sentinel": str, "poll_hint": str}``.
+    """
+    ships_dir = Path(project_dir) / ".ships" / "runs"
+    ships_dir.mkdir(parents=True, exist_ok=True)
+
+    run_id = str(uuid.uuid4())[:8]
+    log_path = ships_dir / f"run_{run_id}.log"
+    sentinel = ships_dir / f"run_{run_id}.json"
+
+    # Initial sentinel — pid=None until subprocess.Popen returns.
+    # Callers that poll between the sentinel write and the PID
+    # rewrite see ``status=running`` + ``alive=None`` and retry.
+    _atomic_write_json(
+        sentinel,
+        {
+            "run_id": run_id,
+            "status": "running",
+            "command": " ".join(args),
+            "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "pid": None,
+            "log_path": str(log_path),
+        },
+    )
+
+    cmd = [sys.executable, "-m", module, *args]
+
+    # Encoding-tolerant log file: packager output may include
+    # non-UTF-8 bytes from third-party tools or odd DDL comments;
+    # ``errors="replace"`` keeps the write stream alive.
+    log_handle = open(log_path, "w", encoding="utf-8", errors="replace")
+
+    try:
+        if sys.platform == "win32":
+            creation_flags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+            proc = subprocess.Popen(
+                cmd,
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                creationflags=creation_flags,
+                close_fds=True,
+            )
+        else:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+                close_fds=True,
+            )
+    except OSError as exc:
+        log_handle.close()
+        # Rewrite the sentinel as failed so polling immediately sees
+        # the error rather than waiting on a process that never started.
+        _atomic_write_json(
+            sentinel,
+            {
+                "run_id": run_id,
+                "status": "failed",
+                "command": " ".join(args),
+                "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "pid": None,
+                "log_path": str(log_path),
+                "error": f"subprocess.Popen failed: {exc!r}",
+            },
+        )
+        raise
+
+    # Rewrite sentinel with the real PID.  Log handle stays open in
+    # this process so the child can keep writing; closing it here is
+    # harmless on Windows (the child inherits an OS-level handle).
+    _atomic_write_json(
+        sentinel,
+        {
+            "run_id": run_id,
+            "status": "running",
+            "command": " ".join(args),
+            "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "pid": proc.pid,
+            "log_path": str(log_path),
+        },
+    )
+
+    return {
+        "dispatched": True,
+        "run_id": run_id,
+        "pid": proc.pid,
+        "log_path": str(log_path),
+        "sentinel": str(sentinel),
+        "poll_hint": ("Call ships_poll_build with this run_id to check completion."),
+    }
+
+
+def _is_process_alive(pid: int) -> Optional[bool]:
+    """Return whether ``pid`` maps to a live process.
+
+    Cross-platform existence check used by :func:`ships_poll_build`.
+    ``None`` is reserved for "couldn't determine" cases (no PID yet
+    recorded, or a permission error opening the process handle on
+    Windows).
+
+    :param pid: Process identifier from the sentinel file.
+    :returns:   ``True`` (alive), ``False`` (gone), or ``None``
+                (indeterminate).
+    """
+    if pid is None or pid <= 0:
+        return None
+
+    if sys.platform == "win32":
+        import ctypes
+
+        handle = ctypes.windll.kernel32.OpenProcess(
+            _WIN_PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid)
+        )
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return True
+        return False
+
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # Process exists but is owned by a different user; for our
+        # purposes that's still "alive".
+        return True
+    except OSError:
+        return None
 
 
 # ---------------------------------------------------------------
@@ -852,19 +1062,24 @@ async def ships_harvest(
     prefix_token: Optional[str] = None,
     ctx: Optional[Context] = None,
 ) -> dict:
-    """Off-loop wrapper for :func:`_ships_harvest_impl`."""
-    report = ctx.report_progress if ctx is not None else None
-    return await run_blocking_with_heartbeat(
-        _ships_harvest_impl,
-        source=source,
-        project=project,
-        token_map=token_map,
-        auto_tokenise=auto_tokenise,
-        env_prefix=env_prefix,
-        remove_view_type_affixes=remove_view_type_affixes,
-        prefix_token=prefix_token,
-        report=report,
-    )
+    """Dispatch the harvest stage as a detached subprocess (#319).
+
+    Returns immediately with a dispatch receipt containing a
+    ``run_id``.  Poll for completion with :func:`ships_poll_build`.
+    See ``_ships_harvest_impl`` for the underlying behaviour.
+    """
+    args = ["harvest", "--source", source, "--project", project]
+    if token_map:
+        args += ["--token-map", token_map]
+    if auto_tokenise:
+        args.append("--auto-tokenise")
+    if env_prefix:
+        args += ["--env-prefix", env_prefix]
+    if prefix_token:
+        args += ["--prefix-token", prefix_token]
+    if remove_view_type_affixes:
+        args.append("--remove-view-type-affixes")
+    return _launch_background("td_release_packager", args, project)
 
 
 @mcp.tool(name="ships_generate")
@@ -893,16 +1108,22 @@ async def ships_inspect(
     skip_grants: bool = False,
     ctx: Optional[Context] = None,
 ) -> dict:
-    """Off-loop wrapper for :func:`_ships_inspect_impl`."""
-    report = ctx.report_progress if ctx is not None else None
-    return await run_blocking_with_heartbeat(
-        _ships_inspect_impl,
-        project=project,
-        config=config,
-        strict=strict,
-        skip_grants=skip_grants,
-        report=report,
-    )
+    """Dispatch the inspect stage as a detached subprocess (#319).
+
+    Returns immediately with a dispatch receipt containing a
+    ``run_id``.  Poll for completion with :func:`ships_poll_build`.
+    The actual lint findings land in
+    ``<project>/ships.decisions.json`` and the rendered HTML report
+    when the run finishes.
+    """
+    args = ["inspect", "--project", project]
+    if config:
+        args += ["--config", config]
+    if strict:
+        args.append("--strict")
+    if skip_grants:
+        args.append("--skip-grants")
+    return _launch_background("td_release_packager", args, project)
 
 
 @mcp.tool(name="ships_analyse")
@@ -933,20 +1154,34 @@ async def ships_package(
     commit: str = "",
     ctx: Optional[Context] = None,
 ) -> dict:
-    """Off-loop wrapper for :func:`_ships_package_impl`."""
-    report = ctx.report_progress if ctx is not None else None
-    return await run_blocking_with_heartbeat(
-        _ships_package_impl,
-        project=project,
-        env=env,
-        name=name,
-        env_config=env_config,
-        output=output,
-        author=author,
-        description=description,
-        commit=commit,
-        report=report,
-    )
+    """Dispatch the package stage as a detached subprocess (#319).
+
+    Returns immediately with a dispatch receipt containing a
+    ``run_id``.  Poll for completion with :func:`ships_poll_build`,
+    then call :func:`ships_verify` for the trust evaluation and
+    :func:`ships_describe_package` for the structured archive
+    summary.
+    """
+    args = [
+        "package",
+        "--project",
+        project,
+        "--env",
+        env,
+        "--name",
+        name,
+        "--env-config",
+        env_config,
+    ]
+    if output:
+        args += ["--output", output]
+    if author:
+        args += ["--author", author]
+    if description:
+        args += ["--description", description]
+    if commit:
+        args += ["--commit", commit]
+    return _launch_background("td_release_packager", args, project)
 
 
 @mcp.tool(name="ships_process")
@@ -964,23 +1199,36 @@ async def ships_process(
     prefix_token: Optional[str] = None,
     ctx: Optional[Context] = None,
 ) -> dict:
-    """Off-loop wrapper for :func:`_ships_process_impl`."""
-    report = ctx.report_progress if ctx is not None else None
-    return await run_blocking_with_heartbeat(
-        _ships_process_impl,
-        project=project,
-        source=source,
-        token_map=token_map,
-        auto_tokenise=auto_tokenise,
-        env_prefix=env_prefix,
-        env=env,
-        env_config=env_config,
-        name=name,
-        skip_generate=skip_generate,
-        strict=strict,
-        prefix_token=prefix_token,
-        report=report,
-    )
+    """Dispatch the full pipeline as a detached subprocess (#319).
+
+    ``process`` orchestrates Scaffold -> Harvest -> Inspect ->
+    Analyse -> Package and almost always exceeds the MCP client's
+    deadline; this tool always fires it off the loop.  Returns
+    immediately with a dispatch receipt; poll with
+    :func:`ships_poll_build`.
+    """
+    args = ["process", "--project", project]
+    if source:
+        args += ["--source", source]
+    if token_map:
+        args += ["--token-map", token_map]
+    if auto_tokenise:
+        args.append("--auto-tokenise")
+    if env_prefix:
+        args += ["--env-prefix", env_prefix]
+    if prefix_token:
+        args += ["--prefix-token", prefix_token]
+    if env:
+        args += ["--env", env]
+    if env_config:
+        args += ["--env-config", env_config]
+    if name:
+        args += ["--name", name]
+    if skip_generate:
+        args.append("--skip-generate")
+    if strict:
+        args.append("--strict")
+    return _launch_background("td_release_packager", args, project)
 
 
 @mcp.tool(name="ships_deploy")
@@ -1062,6 +1310,158 @@ async def ships_rollback(
 # ---------------------------------------------------------------
 # Read-only consumers
 # ---------------------------------------------------------------
+
+
+#: Substrings whose presence in the log tail indicates the run
+#: failed.  Matched case-insensitively against the last 40 lines of
+#: ``run_<id>.log``.  ``ships_poll_build`` returns ``status=failed``
+#: when the process is gone AND the log contains any of these.
+_FAILURE_SIGNALS = ("error", "traceback", "failed", "exception")
+
+
+@mcp.tool()
+def ships_poll_build(project: str, run_id: Optional[str] = None) -> dict:
+    """Check completion of a dispatched harvest / inspect / package /
+    process run (#319).
+
+    Reads the sentinel JSON written by :func:`_launch_background`,
+    checks whether the recorded PID is still alive, and returns a
+    status plus the tail of the run log.  This is a lightweight
+    pre-check — call :func:`ships_verify` once status is ``done`` to
+    confirm the trust label and :func:`ships_describe_package` for
+    the structured archive summary.
+
+    :param project: SHIPS project directory.
+    :param run_id:  Specific run identifier returned by the
+                    dispatching tool.  When ``None``, the most
+                    recently modified sentinel under
+                    ``<project>/.ships/runs/`` is selected.
+    :returns:       ``{"run_id": str|None, "status": str,
+                       "pid": int|None, "alive": bool|None,
+                       "command": str|None, "started_at": str|None,
+                       "log_path": str|None, "log_tail": str,
+                       "next_step": str}``.
+
+                    ``status`` is one of:
+
+                    * ``"running"`` — process still alive.
+                    * ``"done"``    — process gone, log shows no
+                                       failure signals.
+                    * ``"failed"``  — process gone, log contains
+                                       one of :data:`_FAILURE_SIGNALS`.
+                    * ``"unknown"`` — no sentinel found, PID not
+                                       yet recorded, or alive-check
+                                       indeterminate.
+    """
+    ships_dir = Path(project) / ".ships" / "runs"
+
+    sentinel_path: Optional[Path] = None
+    if run_id:
+        sentinel_path = ships_dir / f"run_{run_id}.json"
+    else:
+        if ships_dir.is_dir():
+            sentinels = sorted(
+                ships_dir.glob("run_*.json"),
+                key=lambda p: p.stat().st_mtime,
+            )
+            if sentinels:
+                sentinel_path = sentinels[-1]
+        if sentinel_path is None:
+            return {
+                "run_id": None,
+                "status": "unknown",
+                "pid": None,
+                "alive": None,
+                "command": None,
+                "started_at": None,
+                "log_path": None,
+                "log_tail": "",
+                "next_step": (
+                    f"No run sentinels found in {ships_dir}. "
+                    "Call ships_harvest / ships_inspect / ships_package / "
+                    "ships_process first."
+                ),
+            }
+
+    if not sentinel_path.exists():
+        return {
+            "run_id": run_id,
+            "status": "unknown",
+            "pid": None,
+            "alive": None,
+            "command": None,
+            "started_at": None,
+            "log_path": None,
+            "log_tail": "",
+            "next_step": (
+                f"Sentinel not found at {sentinel_path}. "
+                "Verify the run_id returned by the dispatch call."
+            ),
+        }
+
+    try:
+        sentinel = json.loads(sentinel_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {
+            "run_id": run_id,
+            "status": "unknown",
+            "pid": None,
+            "alive": None,
+            "command": None,
+            "started_at": None,
+            "log_path": str(sentinel_path),
+            "log_tail": "",
+            "next_step": f"Sentinel unreadable: {exc!r}.  Retry in a few seconds.",
+        }
+
+    pid = sentinel.get("pid")
+    log_path_raw = sentinel.get("log_path", "")
+    log_path = Path(log_path_raw) if log_path_raw else None
+
+    alive = _is_process_alive(pid) if pid else None
+
+    log_tail = ""
+    if log_path and log_path.exists():
+        try:
+            content = log_path.read_text(encoding="utf-8", errors="replace")
+            log_tail = "\n".join(content.splitlines()[-40:])
+        except OSError:
+            log_tail = ""
+
+    if alive is True:
+        status = "running"
+        next_step = "Call ships_poll_build again in 30-60 seconds."
+    elif alive is False:
+        log_lower = log_tail.lower()
+        if any(signal in log_lower for signal in _FAILURE_SIGNALS):
+            status = "failed"
+            next_step = (
+                "Review log_tail for errors.  Fix the issue and re-run the "
+                "dispatch call."
+            )
+        else:
+            status = "done"
+            next_step = (
+                "Call ships_verify to confirm trust label, then "
+                "ships_describe_package for the structured summary."
+            )
+    else:
+        # alive is None — sentinel exists but PID not yet recorded,
+        # or alive check was indeterminate.
+        status = "unknown"
+        next_step = "PID not yet recorded.  Retry in a few seconds."
+
+    return {
+        "run_id": sentinel.get("run_id"),
+        "status": status,
+        "pid": pid,
+        "alive": alive,
+        "command": sentinel.get("command"),
+        "started_at": sentinel.get("started_at"),
+        "log_path": str(log_path) if log_path else None,
+        "log_tail": log_tail,
+        "next_step": next_step,
+    }
 
 
 @mcp.tool()
