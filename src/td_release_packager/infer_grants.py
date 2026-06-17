@@ -70,19 +70,47 @@ SCANNABLE_EXTENSIONS = {"viw", "spl", "mcr", "trg", "fnc"}
 
 SQL_OBJECT_NAME_PATTERN = r'(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_]*)'
 
-# Regex to match tokenised database references: {{TOKEN}}.ObjectName
-# Captures the full token including braces and the object name
+# Database-reference building block, used by every reference regex in
+# this module. A database reference can be:
+#   * a whole-name token              : ``{{DOM_DATABASE_V}}``
+#   * a literal database name         : ``CallCentre_DOM_BUS_V``
+#   * a prefix-token + literal suffix : ``{{DB_PREFIX}}_DOM_BUS_V``
+#   * a literal prefix + token suffix : ``CallCentre_{{ENV}}``
+# The atom loop after the first atom lets a reference start with
+# either a token or a literal and continue with any mix of further
+# tokens and word-character runs. Without it the regex truncates a
+# prefix-token reference at the closing ``}}`` and inference silently
+# misses every cross-database reference in a prefix-tokenised payload
+# (issue #309 — same root cause as the harvest filename collapse).
+#
+# The token branch capture INCLUDES the ``{{...}}`` braces and any
+# literal suffix, so callers can use it verbatim. The literal branch
+# captures the bare name. ``extract_db_ref`` distinguishes which
+# branch fired and returns the reference in canonical form.
+_DB_TOKEN_PART = (
+    r"\{\{[A-Z][A-Z0-9_]*\}\}"
+    r"(?:\w+|\{\{[A-Z][A-Z0-9_]*\}\})*"
+)
+_DB_LITERAL_PART = (
+    r"[A-Z][A-Z0-9_]{1,127}"
+    r"(?:\{\{[A-Z][A-Z0-9_]*\}\}|\w+)*"
+)
+_DB_REF_GROUPED = rf"(?:({_DB_TOKEN_PART})|({_DB_LITERAL_PART}))"
+
+# Regex to match tokenised database references: {{TOKEN}}[.suffix].ObjectName
+# Group 1 captures the full database reference INCLUDING braces.
 RE_TOKEN_REF = re.compile(
-    r"\{\{([A-Z][A-Z0-9_]*)\}\}"  # group 1: token name (inside braces)
+    rf"({_DB_TOKEN_PART})"  # group 1: full tokenised database reference
     r"\s*\.\s*"  # dot separator (optional whitespace)
     rf"({SQL_OBJECT_NAME_PATTERN})",  # group 2: object name
     re.IGNORECASE,
 )
 
 # Regex to match non-tokenised fully-qualified references: Database.ObjectName
-# Only matches when the database name is NOT a token (no braces)
+# Only matches when the database name does NOT contain any token braces.
 RE_LITERAL_REF = re.compile(
-    r"(?<!\{)\b([A-Z][A-Z0-9_]{1,127})"  # group 1: database name
+    r"(?<!\{)\b"
+    rf"([A-Z][A-Z0-9_]{{1,127}})"  # group 1: literal database name
     r"\s*\.\s*"  # dot separator
     rf"({SQL_OBJECT_NAME_PATTERN})",  # group 2: object name
     re.IGNORECASE,
@@ -96,50 +124,40 @@ RE_LITERAL_REF = re.compile(
 
 # INSERT INTO {{DB}}.Table or INSERT {{DB}}.Table
 RE_INSERT_TARGET = re.compile(
-    r"\bINSERT\s+(?:INTO\s+)?"
-    r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
+    rf"\bINSERT\s+(?:INTO\s+)?{_DB_REF_GROUPED}"
     rf"\s*\.\s*({SQL_OBJECT_NAME_PATTERN})",
     re.IGNORECASE,
 )
 
 # UPDATE {{DB}}.Table (the target — not the FROM source)
 RE_UPDATE_TARGET = re.compile(
-    r"\bUPDATE\s+"
-    r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
-    rf"\s*\.\s*({SQL_OBJECT_NAME_PATTERN})",
+    rf"\bUPDATE\s+{_DB_REF_GROUPED}\s*\.\s*({SQL_OBJECT_NAME_PATTERN})",
     re.IGNORECASE,
 )
 
 # DELETE [FROM] {{DB}}.Table
 # Careful: DELETE FROM is the target, not a read source
 RE_DELETE_TARGET = re.compile(
-    r"\bDELETE\s+(?:FROM\s+)?"
-    r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
+    rf"\bDELETE\s+(?:FROM\s+)?{_DB_REF_GROUPED}"
     rf"\s*\.\s*({SQL_OBJECT_NAME_PATTERN})",
     re.IGNORECASE,
 )
 
 # MERGE INTO {{DB}}.Table
 RE_MERGE_TARGET = re.compile(
-    r"\bMERGE\s+INTO\s+"
-    r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
-    rf"\s*\.\s*({SQL_OBJECT_NAME_PATTERN})",
+    rf"\bMERGE\s+INTO\s+{_DB_REF_GROUPED}\s*\.\s*({SQL_OBJECT_NAME_PATTERN})",
     re.IGNORECASE,
 )
 
 # CALL {{DB}}.Procedure
 RE_CALL_TARGET = re.compile(
-    r"\bCALL\s+"
-    r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
-    rf"\s*\.\s*({SQL_OBJECT_NAME_PATTERN})",
+    rf"\bCALL\s+{_DB_REF_GROUPED}\s*\.\s*({SQL_OBJECT_NAME_PATTERN})",
     re.IGNORECASE,
 )
 
 # EXEC[UTE] {{DB}}.Macro
 RE_EXEC_TARGET = re.compile(
-    r"\bEXEC(?:UTE)?\s+"
-    r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
-    rf"\s*\.\s*({SQL_OBJECT_NAME_PATTERN})",
+    rf"\bEXEC(?:UTE)?\s+{_DB_REF_GROUPED}\s*\.\s*({SQL_OBJECT_NAME_PATTERN})",
     re.IGNORECASE,
 )
 
@@ -148,9 +166,7 @@ RE_CREATE_STMT = re.compile(
     r"\b(?:CREATE|REPLACE)\s+"
     r"(VIEW|PROCEDURE|MACRO|FUNCTION|TRIGGER|(?:MULTISET\s+)?TABLE"
     r"|SET\s+TABLE|VOLATILE\s+TABLE)"
-    r"\s+"
-    r"(?:\{\{([A-Z][A-Z0-9_]*)\}\}|([A-Z][A-Z0-9_]{1,127}))"
-    rf"\s*\.\s*({SQL_OBJECT_NAME_PATTERN})",
+    rf"\s+{_DB_REF_GROUPED}\s*\.\s*({SQL_OBJECT_NAME_PATTERN})",
     re.IGNORECASE,
 )
 
@@ -322,7 +338,10 @@ def extract_db_ref(
     token = match.group(token_group)
     literal = match.group(literal_group)
     if token:
-        return f"{{{{{token}}}}}"
+        # The token branch already captures the FULL reference including
+        # the ``{{...}}`` braces and any literal prefix/suffix (e.g.
+        # ``{{DB_PREFIX}}_DOM_BUS_V``), so it is returned verbatim.
+        return token
     return literal
 
 
@@ -505,8 +524,10 @@ def find_all_db_references(sql: str, tokens_only: bool = True) -> Set[str]:
     refs = set()
 
     # --- Tokenised references (always matched) ---
+    # Group 1 already captures the full tokenised reference including
+    # any prefix-token suffix (e.g. ``{{DB_PREFIX}}_DOM_BUS_V``).
     for match in RE_TOKEN_REF.finditer(sql):
-        refs.add(f"{{{{{match.group(1)}}}}}")
+        refs.add(match.group(1))
 
     # --- Literal references (only when tokens_only=False) ---
     if not tokens_only:
@@ -540,7 +561,7 @@ def find_all_object_references(
     refs: Set[Tuple[str, str]] = set()
 
     for match in RE_TOKEN_REF.finditer(sql):
-        refs.add((f"{{{{{match.group(1)}}}}}", match.group(2)))
+        refs.add((match.group(1), match.group(2)))
 
     if tokens_only:
         return refs

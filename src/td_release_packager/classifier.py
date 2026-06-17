@@ -206,10 +206,14 @@ EXTENSION_TO_EXPECTED: Dict[str, Optional[Set[str]]] = {
     ".sjr": {"JAR"},
     ".jar": {"JAR"},  # legacy alias
     ".cmt": {"COMMENT"},
+    # Reflection-style long-form alias for COMMENT files.
+    ".cmnts": {"COMMENT"},
     ".stt": {"STATISTICS"},
     ".sto": {"SCRIPT_TABLE_OPERATOR"},
     ".dcl": {"GRANT", "REVOKE"},
     ".grt": {"GRANT", "REVOKE"},
+    # Reflection-style long-form alias for DCL files.
+    ".grants": {"GRANT", "REVOKE"},
     ".map": {"MAP"},
     ".rol": {"ROLE"},
     ".prf": {"PROFILE"},

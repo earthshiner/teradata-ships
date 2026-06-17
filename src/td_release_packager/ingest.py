@@ -78,7 +78,22 @@ def _has_multi_table_dml_marker(content: str) -> bool:
 # -- Qualified name extraction patterns --
 # Matches both literal names (Database.Object) and tokenised names
 # ({{TOKEN}}.Object or {{TOKEN}}) in DDL statements.
-_NAME_PART = r'(?:\{\{[A-Z][A-Z0-9_]*\}\}|"?[A-Za-z_]\w*"?)'
+# A qualified-name segment may be a bare identifier, a quoted
+# identifier, a whole-name token like ``{{DB}}``, OR — for
+# prefix-token tokenisation (#309) — a token concatenated with a
+# literal suffix such as ``{{DB_PREFIX}}_DOM_STD_T``. The atom
+# loop after the first atom permits any mix of further tokens and
+# word-character runs so a segment can start with a token and
+# carry on with literal characters (or vice versa). Without this
+# the extractor matches only the leading ``{{TOKEN}}``, drops the
+# suffix, and every object of a given type clobbers a single file
+# named ``{{TOKEN}}.<ext>``.
+_NAME_PART = (
+    r"(?:"
+    r'(?:\{\{[A-Z][A-Z0-9_]*\}\}|"?[A-Za-z_]\w*"?)'
+    r"(?:\{\{[A-Z][A-Z0-9_]*\}\}|\w+)*"
+    r")"
+)
 _QUALIFIED_NAME_RE = re.compile(
     r"^\s*(?:CREATE|REPLACE)\s+(?:MULTISET\s+|SET\s+)?"
     r"(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?"

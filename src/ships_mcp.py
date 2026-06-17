@@ -1316,7 +1316,28 @@ async def ships_rollback(
 #: failed.  Matched case-insensitively against the last 40 lines of
 #: ``run_<id>.log``.  ``ships_poll_build`` returns ``status=failed``
 #: when the process is gone AND the log contains any of these.
-_FAILURE_SIGNALS = ("error", "traceback", "failed", "exception")
+#: Substrings that indicate the dispatched subprocess died on a
+#: Python startup / import error before reaching the SHIPS code path.
+#: Matched case-insensitively. These complement the generic
+#: ``error``/``traceback`` markers so a partially-flushed traceback —
+#: or one that elided the ``Traceback`` banner — is still classified
+#: as ``failed`` rather than slipping through the trust gate as
+#: ``done``.
+_FAILURE_SIGNALS = (
+    "error",
+    "traceback",
+    "failed",
+    "exception",
+    # Import / startup failures from a misconfigured interpreter.
+    # Critical: when ``python -m td_release_packager`` cannot import
+    # the package (e.g. editable install missing from the MCP server's
+    # venv), the subprocess dies before any SHIPS code runs and the
+    # only output on the log is the import error itself.
+    "no module named",
+    "modulenotfounderror",
+    "importerror",
+    "syntaxerror",
+)
 
 
 @mcp.tool()
@@ -1433,11 +1454,24 @@ def ships_poll_build(project: str, run_id: Optional[str] = None) -> dict:
         next_step = "Call ships_poll_build again in 30-60 seconds."
     elif alive is False:
         log_lower = log_tail.lower()
-        if any(signal in log_lower for signal in _FAILURE_SIGNALS):
+        # A dead process with an empty log almost always means the
+        # interpreter died before any SHIPS code ran (e.g. import
+        # failure that wrote a traceback to stderr that never
+        # reached the log file). Treat empty + dead as ``failed``
+        # so the trust gate does not pass these through as ``done``.
+        log_empty = not log_tail.strip()
+        if log_empty or any(signal in log_lower for signal in _FAILURE_SIGNALS):
             status = "failed"
             next_step = (
                 "Review log_tail for errors.  Fix the issue and re-run the "
                 "dispatch call."
+                if not log_empty
+                else (
+                    "Subprocess died before producing any output — likely a "
+                    "Python startup or import failure. Verify the interpreter "
+                    "(``python -m td_release_packager --version``) can import "
+                    "the package, then re-run the dispatch call."
+                )
             )
         else:
             status = "done"
