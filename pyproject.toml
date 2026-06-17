@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "teradata-ships"
 version = "0.4.8"
@@ -52,6 +56,16 @@ dev = [
     # mandatory for the test suite so the compare-mode corpus runs.
     "sqlglot>=25.0",
 ]
+
+# Src-layout package discovery. Without this (and the [build-system] table
+# above) setuptools builds a metadata-only wheel that omits the packages
+# under src/, so the distribution installs but `import td_release_packager`
+# fails. `exclude` keeps the test tree out of the wheel while still picking
+# up every shipped package (td_release_packager, database_package_deployer,
+# the ships MCP server, etc.).
+[tool.setuptools.packages.find]
+where = ["src"]
+exclude = ["tests*"]
 
 [tool.pytest.ini_options]
 # Tests live under src/tests/ and the package under src/. Pinning
