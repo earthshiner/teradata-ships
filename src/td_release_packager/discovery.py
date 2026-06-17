@@ -64,6 +64,11 @@ DEFAULT_HARVEST_EXTENSIONS: frozenset = frozenset(
         ".ddl",
         ".dcl",
         ".grt",
+        # ``.grants`` is the long-form alias emitted by Reflection-style
+        # exports for GRANT/REVOKE files (``CallCentre.grants``). Kept
+        # alongside ``.grt`` so harvest of legacy exports does not
+        # silently drop the package's DCL.
+        ".grants",
         ".dml",
         ".osql",
         ".map",
@@ -85,6 +90,11 @@ DEFAULT_HARVEST_EXTENSIONS: frozenset = frozenset(
         # DDL and must be linted for the 254-character Teradata
         # limit (Error 5550) before packaging.
         ".cmt",
+        # ``.cmnts`` is the long-form alias emitted by Reflection-style
+        # exports for COMMENT ON files. Treated identically to ``.cmt``
+        # by the classifier so harvest of legacy exports does not drop
+        # column / table documentation.
+        ".cmnts",
     }
 )
 
