@@ -13,8 +13,10 @@ All page chrome comes from ``reporting.common`` so the visual identity
 matches the package report.
 
 Tabs: Run timeline, Harvest, Inspect, Scan, Analyse (each a projection of
-its decisions.json stage), and Payload (the pre-package object/wave view,
-rendered with the shared wave SVG from ``reporting.waves``).
+its decisions.json stage), Payload (the pre-package object/wave view,
+rendered with the shared wave SVG from ``reporting.waves``), and
+Tokenisation (a before/after substitution preview from
+``reporting.tokenisation``).
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ import logging
 import os
 from typing import Dict, List, Optional, Tuple
 
-from td_release_packager.reporting import common, waves
+from td_release_packager.reporting import common, tokenisation, waves
 from td_release_packager.reporting.common import Tab, h
 
 logger = logging.getLogger(__name__)
@@ -482,6 +484,11 @@ def generate_pipeline_report(project_dir: str) -> Optional[str]:
         Tab("tab-scan", "Scan", _step_detail_tab(stages, "scan")),
         Tab("tab-analyse", "Analyse", _step_detail_tab(stages, "analyse")),
         Tab("tab-payload", "Payload", _payload_tab(project_dir)),
+        Tab(
+            "tab-tokens",
+            "Tokenisation",
+            tokenisation.tokenisation_tab(project_dir),
+        ),
     ]
 
     doc = common.render_page(
