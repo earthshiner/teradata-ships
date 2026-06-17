@@ -58,8 +58,16 @@ _QUALIFIED_DDL_RE = re.compile(
     r"(?:SPECIFIC\s+)?"
     r"(?:JOIN\s+INDEX|HASH\s+INDEX|TABLE|VIEW|MACRO|PROCEDURE|"
     r"FUNCTION|TRIGGER)\s+"
-    r"((?:\{\{[A-Za-z_]\w*\}\}|\"[^\"]+\"|[A-Za-z_]\w*)"
-    r"(?:\.(?:\{\{[A-Za-z_]\w*\}\}|\"[^\"]+\"|[A-Za-z_]\w*))?)",
+    # A name segment may be a bare identifier, a quoted identifier,
+    # a whole-name token, OR a token concatenated with a literal
+    # suffix/prefix (prefix-token tokenisation, issue #309) such as
+    # ``{{DB_PREFIX}}_DOM_STD_T``. The atom loop after the first
+    # atom allows any mix of further tokens and word runs so the
+    # rename pass does not truncate the segment at the closing ``}}``.
+    r"((?:(?:\{\{[A-Za-z_]\w*\}\}|\"[^\"]+\"|[A-Za-z_]\w*)"
+    r"(?:\{\{[A-Za-z_]\w*\}\}|\w+)*)"
+    r"(?:\.(?:(?:\{\{[A-Za-z_]\w*\}\}|\"[^\"]+\"|[A-Za-z_]\w*)"
+    r"(?:\{\{[A-Za-z_]\w*\}\}|\w+)*))?)",
     _EPO_STMT_FLAGS,
 )
 
@@ -68,7 +76,8 @@ _SINGLE_NAME_DDL_RE = re.compile(
     r"^\s*(?:CREATE)\s+"
     r"(?:DATABASE|USER|ROLE|PROFILE|MAP|AUTHORIZATION|"
     r"FOREIGN\s+SERVER)\s+"
-    r"((?:\{\{[A-Za-z_]\w*\}\}|\"[^\"]+\"|[A-Za-z_]\w*))",
+    r"((?:(?:\{\{[A-Za-z_]\w*\}\}|\"[^\"]+\"|[A-Za-z_]\w*)"
+    r"(?:\{\{[A-Za-z_]\w*\}\}|\w+)*))",
     _EPO_STMT_FLAGS,
 )
 
