@@ -382,7 +382,11 @@ class FakeFastMCP:
         self._tool_manager = MagicMock()
         self._tool_manager._tools = {}
 
-    def tool(self):
+    def tool(self, *args, **kwargs):
+        # Real FastMCP accepts ``name=...``, ``description=...`` and other
+        # registration kwargs. Accept and ignore them so module-level
+        # ``@mcp.tool(name="...")`` decorators in ships_mcp don't error
+        # during the fake-mcp reload.
         def decorator(fn):
             return fn
 
@@ -397,6 +401,13 @@ def _install_fake_mcp_for_auth() -> FakeFastMCP:
     instance = FakeFastMCP()
     fake_fastmcp_mod = types.ModuleType("mcp.server.fastmcp")
     fake_fastmcp_mod.FastMCP = lambda *a, **kw: instance  # type: ignore
+    # ``ships_mcp`` does ``from mcp.server.fastmcp import Context, FastMCP``
+    # — any attribute the real package exposes that ``ships_mcp`` reads at
+    # module import time must be stubbed here, otherwise the reload at
+    # the top of the auth fixture raises ``ImportError: cannot import
+    # name 'Context' from 'mcp.server.fastmcp' (unknown location)`` and
+    # pollutes ``sys.modules`` for every subsequent test in the run.
+    fake_fastmcp_mod.Context = MagicMock  # type: ignore
 
     # Also fake mcp.server.auth.settings so the import in main() works
     fake_auth_settings_mod = types.ModuleType("mcp.server.auth.settings")
@@ -438,22 +449,24 @@ def fresh_ships_mcp_for_auth():
     originals = {k: sys.modules.get(k) for k in MCP_KEYS}
     ships_mcp_original = sys.modules.pop("ships_mcp", None)
 
-    _install_fake_mcp_for_auth()
+    try:
+        _install_fake_mcp_for_auth()
+        import ships_mcp  # noqa: F401
+        yield
+    finally:
+        # Teardown: drop ships_mcp and restore every mcp.* entry.
+        # MUST run even if the setup ``import ships_mcp`` raises, or a
+        # fakes-shaped ``sys.modules`` leaks into every subsequent test
+        # file in the run and they fail with cascading ImportErrors.
+        sys.modules.pop("ships_mcp", None)
+        for key, original_value in originals.items():
+            if original_value is None:
+                sys.modules.pop(key, None)
+            else:
+                sys.modules[key] = original_value
 
-    import ships_mcp  # noqa: F401
-
-    yield
-
-    # Teardown: drop ships_mcp and restore every mcp.* entry
-    sys.modules.pop("ships_mcp", None)
-    for key, original_value in originals.items():
-        if original_value is None:
-            sys.modules.pop(key, None)
-        else:
-            sys.modules[key] = original_value
-
-    if ships_mcp_original is not None:
-        sys.modules["ships_mcp"] = ships_mcp_original
+        if ships_mcp_original is not None:
+            sys.modules["ships_mcp"] = ships_mcp_original
 
 
 def _run_auth_main(argv):
