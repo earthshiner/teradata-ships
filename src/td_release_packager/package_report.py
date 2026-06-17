@@ -39,6 +39,7 @@ from td_release_packager.report_viewer import (
     SIGNAL_EXPLANATIONS as _SIGNAL_EXPLANATIONS,
     signal_name_cell as _signal_name_cell_shared,
 )
+from td_release_packager.reporting import common as _common, waves as _waves
 
 logger = logging.getLogger(__name__)
 
@@ -46,64 +47,13 @@ logger = logging.getLogger(__name__)
 # Extension → object type mapping
 # ---------------------------------------------------------------------------
 
-_EXT_TYPE: Dict[str, str] = {
-    ".tbl": "TABLE",
-    ".viw": "VIEW",
-    ".mcr": "MACRO",
-    ".spl": "PROCEDURE",
-    ".fnc": "FUNCTION",
-    ".trg": "TRIGGER",
-    ".jix": "JOIN INDEX",
-    ".idx": "INDEX",
-    ".sjr": "JAR",
-    ".sto": "STO",
-    ".dcl": "GRANT",
-    ".grt": "GRANT",
-    ".db": "DATABASE",
-    ".usr": "USER",
-    ".rol": "ROLE",
-    ".prf": "PROFILE",
-    ".auth": "AUTHORISATION",
-    ".fsvr": "FOREIGN SERVER",
-    ".map": "MAP",
-    ".dml": "DML",
-    ".osql": "ORDERED SQL",
-    ".sql": "SQL",
-    ".ddl": "DDL",
-    ".c": "C SOURCE",
-    ".cpp": "CPP SOURCE",
-    ".cc": "CPP SOURCE",
-    ".cxx": "CPP SOURCE",
-    ".h": "C HEADER",
-    ".hpp": "C HEADER",
-    ".hh": "C HEADER",
-    ".bteq": "BTEQ",
-    ".btq": "BTQ",
-    ".cmt": "COMMENT",
-    ".stt": "STATISTICS",
-    ".fk": "FOREIGN KEY",
-}
-
-# Type → badge colour (bg, text)
-_TYPE_COLOURS: Dict[str, Tuple[str, str]] = {
-    "TABLE": ("#0D6EFD", "#fff"),
-    "VIEW": ("#6610F2", "#fff"),
-    "PROCEDURE": ("#198754", "#fff"),
-    "FUNCTION": ("#20C997", "#fff"),
-    "MACRO": ("#0DCAF0", "#000"),
-    "TRIGGER": ("#FFC107", "#000"),
-    "JOIN INDEX": ("#6C757D", "#fff"),
-    "INDEX": ("#ADB5BD", "#000"),
-    "JAR": ("#D63384", "#fff"),
-    "DATABASE": ("#FF5F02", "#fff"),
-    "USER": ("#FF5F02", "#fff"),
-    "GRANT": ("#FD7E14", "#000"),
-    "DML": ("#6F42C1", "#fff"),
-    "C SOURCE": ("#6C757D", "#fff"),
-    "CPP SOURCE": ("#6C757D", "#fff"),
-    "C HEADER": ("#6C757D", "#fff"),
-}
-_TYPE_COLOUR_DEFAULT = ("#6C757D", "#fff")
+# Object-type colour system and extension mapping are shared with the
+# pipeline report via reporting.waves so both reports render objects
+# identically.  These module-level aliases preserve the existing call
+# sites (and the package-report test imports) unchanged.
+_EXT_TYPE: Dict[str, str] = _waves.EXT_TYPE
+_TYPE_COLOURS: Dict[str, Tuple[str, str]] = _waves.TYPE_COLOURS
+_TYPE_COLOUR_DEFAULT = _waves.TYPE_COLOUR_DEFAULT
 
 # Teradata brand
 _NAVY = "#00233C"
@@ -177,43 +127,8 @@ def _phase_label(phase_dir: str) -> str:
     return labels.get(os.path.basename(phase_dir), os.path.basename(phase_dir))
 
 
-def _parse_waves_txt(waves_path: str) -> Dict[str, int]:
-    """Parse a _waves.txt file into a path-aware wave mapping (1-based)."""
-    result: Dict[str, int] = {}
-    if not os.path.isfile(waves_path):
-        return result
-    wave_num = 1
-    basenames: Dict[str, Optional[int]] = {}
-    try:
-        with open(waves_path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if line == "---":
-                    wave_num += 1
-                else:
-                    # Entries are phase-relative paths like
-                    # "views/DB.Object.viw". Keep the full relative path
-                    # so duplicate filenames in different folders cannot
-                    # borrow each other's wave labels in the report.
-                    norm = line.replace("\\", "/").lstrip("./")
-                    result[norm] = wave_num
-
-                    # Backward compatibility for old reports/tests that
-                    # looked up by filename only. If the same basename is
-                    # seen in more than one wave, remove the ambiguous alias.
-                    basename = os.path.basename(norm)
-                    previous = basenames.get(basename)
-                    if previous is None and basename not in basenames:
-                        basenames[basename] = wave_num
-                        result[basename] = wave_num
-                    elif previous != wave_num:
-                        basenames[basename] = None
-                        result.pop(basename, None)
-    except OSError as exc:
-        logger.debug("package_report: could not read %s: %s", waves_path, exc)
-    return result
+# Wave-file parsing is shared with the pipeline report (reporting.waves).
+_parse_waves_txt = _waves.parse_waves_txt
 
 
 def _strip_report_comments_and_strings(sql: str) -> str:
@@ -411,13 +326,8 @@ def _scan_payload(pkg_dir: str) -> List[Dict]:
     return records
 
 
-def _group_by_wave(records: List[Dict]) -> Dict[Optional[int], List[Dict]]:
-    """Group records by wave number. None = serial pre-wave work."""
-    groups: Dict[Optional[int], List[Dict]] = {}
-    for rec in records:
-        key = rec["wave"]
-        groups.setdefault(key, []).append(rec)
-    return groups
+# Wave grouping is shared with the pipeline report (reporting.waves).
+_group_by_wave = _waves.group_by_wave
 
 
 # ---------------------------------------------------------------------------
@@ -426,12 +336,7 @@ def _group_by_wave(records: List[Dict]) -> Dict[Optional[int], List[Dict]]:
 
 
 def _type_badge(obj_type: str) -> str:
-    bg, fg = _TYPE_COLOURS.get(obj_type, _TYPE_COLOUR_DEFAULT)
-    return (
-        f'<span style="background:{bg};color:{fg};'
-        f"padding:2px 7px;border-radius:3px;font-size:11px;"
-        f'font-weight:600;letter-spacing:.3px">{obj_type}</span>'
-    )
+    return _waves.type_badge(obj_type)
 
 
 def _trust_icon(status: str) -> str:
@@ -459,14 +364,6 @@ def _h(value: object) -> str:
 def _a(value: object) -> str:
     """HTML-escape attribute values."""
     return html.escape(str(value), quote=True)
-
-
-def _truncated(value: object, max_len: int = 28) -> str:
-    """Return a display-safe truncated value with an ellipsis."""
-    text = str(value)
-    if len(text) <= max_len:
-        return text
-    return text[: max_len - 1] + "…"
 
 
 def _file_link(record: Dict, viewer_links: Optional[Dict[str, str]] = None) -> str:
@@ -826,133 +723,8 @@ def _summary_tab(records: List[Dict]) -> str:
 
 
 def _waves_tab(records: List[Dict]) -> str:
-    """Tiered SVG wave plan visualisation."""
-    wave_groups = _group_by_wave(records)
-    wave_nums = sorted(k for k in wave_groups if k is not None)
-    has_serial = None in wave_groups
-
-    if not wave_nums and not has_serial:
-        return '<p style="color:#6C757D;padding:32px;text-align:center">No wave data available — run <code>ships analyse</code> before packaging.</p>'
-
-    # Build columns: serial (prereqs) first if present, then waves
-    columns = []
-    if has_serial:
-        columns.append(("Serial", wave_groups[None]))
-    for wn in wave_nums:
-        columns.append((f"Wave {wn}", wave_groups[wn]))
-
-    cell_h = 22
-    cell_w = 160
-    gap = 28  # arrow gap between columns
-    col_pad = 8  # padding inside column header
-    header_h = 30
-    margin = 16
-    arrow_w = gap
-
-    max_items = max(len(items) for _, items in columns)
-    col_h = max_items * cell_h + header_h + col_pad * 2
-    svg_w = len(columns) * (cell_w + gap) - gap + margin * 2
-    svg_h = col_h + margin * 2
-
-    svg_parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{svg_w}" height="{svg_h}" '
-        f'style="font-family:Inter,-apple-system,sans-serif;display:block;margin:0 auto">'
-    ]
-
-    for ci, (label, items) in enumerate(columns):
-        x = margin + ci * (cell_w + gap)
-        y = margin
-
-        # Column background
-        svg_parts.append(
-            f'<rect x="{x}" y="{y}" width="{cell_w}" height="{col_h}" '
-            f'rx="6" fill="#f0f4f8" stroke="{_BORDER}" stroke-width="1"/>'
-        )
-        # Column header
-        svg_parts.append(
-            f'<rect x="{x}" y="{y}" width="{cell_w}" height="{header_h}" '
-            f'rx="6" fill="{_NAVY}"/>'
-        )
-        svg_parts.append(
-            f'<rect x="{x}" y="{y + header_h - 6}" width="{cell_w}" height="6" fill="{_NAVY}"/>'
-        )
-        svg_parts.append(
-            f'<text x="{x + cell_w // 2}" y="{y + 19}" text-anchor="middle" '
-            f'font-size="12" font-weight="600" fill="{_WHITE}">{label}</text>'
-        )
-
-        # Items
-        for ii, item in enumerate(items[:40]):  # cap at 40 per wave for readability
-            iy = y + header_h + col_pad + ii * cell_h
-            bg, fg = _TYPE_COLOURS.get(item["type"], _TYPE_COLOUR_DEFAULT)
-            # type dot
-            svg_parts.append(
-                f'<circle cx="{x + 12}" cy="{iy + 11}" r="4" fill="{bg}"/>'
-            )
-            # object name (truncate to fit); SVG <title> exposes full name as a tooltip.
-            full_name = item["name"]
-            display_name = _truncated(full_name, 20)
-            svg_parts.append(
-                f'<text x="{x + 22}" y="{iy + 15}" font-size="11" fill="#333">'
-                f"<title>{_h(full_name)}</title>{_h(display_name)}</text>"
-            )
-
-        if len(items) > 40:
-            iy = y + header_h + col_pad + 40 * cell_h
-            svg_parts.append(
-                f'<text x="{x + cell_w // 2}" y="{iy + 11}" text-anchor="middle" '
-                f'font-size="11" fill="#6C757D">… {len(items) - 40} more</text>'
-            )
-
-        # Arrow to next column — slim line with a small, tight arrowhead.
-        # The shaft starts/ends a few px off the column edges so the head
-        # lands exactly at the boundary without overlapping the column border.
-        if ci < len(columns) - 1:
-            ax_start = x + cell_w + 5  # small gap off the right column edge
-            ax_end = x + cell_w + arrow_w - 5  # tip just before the next column
-            ay = margin + col_h // 2
-            svg_parts.append(
-                f'<line x1="{ax_start}" y1="{ay}" x2="{ax_end}" y2="{ay}" '
-                f'stroke="{_ORANGE}" stroke-width="1.5" stroke-linecap="round" '
-                f'marker-end="url(#arr)"/>'
-            )
-
-    # Open-chevron arrowhead — matches the SHIPS report design language.
-    # markerUnits="userSpaceOnUse" keeps the head a fixed 10×10 px regardless
-    # of stroke width.  context-stroke inherits the line colour automatically
-    # so there is never a colour mismatch between shaft and head.
-    svg_parts.insert(
-        1,
-        "<defs>"
-        '<marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" '
-        'markerWidth="10" markerHeight="10" orient="auto-start-reverse" '
-        'markerUnits="userSpaceOnUse">'
-        '<path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" '
-        'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>'
-        "</marker>"
-        "</defs>",
-    )
-
-    svg_parts.append("</svg>")
-
-    # Type legend
-    legend_items = sorted({r["type"] for r in records})
-    legend_parts = []
-    for t in legend_items[:12]:
-        bg, fg = _TYPE_COLOURS.get(t, _TYPE_COLOUR_DEFAULT)
-        legend_parts.append(
-            f'<span style="display:inline-flex;align-items:center;gap:4px;margin-right:12px">'
-            f'<span style="width:10px;height:10px;border-radius:50%;background:{bg};display:inline-block"></span>'
-            f'<span style="font-size:12px;color:#555">{t}</span></span>'
-        )
-
-    return (
-        '<div style="overflow-x:auto;padding:8px 0">\n'
-        + "\n".join(svg_parts)
-        + '\n</div>\n<div style="margin-top:16px;padding:0 8px">'
-        + "".join(legend_parts)
-        + "</div>"
-    )
+    """Tiered SVG wave plan visualisation (shared with the pipeline report)."""
+    return _waves.render_wave_svg(records)
 
 
 def _load_build_provenance(pkg_dir: str) -> List[dict]:
@@ -1887,78 +1659,11 @@ def _environment_prereq_banner(manifest_dict: dict) -> str:
 # Main entry point
 # ---------------------------------------------------------------------------
 
-
-def generate_package_report(pkg_dir: str, manifest_dict: dict) -> str:
-    """Generate the interactive HTML package report and write it to ``pkg_dir``.
-
-    Args:
-        pkg_dir:       The package directory (not yet archived).
-        manifest_dict: The ``BuildManifest.__dict__`` already written to
-                       ships.build.json.
-
-    Returns:
-        Absolute path to the written report file.
-    """
-    records = _scan_payload(pkg_dir)
-    from td_release_packager.trust import load_trust_result
-
-    trust = load_trust_result(pkg_dir) or {}
-    viewer_links = _write_package_viewers(pkg_dir, records)
-    stages = _load_build_provenance(pkg_dir)
-
-    pkg_name = manifest_dict.get("package_name", "Package")
-    report_label = _package_report_label(manifest_dict)
-    build_no = manifest_dict.get("build_number", "?")
-    env = manifest_dict.get("environment", "?")
-    file_count = manifest_dict.get("file_count", len(records))
-    trust_label = trust.get("status", "")
-    trust_bg, trust_fg = _trust_label_style(trust_label)
-
-    # Subtitle summary line
-    type_counts: Dict[str, int] = {}
-    for r in records:
-        type_counts[r["type"]] = type_counts.get(r["type"], 0) + 1
-    summary_parts = [
-        f"{v} {k.lower()}{'s' if v != 1 else ''}"
-        for k, v in sorted(type_counts.items())
-    ]
-    summary = ",  ".join(summary_parts[:6])
-    if len(summary_parts) > 6:
-        summary += f",  …and {len(summary_parts) - 6} more types"
-
-    html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SHIPS {report_label} — {pkg_name} {build_no}</title>
-<style>
-*, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
-body {{ font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-       background: #f0f4f8; color: #212529; min-height: 100vh; }}
-.hdr {{ background: {_NAVY}; color: {_WHITE}; padding: 0 24px;
-        display: flex; align-items: center; gap: 16px; height: 56px; }}
-.hdr-title {{ font-size: 17px; font-weight: 700; letter-spacing: -.2px; }}
-.hdr-sub {{ font-size: 13px; color: #8ba4be; }}
-.trust-pill {{ margin-left: auto; background: {trust_bg}; color: {trust_fg};
-               padding: 4px 14px; border-radius: 20px; font-size: 13px;
-               font-weight: 700; letter-spacing: .3px; white-space: nowrap; }}
-.meta-bar {{ background: {_WHITE}; border-bottom: 1px solid {_BORDER};
-             padding: 10px 24px; font-size: 13px; color: #555;
-             display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }}
-.meta-bar strong {{ color: {_NAVY}; }}
-.tabs {{ background: {_WHITE}; border-bottom: 2px solid {_BORDER}; padding: 0 24px;
-         display: flex; gap: 0; }}
-.tab-btn {{ background: none; border: none; border-bottom: 3px solid transparent;
-            padding: 14px 20px; font-size: 14px; font-weight: 500; cursor: pointer;
-            color: #555; margin-bottom: -2px; }}
-.tab-btn.active {{ color: {_NAVY}; border-bottom-color: {_ORANGE}; font-weight: 700; }}
-.tab-btn:hover {{ color: {_NAVY}; }}
-.tab-pane {{ display: none; }}
-.tab-pane.active {{ display: block; }}
-.content {{ padding: 24px; max-width: 1200px; margin: 0 auto; }}
-.card {{ background: {_WHITE}; border-radius: 8px; border: 1px solid {_BORDER};
-         padding: 20px 24px; margin-bottom: 16px; }}
+# Package-report-specific CSS appended after the shared chrome in
+# reporting.common.BASE_CSS.  Only classes unique to this report live here;
+# the page shell (header, meta bar, tabs, cards) comes from the shared
+# renderer so the package, deploy, and pipeline reports stay visually aligned.
+_PACKAGE_EXTRA_CSS = f"""
 .flt-btn {{ background: {_LIGHT}; border: 1px solid {_BORDER}; border-radius: 4px;
             padding: 4px 10px; font-size: 12px; cursor: pointer; }}
 .flt-btn.active {{ background: {_NAVY}; color: {_WHITE}; border-color: {_NAVY}; }}
@@ -2019,82 +1724,77 @@ pre {{ white-space: pre-wrap; word-break: break-all; }}
 [data-tip]:hover::before {{ content: ""; position: absolute; bottom: 115%;
   left: 50%; transform: translateX(-50%); border: 6px solid transparent;
   border-top-color: {_NAVY}; z-index: 100; }}
-</style>
-</head>
-<body>
+"""
 
-<div class="hdr">
-  <svg width="90" height="24" viewBox="0 0 90 24" xmlns="http://www.w3.org/2000/svg">
-    <text x="0" y="19" font-family="Inter,sans-serif" font-size="18" font-weight="700"
-          letter-spacing="-.3" fill="#fff">Teradata</text>
-  </svg>
-  <div>
-    <div class="hdr-title">{report_label} &nbsp;·&nbsp; {pkg_name}</div>
-    <div class="hdr-sub">Build {build_no} &nbsp;·&nbsp; {env}</div>
-  </div>
-  <div class="trust-pill">{trust_label or "—"}</div>
-</div>
 
-<div class="meta-bar">
-  <span><strong>{file_count}</strong> objects</span>
-  <span style="color:{_BORDER}">|</span>
-  <span style="color:#777">{summary}</span>
-</div>
+def generate_package_report(pkg_dir: str, manifest_dict: dict) -> str:
+    """Generate the interactive HTML package report and write it to ``pkg_dir``.
 
-<div class="tabs">
-  <button class="tab-btn active" onclick="switchTab(this,'tab-guide')">📖 Guide</button>
-  <button class="tab-btn" onclick="switchTab(this,'tab-summary')">Summary</button>
-  <button class="tab-btn" onclick="switchTab(this,'tab-waves')">Waves</button>
-  <button class="tab-btn" onclick="switchTab(this,'tab-objects')">Objects</button>
-  <button class="tab-btn" onclick="switchTab(this,'tab-provenance')">Build Provenance</button>
-  <button class="tab-btn" onclick="switchTab(this,'tab-trust')">Trust Report</button>
-  <button class="tab-btn" onclick="switchTab(this,'tab-deploy')">Deploy</button>
-</div>
+    Args:
+        pkg_dir:       The package directory (not yet archived).
+        manifest_dict: The ``BuildManifest.__dict__`` already written to
+                       ships.build.json.
 
-<div class="content">
+    Returns:
+        Absolute path to the written report file.
+    """
+    records = _scan_payload(pkg_dir)
+    from td_release_packager.trust import load_trust_result
 
-{_environment_prereq_banner(manifest_dict)}
+    trust = load_trust_result(pkg_dir) or {}
+    viewer_links = _write_package_viewers(pkg_dir, records)
+    stages = _load_build_provenance(pkg_dir)
 
-<div id="tab-guide" class="tab-pane active card">
-{_guide_tab(manifest_dict, records)}
-</div>
+    pkg_name = manifest_dict.get("package_name", "Package")
+    report_label = _package_report_label(manifest_dict)
+    build_no = manifest_dict.get("build_number", "?")
+    env = manifest_dict.get("environment", "?")
+    file_count = manifest_dict.get("file_count", len(records))
+    trust_label = trust.get("status", "")
+    trust_bg, trust_fg = _trust_label_style(trust_label)
 
-<div id="tab-summary" class="tab-pane card">
-{_summary_tab(records)}
-</div>
+    # Meta-bar summary line
+    type_counts: Dict[str, int] = {}
+    for r in records:
+        type_counts[r["type"]] = type_counts.get(r["type"], 0) + 1
+    summary_parts = [
+        f"{v} {k.lower()}{'s' if v != 1 else ''}"
+        for k, v in sorted(type_counts.items())
+    ]
+    summary = ",  ".join(summary_parts[:6])
+    if len(summary_parts) > 6:
+        summary += f",  …and {len(summary_parts) - 6} more types"
 
-<div id="tab-waves" class="tab-pane card">
-{_waves_tab(records)}
-</div>
+    meta_html = (
+        f"<span><strong>{file_count}</strong> objects</span>"
+        f'<span style="color:{_BORDER}">|</span>'
+        f'<span style="color:#777">{summary}</span>'
+    )
 
-<div id="tab-objects" class="tab-pane card">
-{_objects_tab(records, trust, viewer_links)}
-</div>
+    tabs = [
+        _common.Tab("tab-guide", "📖 Guide", _guide_tab(manifest_dict, records), True),
+        _common.Tab("tab-summary", "Summary", _summary_tab(records)),
+        _common.Tab("tab-waves", "Waves", _waves_tab(records)),
+        _common.Tab(
+            "tab-objects", "Objects", _objects_tab(records, trust, viewer_links)
+        ),
+        _common.Tab(
+            "tab-provenance", "Build Provenance", _build_provenance_tab(stages)
+        ),
+        _common.Tab("tab-trust", "Trust Report", _trust_tab(trust)),
+        _common.Tab("tab-deploy", "Deploy", _deploy_tab(manifest_dict)),
+    ]
 
-<div id="tab-provenance" class="tab-pane card">
-{_build_provenance_tab(stages)}
-</div>
-
-<div id="tab-trust" class="tab-pane card">
-{_trust_tab(trust)}
-</div>
-
-<div id="tab-deploy" class="tab-pane card">
-{_deploy_tab(manifest_dict)}
-</div>
-
-</div>
-
-<script>
-function switchTab(btn, pane) {{
-  document.querySelectorAll('.tab-btn').forEach(function(b) {{ b.classList.remove('active'); }});
-  document.querySelectorAll('.tab-pane').forEach(function(p) {{ p.classList.remove('active'); }});
-  btn.classList.add('active');
-  document.getElementById(pane).classList.add('active');
-}}
-</script>
-</body>
-</html>"""
+    html = _common.render_page(
+        doc_title=f"SHIPS {report_label} — {pkg_name} {build_no}",
+        header_title=f"{report_label} · {pkg_name}",
+        header_sub=f"Build {build_no} · {env}",
+        header_pill=_common.status_pill(trust_label or "—", trust_bg, trust_fg),
+        meta_html=meta_html,
+        tabs=tabs,
+        content_prefix=_environment_prereq_banner(manifest_dict),
+        extra_css=_PACKAGE_EXTRA_CSS,
+    )
 
     report_path = os.path.join(pkg_dir, "package_report.html")
     with open(report_path, "w", encoding="utf-8") as f:

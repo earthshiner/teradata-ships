@@ -569,6 +569,17 @@ def _stage_recording(project_dir: str, stage_name: str):
             except Exception as exc:  # pragma: no cover - defensive
                 logger.debug("project_policy refresh failed: %s", exc)
 
+            # Refresh the pre-package pipeline HTML report after every step
+            # so a human can see what happened at each stage before a
+            # package is built (#324). Best-effort: a reporting failure must
+            # never break the stage recording path.
+            try:
+                from td_release_packager.reporting import regenerate_reports
+
+                regenerate_reports(project_dir)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug("pipeline report refresh failed: %s", exc)
+
     return _ctx()
 
 
