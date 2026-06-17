@@ -1,0 +1,373 @@
+"""
+common.py — Shared HTML rendering chrome for SHIPS reports.
+
+Every SHIPS report (the post-build package report, the post-deploy report,
+and the pre-package pipeline report introduced in #324) needs the same
+page shell: Teradata-branded header, meta bar, tabbed navigation, and a
+consistent set of status helpers for the data recorded in
+``ships.decisions.json``.
+
+This module is the single home for that chrome so the visual identity is
+defined once and no CSS/JavaScript is duplicated across report generators.
+It is deliberately dependency-free — pure standard library — so any report
+module can import it without pulling in the wider package.
+
+Public API
+----------
+    Brand palette constants (NAVY, ORANGE, ...).
+    h(value) / a(value)           HTML-escape text / attribute values.
+    fmt_duration(ms)              Human-readable millisecond duration.
+    stage_status_badge(status, …) Coloured status pill for a stage.
+    render_issue_list(issues)     Issue detail block for a stage.
+    Tab(id, label, body, active)  One tab definition.
+    render_page(...)              Assemble a complete self-contained HTML doc.
+"""
+
+from __future__ import annotations
+
+import html
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Sequence, Tuple
+
+# ---------------------------------------------------------------------------
+# Teradata brand palette
+# ---------------------------------------------------------------------------
+
+NAVY = "#00233C"
+ORANGE = "#FF5F02"
+WHITE = "#FFFFFF"
+LIGHT = "#F8F9FA"
+BORDER = "#DEE2E6"
+
+# ---------------------------------------------------------------------------
+# Stage / issue status styling
+# ---------------------------------------------------------------------------
+#
+# Shared by the package report's Build Provenance tab and the pipeline
+# report's Run timeline so a "warning" stage looks identical wherever it
+# is shown.  Keys match the StageRecorder status vocabulary
+# (success / warning / error / skipped / no-op).
+
+STATUS_ICON: Dict[str, str] = {
+    "success": "✔",
+    "warning": "⚠",
+    "error": "✗",
+    "skipped": "○",
+    "no-op": "—",
+}
+STATUS_BG: Dict[str, str] = {
+    "success": "#D4EDDA",
+    "warning": "#FFF3CD",
+    "error": "#F8D7DA",
+    "skipped": "#E9ECEF",
+    "no-op": "#E9ECEF",
+}
+STATUS_FG: Dict[str, str] = {
+    "success": "#155724",
+    "warning": "#856404",
+    "error": "#721C24",
+    "skipped": "#495057",
+    "no-op": "#495057",
+}
+
+_SEV_COLOUR = {"error": "#DC3545", "warning": "#856404", "info": "#0D6EFD"}
+_SEV_ICON = {"error": "✗", "warning": "⚠", "info": "ℹ"}
+
+
+# ---------------------------------------------------------------------------
+# Escaping
+# ---------------------------------------------------------------------------
+
+
+def h(value: object) -> str:
+    """HTML-escape text content (leaves quotes intact for readability)."""
+    return html.escape(str(value), quote=False)
+
+
+def a(value: object) -> str:
+    """HTML-escape an attribute value (escapes quotes as well)."""
+    return html.escape(str(value), quote=True)
+
+
+# ---------------------------------------------------------------------------
+# Formatting helpers
+# ---------------------------------------------------------------------------
+
+
+def fmt_duration(ms: object) -> str:
+    """Format a millisecond duration as a compact human-readable string."""
+    try:
+        value = int(ms or 0)
+    except (TypeError, ValueError):
+        return "—"
+    if value < 1000:
+        return f"{value} ms"
+    if value < 60_000:
+        return f"{value / 1000:.1f} s"
+    return f"{value / 60_000:.1f} min"
+
+
+def stage_status_badge(status: str, label: Optional[str] = None) -> str:
+    """Return a coloured status pill for a stage row.
+
+    Args:
+        status: One of the StageRecorder statuses; unknown values fall
+                back to neutral styling.
+        label:  Optional text shown after the icon. Defaults to the
+                status name so the badge is meaningful on its own.
+
+    Returns:
+        An HTML ``<span>`` element string.
+    """
+    key = str(status).lower()
+    icon = STATUS_ICON.get(key, "?")
+    bg = STATUS_BG.get(key, "#E9ECEF")
+    fg = STATUS_FG.get(key, "#333")
+    text = label if label is not None else key
+    return (
+        f'<span style="background:{bg};color:{fg};font-weight:700;'
+        f"font-size:13px;padding:2px 10px;border-radius:10px;"
+        f'min-width:80px;text-align:center;display:inline-block">'
+        f"{icon} {h(text)}</span>"
+    )
+
+
+def issue_count_badges(issues: Sequence[dict]) -> str:
+    """Return small error/warning count pills for a stage summary line."""
+    n_errors = sum(1 for i in issues if str(i.get("severity", "")).lower() == "error")
+    n_warnings = sum(
+        1 for i in issues if str(i.get("severity", "")).lower() == "warning"
+    )
+    out = ""
+    if n_errors:
+        out += (
+            f'<span style="background:#F8D7DA;color:#721C24;font-size:11px;'
+            f'font-weight:700;padding:1px 7px;border-radius:10px;margin-left:8px">'
+            f"{n_errors} error{'s' if n_errors != 1 else ''}</span>"
+        )
+    if n_warnings:
+        out += (
+            f'<span style="background:#FFF3CD;color:#856404;font-size:11px;'
+            f'font-weight:700;padding:1px 7px;border-radius:10px;margin-left:4px">'
+            f"{n_warnings} warning{'s' if n_warnings != 1 else ''}</span>"
+        )
+    return out
+
+
+def render_issue_list(issues: Sequence[dict]) -> str:
+    """Render a stage's issue list as an HTML detail block.
+
+    Args:
+        issues: The ``issues`` array from a decisions.json stage entry.
+                Each issue has ``severity`` / ``code`` / ``message`` and
+                an optional ``location``.
+
+    Returns:
+        HTML string. A green "no issues" note when the list is empty.
+    """
+    if not issues:
+        return (
+            '<p style="color:#28A745;font-size:13px;margin:0">No issues recorded.</p>'
+        )
+    rows: List[str] = []
+    for issue in issues:
+        sev = str(issue.get("severity", "info")).lower()
+        colour = _SEV_COLOUR.get(sev, "#555")
+        icon = _SEV_ICON.get(sev, "·")
+        code = h(str(issue.get("code", "")))
+        msg = h(str(issue.get("message", "")))
+        loc = issue.get("location", "")
+        loc_html = (
+            f'<div style="font-size:11px;color:#6C757D;margin-top:2px">{h(str(loc))}</div>'
+            if loc
+            else ""
+        )
+        rows.append(
+            f'<div style="padding:5px 0;border-bottom:1px solid #F0F0F0">'
+            f'<span style="color:{colour};font-weight:700;margin-right:6px">{icon}</span>'
+            f'<span style="font-family:monospace;font-size:12px;color:{colour};'
+            f'margin-right:8px">{code}</span>'
+            f'<span style="font-size:12px;color:#333">{msg}</span>'
+            f"{loc_html}</div>"
+        )
+    return "".join(rows)
+
+
+# ---------------------------------------------------------------------------
+# Page assembly
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Tab:
+    """One tab in a report.
+
+    Attributes:
+        id:     Unique DOM id for the pane (e.g. ``"tab-timeline"``).
+        label:  Button text shown in the tab bar.
+        body:   Pre-rendered HTML for the pane's inner content.
+        active: Whether this tab is shown first.
+    """
+
+    id: str
+    label: str
+    body: str
+    active: bool = False
+
+
+# Shared chrome — the subset of CSS common to every SHIPS report.  Report
+# modules pass their own ``extra_css`` for anything tab-specific.
+BASE_CSS = f"""
+*, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+body {{ font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+       background: #f0f4f8; color: #212529; min-height: 100vh; }}
+.hdr {{ background: {NAVY}; color: {WHITE}; padding: 0 24px;
+        display: flex; align-items: center; gap: 16px; height: 56px; }}
+.hdr-title {{ font-size: 17px; font-weight: 700; letter-spacing: -.2px; }}
+.hdr-sub {{ font-size: 13px; color: #8ba4be; }}
+.status-pill {{ margin-left: auto; padding: 4px 14px; border-radius: 20px;
+                font-size: 13px; font-weight: 700; letter-spacing: .3px;
+                white-space: nowrap; }}
+.meta-bar {{ background: {WHITE}; border-bottom: 1px solid {BORDER};
+             padding: 10px 24px; font-size: 13px; color: #555;
+             display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }}
+.meta-bar strong {{ color: {NAVY}; }}
+.tabs {{ background: {WHITE}; border-bottom: 2px solid {BORDER}; padding: 0 24px;
+         display: flex; gap: 0; flex-wrap: wrap; }}
+.tab-btn {{ background: none; border: none; border-bottom: 3px solid transparent;
+            padding: 14px 20px; font-size: 14px; font-weight: 500; cursor: pointer;
+            color: #555; margin-bottom: -2px; }}
+.tab-btn.active {{ color: {NAVY}; border-bottom-color: {ORANGE}; font-weight: 700; }}
+.tab-btn:hover {{ color: {NAVY}; }}
+.tab-pane {{ display: none; }}
+.tab-pane.active {{ display: block; }}
+.content {{ padding: 24px; max-width: 1200px; margin: 0 auto; }}
+.card {{ background: {WHITE}; border-radius: 8px; border: 1px solid {BORDER};
+         padding: 20px 24px; margin-bottom: 16px; }}
+details > summary {{ list-style: none; }}
+details > summary::-webkit-details-marker {{ display: none; }}
+"""
+
+# Teradata wordmark used in the header bar across all reports.
+_WORDMARK = (
+    '<svg width="90" height="24" viewBox="0 0 90 24" '
+    'xmlns="http://www.w3.org/2000/svg">'
+    '<text x="0" y="19" font-family="Inter,sans-serif" font-size="18" '
+    'font-weight="700" letter-spacing="-.3" fill="#fff">Teradata</text></svg>'
+)
+
+
+def status_pill(label: str, bg: str, fg: str) -> str:
+    """Return the header status pill markup (right-aligned in the header)."""
+    return (
+        f'<div class="status-pill" style="background:{bg};color:{fg}">{h(label)}</div>'
+    )
+
+
+def render_page(
+    *,
+    doc_title: str,
+    header_title: str,
+    header_sub: Optional[str] = None,
+    header_pill: Optional[str] = None,
+    meta_html: Optional[str] = None,
+    tabs: Sequence[Tab],
+    content_prefix: str = "",
+    extra_css: str = "",
+) -> str:
+    """Assemble a complete, self-contained SHIPS report HTML document.
+
+    The output is a single HTML string with embedded CSS and a tiny
+    tab-switching script — no external requests, opens directly from a
+    ``file:`` URL.
+
+    Args:
+        doc_title:      The ``<title>`` text.
+        header_title:   Bold title shown in the navy header bar.
+        header_sub:     Optional sub-line under the header title.
+        header_pill:    Optional pre-rendered status pill (see ``status_pill``).
+        meta_html:      Optional pre-rendered inner HTML for the meta bar.
+                        When ``None`` the meta bar is omitted entirely.
+        tabs:           Tab definitions, rendered left-to-right. Exactly one
+                        is shown first: the first marked ``active``, or the
+                        first tab when none is marked.
+        content_prefix: Optional raw HTML rendered inside the content area
+                        before the tab panes (e.g. an action banner).
+        extra_css:      Report-specific CSS appended after ``BASE_CSS``.
+
+    Returns:
+        The full HTML document as a string.
+    """
+    tab_list = list(tabs)
+    if tab_list and not any(t.active for t in tab_list):
+        tab_list[0].active = True
+
+    buttons = "\n".join(
+        f'<button class="tab-btn{" active" if t.active else ""}" '
+        f"onclick=\"switchTab(this,'{a(t.id)}')\">{h(t.label)}</button>"
+        for t in tab_list
+    )
+    panes = "\n".join(
+        f'<div id="{a(t.id)}" class="tab-pane{" active" if t.active else ""} card">'
+        f"\n{t.body}\n</div>"
+        for t in tab_list
+    )
+
+    sub_html = f'<div class="hdr-sub">{h(header_sub)}</div>' if header_sub else ""
+    meta_bar = f'<div class="meta-bar">{meta_html}</div>' if meta_html else ""
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{h(doc_title)}</title>
+<style>
+{BASE_CSS}
+{extra_css}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  {_WORDMARK}
+  <div>
+    <div class="hdr-title">{h(header_title)}</div>
+    {sub_html}
+  </div>
+  {header_pill or ""}
+</div>
+
+{meta_bar}
+
+<div class="tabs">
+  {buttons}
+</div>
+
+<div class="content">
+{content_prefix}
+{panes}
+</div>
+
+<script>
+function switchTab(btn, pane) {{
+  document.querySelectorAll('.tab-btn').forEach(function(b) {{ b.classList.remove('active'); }});
+  document.querySelectorAll('.tab-pane').forEach(function(p) {{ p.classList.remove('active'); }});
+  btn.classList.add('active');
+  document.getElementById(pane).classList.add('active');
+}}
+</script>
+</body>
+</html>"""
+
+
+def run_status_style(final_status: str) -> Tuple[str, str]:
+    """Return (background, text) colours for a run-level final status."""
+    key = str(final_status).lower()
+    if key == "success":
+        return "#198754", WHITE
+    if key in ("failed", "partial"):
+        return "#DC3545", WHITE
+    if key == "warning":
+        return "#FFC107", NAVY
+    return "#6C757D", WHITE
