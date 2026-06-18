@@ -1281,25 +1281,42 @@ def _check_db_qualifier(rel_path: str, content: str) -> List[ValidationIssue]:
 
 
 def _check_multiset(rel_path: str, content: str) -> List[ValidationIssue]:
-    """Check that tables specify SET or MULTISET."""
-    # Only applies to CREATE TABLE statements
-    if not re.search(
-        r"CREATE\s+(?:MULTISET\s+|SET\s+)?(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?(?:TRACE\s+)?TABLE\b",
-        content,
-        re.I,
-    ):
+    """Check that CREATE TABLE statements specify SET or MULTISET.
+
+    DCL files (``.dcl`` / ``.grt``) are excluded by extension: a
+    ``GRANT CREATE TABLE ON … TO …`` clause mentions the literal
+    phrase "CREATE TABLE" without issuing a CREATE TABLE statement,
+    and these extensions can never legitimately carry table DDL.
+
+    Inside DDL files we still split on ``;`` and only match CREATE
+    TABLE at statement start — so a ``GRANT CREATE TABLE`` clause that
+    legitimately appears in a mixed-DCL/.sql script is also ignored.
+    Comments and string literals were already stripped before this
+    rule runs, so ``;`` is a safe statement separator.
+    """
+    if os.path.splitext(rel_path)[1].lower() in {".dcl", ".grt", ".grants"}:
         return []
 
-    if not _HAS_SET_MULTISET_RE.search(content):
-        return [
-            ValidationIssue(
-                file=rel_path,
-                rule="set_multiset",
-                severity="WARNING",
-                message="CREATE TABLE without SET/MULTISET. "
-                "MULTISET will be auto-injected at build time.",
-            )
-        ]
+    table_pattern = re.compile(
+        r"^\s*CREATE\s+(?:MULTISET\s+|SET\s+)?"
+        r"(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?"
+        r"(?:TRACE\s+)?TABLE\b",
+        re.I,
+    )
+
+    for statement in content.split(";"):
+        if table_pattern.match(statement) and not _HAS_SET_MULTISET_RE.search(
+            statement
+        ):
+            return [
+                ValidationIssue(
+                    file=rel_path,
+                    rule="set_multiset",
+                    severity="WARNING",
+                    message="CREATE TABLE without SET/MULTISET. "
+                    "MULTISET will be auto-injected at build time.",
+                )
+            ]
     return []
 
 
