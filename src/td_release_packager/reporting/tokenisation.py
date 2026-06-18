@@ -274,16 +274,26 @@ def _matrix_html(summaries: List[dict]) -> str:
     )
 
 
-def _flags_html(summary: dict) -> str:
-    """Render the undefined/empty/collision detail for the focused env."""
+def _flags_html(summary: dict, conf_path: Optional[str] = None) -> str:
+    """Render the undefined/empty/collision detail for the focused env.
+
+    ``conf_path`` is the path to the .conf file backing this summary;
+    when supplied, the Undefined and Empty banners append a one-line
+    actionable hint pointing the operator at the exact file to edit.
+    Low-friction operating principle: every "this is wrong" should
+    arrive with "this is what to do about it".
+    """
     parts: List[str] = []
+    edit_hint = (
+        f" Edit <code>{h(conf_path)}</code> to fill in the values." if conf_path else ""
+    )
     if summary["undefined"]:
         items = ", ".join(f"<code>{{{{{h(t)}}}}}</code>" for t in summary["undefined"])
         parts.append(
             f'<div style="background:#F8D7DA;color:#721C24;border-radius:6px;'
             f'padding:10px 14px;margin-bottom:8px;font-size:13px">'
             f"<strong>Undefined</strong> — referenced but not in this env config; "
-            f"these will ship unresolved: {items}</div>"
+            f"these will ship unresolved: {items}.{edit_hint}</div>"
         )
     if summary["collisions"]:
         rows = "".join(
@@ -302,7 +312,7 @@ def _flags_html(summary: dict) -> str:
             f'<div style="background:#FFF3CD;color:#856404;border-radius:6px;'
             f'padding:10px 14px;margin-bottom:8px;font-size:13px">'
             f"<strong>Empty</strong> — resolve to an empty string (may produce "
-            f"malformed identifiers): {items}</div>"
+            f"malformed identifiers): {items}.{edit_hint}</div>"
         )
     return "".join(parts)
 
@@ -405,7 +415,7 @@ def tokenisation_tab(project_dir: str) -> str:
         f'<h3 style="font-size:14px;color:{common.NAVY};margin:20px 0 10px">'
         f"Rendered examples — environment <code>{h(focused)}</code></h3>"
     )
-    body += _flags_html(focused_summary)
+    body += _flags_html(focused_summary, conf_path=focused_path)
 
     sub_map = _display_sub_map(referenced, resolved)
     examples = _token_examples(usage, referenced, sub_map)
