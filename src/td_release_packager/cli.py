@@ -39,7 +39,7 @@ import tarfile
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from td_release_packager.builder import build_package
 from td_release_packager.build_counter import read_build_number
@@ -2099,7 +2099,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
             "skip_grants", getattr(args, "skip_grants", False), "layer-5", "cli"
         )
         stage.set_config_resolved(
-            "fix_grants", getattr(args, "fix_grants", False), "layer-5", "cli"
+            "fix_grants", getattr(args, "fix_grants", True), "layer-5", "cli"
         )
         stage.set_config_resolved(
             "fix_ddl_terminators",
@@ -2319,7 +2319,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
         # ==============================================================
 
         skip_grants = getattr(args, "skip_grants", False)
-        do_fix = getattr(args, "fix_grants", False)
+        do_fix = getattr(args, "fix_grants", True)
         dcl_dir = None
         if hasattr(args, "dcl_dir") and args.dcl_dir:
             dcl_dir = Path(args.dcl_dir)
@@ -2377,6 +2377,56 @@ def _run_inspect(args, stage, issue_codes) -> int:
                     return False
             return True
 
+        def _rel_grant_path(status) -> str:
+            """Return ``status.file_path`` relative to the project root."""
+            try:
+                project_root = Path(args.project).resolve()
+                return os.path.relpath(status.file_path, project_root)
+            except (ValueError, AttributeError):
+                return str(getattr(status, "file_path", ""))
+
+        def _privs_summary(privs_map: Dict[str, Set[str]]) -> str:
+            """Render a ``{grantor: {privs}}`` mapping as ``priv,priv on grantor; …``."""
+            if not privs_map:
+                return "(none)"
+            return "; ".join(
+                f"{', '.join(sorted(privs))} on {grantor}"
+                for grantor, privs in sorted(privs_map.items())
+            )
+
+        def _format_missing_grant(status) -> str:
+            """Render a ``GranteeStatus`` for a missing-grant finding.
+
+            The dataclass ``repr`` includes ``WindowsPath`` and
+            ``defaultdict(<class 'set'>, …)`` noise that's unreadable
+            in a report. Render the salient fields directly: the
+            grantee, what was expected to be granted, and the relative
+            path of the .grt file SHIPS expected to find.
+            """
+            return (
+                f"{status.grantee} expects "
+                f"[{_privs_summary(getattr(status, 'expected_grants', {}))}] "
+                f"but no entry exists at {_rel_grant_path(status)}"
+            )
+
+        def _format_drifted_grant(status) -> str:
+            """Render a ``GranteeStatus`` for a drifted-grant finding."""
+            parts = [f"{status.grantee} at {_rel_grant_path(status)}"]
+            missing = getattr(status, "missing_privs", {}) or {}
+            extras = getattr(status, "extra_privs", {}) or {}
+            if missing:
+                parts.append(f"missing intent: [{_privs_summary(missing)}]")
+            if extras:
+                parts.append(f"extra in .grt: [{_privs_summary(extras)}]")
+            return "; ".join(parts)
+
+        def _format_orphaned_grant(status) -> str:
+            """Render a ``GranteeStatus`` for an orphaned-.grt finding."""
+            return (
+                f"{status.grantee}: .grt file at "
+                f"{_rel_grant_path(status)} has no matching DDL intent"
+            )
+
         def _grant_suffix(result) -> str:
             """Build a parenthetical suffix describing non-error grant modes."""
             parts = []
@@ -2392,11 +2442,12 @@ def _run_inspect(args, stage, issue_codes) -> int:
                 )
             return f"  [{', '.join(parts)}]" if parts else ""
 
+        grants_files_written = 0
         if skip_grants:
             print("\n  ℹ Grant validation skipped (--skip-grants)")
         elif do_fix:
             # -- Fix mode: generate/update .grt files --
-            grant_result, files_written = fix_grants(
+            grant_result, grants_files_written = fix_grants(
                 project_dir,
                 dcl_dir=dcl_dir,
                 verbose=args.verbose,
@@ -2412,7 +2463,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
                 f" (--fix-grants){_grant_suffix(grant_result)}"
             )
             print(f"{'=' * 64}")
-            print(f"  .grt files written: {files_written}")
+            print(f"  .grt files written: {grants_files_written}")
             print(
                 format_grant_report(
                     grant_result,
@@ -2587,6 +2638,19 @@ def _run_inspect(args, stage, issue_codes) -> int:
         # itself was set up at the top of this function — we only
         # need to attach the per-step findings now.
         if grant_result is not None:
+            if grants_files_written:
+                # Summary INFO: low-friction default — fix mode just
+                # generated/updated the .grt files from inferred DDL
+                # intent. Record once at info-level so the audit trail
+                # in ships.decisions.json shows what SHIPS did on the
+                # operator's behalf.
+                stage.add_issue(
+                    "info",
+                    issue_codes.INSPECT_GRANT_VIOLATION,
+                    f"Auto-generated {grants_files_written} .grt file(s) "
+                    f"from DDL intent (--fix-grants default). Pass "
+                    f"--no-fix-grants to opt out and just lint.",
+                )
             # Drifted entries — severity depends on whether all drift is
             # extra-only (manually added grants) or includes missing privs
             # (inferred grants absent from the .dcl file).
@@ -2597,37 +2661,37 @@ def _run_inspect(args, stage, issue_codes) -> int:
                     stage.add_issue(
                         "error",
                         issue_codes.INSPECT_GRANT_VIOLATION,
-                        f"Drifted grant: {entry}",
+                        f"Drifted grant: {_format_drifted_grant(entry)}",
                     )
                 elif _grant_issue_enabled(warn_extra_grants_severity):
                     # Extra-only drift is controlled by warn_extra_grants.
                     stage.add_issue(
                         warn_extra_grants_severity.lower(),
                         issue_codes.INSPECT_GRANT_VIOLATION,
-                        f"Drifted grant: {entry}",
+                        f"Drifted grant: {_format_drifted_grant(entry)}",
                     )
             for entry in grant_result.missing:
                 # Missing grants are derivable from intent — the DDL
                 # implies the grant, the operator just hasn't written
-                # the matching .grt entry. Surface as informational
-                # with a pointer at ``--fix-grants``: the auto-fix is
-                # safe and idempotent, so escalating to an error
-                # creates friction for a problem SHIPS already knows
-                # how to solve.
+                # the matching .grt entry. With --fix-grants ON by
+                # default these are auto-generated before this point,
+                # so this branch only fires under --no-fix-grants.
+                # Surface as informational with a pointer back at the
+                # default behaviour.
                 stage.add_issue(
                     "info",
                     issue_codes.INSPECT_GRANT_VIOLATION,
-                    f"Missing grant (intent has it, .grt does not): "
-                    f"{entry}. Run "
-                    f"`ships inspect --fix-grants` to generate the "
-                    f"missing .grt entries from DDL intent.",
+                    f"Missing grant: {_format_missing_grant(entry)}. "
+                    f"Drop --no-fix-grants (or run "
+                    f"`ships inspect --fix-grants`) to auto-generate.",
                 )
             for entry in grant_result.orphaned:
                 if _grant_issue_enabled(warn_orphan_grants_severity):
                     stage.add_issue(
                         warn_orphan_grants_severity.lower(),
                         issue_codes.INSPECT_GRANT_VIOLATION,
-                        f"Orphaned grant (.grt has it, intent does not): {entry}",
+                        f"Orphaned grant (.grt has it, intent does not): "
+                        f"{_format_orphaned_grant(entry)}",
                     )
 
         stage.set_inputs(
@@ -4941,10 +5005,15 @@ def _build_parser():
     )
     vl.add_argument(
         "--fix-grants",
-        action="store_true",
-        help="Generate or update .grt files in dcl/ to match "
-        "the inferred grant set from DDL intent analysis. "
-        "Existing .grt files are overwritten.",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Generate or update .grt files in dcl/ to match the inferred "
+        "grant set from DDL intent analysis. ON by default — missing "
+        "grants are derivable from the DDL, idempotent, and the writer "
+        "only adds entries that intent implies (extras and orphans are "
+        "left for human review), so making the operator opt in to a "
+        "known-safe fix is friction. Pass --no-fix-grants to opt out "
+        "and just lint instead.",
     )
     vl.add_argument(
         "--fix-ddl-terminators",

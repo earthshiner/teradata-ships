@@ -49,6 +49,26 @@ class TestCLIDefault:
         args = parser.parse_args(["inspect", "--project", ".", "--fix-ddl-terminators"])
         assert args.fix_ddl_terminators is True
 
+    def test_fix_grants_defaults_to_true(self):
+        """``--fix-grants`` is also ON by default. Missing grants are
+        derivable from DDL intent, the writer is additive (extras and
+        orphans are left for human review), and the operation is
+        idempotent — so making operators opt in is friction we don't
+        want. Pass ``--no-fix-grants`` to opt out."""
+        parser = _build_parser()
+        args = parser.parse_args(["inspect", "--project", "."])
+        assert args.fix_grants is True
+
+    def test_no_fix_grants_opts_out(self):
+        parser = _build_parser()
+        args = parser.parse_args(["inspect", "--project", ".", "--no-fix-grants"])
+        assert args.fix_grants is False
+
+    def test_explicit_fix_grants_stays_true(self):
+        parser = _build_parser()
+        args = parser.parse_args(["inspect", "--project", ".", "--fix-grants"])
+        assert args.fix_grants is True
+
 
 # ---------------------------------------------------------------
 # Helpers
