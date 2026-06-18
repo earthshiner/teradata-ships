@@ -150,6 +150,42 @@ def test_undefined_token_flagged_and_kept_literal(tmp_path):
     assert "✗" in html
 
 
+def test_empty_token_banner_carries_edit_hint(tmp_path):
+    """An "Empty" warning must tell the operator which .conf to edit.
+
+    Replicates the BionicCC_17 case where ``bootstrap-env-config``
+    parked the referenced tokens in DEV.conf with empty values
+    ready to be filled in. Without the hint, the report names the
+    problem ("Empty") but not the fix.
+    """
+    _write_env(tmp_path, "DEV", ["DB_T="])  # defined but empty
+    _write_payload(
+        tmp_path,
+        "DDL/tables/T.tbl",
+        "CREATE TABLE {{DB_T}}.X (Id INT);",
+    )
+    html = tokenisation_tab(str(tmp_path))
+    assert "Empty" in html
+    assert "DB_T" in html
+    # Banner points the operator at the exact file to edit
+    assert "DEV.conf" in html
+    assert "fill in the values" in html
+
+
+def test_undefined_token_banner_carries_edit_hint(tmp_path):
+    """The Undefined banner must also point at the .conf to edit."""
+    _write_env(tmp_path, "DEV", ["ENV_PREFIX=A_D01"])
+    _write_payload(
+        tmp_path,
+        "DDL/tables/T.tbl",
+        "CREATE TABLE {{ENV_PREFIX}}_{{MISSING_DB}}.T (Id INT);",
+    )
+    html = tokenisation_tab(str(tmp_path))
+    assert "Undefined" in html
+    assert "DEV.conf" in html
+    assert "fill in the values" in html
+
+
 def test_collision_detected(tmp_path):
     _write_env(tmp_path, "DEV", ["DB_A=SAME", "DB_B=SAME"])
     _write_payload(
