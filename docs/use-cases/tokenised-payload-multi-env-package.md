@@ -169,17 +169,30 @@ This is the round-trip the use case describes: source → tokenise once
 ## One-shot equivalent
 
 `process` runs harvest → generate → inspect → analyse → package in
-order and stops on the first failure. Useful in CI:
+order. Add `--strict` to stop on the first stage that finishes with
+errors; without it every stage runs and errors are summarised at the
+end. Useful in CI:
 
 ```bash
 python -m td_release_packager process \
   --project $PROJECT \
   --source  $SOURCE \
   --auto-tokenise \
-  --force \
   --env DEV \
-  --name <release-name>
+  --name <release-name> \
+  --strict
 ```
 
-Same flags as the individual steps. For multi-env builds, run `process`
-once to land the payload, then loop over `package --env <ENV>`.
+`process` exposes a curated subset of the per-stage flags. Notable
+omissions vs. the individual steps:
+
+- No `--force` / `--keep-existing` — `process` always runs harvest in
+  the default (clean) mode.
+- No `--reconcile` — interactive reconciliation belongs in standalone
+  `harvest` runs, not in a one-shot pipeline.
+- No `--build-number`, `--no-increment`, `--change-ref`,
+  `--allow-dirty`, or signing flags — when you need any of those,
+  run the steps individually and pass the flag to `package`.
+
+For multi-env builds, run `process` once to land the payload, then
+loop over `package --env <ENV>`.
