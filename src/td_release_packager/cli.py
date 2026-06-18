@@ -2103,7 +2103,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
         )
         stage.set_config_resolved(
             "fix_ddl_terminators",
-            getattr(args, "fix_ddl_terminators", False),
+            getattr(args, "fix_ddl_terminators", True),
             "layer-5",
             "cli",
         )
@@ -2207,26 +2207,24 @@ def _run_inspect(args, stage, issue_codes) -> int:
             rules_config["leading_commas"] = "OFF"
 
         # -- Optional: auto-fix missing DDL terminators (issue #253) --
-        # Mirrors --fix-grants. Runs BEFORE the lint pass so any fixed
-        # statements are absent from the post-fix report. Inserting ';'
-        # at a DDL boundary is mechanically safe and does not change
-        # functionality.
+        # Runs BEFORE the lint pass so any fixed statements are absent
+        # from the post-fix report. Inserting ';' at a DDL boundary is
+        # mechanically safe (Teradata requires it for deploy and the
+        # addition cannot change statement semantics), so this fixer is
+        # ON by default. Pass --no-fix-ddl-terminators to opt out.
         ddl_terminator_fix_result = None
-        if getattr(args, "fix_ddl_terminators", False):
+        if getattr(args, "fix_ddl_terminators", True):
             from td_release_packager.validate import fix_ddl_terminators
 
-            ddl_terminator_fix_result = fix_ddl_terminators(args.project)
+            ddl_terminator_fix_result = fix_ddl_terminators(
+                resolve_inspect_root(args.project)
+            )
             if ddl_terminator_fix_result.files_written:
                 print(
                     f"\n  ✎ Auto-fixed missing DDL terminators in "
                     f"{ddl_terminator_fix_result.files_written} file(s) "
                     f"({ddl_terminator_fix_result.statements_fixed} statement(s)) "
-                    f"— re-run inspect to confirm."
-                )
-            else:
-                print(
-                    "\n  ✓ No DDL terminator violations found "
-                    "(--fix-ddl-terminators had nothing to fix)."
+                    f"— pass --no-fix-ddl-terminators to disable."
                 )
 
         # -- Optional: auto-fix non-ASCII characters (issue #257) --
@@ -4931,12 +4929,15 @@ def _build_parser():
     )
     vl.add_argument(
         "--fix-ddl-terminators",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="Append the missing ';' to DDL statements that violate the "
-        "ddl_terminator rule. Rewrites source files in place; preserves "
+        "ddl_terminator rule. Rewrites payload files in place; preserves "
         "trailing whitespace and comments. Skips generated paths "
-        "(releases/, .ships-work/, _rollback/). Opt-in only; the "
-        "operator is expected to audit the diff via source control.",
+        "(releases/, .ships-work/, _rollback/). ON by default — inserting "
+        "a semi-colon at a DDL boundary is mechanically safe and Teradata "
+        "requires it for deploy. Pass --no-fix-ddl-terminators to opt out "
+        "and just lint instead.",
     )
     vl.add_argument(
         "--fix-non-ascii",

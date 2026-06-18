@@ -659,7 +659,9 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
                     ],
                     "properties": {
                         "description": {"type": "string"},
-                        "default_severity": {"enum": ["ERROR", "WARNING", "OFF"]},
+                        "default_severity": {
+                            "enum": ["ERROR", "WARNING", "INFO", "OFF"]
+                        },
                         "safe_fix_available": {"type": "boolean"},
                         "automation_level": {"enum": ["auto", "guided", "manual"]},
                         "recommended_action": {"type": "string"},

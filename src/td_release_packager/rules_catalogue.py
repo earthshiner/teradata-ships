@@ -45,7 +45,7 @@ RULES_RESULT_REF = f"context/{RULES_RESULT_FILENAME}"
 # Field semantics:
 #
 #   description            One sentence on what the rule checks.
-#   default_severity       ERROR / WARNING / OFF — mirrors
+#   default_severity       ERROR / WARNING / INFO / OFF — mirrors
 #                          validate.DEFAULT_RULES.
 #   safe_fix_available     True when a deterministic, low-risk
 #                          mechanical fix exists (either built into
@@ -176,12 +176,18 @@ _RULES: dict[str, dict[str, object]] = {
     "keyword_case": {
         "description": (
             "SQL keywords (``CREATE``, ``TABLE``, ``SELECT`` ...) "
-            "should be uppercase to match the project's style."
+            "are conventionally uppercase. Teradata case-folds them "
+            "and runs either way, so this is a style preference, not "
+            "a correctness defect."
         ),
-        "default_severity": "WARNING",
-        "safe_fix_available": True,
-        "automation_level": "auto",
-        "recommended_action": ("Uppercase the SQL keywords flagged in the message."),
+        "default_severity": "INFO",
+        "safe_fix_available": False,
+        "automation_level": "manual",
+        "recommended_action": (
+            "Uppercase the SQL keywords flagged in the message — or "
+            "set ``keyword_case=OFF`` in ``config/inspect.conf`` if "
+            "your project does not enforce the convention."
+        ),
         "risk": "low",
         "requires_human_review": False,
     },

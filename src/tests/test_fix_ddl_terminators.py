@@ -6,11 +6,48 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from td_release_packager.cli import _build_parser
 from td_release_packager.validate import (
     DDLTerminatorFixResult,
     fix_ddl_terminators,
     validate_directory,
 )
+
+
+# ---------------------------------------------------------------
+# CLI default
+# ---------------------------------------------------------------
+
+
+class TestCLIDefault:
+    """``ships inspect --fix-ddl-terminators`` is ON by default."""
+
+    def test_fix_ddl_terminators_defaults_to_true(self):
+        """The flag uses BooleanOptionalAction with default=True so a
+        bare ``ships inspect`` rewrites missing semi-colons. The fix
+        is mechanically safe (Teradata requires the terminator for
+        deploy) and operates only on payload files, so making the
+        operator opt in to a known-safe fix is friction we don't want.
+        """
+        parser = _build_parser()
+        args = parser.parse_args(["inspect", "--project", "."])
+        assert args.fix_ddl_terminators is True
+
+    def test_no_fix_ddl_terminators_opts_out(self):
+        """BooleanOptionalAction generates ``--no-fix-ddl-terminators``
+        as the opt-out for the same flag."""
+        parser = _build_parser()
+        args = parser.parse_args(
+            ["inspect", "--project", ".", "--no-fix-ddl-terminators"]
+        )
+        assert args.fix_ddl_terminators is False
+
+    def test_explicit_fix_ddl_terminators_stays_true(self):
+        """Passing the flag explicitly still means True, for users who
+        scripted against the pre-default form."""
+        parser = _build_parser()
+        args = parser.parse_args(["inspect", "--project", ".", "--fix-ddl-terminators"])
+        assert args.fix_ddl_terminators is True
 
 
 # ---------------------------------------------------------------
