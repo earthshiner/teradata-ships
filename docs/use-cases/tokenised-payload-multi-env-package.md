@@ -70,6 +70,57 @@ eponymous atomic files, each containing `{{TOKEN}}` references in
 place of database literals. `config/token_map.conf` records every
 substitution decision.
 
+## 1b. Align env config to the harvested tokens
+
+`--auto-tokenise` chooses token names based on the literal database
+prefixes it finds in your source — e.g. a source DDL using
+`CallCentre_DOM_STD_T.Agent_H` becomes
+`{{CallCentre_DOM_STD_T}}.Agent_H` in the payload. If the
+`config/env/*.conf` files were scaffolded with a different naming
+convention (a common case when the scaffold template predates the
+data you're harvesting), the payload tokens won't intersect the env
+config, and step 2 will report every reference as undefined.
+
+Re-generate each environment's config to match the actual tokens
+the harvest produced:
+
+```bash
+for env in DEV TST PRD; do
+  python -m td_release_packager bootstrap-env-config \
+    --source $PROJECT \
+    --env $env \
+    --force
+done
+```
+
+| Flag | Why for this scenario |
+|---|---|
+| `--source` | The project whose tokenised payload should drive the env config. |
+| `--env` | Which environment file to (re)generate — `<source>/config/env/<env>.conf`. |
+| `--force` | Overwrite any pre-existing template that doesn't match the harvest output. Drop this on the very first project so an editorial draft isn't clobbered; keep it whenever you re-harvest with a different naming convention. |
+
+`bootstrap-env-config` parks every referenced token in section 8 of
+the .conf for you to fill in with the real database name per
+environment. The composition-roots cascade (sections 1–2) is
+untouched on existing files unless `--force` rewrites them.
+
+When you can't or don't want to regenerate the env config (e.g. you
+have a hand-authored cascade you want to keep), the alternative is to
+re-run harvest with explicit `--prefix-token` mappings so the
+payload's token names match the names the env config already
+defines:
+
+```bash
+python -m td_release_packager harvest \
+  --project $PROJECT \
+  --source  $SOURCE \
+  --prefix-token CallCentre_DOM_STD_T={{DB_DOMAIN_STD_T}} \
+  --prefix-token CallCentre_DOM_STD_V={{DB_DOMAIN_STD_V}} \
+  --force
+```
+
+Use one or the other approach per project, not both.
+
 ## 2. Scan — validate token coverage
 
 ```bash
@@ -83,6 +134,10 @@ python -m td_release_packager scan \
 |---|---|
 | `--all-envs` | Resolve the tokenised payload against every `config/env/*.conf`. Flags any token an environment cannot supply — the show-stopper for that environment's package build. |
 | `--fail-on-orphan` | Non-zero exit if any env defines a token the payload never references. Catches drift between env config and DDL. Keep off during early development; turn on in CI. |
+
+If many tokens come back undefined, step 1b is the fix — the env
+config and payload were generated with mismatching naming. Scan now
+points at `bootstrap-env-config` in that case.
 
 ## 3. Inspect — lint the tokenised payload
 
