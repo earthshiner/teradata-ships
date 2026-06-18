@@ -35,6 +35,20 @@ DECISIONS_FILENAME = "ships.decisions.json"
 REPORT_DIRNAME = os.path.join("output", "reports")
 REPORT_FILENAME = "pipeline_report.html"
 
+# Canonical SHIPS pipeline order. The timeline displays stages in this
+# order regardless of when each was last invoked — re-running ``harvest``
+# after ``package`` should not push it to the bottom of the visual
+# pipeline. Unknown stage names fall through to the end, ordered by their
+# ``started_at`` timestamp.
+_PIPELINE_ORDER = (
+    "scaffold",
+    "harvest",
+    "inspect",
+    "scan",
+    "analyse",
+    "package",
+)
+
 # Per-step metrics surfaced in the report.  Each entry is a
 # (display_label, decisions key) pair; the key is looked up across a
 # stage's merged inputs+outputs, and absent or zero-noise values are
@@ -87,7 +101,15 @@ _ZERO_NOISE_KEYS = frozenset(
 
 
 def load_latest_run(project_dir: str) -> Optional[dict]:
-    """Return the most recent run dict from ``ships.decisions.json``.
+    """Return a synthetic "latest pipeline" run dict from ``ships.decisions.json``.
+
+    Each SHIPS CLI invocation (``ships harvest``, ``ships inspect``, ...) is
+    recorded as its own run, so the literal newest run typically carries only
+    one stage. To give the report a complete view of the most recent
+    pipeline state, this function merges stages across runs: for each stage
+    name it keeps the most recently recorded stage entry. Run-level fields
+    (``command``, ``run_id``, ``final_status``, ``duration_ms``) come from
+    the newest run so the timeline header still identifies the last action.
 
     Args:
         project_dir: SHIPS project root that should contain the decisions
@@ -96,8 +118,9 @@ def load_latest_run(project_dir: str) -> Optional[dict]:
                      project root.
 
     Returns:
-        The last run object (``{"run_id", "command", "stages", ...}``), or
-        ``None`` when the file is absent, unreadable, malformed, or empty.
+        A synthetic run object (``{"run_id", "command", "stages", ...}``)
+        with merged ``stages``, or ``None`` when the file is absent,
+        unreadable, malformed, or empty.
     """
     path = os.path.join(project_dir, DECISIONS_FILENAME)
     if not os.path.isfile(path):
@@ -111,7 +134,35 @@ def load_latest_run(project_dir: str) -> Optional[dict]:
     runs = data.get("runs") if isinstance(data, dict) else None
     if not runs:
         return None
-    return runs[-1]
+
+    # Walk forward so later occurrences overwrite earlier ones; each stage
+    # name ends up holding its most recent entry.
+    latest_stage: Dict[str, dict] = {}
+    for run in runs:
+        for stage in run.get("stages", []) or []:
+            name = str(stage.get("stage", "")).lower()
+            if name:
+                latest_stage[name] = stage
+
+    def _sort_key(stage: dict) -> Tuple[int, str]:
+        name = str(stage.get("stage", "")).lower()
+        try:
+            return (_PIPELINE_ORDER.index(name), "")
+        except ValueError:
+            # Unknown stage names sort after the canonical pipeline,
+            # ordered by their started_at timestamp for stability.
+            return (len(_PIPELINE_ORDER), str(stage.get("started_at") or ""))
+
+    merged_stages = sorted(latest_stage.values(), key=_sort_key)
+
+    newest = runs[-1]
+    return {
+        "run_id": newest.get("run_id"),
+        "command": newest.get("command"),
+        "final_status": newest.get("final_status", "success"),
+        "duration_ms": newest.get("duration_ms"),
+        "stages": merged_stages,
+    }
 
 
 def _find_stage(stages: List[dict], name: str) -> Optional[dict]:

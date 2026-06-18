@@ -653,10 +653,32 @@ def _ingest_directory_impl(
                 classification = classify(path=src_path, content=clean)
                 obj_subtype = classification.type
                 obj_type = base_type(obj_subtype)
-                # Surface filename-mismatch and unrecognised-external
-                # warnings to the harvest banner for user attention.
+                # Surface unrecognised-external and similar warnings to
+                # the harvest banner for user attention.
+                #
+                # Filename-mismatch warnings are suppressed when the
+                # source file produced more than one statement: the
+                # ingest splitter routes each chunk to its own
+                # type-appropriate placed file, so every non-primary
+                # chunk would otherwise trip the mismatch warning for
+                # the *original* extension (e.g. a STATISTICS chunk
+                # tail-appended to a .tbl, a COMMENT chunk after a
+                # VIEW). That's the splitter doing its job, not a
+                # user-actionable mismatch — surfacing it is pure
+                # noise. The "files placed" metric already records
+                # what happened. Single-statement files with a
+                # genuinely wrong extension (a .tbl that is purely a
+                # CREATE VIEW) still warn.
                 rel_path = os.path.relpath(src_path, source_dir)
+                was_split = len(statements) > 1
                 for w in classification.warnings:
+                    if was_split and "Filename mismatch" in w:
+                        logger.debug(
+                            "ingest: suppressed split-chunk mismatch for %s — %s",
+                            rel_path,
+                            w,
+                        )
+                        continue
                     result.classification_warnings.append(f"{rel_path}: {w}")
 
                 if obj_type is None:
