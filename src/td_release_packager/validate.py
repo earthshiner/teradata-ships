@@ -93,7 +93,12 @@ DEFAULT_RULES: Dict[str, str] = {
     "extension": "ERROR",
     "type_suffix": "ERROR",
     "hardcoded_name": "WARNING",
-    "keyword_case": "WARNING",
+    # keyword_case: lowercase SQL keywords are a stylistic preference, not
+    # a correctness defect — Teradata case-folds them and runs fine. Default
+    # to INFO so the rule documents the discipline without cluttering the
+    # error/warning counts on legacy onboarding. Projects that enforce
+    # UPPERCASE strictly can flip it back via ``config/inspect.conf``.
+    "keyword_case": "INFO",
     # comma_log_level controls the SEVERITY of a comma-style finding.
     # Use comma_style to control WHAT is checked (leading/trailing/as-per-source).
     "comma_log_level": "WARNING",
@@ -1028,6 +1033,22 @@ class ValidationResult:
     def passed(self) -> bool:
         """True if no ERROR-level issues found."""
         return self.errors == 0
+
+
+def resolve_inspect_root(project_dir: str) -> str:
+    """Return the directory ``inspect`` should walk for a SHIPS project.
+
+    The deployable artefact of a SHIPS project lives at
+    ``payload/database/``. Linting must focus on that artefact, not on
+    user-owned scratch directories that sit alongside it at the project
+    root (``___extras/``, original source dumps, fabrication scripts,
+    spreadsheets). Falls back to ``project_dir`` itself when no payload
+    subtree exists — preserves the bare-directory behaviour relied on
+    by unit tests and by callers running inspect against an arbitrary
+    directory.
+    """
+    payload = os.path.join(project_dir, "payload", "database")
+    return payload if os.path.isdir(payload) else project_dir
 
 
 def validate_directory(
@@ -2034,9 +2055,13 @@ def _check_keyword_case(rel_path: str, content: str) -> List[ValidationIssue]:
             ValidationIssue(
                 file=rel_path,
                 rule="keyword_case",
-                severity="WARNING",
+                # Default severity for this rule is INFO — the framework
+                # will remap to whatever ``rules_config["keyword_case"]``
+                # says, so projects that enforce UPPERCASE strictly still
+                # get WARNING/ERROR via their inspect.conf.
+                severity="INFO",
                 message=f"{lowercase}/{total} SQL keywords are lowercase. "
-                f"Discipline requires UPPERCASE keywords.",
+                f"Discipline prefers UPPERCASE keywords.",
             )
         ]
     return []
@@ -2779,6 +2804,13 @@ def _check_non_ascii_literals(rel_path: str, content: str) -> List[ValidationIss
                 if in_comment
                 else "SQL source -- Teradata Error 6706 on LATIN databases"
             )
+            # When this character has a registered ASCII substitute, point
+            # the operator at the auto-fix flag — low-friction is the goal.
+            autofix_hint = (
+                " Run `ships inspect --fix-non-ascii` to substitute it automatically."
+                if char in _NON_ASCII_AUTO_FIX_REPLACEMENTS
+                else ""
+            )
             issues.append(
                 ValidationIssue(
                     rule="non_ascii",
@@ -2787,7 +2819,7 @@ def _check_non_ascii_literals(rel_path: str, content: str) -> List[ValidationIss
                     line=line_no,
                     message=(
                         f"Non-ASCII character U+{ord(char):04X} {repr(char)} "
-                        f"in {location}. Suggestion: {suggestion}"
+                        f"in {location}. Suggestion: {suggestion}.{autofix_hint}"
                     ),
                 )
             )

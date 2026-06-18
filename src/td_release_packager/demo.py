@@ -24,7 +24,11 @@ from td_release_packager.models import BuildConfig
 from td_release_packager.root_parent import inject_root_parent, normalise_root_parent
 from td_release_packager.scaffolder import scaffold_project
 from td_release_packager.token_engine import generate_token_map, write_token_map
-from td_release_packager.validate import read_inspect_config, validate_directory
+from td_release_packager.validate import (
+    read_inspect_config,
+    resolve_inspect_root,
+    validate_directory,
+)
 
 
 DEMO_INSPECT_OVERRIDES: dict[str, str] = {
@@ -150,7 +154,9 @@ def run_demo(
     env_config = _write_demo_env_config(project_dir, env, token_map, root_parent_value)
 
     rules = read_inspect_config(str(project_dir / "config" / "inspect.conf"))
-    lint = validate_directory(str(project_dir), rules_config=rules, strict=False)
+    lint = validate_directory(
+        resolve_inspect_root(str(project_dir)), rules_config=rules, strict=False
+    )
     analysis = analyse_project(str(project_dir))
 
     demo_result = DemoResult(

@@ -562,9 +562,10 @@ def _ships_inspect_impl(
     """
     try:
         from td_release_packager.validate import (
-            validate_directory,
-            read_inspect_config,
             DEFAULT_RULES,
+            read_inspect_config,
+            resolve_inspect_root,
+            validate_directory,
         )
 
         # Load rule config from file or use defaults
@@ -579,7 +580,7 @@ def _ships_inspect_impl(
                 rules_config = dict(DEFAULT_RULES)
 
         result = validate_directory(
-            source_dir=project,
+            source_dir=resolve_inspect_root(project),
             rules_config=rules_config,
             strict=strict,
         )

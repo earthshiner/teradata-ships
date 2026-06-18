@@ -790,6 +790,39 @@ class TestCheckKeywordCase:
         assert len(issues) == 1
         assert issues[0].rule == "keyword_case"
 
+    def test_default_severity_is_info(self):
+        """Default severity is INFO — lowercase keywords are a style
+        preference, not a deploy-blocking defect. Projects can flip it
+        back to WARNING/ERROR via ``config/inspect.conf``."""
+        from td_release_packager.validate import DEFAULT_RULES
+
+        assert DEFAULT_RULES["keyword_case"] == "INFO"
+
+    def test_lowercase_keyword_finding_does_not_count_as_warning(self, tmp_path):
+        """A file that trips the rule under defaults must not bump the
+        warnings count — it surfaces as an INFO note only."""
+        f = tmp_path / "t.tbl"
+        f.write_text(
+            "create table x.y\n"
+            "(id integer not null\n"
+            "   ,name varchar(100) default 'x'\n"
+            "   ,created date\n"
+            ") primary index (id);\n",
+            encoding="utf-8",
+        )
+        result = validate_directory(str(tmp_path))
+        kc = [i for i in result.issues if i.rule == "keyword_case"]
+        assert kc, "Expected keyword_case to fire on lowercase DDL"
+        # The finding itself is INFO — the rule no longer bumps the
+        # warnings count for lowercase keywords. Other rules in the
+        # same file (e.g. set_multiset, leading_commas) may still
+        # raise warnings independently; the check here is just that
+        # the keyword_case finding did not contribute one.
+        assert all(i.severity == "INFO" for i in kc)
+        kc_severities = {i.severity for i in kc}
+        assert "WARNING" not in kc_severities
+        assert "ERROR" not in kc_severities
+
 
 # ---------------------------------------------------------------
 # _check_leading_commas
@@ -2481,3 +2514,89 @@ class TestCheckCommentLength:
             "for a .cmt file with a 260-character comment body."
         )
         assert all(i.severity == "ERROR" for i in comment_issues)
+
+
+class TestResolveInspectRoot:
+    """``resolve_inspect_root`` constrains inspect to the deployable payload."""
+
+    def test_returns_payload_subdir_when_present(self, tmp_path):
+        """Standard SHIPS project layout — return payload/database."""
+        from td_release_packager.validate import resolve_inspect_root
+
+        payload = tmp_path / "payload" / "database"
+        payload.mkdir(parents=True)
+        assert resolve_inspect_root(str(tmp_path)) == str(payload)
+
+    def test_falls_back_to_project_when_no_payload(self, tmp_path):
+        """Bare directory (unit tests, ad-hoc lint runs) — return as-is."""
+        from td_release_packager.validate import resolve_inspect_root
+
+        assert resolve_inspect_root(str(tmp_path)) == str(tmp_path)
+
+    def test_inspect_does_not_walk_sibling_scratch_dirs(self, tmp_path):
+        """Files under ``___extras/`` (sibling of payload/) must be ignored.
+
+        Replicates the user's BionicCC scenario where ``___extras/``
+        held legacy seed scripts that produced spurious lint findings
+        because inspect walked the whole project root.
+        """
+        from td_release_packager.validate import (
+            resolve_inspect_root,
+            validate_directory,
+        )
+
+        payload = tmp_path / "payload" / "database"
+        payload.mkdir(parents=True)
+        clean_view = payload / "MyDB.MyView.viw"
+        clean_view.write_text(
+            "REPLACE VIEW MyDB.MyView AS SELECT 1 AS x;\n",
+            encoding="utf-8",
+        )
+
+        extras = tmp_path / "___extras"
+        extras.mkdir()
+        scratch_sql = extras / "2_Call_H.sql"
+        scratch_sql.write_text(
+            "create table x.y (id int);\nCREATE VIEW x.v AS SELECT 1;\n",
+            encoding="utf-8",
+        )
+
+        result = validate_directory(resolve_inspect_root(str(tmp_path)))
+        scanned_files = {issue.file for issue in result.issues}
+        assert not any("___extras" in f for f in scanned_files), (
+            f"inspect leaked into ___extras/: {scanned_files}"
+        )
+
+
+class TestNonAsciiAutoFixHint:
+    """Non-ASCII findings point the operator at ``--fix-non-ascii``."""
+
+    def test_em_dash_finding_mentions_auto_fix_flag(self, tmp_path):
+        """An em-dash is in the auto-fix table — message must advertise the flag."""
+        f = tmp_path / "x.viw"
+        f.write_text(
+            "REPLACE VIEW x.v AS SELECT 1 AS y; -- description — note\n",
+            encoding="utf-8",
+        )
+        result = validate_directory(str(tmp_path))
+        nas = [i for i in result.issues if i.rule == "non_ascii"]
+        assert nas, "Expected a non_ascii finding for the em-dash"
+        assert any("--fix-non-ascii" in i.message for i in nas)
+
+    def test_unmappable_char_does_not_advertise_auto_fix(self, tmp_path):
+        """A char without an auto-fix entry must NOT advertise the flag.
+
+        Avoids the false promise of "run --fix-non-ascii" when the
+        fix flag won't actually substitute this character.
+        """
+        # U+FFFD REPLACEMENT CHARACTER — explicitly excluded from the
+        # auto-fix table (the original byte is gone, no safe substitute).
+        f = tmp_path / "x.viw"
+        f.write_text(
+            "REPLACE VIEW x.v AS SELECT 1 AS y; -- � here\n",
+            encoding="utf-8",
+        )
+        result = validate_directory(str(tmp_path))
+        nas = [i for i in result.issues if i.rule == "non_ascii"]
+        assert nas, "Expected a non_ascii finding for U+FFFD"
+        assert not any("--fix-non-ascii" in i.message for i in nas)
