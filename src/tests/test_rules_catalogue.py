@@ -54,7 +54,12 @@ class TestDocumentShape:
     def test_field_enums(self):
         doc = compute_rules_document()
         for code, meta in doc["rules"].items():
-            assert meta["default_severity"] in {"ERROR", "WARNING", "OFF"}, code
+            assert meta["default_severity"] in {
+                "ERROR",
+                "WARNING",
+                "INFO",
+                "OFF",
+            }, code
             assert meta["automation_level"] in {"auto", "guided", "manual"}, code
             assert meta["risk"] in {"low", "medium", "high"}, code
             assert isinstance(meta["safe_fix_available"], bool), code
