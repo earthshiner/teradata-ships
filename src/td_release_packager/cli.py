@@ -56,7 +56,11 @@ from td_release_packager.token_engine import (
     scan_tokens_in_directory,
     validate_tokens,
 )
-from td_release_packager.validate import validate_directory, read_inspect_config
+from td_release_packager.validate import (
+    read_inspect_config,
+    resolve_inspect_root,
+    validate_directory,
+)
 from td_release_packager.version_args import add_version_argument
 from td_release_packager.validate_grants import (
     validate_grants,
@@ -2250,7 +2254,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
                 )
 
         lint_result = validate_directory(
-            source_dir=args.project,
+            source_dir=resolve_inspect_root(args.project),
             rules_config=rules_config,
             strict=args.strict,
         )
