@@ -1077,6 +1077,36 @@ class TestIngestDirectory:
         # Warning surfaced
         assert any("Filename mismatch" in w for w in result.classification_warnings)
 
+    def test_ingest_suppresses_mismatch_warning_for_split_files(
+        self, tmp_path, tmp_project
+    ):
+        """A source file that legitimately mixes types (e.g. a CREATE
+        TABLE followed by a tail COLLECT STATISTICS, a CREATE VIEW
+        followed by a COMMENT ON) gets split by the ingest layer into
+        type-appropriate placed files. The non-primary chunks would
+        each trip a "Filename mismatch" warning against the original
+        extension — but the splitter is doing its job, so suppress
+        those warnings to keep the harvest signal-to-noise high.
+        """
+        src = tmp_path / "source"
+        src.mkdir()
+        # Real-world shape: CREATE TABLE + tail COLLECT STATISTICS.
+        (src / "Agent_H.tbl").write_text(
+            "CREATE TABLE x.Agent_H (id INTEGER NOT NULL) "
+            "PRIMARY INDEX(id);\n"
+            "COLLECT STATISTICS COLUMN ( id ) ON x.Agent_H;",
+            encoding="utf-8",
+        )
+
+        result = ingest_directory(str(src), str(tmp_project), detect_tokens=False)
+
+        # Both statements were placed (split worked)
+        types_placed = {placed[2] for placed in result.files_placed}
+        assert "TABLE" in types_placed
+        assert "STATISTICS" in types_placed
+        # No mismatch warning surfaced — the split is the expected shape
+        assert not any("Filename mismatch" in w for w in result.classification_warnings)
+
     def test_ingest_no_classification_warnings_for_clean_files(
         self, tmp_path, tmp_project
     ):

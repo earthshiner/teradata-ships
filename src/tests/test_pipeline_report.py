@@ -110,6 +110,173 @@ def test_latest_run_is_used(tmp_path):
     assert run["command"] == "newest-run"
 
 
+def test_stages_are_merged_across_separate_runs(tmp_path):
+    """Each step run as its own CLI invocation still surfaces in its tab.
+
+    Users typically invoke ``ships harvest``, ``ships inspect`` ... as
+    separate commands, so each becomes a one-stage run in decisions.json.
+    The report must merge the most recent stage of each kind, not just
+    render the literal final run.
+    """
+
+    def _single_stage_run(rid, cmd, stage_name, started, outputs):
+        return {
+            "run_id": rid,
+            "command": cmd,
+            "final_status": "success",
+            "duration_ms": 100,
+            "stages": [
+                {
+                    "stage": stage_name,
+                    "status": "success",
+                    "started_at": started,
+                    "duration_ms": 90,
+                    "inputs": {},
+                    "outputs": outputs,
+                    "issues": [],
+                }
+            ],
+        }
+
+    runs = [
+        _single_stage_run(
+            "r1",
+            "harvest",
+            "harvest",
+            "2026-06-17T09:00:00+00:00",
+            {"classified": 42, "files_placed": 42},
+        ),
+        _single_stage_run(
+            "r2",
+            "inspect",
+            "inspect",
+            "2026-06-17T09:00:01+00:00",
+            {"lint_warnings": 5},
+        ),
+        _single_stage_run(
+            "r3",
+            "scan",
+            "scan",
+            "2026-06-17T09:00:02+00:00",
+            {"unique_tokens": 17},
+        ),
+        _single_stage_run(
+            "r4",
+            "analyse",
+            "analyse",
+            "2026-06-17T09:00:03+00:00",
+            {"object_count": 88, "wave_count": 4},
+        ),
+        _single_stage_run(
+            "r5",
+            "package",
+            "package",
+            "2026-06-17T09:00:04+00:00",
+            {},
+        ),
+    ]
+    _write_decisions(tmp_path, runs)
+
+    merged = load_latest_run(str(tmp_path))
+    # Run-level identity comes from the literal newest run.
+    assert merged["command"] == "package"
+    assert merged["run_id"] == "r5"
+    # But stages are merged from all runs.
+    stage_names = [s["stage"] for s in merged["stages"]]
+    assert stage_names == ["harvest", "inspect", "scan", "analyse", "package"]
+
+    generate_pipeline_report(str(tmp_path))
+    html = (tmp_path / REPORT_DIRNAME / REPORT_FILENAME).read_text(encoding="utf-8")
+    # Each step tab now renders its own metrics instead of the placeholder.
+    assert "Harvest has not run" not in html
+    assert "Inspect has not run" not in html
+    assert "Scan has not run" not in html
+    assert "Analyse has not run" not in html
+    assert "42" in html  # harvest classified
+    assert "17" in html  # scan unique_tokens
+    assert "88" in html  # analyse object_count
+
+
+def test_merged_stages_follow_canonical_pipeline_order(tmp_path):
+    """Timeline reflects the SHIPS pipeline order, not when each step
+    last ran. Re-harvesting after packaging is common — harvest must
+    still appear at its canonical position, not get pushed to the end.
+    """
+
+    def _run(rid, cmd, started):
+        return {
+            "run_id": rid,
+            "command": cmd,
+            "final_status": "success",
+            "duration_ms": 100,
+            "stages": [
+                {
+                    "stage": cmd,
+                    "status": "success",
+                    "started_at": started,
+                    "duration_ms": 90,
+                    "inputs": {},
+                    "outputs": {},
+                    "issues": [],
+                }
+            ],
+        }
+
+    # Out-of-order timestamps: scaffold/inspect/scan/analyse/package
+    # ran first, then harvest was re-run last.
+    runs = [
+        _run("r1", "scaffold", "2026-06-17T09:00:00+00:00"),
+        _run("r2", "inspect", "2026-06-17T09:00:01+00:00"),
+        _run("r3", "scan", "2026-06-17T09:00:02+00:00"),
+        _run("r4", "analyse", "2026-06-17T09:00:03+00:00"),
+        _run("r5", "package", "2026-06-17T09:00:04+00:00"),
+        _run("r6", "harvest", "2026-06-17T09:05:00+00:00"),
+    ]
+    _write_decisions(tmp_path, runs)
+
+    merged = load_latest_run(str(tmp_path))
+    stage_names = [s["stage"] for s in merged["stages"]]
+    # Canonical SHIPS pipeline order, regardless of timestamps.
+    assert stage_names == [
+        "scaffold",
+        "harvest",
+        "inspect",
+        "scan",
+        "analyse",
+        "package",
+    ]
+
+
+def test_most_recent_stage_wins_when_step_rerun(tmp_path):
+    """Re-running a step replaces the older stage record in the merge."""
+    older = {
+        "run_id": "old",
+        "command": "harvest",
+        "final_status": "success",
+        "duration_ms": 100,
+        "stages": [
+            {
+                "stage": "harvest",
+                "status": "success",
+                "started_at": "2026-06-17T08:00:00+00:00",
+                "duration_ms": 90,
+                "inputs": {},
+                "outputs": {"classified": 1},
+                "issues": [],
+            }
+        ],
+    }
+    newer = json.loads(json.dumps(older))
+    newer["run_id"] = "new"
+    newer["stages"][0]["started_at"] = "2026-06-17T09:00:00+00:00"
+    newer["stages"][0]["outputs"]["classified"] = 999
+    _write_decisions(tmp_path, [older, newer])
+
+    merged = load_latest_run(str(tmp_path))
+    assert len(merged["stages"]) == 1
+    assert merged["stages"][0]["outputs"]["classified"] == 999
+
+
 def test_no_decisions_file_returns_none(tmp_path):
     """With no decisions file, nothing is written and None is returned."""
     assert generate_pipeline_report(str(tmp_path)) is None

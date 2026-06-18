@@ -364,9 +364,18 @@ def tokenisation_tab(project_dir: str) -> str:
     referenced = _referenced_tokens(usage)
     if not referenced:
         return (
-            '<p style="color:#6C757D;padding:24px;text-align:center">'
+            '<p style="color:#6C757D;padding:24px 24px 6px;text-align:center">'
             "No <code>{{TOKEN}}</code> references found in the payload — nothing "
             "to substitute.</p>"
+            '<p style="color:#6C757D;padding:0 24px 24px;text-align:center;'
+            'font-size:12px;max-width:760px;margin:0 auto">'
+            "If you expected references here, check that the DDL uses "
+            "<code>{{TOKEN}}</code> placeholders rather than fully-qualified "
+            "names, that prefix-mode tokenisation in <code>ships.yaml</code> "
+            "matches your database prefixes, and that the files live under "
+            "<code>payload/database/</code> with a recognised extension "
+            "(scaffolding files prefixed <code>_</code> or with a "
+            "<code>.sample</code> extension are skipped by design).</p>"
         )
 
     summaries = [_env_summary(name, path, referenced) for name, path in configs]
