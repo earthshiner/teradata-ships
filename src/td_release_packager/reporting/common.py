@@ -94,6 +94,21 @@ def a(value: object) -> str:
 # ---------------------------------------------------------------------------
 
 
+def pluralise(noun: str, count: int) -> str:
+    """Return ``noun`` followed by a numerically-appropriate plural ``s``.
+
+    Avoids double-pluralising nouns that are already plural in form
+    (e.g. ``statistics`` should stay ``statistics``, not ``statisticss``).
+    Words ending in ``s`` are left unchanged regardless of count; other
+    nouns get an ``s`` when ``count != 1``.
+    """
+    if count == 1:
+        return noun
+    if noun.lower().endswith("s"):
+        return noun
+    return f"{noun}s"
+
+
 def fmt_duration(ms: object) -> str:
     """Format a millisecond duration as a compact human-readable string."""
     try:
@@ -246,6 +261,46 @@ body {{ font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-
          padding: 20px 24px; margin-bottom: 16px; }}
 details > summary {{ list-style: none; }}
 details > summary::-webkit-details-marker {{ display: none; }}
+"""
+
+
+# Shared "Reader's Guide" tab styling. Used by both the package report and
+# the pre-package pipeline report so the visual language stays consistent.
+GUIDE_CSS = f"""
+/* ── Guide tab ── */
+.guide-hero {{ background: {NAVY}; color: {WHITE}; border-radius: 8px;
+               padding: 28px 32px; margin-bottom: 24px;
+               display: flex; align-items: center; gap: 24px; }}
+.guide-hero-text h2 {{ font-size: 20px; font-weight: 700; margin-bottom: 6px; }}
+.guide-hero-text p {{ font-size: 14px; color: #8ba4be; max-width: 680px; line-height: 1.6; }}
+.guide-steps {{ display: grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr));
+                gap: 16px; margin-bottom: 24px; }}
+.guide-step {{ border: 1px solid {BORDER}; border-radius: 8px; padding: 18px 20px;
+               background: {WHITE}; }}
+.guide-step-num {{ display: inline-flex; align-items: center; justify-content: center;
+                   width: 28px; height: 28px; border-radius: 50%; background: {ORANGE};
+                   color: {WHITE}; font-size: 13px; font-weight: 700; margin-bottom: 10px; }}
+.guide-step h4 {{ font-size: 14px; font-weight: 700; color: {NAVY}; margin-bottom: 6px; }}
+.guide-step p {{ font-size: 13px; color: #555; line-height: 1.5; }}
+.guide-glossary {{ display: grid; grid-template-columns: repeat(auto-fit,minmax(280px,1fr));
+                   gap: 12px; margin-bottom: 8px; }}
+.guide-glossary-item {{ border-left: 4px solid {ORANGE}; background: #f8f9fa;
+                         padding: 10px 14px; border-radius: 0 4px 4px 0; }}
+.guide-glossary-item dt {{ font-weight: 700; font-size: 13px; color: {NAVY}; }}
+.guide-glossary-item dd {{ font-size: 13px; color: #555; margin: 4px 0 0; line-height: 1.5; }}
+.guide-section-title {{ font-size: 15px; font-weight: 700; color: {NAVY};
+                         margin: 24px 0 12px; padding-bottom: 8px;
+                         border-bottom: 2px solid {ORANGE}; }}
+/* Tooltip */
+[data-tip] {{ border-bottom: 1px dashed {ORANGE}; cursor: help; position: relative; }}
+[data-tip]:hover::after {{ content: attr(data-tip); position: absolute; bottom: 125%;
+  left: 50%; transform: translateX(-50%); background: {NAVY}; color: {WHITE};
+  font-size: 12px; padding: 6px 10px; border-radius: 5px; white-space: normal;
+  width: 260px; line-height: 1.5; z-index: 100; pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,.25); }}
+[data-tip]:hover::before {{ content: ""; position: absolute; bottom: 115%;
+  left: 50%; transform: translateX(-50%); border: 6px solid transparent;
+  border-top-color: {NAVY}; z-index: 100; }}
 """
 
 # Teradata wordmark used in the header bar across all reports.

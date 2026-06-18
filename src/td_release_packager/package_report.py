@@ -1663,7 +1663,8 @@ def _environment_prereq_banner(manifest_dict: dict) -> str:
 # reporting.common.BASE_CSS.  Only classes unique to this report live here;
 # the page shell (header, meta bar, tabs, cards) comes from the shared
 # renderer so the package, deploy, and pipeline reports stay visually aligned.
-_PACKAGE_EXTRA_CSS = f"""
+_PACKAGE_EXTRA_CSS = (
+    f"""
 .flt-btn {{ background: {_LIGHT}; border: 1px solid {_BORDER}; border-radius: 4px;
             padding: 4px 10px; font-size: 12px; cursor: pointer; }}
 .flt-btn.active {{ background: {_NAVY}; color: {_WHITE}; border-color: {_NAVY}; }}
@@ -1690,41 +1691,9 @@ pre {{ white-space: pre-wrap; word-break: break-all; }}
 .summary-flags {{ background: #fff3cd; border: 1px solid #ffca2c; border-left: 6px solid {_ORANGE};
                   padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; }}
 .summary-flags ul {{ margin: 8px 0 0 18px; color: #7a3b00; }}
-/* ── Guide tab ── */
-.guide-hero {{ background: {_NAVY}; color: {_WHITE}; border-radius: 8px;
-               padding: 28px 32px; margin-bottom: 24px;
-               display: flex; align-items: center; gap: 24px; }}
-.guide-hero-text h2 {{ font-size: 20px; font-weight: 700; margin-bottom: 6px; }}
-.guide-hero-text p {{ font-size: 14px; color: #8ba4be; max-width: 680px; line-height: 1.6; }}
-.guide-steps {{ display: grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr));
-                gap: 16px; margin-bottom: 24px; }}
-.guide-step {{ border: 1px solid {_BORDER}; border-radius: 8px; padding: 18px 20px;
-               background: {_WHITE}; }}
-.guide-step-num {{ display: inline-flex; align-items: center; justify-content: center;
-                   width: 28px; height: 28px; border-radius: 50%; background: {_ORANGE};
-                   color: {_WHITE}; font-size: 13px; font-weight: 700; margin-bottom: 10px; }}
-.guide-step h4 {{ font-size: 14px; font-weight: 700; color: {_NAVY}; margin-bottom: 6px; }}
-.guide-step p {{ font-size: 13px; color: #555; line-height: 1.5; }}
-.guide-glossary {{ display: grid; grid-template-columns: repeat(auto-fit,minmax(280px,1fr));
-                   gap: 12px; margin-bottom: 8px; }}
-.guide-glossary-item {{ border-left: 4px solid {_ORANGE}; background: #f8f9fa;
-                         padding: 10px 14px; border-radius: 0 4px 4px 0; }}
-.guide-glossary-item dt {{ font-weight: 700; font-size: 13px; color: {_NAVY}; }}
-.guide-glossary-item dd {{ font-size: 13px; color: #555; margin: 4px 0 0; line-height: 1.5; }}
-.guide-section-title {{ font-size: 15px; font-weight: 700; color: {_NAVY};
-                         margin: 24px 0 12px; padding-bottom: 8px;
-                         border-bottom: 2px solid {_ORANGE}; }}
-/* Tooltip */
-[data-tip] {{ border-bottom: 1px dashed {_ORANGE}; cursor: help; position: relative; }}
-[data-tip]:hover::after {{ content: attr(data-tip); position: absolute; bottom: 125%;
-  left: 50%; transform: translateX(-50%); background: {_NAVY}; color: {_WHITE};
-  font-size: 12px; padding: 6px 10px; border-radius: 5px; white-space: normal;
-  width: 260px; line-height: 1.5; z-index: 100; pointer-events: none;
-  box-shadow: 0 4px 12px rgba(0,0,0,.25); }}
-[data-tip]:hover::before {{ content: ""; position: absolute; bottom: 115%;
-  left: 50%; transform: translateX(-50%); border: 6px solid transparent;
-  border-top-color: {_NAVY}; z-index: 100; }}
 """
+    + _common.GUIDE_CSS
+)
 
 
 def generate_package_report(pkg_dir: str, manifest_dict: dict) -> str:
@@ -1758,8 +1727,7 @@ def generate_package_report(pkg_dir: str, manifest_dict: dict) -> str:
     for r in records:
         type_counts[r["type"]] = type_counts.get(r["type"], 0) + 1
     summary_parts = [
-        f"{v} {k.lower()}{'s' if v != 1 else ''}"
-        for k, v in sorted(type_counts.items())
+        f"{v} {_common.pluralise(k.lower(), v)}" for k, v in sorted(type_counts.items())
     ]
     summary = ",  ".join(summary_parts[:6])
     if len(summary_parts) > 6:

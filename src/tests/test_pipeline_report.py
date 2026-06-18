@@ -410,6 +410,52 @@ def test_scan_project_payload_empty_when_no_tree(tmp_path):
     assert scan_project_payload(str(tmp_path)) == []
 
 
+def test_guide_tab_is_first_and_carries_pipeline_phases(tmp_path):
+    """The Guide tab opens by default and lists the six pipeline stages."""
+    _write_decisions(tmp_path, [_harvest_run()])
+    generate_pipeline_report(str(tmp_path))
+    html = (tmp_path / REPORT_DIRNAME / REPORT_FILENAME).read_text(encoding="utf-8")
+    # Guide tab is the first active tab — its button carries the active class.
+    assert ">Guide</button>" in html
+    assert 'class="tab-btn active" onclick="switchTab(this,\'tab-guide' in html
+    # All six canonical pipeline steps are described as phase cards.
+    for label in (
+        "Scaffold —",
+        "Harvest —",
+        "Inspect —",
+        "Scan —",
+        "Analyse —",
+        "Package —",
+    ):
+        assert label in html
+    # Shared Guide CSS is included (hero + step + glossary scaffolding).
+    assert ".guide-hero" in html
+    assert ".guide-step" in html
+    assert ".guide-glossary" in html
+
+
+def test_payload_summary_does_not_double_pluralise_statistics(tmp_path):
+    """Object-type names that are already plural (STATISTICS) must not
+    get an extra trailing ``s`` in the Payload tab summary line.
+    Regression test for the user-reported ``statisticss`` bug.
+    """
+    _write_decisions(tmp_path, [_harvest_run()])
+    (tmp_path / "payload" / "database" / "DDL" / "statistics").mkdir(parents=True)
+    (tmp_path / "payload" / "database" / "DDL" / "statistics" / "DB.T.stt").write_text(
+        "COLLECT STATISTICS COLUMN ( id ) ON DB.T;\n", encoding="utf-8"
+    )
+    (tmp_path / "payload" / "database" / "DDL" / "tables").mkdir(parents=True)
+    (tmp_path / "payload" / "database" / "DDL" / "tables" / "DB.T.tbl").write_text(
+        "CREATE MULTISET TABLE DB.T (id INTEGER) PRIMARY INDEX (id);\n",
+        encoding="utf-8",
+    )
+
+    generate_pipeline_report(str(tmp_path))
+    html = (tmp_path / REPORT_DIRNAME / REPORT_FILENAME).read_text(encoding="utf-8")
+    assert "statisticss" not in html
+    assert "statistics" in html
+
+
 def test_payload_tab_renders_wave_svg(tmp_path):
     """With waves present, the Payload tab renders the shared wave SVG."""
     _write_decisions(tmp_path, [_harvest_run()])
