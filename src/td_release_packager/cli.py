@@ -4542,6 +4542,24 @@ def _scan_print_text(
                     )
                     for e in undef:
                         print(f"      {e}")
+                    # Recovery hint: when many tokens are undefined this is
+                    # almost always payload / env-config misalignment (e.g.
+                    # scaffolded with one naming convention, harvested with
+                    # another). bootstrap-env-config regenerates the .conf
+                    # to match the actual token references in the payload.
+                    _unique_undef_tokens = {e for e in undef if not e.startswith("  →")}
+                    if len(_unique_undef_tokens) >= 3:
+                        print(
+                            f"\n      ℹ Many tokens undefined — likely a "
+                            f"payload/env-config naming mismatch. To "
+                            f"regenerate {label} matching the actual "
+                            f"payload references, run:"
+                        )
+                        print(
+                            f"        python -m td_release_packager "
+                            f"bootstrap-env-config --source <project> "
+                            f"--env <env> --force"
+                        )
                 if orphans:
                     print(
                         f"\n  ⚠ {label} ORPHAN tokens (defined but never referenced):"
