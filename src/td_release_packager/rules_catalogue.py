@@ -437,16 +437,21 @@ _RULES: dict[str, dict[str, object]] = {
     },
     "warn_extra_grants": {
         "description": (
-            "DCL contains a grant that the inferred grant set does not require."
+            "DCL contains a grant that the inferred grant set does not require. "
+            "Default WARNING — the operator may have added grants the inferrer "
+            "cannot derive from DDL, which is a soft signal rather than a "
+            "packaging failure."
         ),
-        "default_severity": "ERROR",
+        "default_severity": "WARNING",
         "safe_fix_available": False,
         "automation_level": "manual",
         "recommended_action": (
             "Either remove the extra grant from DCL or extend the "
-            "inferred grant set to cover the use case."
+            "inferred grant set to cover the use case. Promote to ERROR in "
+            "``config/inspect.conf`` when you want .dcl files to be a pure "
+            "reflection of the inferred set."
         ),
-        "risk": "medium",
+        "risk": "low",
         "requires_human_review": True,
     },
     "warn_orphan_grants": {

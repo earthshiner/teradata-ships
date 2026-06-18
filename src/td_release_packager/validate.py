@@ -141,9 +141,12 @@ DEFAULT_RULES: Dict[str, str] = {
     # not block, and OFF suppresses the finding.
     #
     # warn_extra_grants applies only to drift entries that contain extra
-    # privileges and no missing inferred privileges. Missing inferred grants
+    # privileges and no missing inferred privileges. Defaults to WARNING:
+    # the operator added grants in the .dcl that SHIPS could not infer
+    # from the DDL — that's a soft signal (they may know something the
+    # inferrer doesn't), not a packaging failure. Missing inferred grants
     # remain hard errors because required access is absent from the DCL.
-    "warn_extra_grants": "ERROR",
+    "warn_extra_grants": "WARNING",
     "warn_orphan_grants": "ERROR",
 }
 
@@ -281,7 +284,7 @@ def read_inspect_config(config_path: str) -> Dict[str, str]:
 def read_severity_from_inspect_config(
     rules: Dict[str, str],
     key: str,
-    default: str = "ERROR",
+    default: Optional[str] = None,
     *,
     strict: bool = False,
 ) -> str:
@@ -294,13 +297,18 @@ def read_severity_from_inspect_config(
     Args:
         rules:   Dict returned by ``read_inspect_config``.
         key:     Rule key to look up, such as ``warn_extra_grants``.
-        default: Default severity to use when the key is absent.
+        default: Explicit fallback severity. When ``None`` (the usual
+                 case), the per-key default in ``DEFAULT_RULES`` is
+                 used, with a final fallback to ``ERROR`` for keys
+                 not registered there.
         strict:  When true, promote ``WARNING`` to ``ERROR`` to match
                  the normal inspect ``--strict`` behaviour.
 
     Returns:
         Normalized severity string.
     """
+    if default is None:
+        default = DEFAULT_RULES.get(key, "ERROR")
     value = rules.get(key, default)
     severity = str(value).strip().upper()
     if severity == "WARN":
@@ -423,13 +431,14 @@ def generate_default_config() -> str:
         "#   Controls .dcl files that contain privileges BEYOND what SHIPS inferred",
         "#   from the DDL — i.e. grants you added manually to the .dcl file.",
         "#",
-        "#   ERROR   (default) — any privilege not inferred from DDL is treated as",
+        "#   ERROR             — any privilege not inferred from DDL is treated as",
         "#                       drift and blocks packaging. Use this posture when",
         "#                       the .dcl files should be a pure reflection of the",
         "#                       DDL with no manual additions.",
-        "#   WARNING           — extra privileges are reported but do not block",
-        "#                       packaging. Useful when some manual grants are",
-        "#                       expected alongside the inferred set.",
+        "#   WARNING (default) — extra privileges are reported but do not block",
+        "#                       packaging. The operator may have added grants",
+        "#                       the inferrer can't derive from DDL; that's a",
+        "#                       soft signal, not a build failure.",
         "#   OFF               — extra privileges are silently accepted. Use when",
         "#                       the .dcl files are intentionally richer than what",
         "#                       SHIPS infers and you do not want any noise.",
