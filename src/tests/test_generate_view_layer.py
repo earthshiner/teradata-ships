@@ -1001,3 +1001,54 @@ class TestDefaultKeywordNotEmittedAsColumn:
         # is_current and is_deleted both have inline DEFAULT on the same line
         assert "is_current" in cols
         assert "is_deleted" in cols
+
+
+class TestSkippedRun:
+    """``run`` reports ``skipped`` instead of erroring on non-applicable payloads.
+
+    View-layer generation is an opt-in convention. When the payload
+    uses literal database names (no ``{{*_T}}.<Name>.tbl`` shapes),
+    the generator can't operate — but that is not a pipeline failure,
+    it is a payload that simply doesn't need this stage.
+    """
+
+    def test_literal_named_payload_is_skipped_not_errored(self, tmp_path):
+        """A .tbl whose name does not start with a paired token reports
+        skipped, not error. Matches the BionicCC_17 case where the
+        operator deployed with literal database names."""
+        root = tmp_path / "Project"
+        _make_ships_project(root)
+        # Literal database name, NOT a {{TOKEN}} prefix.
+        _write(
+            root,
+            "payload/database/DDL/tables/CallCentre_DOM_STD_T.Agent_H.tbl",
+            "CREATE MULTISET TABLE CallCentre_DOM_STD_T.Agent_H "
+            "(id INTEGER NOT NULL) PRIMARY INDEX (id);\n",
+        )
+
+        result = run(root, requested_modules=None, dry_run=False)
+
+        assert result.errors == []
+        assert result.skipped is True
+        assert result.skip_reason is not None
+        # Mentions the convention the user needs to follow
+        assert "{{DB_DOMAIN_T}}" in result.skip_reason
+
+    def test_empty_tables_dir_is_skipped_not_errored(self, tmp_path):
+        """A project that ships no tables at all is also a no-op for the
+        generator. Some packages are pure DML/grants/views — they don't
+        need the view-layer pipeline either."""
+        root = tmp_path / "Project"
+        _make_ships_project(root)
+
+        result = run(root, requested_modules=None, dry_run=False)
+
+        assert result.errors == []
+        assert result.skipped is True
+
+    def test_paired_token_payload_is_not_skipped(self, ships_project):
+        """A real paired-token payload still runs through to completion."""
+        result = run(ships_project, requested_modules=None, dry_run=False)
+        assert result.errors == []
+        assert result.skipped is False
+        assert result.skip_reason is None

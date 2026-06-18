@@ -470,8 +470,10 @@ class TestGenerateStageRecording:
         assert "inspect_config" in config
         assert "token_map" in config
 
-    def test_generate_no_tables_emits_error_issue(self, tmp_path):
-        """No tables in payload → generator errors; GENERATE_ERROR emitted."""
+    def test_generate_no_tables_emits_info_skip_not_error(self, tmp_path):
+        """No paired-token tables → generator skips with an INFO issue,
+        not an error. View-layer generation is opt-in; an inapplicable
+        payload should not break the pipeline."""
         project = _make_project(tmp_path)
         # Don't seed any tables
 
@@ -481,8 +483,9 @@ class TestGenerateStageRecording:
         d = _read_decisions(project)
         gen_run = next(r for r in d["runs"] if r["stages"][0]["stage"] == "generate")
         stage = gen_run["stages"][0]
-        codes = [i["code"] for i in stage["issues"]]
-        assert issue_codes.GENERATE_ERROR in codes
+        issues_by_severity = {i["severity"]: i["code"] for i in stage["issues"]}
+        assert "error" not in issues_by_severity
+        assert issues_by_severity.get("info") == issue_codes.GENERATE_WARNING
 
 
 # ---------------------------------------------------------------
