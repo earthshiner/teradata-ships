@@ -116,6 +116,43 @@ class TestCheckMultiset:
         issues = _check_multiset("test.viw", "CREATE VIEW MyDB.V AS SELECT 1;")
         assert issues == []
 
+    def test_grant_create_table_in_dcl_file_not_flagged(self):
+        """``.dcl`` / ``.grt`` files cannot contain CREATE TABLE DDL by
+        definition. A ``GRANT CREATE TABLE ON …`` clause mentions the
+        literal phrase but does not issue a CREATE TABLE — must not fire.
+        Regression test for the BionicCC_17 case (CallCentre.dcl flagged
+        because of ``GRANT CREATE TABLE ON {{...}} TO {{...}}``).
+        """
+        dcl_content = (
+            "GRANT CREATE TABLE ON {{CallCentre_DOM_BUS_V}} "
+            "TO {{CallCentre_DOM_BUS_V}};\n"
+            "GRANT CREATE VIEW ON {{CallCentre_DOM_BUS_V}} "
+            "TO {{CallCentre_DOM_BUS_V}};\n"
+        )
+        assert _check_multiset("DCL/inter_db/CallCentre.dcl", dcl_content) == []
+        assert _check_multiset("DCL/inter_db/CallCentre.grt", dcl_content) == []
+
+    def test_grant_create_table_in_ddl_file_not_flagged(self):
+        """Even in a DDL-extension file, ``GRANT CREATE TABLE`` must NOT
+        trip the rule — the regex now requires CREATE TABLE at statement
+        start, so a GRANT clause is correctly skipped."""
+        mixed_content = (
+            "GRANT CREATE TABLE ON {{MyDB}} TO {{Role}};\n"
+            "GRANT CREATE VIEW ON {{MyDB}} TO {{Role}};\n"
+        )
+        assert _check_multiset("ops.sql", mixed_content) == []
+
+    def test_real_create_table_in_mixed_file_still_flagged(self):
+        """A real CREATE TABLE statement that lacks SET/MULTISET still
+        fires, even when sitting next to GRANT clauses in the same file."""
+        mixed = (
+            "GRANT CREATE TABLE ON {{MyDB}} TO {{Role}};\n"
+            "CREATE TABLE {{MyDB}}.T (id INT) PRIMARY INDEX (id);\n"
+        )
+        issues = _check_multiset("ops.sql", mixed)
+        assert len(issues) == 1
+        assert issues[0].rule == "set_multiset"
+
 
 # ---------------------------------------------------------------
 # _check_deploy_intent (strict mode)
