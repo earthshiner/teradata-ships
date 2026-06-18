@@ -462,12 +462,11 @@ def _payload_tab(project_dir: str) -> str:
     for r in records:
         type_counts[r["type"]] = type_counts.get(r["type"], 0) + 1
     summary = ",  ".join(
-        f"{v} {k.lower()}{'s' if v != 1 else ''}"
-        for k, v in sorted(type_counts.items())
+        f"{v} {common.pluralise(k.lower(), v)}" for k, v in sorted(type_counts.items())
     )
     intro = (
         f'<p style="font-size:13px;color:#555;margin-bottom:6px">'
-        f"<strong>{len(records)}</strong> object{'s' if len(records) != 1 else ''} "
+        f"<strong>{len(records)}</strong> {common.pluralise('object', len(records))} "
         f"about to be packaged — {h(summary)}. This is the pre-package view; the "
         f"sealed package report carries the same objects with trust flags.</p>"
     )
@@ -485,6 +484,233 @@ def _payload_tab(project_dir: str) -> str:
             + _payload_object_list(records)
         )
     return intro + body
+
+
+# ---------------------------------------------------------------------------
+# Guide tab
+# ---------------------------------------------------------------------------
+
+
+# Canonical SHIPS pre-package pipeline steps with the icons and the
+# one-line description shown on each Guide phase card. Mirrors the
+# phase metadata block used by the sealed package report.
+_GUIDE_STEP_META: List[Tuple[str, str, str, str]] = [
+    (
+        "scaffold",
+        "📐",
+        "Scaffold — project skeleton",
+        "Creates the project directory, env config skeletons, and ships.yaml. "
+        "Run once per project.",
+    ),
+    (
+        "harvest",
+        "📥",
+        "Harvest — split and tokenise",
+        "Splits raw DDL into eponymous atomic files and rewrites hard-coded "
+        "database names as {{TOKEN}} placeholders.",
+    ),
+    (
+        "inspect",
+        "🔍",
+        "Inspect — lint the payload",
+        "Validates the tokenised payload against the Coding Discipline. "
+        "Auto-fixes DDL terminators and grants by default.",
+    ),
+    (
+        "scan",
+        "🔗",
+        "Scan — token coverage",
+        "Resolves every {{TOKEN}} reference against each env config and "
+        "flags anything undefined, empty, or in collision.",
+    ),
+    (
+        "analyse",
+        "🗺",
+        "Analyse — dependency waves",
+        "Walks dependencies between objects and writes the wave order that "
+        "the packager and deployer both consume.",
+    ),
+    (
+        "package",
+        "📦",
+        "Package — environment artefact",
+        "Resolves the payload against one env config and seals the result "
+        "into a versioned zip package.",
+    ),
+]
+
+
+def _guide_phase_cards() -> str:
+    """Render the SHIPS pipeline as a horizontal row of phase cards."""
+    parts = []
+    for i, (_key, icon, title, desc) in enumerate(_GUIDE_STEP_META):
+        is_last = i == len(_GUIDE_STEP_META) - 1
+        arrow = (
+            ""
+            if is_last
+            else '<div style="display:flex;align-items:center;color:#aaa;'
+            'font-size:18px;padding:0 4px;align-self:center">›</div>'
+        )
+        parts.append(
+            f'<div style="display:flex;align-items:stretch;gap:0">'
+            f'<div style="background:#f0f4f8;border:1px solid {common.BORDER};'
+            f"border-radius:8px;padding:14px 16px;min-width:140px;"
+            f'max-width:180px;flex:1">'
+            f'<div style="font-size:22px;margin-bottom:6px">{icon}</div>'
+            f'<div style="font-size:12px;font-weight:700;color:{common.NAVY};'
+            f'margin-bottom:4px">{h(title)}</div>'
+            f'<div style="font-size:11px;color:#555;line-height:1.4">{h(desc)}</div>'
+            f"</div>"
+            f"{arrow}"
+            f"</div>"
+        )
+    return "".join(parts)
+
+
+def _guide_tab(run: dict) -> str:
+    """Reader's Guide for the pre-package pipeline report.
+
+    Mirrors the visual language of the sealed package report's Guide
+    tab but reframes the content for the build operator iterating on
+    a project rather than the DBA deploying a sealed artefact.
+    """
+    command = h(str(run.get("command", "—")))
+    run_id = h(str(run.get("run_id", "—")))
+    stage_count = len(run.get("stages", []) or [])
+    return f"""
+<div class="guide-hero">
+  <div class="guide-hero-text">
+    <h2>SHIPS Pipeline Report — Reader's Guide</h2>
+    <p>This is the <strong>pre-package</strong> view of a SHIPS project as
+       it stands right now — not a sealed deployment artefact.
+       It is regenerated automatically after every pipeline step so you
+       can iterate against fresh signal. Latest command:
+       <code>{command}</code> &nbsp;·&nbsp; run <code>{run_id}</code>
+       &nbsp;·&nbsp; <strong>{stage_count}</strong>
+       {common.pluralise("stage", stage_count)} recorded.</p>
+  </div>
+</div>
+
+<p class="guide-section-title">The SHIPS pipeline</p>
+<p style="font-size:13px;color:#555;margin-bottom:12px;line-height:1.6">
+  <span data-tip="Scaffold → Harvest → Inspect → Package → Ship. The full
+  pipeline that turns raw SQL into a validated, versioned deployment
+  archive.">SHIPS</span> assembles a package by running these steps in order.
+  Each step is independently re-runnable; this report records the most recent
+  output of each. Steps that have not run yet show as empty until you invoke
+  them.
+</p>
+<div style="overflow-x:auto;padding-bottom:8px;margin-bottom:24px">
+  <div style="display:inline-flex;gap:8px;align-items:stretch;
+              min-width:max-content;padding:4px 0">
+    {_guide_phase_cards()}
+  </div>
+</div>
+
+<p class="guide-section-title">How to use this report</p>
+<div class="guide-steps">
+  <div class="guide-step">
+    <div class="guide-step-num">1</div>
+    <h4>Start at Run timeline</h4>
+    <p>The timeline shows every step in the canonical pipeline order with
+       counts and status. Steps with errors auto-open so you can see what
+       blocks the build.</p>
+  </div>
+  <div class="guide-step">
+    <div class="guide-step-num">2</div>
+    <h4>Drill into a step</h4>
+    <p>Each step's tab shows the same data the timeline summarises plus
+       the underlying issue list. Use these tabs to understand
+       <em>why</em> a step flagged something.</p>
+  </div>
+  <div class="guide-step">
+    <div class="guide-step-num">3</div>
+    <h4>Confirm the payload</h4>
+    <p>The <strong>Payload</strong> tab lists every object SHIPS would
+       package right now, grouped by deployment wave. Sanity-check
+       counts and wave order before sealing.</p>
+  </div>
+  <div class="guide-step">
+    <div class="guide-step-num">4</div>
+    <h4>Check token resolution</h4>
+    <p>The <strong>Tokenisation</strong> tab shows what every
+       <code>{{{{TOKEN}}}}</code> will substitute to per environment.
+       Undefined and empty tokens are flagged with the .conf to edit.</p>
+  </div>
+  <div class="guide-step">
+    <div class="guide-step-num">5</div>
+    <h4>Re-run and iterate</h4>
+    <p>Fix the source, re-run the affected step, re-open this report. The
+       report regenerates automatically; no manual refresh of intermediate
+       artefacts needed.</p>
+  </div>
+</div>
+
+<p class="guide-section-title">Glossary — terms used in this report</p>
+<p style="font-size:13px;color:#555;margin-bottom:12px">
+  Hover over any
+  <span data-tip="Like this — hover for a quick definition without leaving
+  the page.">underlined term</span> for a short definition. The full
+  glossary follows.
+</p>
+<div class="guide-glossary">
+<div class="guide-glossary-item">
+  <dt>SHIPS</dt>
+  <dd>Scaffold → Harvest → Inspect → Package → Ship. The Teradata structured
+      deployment pipeline that builds, validates, and packages DDL/DCL/DML
+      for repeatable deployment across environments.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>Pre-package report</dt>
+  <dd>This document. Shows the SHIPS project's <em>current</em> state — not
+      a sealed package. Use it while iterating; use the package report after
+      sealing to verify the artefact.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>Stage</dt>
+  <dd>One step of the SHIPS pipeline (Scaffold, Harvest, Inspect, Scan,
+      Analyse, Package). Each stage is independently re-runnable and records
+      its result into <code>ships.decisions.json</code>.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>Payload</dt>
+  <dd>The <code>payload/database/</code> tree — every SQL artefact that will
+      enter the package. Eponymous and atomic: one object per file, filename
+      matches the object name.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>Token</dt>
+  <dd>A <code>{{{{NAME}}}}</code> placeholder for an environment-specific value
+      (typically a database name). Resolved at package time from
+      <code>config/env/&lt;env&gt;.conf</code>.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>Wave</dt>
+  <dd>A group of objects with no mutual dependencies that can deploy in
+      parallel. Computed by <code>ships analyse</code> from foreign-key and
+      view references.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>Grant inference</dt>
+  <dd>Inspect derives a minimum-required grant set from DDL intent (e.g. a
+      view selecting from another database implies a SELECT grant).
+      <code>--fix-grants</code> writes the derived set into
+      <code>.grt</code> files.</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>Drift</dt>
+  <dd>A mismatch between the inferred grant set and the operator-authored
+      <code>.grt</code> file. Missing-priv drift is an error; extra-only
+      drift defaults to a warning (the operator may know something the
+      inferrer doesn't).</dd>
+</div>
+<div class="guide-glossary-item">
+  <dt>ships.decisions.json</dt>
+  <dd>The append-only audit log of every pipeline run. This report is a
+      projection of the most recent run's findings.</dd>
+</div>
+</div>
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -529,7 +755,8 @@ def generate_pipeline_report(project_dir: str) -> Optional[str]:
     )
 
     tabs = [
-        Tab("tab-timeline", "Run timeline", _timeline_tab(run), active=True),
+        Tab("tab-guide", "Guide", _guide_tab(run), active=True),
+        Tab("tab-timeline", "Run timeline", _timeline_tab(run)),
         Tab("tab-harvest", "Harvest", _step_detail_tab(stages, "harvest")),
         Tab("tab-inspect", "Inspect", _step_detail_tab(stages, "inspect")),
         Tab("tab-scan", "Scan", _step_detail_tab(stages, "scan")),
@@ -549,6 +776,7 @@ def generate_pipeline_report(project_dir: str) -> Optional[str]:
         header_pill=common.status_pill(final_status.upper(), bg, fg),
         meta_html=meta_html,
         tabs=tabs,
+        extra_css=common.GUIDE_CSS,
     )
 
     report_dir = os.path.join(project_dir, REPORT_DIRNAME)
