@@ -2607,10 +2607,20 @@ def _run_inspect(args, stage, issue_codes) -> int:
                         f"Drifted grant: {entry}",
                     )
             for entry in grant_result.missing:
+                # Missing grants are derivable from intent — the DDL
+                # implies the grant, the operator just hasn't written
+                # the matching .grt entry. Surface as informational
+                # with a pointer at ``--fix-grants``: the auto-fix is
+                # safe and idempotent, so escalating to an error
+                # creates friction for a problem SHIPS already knows
+                # how to solve.
                 stage.add_issue(
-                    "error",
+                    "info",
                     issue_codes.INSPECT_GRANT_VIOLATION,
-                    f"Missing grant (intent has it, .grt does not): {entry}",
+                    f"Missing grant (intent has it, .grt does not): "
+                    f"{entry}. Run "
+                    f"`ships inspect --fix-grants` to generate the "
+                    f"missing .grt entries from DDL intent.",
                 )
             for entry in grant_result.orphaned:
                 if _grant_issue_enabled(warn_orphan_grants_severity):
@@ -4134,6 +4144,11 @@ def _run_generate(args, stage, issue_codes) -> int:
         stage.add_issue("warning", issue_codes.GENERATE_WARNING, w)
     for e in result.errors:
         stage.add_issue("error", issue_codes.GENERATE_ERROR, e)
+    # Generate is opt-in: when the payload does not use the paired
+    # token convention the generator can't do anything, but that is
+    # informational, not a failure.
+    if result.skipped and result.skip_reason:
+        stage.add_issue("info", issue_codes.GENERATE_WARNING, result.skip_reason)
 
     print(f"\n{'=' * 64}")
     print("  View Layer Generation")
@@ -4160,6 +4175,10 @@ def _run_generate(args, stage, issue_codes) -> int:
     )
     print(f"  Databases:        {result.databases_written} written")
     print(f"  Grants:           {result.grants_written} written")
+
+    if result.skipped and result.skip_reason:
+        print("\n  Skipped (informational):")
+        print(f"    ℹ {result.skip_reason}")
 
     if result.warnings:
         print("\n  Warnings:")

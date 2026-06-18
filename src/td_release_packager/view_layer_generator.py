@@ -282,6 +282,13 @@ class GenerationResult:
 
     All counters are incremented during execution. ``warnings`` and
     ``errors`` collect human-readable messages for the run summary.
+
+    ``skipped`` is set when generation is not applicable to the payload
+    (for example, the project uses literal database names rather than
+    the paired ``{{*_T}}`` / ``{{*_V}}`` token convention). A skipped
+    run is NOT an error — the view-layer generator is an opt-in
+    convention, and a project without it just doesn't need this stage.
+    The caller is expected to surface ``skip_reason`` as informational.
     """
 
     locking_views_written: int = 0
@@ -294,6 +301,8 @@ class GenerationResult:
     grants_unchanged: int = 0
     warnings: List[str] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
+    skipped: bool = False
+    skip_reason: Optional[str] = None
 
 
 # ===========================================================================
@@ -1378,10 +1387,21 @@ def run(
     views = discover_views(project_root)
 
     if not tables:
-        result.errors.append(
-            f"No tables found under {project_root / _PATH_TABLES}. "
-            f"Is this a SHIPS project with paired table/view tokens "
-            f"such as {{{{DB_DOMAIN_T}}}} and {{{{DB_DOMAIN_V}}}}?"
+        # No paired-token tables to drive view-layer generation. This is
+        # NOT an error: the generator is opt-in, and projects that use
+        # literal database names (no ``{{*_T}}.<obj>.tbl`` shapes) or
+        # that ship nothing under tables/ simply don't need this stage.
+        # Surface it as informational and let the pipeline continue.
+        result.skipped = True
+        result.skip_reason = (
+            f"No paired-token tables found under "
+            f"{project_root / _PATH_TABLES}. View-layer generation is "
+            f"only applicable when ``.tbl`` files use the "
+            f"``{{{{DB_DOMAIN_T}}}}.<Name>.tbl`` convention (with a "
+            f"matching ``{{{{DB_DOMAIN_V}}}}`` companion). Run "
+            f"``ships harvest --auto-tokenise`` to introduce the "
+            f"paired tokens, or ignore this stage if your project "
+            f"deploys views by hand."
         )
         return result
 
@@ -1397,7 +1417,13 @@ def run(
         targets = available_modules
 
     if not targets:
-        result.errors.append("No matching token groups to process.")
+        # Same logic as the no-tables branch above: the convention
+        # simply wasn't matched. Treat as a skip, not an error.
+        result.skipped = True
+        result.skip_reason = (
+            "No matching paired-token groups to process — discovered "
+            "tables did not pair with any view-side companion."
+        )
         return result
 
     logger.info(
