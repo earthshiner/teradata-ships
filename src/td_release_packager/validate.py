@@ -147,7 +147,18 @@ DEFAULT_RULES: Dict[str, str] = {
     # inferrer doesn't), not a packaging failure. Missing inferred grants
     # remain hard errors because required access is absent from the DCL.
     "warn_extra_grants": "WARNING",
-    "warn_orphan_grants": "ERROR",
+    # warn_external_grants applies to .dcl files for grantees that no DDL in
+    # the package implies (e.g. roles granted access inside this package
+    # whose GRANT ROLE ... TO USER is owned by a DBA, IGA system, or
+    # autonomous agent outside the package). These are commonly legitimate
+    # and require no operator action, so they default to INFO — surfaced
+    # in the report and audit trail without blocking the build.
+    #
+    # Renamed from warn_orphan_grants in 2026-06: the term "external"
+    # better reflects that the grantee lives outside the package's intent
+    # rather than being a deficiency. Old configs using warn_orphan_grants
+    # must be updated.
+    "warn_external_grants": "INFO",
 }
 
 # -- Valid severity values --
@@ -444,10 +455,11 @@ def generate_default_config() -> str:
         "#                       SHIPS infers and you do not want any noise.",
         f"warn_extra_grants={DEFAULT_RULES['warn_extra_grants']}",
         "#",
-        "# warn_orphan_grants",
+        "# warn_external_grants",
         "#   Controls .dcl files for a grantee that no DDL in the package implies —",
-        "#   i.e. the file exists but SHIPS found no DDL reference that would",
-        "#   require access to be granted to that grantee.",
+        "#   i.e. the grantee is external to the package's intent. The file exists",
+        "#   but SHIPS found no DDL reference that would require access to be granted",
+        "#   to that grantee.",
         "#",
         "#   Common legitimate causes:",
         "#     - A role is granted database access inside this package, but",
@@ -456,17 +468,18 @@ def generate_default_config() -> str:
         "#     - The package pre-provisions access rights that a downstream",
         "#       process or separate package will activate.",
         "#",
-        "#   ERROR   (default) — orphaned .dcl files block packaging. Use this",
-        "#                       posture for fully self-contained packages where",
-        "#                       every grant must be traceable to DDL in this",
-        "#                       package.",
-        "#   WARNING           — orphaned .dcl files are reported but do not",
-        "#                       block packaging.",
-        "#   OFF               — orphaned .dcl files are silently accepted.",
+        "#   INFO    (default) — external grants are surfaced in the report and",
+        "#                       audit trail. They do not block the build because",
+        "#                       they are commonly legitimate.",
+        "#   WARNING           — external grants are reported as warnings.",
+        "#   ERROR             — external grants block packaging. Use this posture",
+        "#                       for fully self-contained packages where every",
+        "#                       grant must be traceable to DDL in this package.",
+        "#   OFF               — external grants are silently accepted.",
         "#",
-        "# Note: orphaned .dcl files are never auto-deleted by --fix-grants.",
+        "# Note: external .dcl files are never auto-deleted by --fix-grants.",
         "# They require manual review and removal.",
-        f"warn_orphan_grants={DEFAULT_RULES['warn_orphan_grants']}",
+        f"warn_external_grants={DEFAULT_RULES['warn_external_grants']}",
         "",
         "",
         "# Security rules (GAP-003, GAP-008)",

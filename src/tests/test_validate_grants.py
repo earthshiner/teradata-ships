@@ -617,8 +617,12 @@ class TestFormatReport:
         report = format_report(result)
         assert "missing" in report.lower()
 
-    def test_orphan_marker(self, project):
-        # Stray .dcl with no DDL
+    def test_external_marker(self, project):
+        """A .dcl file whose grantee has no DDL backing renders as an
+        EXTERNAL grant (user-facing rename of the internal "orphan"
+        concept). The summary line uses "external", and the per-grantee
+        block explains that the grantee lives outside the package's
+        intent."""
         dcl = _dcl_dir(project)
         dcl.mkdir(parents=True)
         (dcl / "{{LEGACY}}.dcl").write_text(
@@ -627,8 +631,35 @@ class TestFormatReport:
         )
         result = validate_grants(project)
         report = format_report(result)
-        assert "orphan" in report.lower()
+        assert "external" in report.lower()
         assert "{{LEGACY}}" in report
+        # The old user-facing term must be gone from the rendered report.
+        assert "orphan" not in report.lower()
+
+    def test_drift_uses_prose_not_brackets(self, project):
+        """Drifted-grant rendering uses readable prose, not the old
+        bracketed ``extra in .dcl: [...]`` dump."""
+        _add_view(
+            project,
+            "{{V}}.A.viw",
+            _make_view_ddl("{{V}}", "{{T}}"),
+        )
+        fix_grants(project)
+        grt = _dcl_dir(project) / "{{V}}.dcl"
+        # Add an extra privilege beyond what SHIPS infers to force
+        # extra-only drift on this grantee.
+        grt.write_text(
+            grt.read_text(encoding="utf-8")
+            + "GRANT DELETE ON {{T}} TO {{V}} WITH GRANT OPTION;\n",
+            encoding="utf-8",
+        )
+        result = validate_grants(project)
+        report = format_report(result)
+        assert (
+            "grants specified but not required by the package payload" in report.lower()
+        )
+        # No square-bracketed dump for the extras list.
+        assert "extra in .dcl: [" not in report
 
     def test_summary_counts(self, project):
         # 1 consistent
@@ -651,7 +682,10 @@ class TestFormatReport:
 
 
 # -------------------------------------------------------------------
-# Tests for passed_ignoring_orphans() — the warn_orphan_grants mode
+# Tests for passed_ignoring_orphans() — the warn_external_grants mode
+#
+# The helper retains the historic ``orphans`` naming on the internal
+# data model; user-facing surfaces use the term "external grant".
 # -------------------------------------------------------------------
 
 
@@ -659,13 +693,14 @@ class TestPassedIgnoringOrphans:
     """
     Covers the ``passed_ignoring_orphans()`` helper on
     GrantValidationResult, which supports the
-    ``inspect.warn_orphan_grants`` ships.yaml option.
+    ``inspect.warn_external_grants`` ships.yaml option (renamed from
+    ``warn_orphan_grants`` in 2026-06).
 
     When that option is enabled the inspect command uses
-    ``passed_ignoring_orphans()`` rather than ``passed`` to
-    determine whether the grant step blocks packaging.  Orphaned
-    DCL files are still detected and reported (as warnings), but
-    they do NOT cause a hard failure.
+    ``passed_ignoring_orphans()`` rather than ``passed`` to determine
+    whether the grant step blocks packaging.  External-grantee DCL
+    files are still detected and reported (as INFO/WARNING per the
+    config setting), but they do NOT cause a hard failure.
     """
 
     def test_no_orphans_passes_same_as_passed(self, project):
@@ -711,7 +746,7 @@ class TestPassedIgnoringOrphans:
     def test_drift_still_fails_ignoring_orphans(self, project):
         """
         Drift (mismatched privileges) must still cause a hard failure
-        even when warn_orphan_grants is enabled.
+        even when warn_external_grants is enabled.
         """
         _add_view(
             project,
@@ -741,7 +776,7 @@ class TestPassedIgnoringOrphans:
     def test_missing_still_fails_ignoring_orphans(self, project):
         """
         Missing DCL files (inferred but not persisted) must still
-        cause a hard failure even when warn_orphan_grants is enabled.
+        cause a hard failure even when warn_external_grants is enabled.
         """
         _add_view(
             project,

@@ -174,7 +174,7 @@ def _format_grant_recap(
     grant_result,
     max_items: int = 10,
     extra_grants_severity: str = "ERROR",
-    orphan_grants_severity: str = "ERROR",
+    external_grants_severity: str = "INFO",
 ) -> str:
     """
     Produce a recap of grant validation failures. Returns empty
@@ -184,7 +184,7 @@ def _format_grant_recap(
         return ""
 
     extra_grants_severity = extra_grants_severity.upper()
-    orphan_grants_severity = orphan_grants_severity.upper()
+    external_grants_severity = external_grants_severity.upper()
 
     drifted = [
         status
@@ -192,8 +192,8 @@ def _format_grant_recap(
         if status.missing_privs or extra_grants_severity != "OFF"
     ]
     missing = grant_result.missing
-    orphaned = [] if orphan_grants_severity == "OFF" else grant_result.orphaned
-    total = len(drifted) + len(missing) + len(orphaned)
+    external = [] if external_grants_severity == "OFF" else grant_result.orphaned
+    total = len(drifted) + len(missing) + len(external)
 
     if total == 0:
         return ""
@@ -211,10 +211,10 @@ def _format_grant_recap(
             break
         lines.append(f"      {status.grantee}  [missing DCL]")
         shown += 1
-    for status in orphaned:
+    for status in external:
         if shown >= max_items:
             break
-        lines.append(f"      {status.grantee}  [orphaned DCL]")
+        lines.append(f"      {status.grantee}  [external grant]")
         shown += 1
 
     if shown < total:
@@ -2340,9 +2340,9 @@ def _run_inspect(args, stage, issue_codes) -> int:
         # access is absent from the DCL.
         from td_release_packager.validate import read_severity_from_inspect_config
 
-        warn_orphan_grants_severity = read_severity_from_inspect_config(
+        warn_external_grants_severity = read_severity_from_inspect_config(
             rules_config,
-            "warn_orphan_grants",
+            "warn_external_grants",
             strict=getattr(args, "strict", False),
         )
         warn_extra_grants_severity = read_severity_from_inspect_config(
@@ -2375,7 +2375,9 @@ def _run_inspect(args, stage, issue_codes) -> int:
                     and _grant_issue_blocks(warn_extra_grants_severity)
                 ):
                     return False
-                if status.orphaned and _grant_issue_blocks(warn_orphan_grants_severity):
+                if status.orphaned and _grant_issue_blocks(
+                    warn_external_grants_severity
+                ):
                     return False
             return True
 
@@ -2388,7 +2390,12 @@ def _run_inspect(args, stage, issue_codes) -> int:
                 return str(getattr(status, "file_path", ""))
 
         def _privs_summary(privs_map: Dict[str, Set[str]]) -> str:
-            """Render a ``{grantor: {privs}}`` mapping as ``priv,priv on grantor; …``."""
+            """Render a ``{grantor: {privs}}`` mapping as prose.
+
+            Output is ``priv, priv on object; priv on object`` — no
+            wrapping brackets. Used inside larger sentences in the
+            user-facing grant report messages.
+            """
             if not privs_map:
                 return "(none)"
             return "; ".join(
@@ -2405,28 +2412,53 @@ def _run_inspect(args, stage, issue_codes) -> int:
             grantee, what was expected to be granted, and the relative
             path of the .grt file SHIPS expected to find.
             """
+            expected = _privs_summary(getattr(status, "expected_grants", {}))
             return (
-                f"{status.grantee} expects "
-                f"[{_privs_summary(getattr(status, 'expected_grants', {}))}] "
+                f"{status.grantee} expects {expected} "
                 f"but no entry exists at {_rel_grant_path(status)}"
             )
 
         def _format_drifted_grant(status) -> str:
-            """Render a ``GranteeStatus`` for a drifted-grant finding."""
+            """Render a ``GranteeStatus`` for a drifted-grant finding.
+
+            Produces user-friendly prose without the previous square-
+            bracket dump. Missing privileges are reported as "Required
+            by the package payload but absent from the .dcl"; extras
+            are reported as "specified but not required by the package
+            payload" — emphasising that the operator added them
+            beyond what SHIPS infers.
+            """
             parts = [f"{status.grantee} at {_rel_grant_path(status)}"]
             missing = getattr(status, "missing_privs", {}) or {}
             extras = getattr(status, "extra_privs", {}) or {}
             if missing:
-                parts.append(f"missing intent: [{_privs_summary(missing)}]")
+                parts.append(
+                    "required by the package payload but absent from the .dcl: "
+                    f"{_privs_summary(missing)}"
+                )
             if extras:
-                parts.append(f"extra in .grt: [{_privs_summary(extras)}]")
-            return "; ".join(parts)
+                parts.append(
+                    "grants specified but not required by the package payload: "
+                    f"{_privs_summary(extras)}"
+                )
+            return ". ".join(parts)
 
-        def _format_orphaned_grant(status) -> str:
-            """Render a ``GranteeStatus`` for an orphaned-.grt finding."""
+        def _format_external_grant(status) -> str:
+            """Render a ``GranteeStatus`` for an external-grant finding.
+
+            "External" because the grantee (role, database, or user)
+            lives outside the package's DDL intent — i.e. SHIPS found
+            no DDL in this package that would require access to be
+            granted to that grantee. Often legitimate (roles managed
+            by a DBA, IGA system, or another package) and so reported
+            at INFO by default; promote ``warn_external_grants`` to
+            ERROR in inspect.conf for self-contained packages where
+            every grant must be traceable to in-package DDL.
+            """
             return (
-                f"{status.grantee}: .grt file at "
-                f"{_rel_grant_path(status)} has no matching DDL intent"
+                f"{status.grantee} at {_rel_grant_path(status)} — "
+                f"granted access by this package but no DDL in the package "
+                f"implies the grant"
             )
 
         def _grant_suffix(result) -> str:
@@ -2437,10 +2469,10 @@ def _run_inspect(args, stage, issue_codes) -> int:
                     f"{len(result.drifted_extra_only)} extra-only drift "
                     f"({warn_extra_grants_severity.lower()} — warn_extra_grants)"
                 )
-            if result.orphaned and warn_orphan_grants_severity != "ERROR":
+            if result.orphaned and warn_external_grants_severity != "ERROR":
                 parts.append(
-                    f"{len(result.orphaned)} orphaned "
-                    f"({warn_orphan_grants_severity.lower()} — warn_orphan_grants)"
+                    f"{len(result.orphaned)} external "
+                    f"({warn_external_grants_severity.lower()} — warn_external_grants)"
                 )
             return f"  [{', '.join(parts)}]" if parts else ""
 
@@ -2470,7 +2502,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
                 format_grant_report(
                     grant_result,
                     extra_grants_severity=warn_extra_grants_severity,
-                    orphan_grants_severity=warn_orphan_grants_severity,
+                    external_grants_severity=warn_external_grants_severity,
                 )
             )
             print(f"{'=' * 64}")
@@ -2496,7 +2528,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
                 format_grant_report(
                     grant_result,
                     extra_grants_severity=warn_extra_grants_severity,
-                    orphan_grants_severity=warn_orphan_grants_severity,
+                    external_grants_severity=warn_external_grants_severity,
                 )
             )
             print(f"{'=' * 64}")
@@ -2595,10 +2627,10 @@ def _run_inspect(args, stage, issue_codes) -> int:
             m = len(grant_result.missing)
             o = (
                 0
-                if warn_orphan_grants_severity == "OFF"
+                if warn_external_grants_severity == "OFF"
                 else len(grant_result.orphaned)
             )
-            print(f"  Step 2 (Grants): FAILED — {d} drifted, {m} missing, {o} orphaned")
+            print(f"  Step 2 (Grants): FAILED — {d} drifted, {m} missing, {o} external")
 
         # -- Step 3 line
         if hierarchy_ok:
@@ -2624,7 +2656,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
             recap = _format_grant_recap(
                 grant_result,
                 extra_grants_severity=warn_extra_grants_severity,
-                orphan_grants_severity=warn_orphan_grants_severity,
+                external_grants_severity=warn_external_grants_severity,
             )
             if recap:
                 print()
@@ -2688,12 +2720,11 @@ def _run_inspect(args, stage, issue_codes) -> int:
                     f"`ships inspect --fix-grants`) to auto-generate.",
                 )
             for entry in grant_result.orphaned:
-                if _grant_issue_enabled(warn_orphan_grants_severity):
+                if _grant_issue_enabled(warn_external_grants_severity):
                     stage.add_issue(
-                        warn_orphan_grants_severity.lower(),
+                        warn_external_grants_severity.lower(),
                         issue_codes.INSPECT_GRANT_VIOLATION,
-                        f"Orphaned grant (.grt has it, intent does not): "
-                        f"{_format_orphaned_grant(entry)}",
+                        f"External grant: {_format_external_grant(entry)}",
                     )
 
         stage.set_inputs(

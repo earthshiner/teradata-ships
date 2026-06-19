@@ -103,7 +103,7 @@ usage: td_release_packager inspect [-h] --source SOURCE [--config CONFIG]
 | `--skip-tokens` | no | `False` | `` | Disable hardcoded name checks (legacy; prefer inspect.conf). |
 | `--skip-keywords` | no | `False` | `` | Disable keyword case checks (legacy; prefer inspect.conf). |
 | `--skip-commas` | no | `False` | `` | Disable leading comma checks (legacy; prefer inspect.conf). |
-| `--fix-grants` | no | `False` | `` | Create missing `.dcl` files and append missing inferred grants to existing DCL files. Existing extra/orphaned grants are not removed automatically. |
+| `--fix-grants` | no | `False` | `` | Create missing `.dcl` files and append missing inferred grants to existing DCL files. Existing extra/external grants are not removed automatically. |
 | `--skip-grants` | no | `False` | `` | Skip cross-database grant validation entirely. |
 | `--dcl-dir` | no | `` | `` | Directory containing inter-database `.dcl` files. Defaults to `<source>/payload/database/DCL/inter_db/`. The DCL directory has three subdirectories: `roles/` grants to roles, `users/` grants to users, and `inter_db/` grants between databases. |
 
@@ -115,15 +115,15 @@ Both flags are set in `config/inspect.conf` alongside all other inspect rules:
 # Control extra manual grants: ERROR, WARNING/WARN, or OFF
 warn_extra_grants=ERROR
 
-# Control orphaned DCL grantees: ERROR, WARNING/WARN, or OFF
-warn_orphan_grants=ERROR
+# Control external-grantee DCL files: ERROR, WARNING/WARN, INFO, or OFF
+warn_external_grants=INFO
 ```
 
 **`warn_extra_grants`** — By default, any `.dcl` file whose privilege set does not exactly match what SHIPS inferred from the DDL is flagged as drift and blocks the package. Set to `WARNING`/`WARN` to downgrade drifted grantees whose `.dcl` files contain only *extra* privileges to warnings, or `OFF` to suppress extra-only drift. Role grants belong under `DCL/roles`, not `DCL/inter_db`. Grantees with *missing* inferred privileges remain hard errors regardless.
 
-**`warn_orphan_grants`** — By default, a `.dcl` file whose grantee is not implied by any DDL in the package is classified as orphaned and blocks the package (Trust Score: `BLOCKED`). Set to `WARNING`/`WARN` to downgrade orphaned grants to warnings, or `OFF` to suppress them.
+**`warn_external_grants`** *(renamed from `warn_orphan_grants` in 2026-06)* — A `.dcl` file whose grantee is not implied by any DDL in the package is classified as **external** — the grantee (role, database, or user) lives outside the package's intent. Defaults to `INFO` because these are commonly legitimate (e.g. a role granted access in this package whose `GRANT ROLE … TO USER` is managed outside the package). Set to `WARNING`/`WARN` to surface as warnings, `ERROR` to block packaging (strict self-contained posture), or `OFF` to suppress entirely. Old configs using `warn_orphan_grants` are no longer accepted.
 
-Both settings can be set independently and are additive. Missing `.dcl` files and missing inferred privileges remain hard errors regardless of either setting. `--fix-grants` repairs missing inferred privileges additively by appending required `GRANT` statements and does not remove, move, or delete extra/orphaned grants.
+Both settings can be set independently and are additive. Missing `.dcl` files and missing inferred privileges remain hard errors regardless of either setting. `--fix-grants` repairs missing inferred privileges additively by appending required `GRANT` statements and does not remove, move, or delete extra/external grants.
 
 ### `package`
 
