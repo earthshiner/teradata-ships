@@ -28,6 +28,13 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from td_release_packager.reporting import common, redaction
 from td_release_packager.reporting.common import h
+from td_release_packager.expected_collisions import (
+    Allowlist,
+    AllowlistParseError,
+    apply_to_report,
+    default_allowlist_path,
+    load_allowlist,
+)
 from td_release_packager.token_audit import (
     CollisionClass,
     audit_project,
@@ -188,20 +195,45 @@ def _payload_files(project_dir: str) -> List[Tuple[str, str]]:
     return out
 
 
+def _load_project_allowlist(
+    project_dir: str,
+) -> Tuple[Allowlist, List[dict]]:
+    """Load expected_collisions.yaml; surface parse errors as report findings.
+
+    Returns ``(allowlist, parse_errors)``. ``parse_errors`` is a list of
+    ``{"path": str, "message": str}`` for any structural problem with the
+    file; the audit still runs (with an empty allow-list) when the file is
+    malformed so the operator sees both the parse error AND the underlying
+    audit state.
+    """
+    path = default_allowlist_path(project_dir)
+    try:
+        return load_allowlist(path), []
+    except AllowlistParseError as exc:
+        return Allowlist(entries=(), source_path=path), [
+            {"path": path, "message": str(exc)}
+        ]
+    except OSError as exc:
+        logger.debug("tokenisation: could not read allow-list at %s: %s", path, exc)
+        return Allowlist(entries=(), source_path=path), []
+
+
 def _classify_collisions(
     raw: Dict[str, str],
     payload: List[Tuple[str, str]],
     env_name: str,
     resolved: Dict[str, str],
-) -> Tuple[List[dict], List[dict], List[dict]]:
-    """Run the resolved-object-identity audit; return classified groups.
+    allowlist: Optional[Allowlist] = None,
+) -> Tuple[List[dict], List[dict], List[dict], List[dict]]:
+    """Run the resolved-object-identity audit; apply the allow-list; classify.
 
-    Returns ``(real, benign, all_classified)`` lists. Each entry is
-    ``{"value": str, "tokens": [str], "class": CollisionClass.value}``. The
-    audit ignores redacted tokens implicitly: they resolve to a placeholder
-    string that is unlikely to collide with anything else, and even if it
-    did the report filter below drops collision pairs containing any
-    redacted member.
+    Returns ``(real, benign, all_classified, rejected)`` lists. Each
+    classified entry is ``{"value", "tokens", "class"}``. ``rejected`` is a
+    list of ``{"tokens", "value", "reason"}`` for allow-list entries the
+    safety invariant refused to honour.
+
+    Redacted tokens are filtered before reporting to preserve the existing
+    secret-safety property of the legacy collision check.
     """
     report = audit_project(
         env=env_name,
@@ -209,10 +241,20 @@ def _classify_collisions(
         resolved_env=resolved,
         payload_files=payload,
     )
+    rejected_entries: List[dict] = []
+    if allowlist is not None and not allowlist.is_empty:
+        report, rejected = apply_to_report(report, allowlist)
+        rejected_entries = [
+            {
+                "tokens": list(r.entry.tokens),
+                "value": r.real_collision_value,
+                "reason": r.entry.reason,
+            }
+            for r in rejected
+        ]
+
     all_classified: List[dict] = []
     for c in report.collisions:
-        # Drop any group containing a redacted token — preserves the existing
-        # secret-safety property of the pre-audit collision check.
         if any(redaction.is_redacted(t, raw.get(t)) for t in c.tokens):
             continue
         all_classified.append(
@@ -233,7 +275,7 @@ def _classify_collisions(
             CollisionClass.ALLOWLISTED.value,
         )
     ]
-    return real, benign, all_classified
+    return real, benign, all_classified, rejected_entries
 
 
 def _env_summary(
@@ -241,6 +283,7 @@ def _env_summary(
     path: str,
     referenced: Set[str],
     payload: Optional[List[Tuple[str, str]]] = None,
+    allowlist: Optional[Allowlist] = None,
 ) -> dict:
     """Compute the resolution summary for one environment (never raises).
 
@@ -248,6 +291,11 @@ def _env_summary(
     the new resolved-object-identity audit runs and the summary carries the
     classified collisions. When omitted (callers that pre-date the audit) the
     legacy value-only collision check is used so behaviour stays the same.
+
+    ``allowlist`` is the operator-recorded expected-collisions document; when
+    supplied, matching benign collisions downgrade to ALLOWLISTED and the
+    summary carries any rejected-suppression entries the safety invariant
+    refused to honour.
     """
     raw = parse_raw_conf(path)
     resolved = preview_resolve(raw)
@@ -261,10 +309,14 @@ def _env_summary(
         if resolved.get(t, "") == "" and not redaction.is_redacted(t, raw.get(t))
     )
 
+    rejected_allowlist: List[dict] = []
     if payload is not None:
-        real_collisions, benign_collisions, classified = _classify_collisions(
-            raw, payload, env_name, resolved
-        )
+        (
+            real_collisions,
+            benign_collisions,
+            classified,
+            rejected_allowlist,
+        ) = _classify_collisions(raw, payload, env_name, resolved, allowlist)
         # Legacy field kept for callers that already read summary["collisions"]
         # — populated from the classified list, in the same (value, tokens) shape.
         collisions = [(g["value"], list(g["tokens"])) for g in classified]
@@ -278,8 +330,12 @@ def _env_summary(
         collisions = [(g["value"], list(g["tokens"])) for g in classified]
 
     # Status escalates only for hard problems. Benign collisions and unused
-    # tokens drop to warning; clobbers and undefined tokens are errors.
-    if undefined or real_collisions:
+    # tokens drop to warning; clobbers, undefined tokens, and rejected
+    # allow-list entries are errors. A rejected entry means an operator tried
+    # to suppress a clobber via the allow-list — the suppression failed, so
+    # the original ERROR class is preserved and the rejection surfaces in
+    # its own banner.
+    if undefined or real_collisions or rejected_allowlist:
         status = "error"
     elif unused or empty or benign_collisions or classified:
         status = "warning"
@@ -292,6 +348,7 @@ def _env_summary(
         "undefined": undefined,
         "unused": unused,
         "empty": empty,
+        "rejected_allowlist": rejected_allowlist,
         "collisions": collisions,  # legacy shape
         "real_collisions": real_collisions,  # new
         "benign_collisions": benign_collisions,  # new
@@ -470,6 +527,26 @@ def _flags_html(summary: dict, conf_path: Optional[str] = None) -> str:
             f"<strong>Empty</strong> — resolve to an empty string (may produce "
             f"malformed identifiers): {items}.{edit_hint}</div>"
         )
+    rejected = summary.get("rejected_allowlist") or []
+    if rejected:
+        rows = "".join(
+            f"<li><code>{h(', '.join(r['tokens']))}</code> "
+            f"→ <code>{h(r['value'])}</code>"
+            + (f" — <em>{h(r['reason'])}</em>" if r.get("reason") else "")
+            + "</li>"
+            for r in rejected
+        )
+        parts.append(
+            f'<div style="background:#F8D7DA;color:#721C24;border-radius:6px;'
+            f'padding:10px 14px;margin-bottom:8px;font-size:13px">'
+            f"<strong>Allow-list rejected</strong> — "
+            f"<code>config/expected_collisions.yaml</code> tried to suppress a "
+            f"real object-identity clobber. The allow-list may only downgrade "
+            f"benign collisions; the suppression was denied and the original "
+            f"<code>collision_object_identity</code> ERROR is preserved. "
+            f"Remove the rejected entry and address the underlying clobber "
+            f"instead.<ul style='margin:6px 0 0 18px'>{rows}</ul></div>"
+        )
     return "".join(parts)
 
 
@@ -545,8 +622,10 @@ def tokenisation_tab(project_dir: str) -> str:
         )
 
     payload = _payload_files(project_dir)
+    allowlist, allowlist_parse_errors = _load_project_allowlist(project_dir)
     summaries = [
-        _env_summary(name, path, referenced, payload=payload) for name, path in configs
+        _env_summary(name, path, referenced, payload=payload, allowlist=allowlist)
+        for name, path in configs
     ]
     focused = _focused_env(configs)
 
@@ -562,6 +641,20 @@ def tokenisation_tab(project_dir: str) -> str:
         f"Resolution by environment</h3>{_matrix_html(summaries)}"
     )
     body = note + matrix
+
+    if allowlist_parse_errors:
+        rows = "".join(
+            f"<li><code>{h(e['path'])}</code>: {h(e['message'])}</li>"
+            for e in allowlist_parse_errors
+        )
+        body += (
+            f'<div style="background:#F8D7DA;color:#721C24;border-radius:6px;'
+            f'padding:10px 14px;margin:8px 0;font-size:13px">'
+            f"<strong>Allow-list parse error</strong> — "
+            f"<code>config/expected_collisions.yaml</code> could not be read. "
+            f"No entries were applied to the audit.<ul style='margin:6px 0 0 18px'>"
+            f"{rows}</ul></div>"
+        )
 
     if focused is None:
         return body
