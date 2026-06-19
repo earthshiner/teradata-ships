@@ -26,7 +26,7 @@ Public API (matches what cli.py imports):
     fix_grants(project_dir, dcl_dir=None, verbose=False)
         Adds missing inferred grants to the correct DCL file. Missing
         files are created; existing drifted files are repaired
-        additively. Extra and orphaned grants are never removed.
+        additively. Extra and external grants are never removed.
         Returns (GrantValidationResult, files_written: int).
 
     format_report(result)
@@ -39,11 +39,18 @@ Drift semantics:
     manual edits that preserve the underlying grant set don't trigger
     drift, but manual additions/removals of privileges do.
 
-Orphan policy:
+External-grant policy:
     A .dcl file in dcl_dir whose grantee is not present in the DDL
-    inference is reported as ORPHANED. Orphans are NEVER auto-deleted
-    in fix mode — they may be intentional manual grants outside the
-    inference's reach. Manual review and removal are required.
+    inference is reported as an EXTERNAL grant (renamed from
+    ORPHANED — the grantee is external to the package's intent
+    rather than orphaned by it). External grants are NEVER auto-
+    deleted in fix mode and surface at INFO by default, because
+    they are commonly legitimate (e.g. roles whose
+    ``GRANT ROLE … TO USER`` lives outside the package). Internal
+    data-model fields and helper names (``.orphaned``,
+    ``_find_orphans``, ``passed_ignoring_orphans``) retain the
+    historic naming to avoid a wide refactor; only user-facing
+    surfaces use "external".
 """
 
 from __future__ import annotations
@@ -422,8 +429,8 @@ class GrantValidationResult:
         """
         True iff every non-orphaned grantee is consistent.
 
-        Use this when ``warn_orphan_grants`` is enabled in ships.yaml —
-        orphaned DCL files are reported as warnings rather than errors,
+        Use this when ``warn_external_grants`` is enabled in ships.yaml —
+        external-grantee DCL files are reported as warnings rather than errors,
         so they must not block packaging.
         """
         return all(s.consistent for s in self.statuses if not s.orphaned)
@@ -450,7 +457,7 @@ class GrantValidationResult:
     def passed_ignoring_extra_grants_and_orphans(self) -> bool:
         """
         Combined check for when both ``warn_extra_grants`` and
-        ``warn_orphan_grants`` are enabled in ships.yaml.
+        ``warn_external_grants`` are enabled in ships.yaml.
 
         Only missing .dcl files and drifted grantees that have missing
         privileges cause a hard failure.
@@ -1049,7 +1056,7 @@ def _format_missing_grant_statements(
 def format_report(
     result: GrantValidationResult,
     extra_grants_severity: str = "ERROR",
-    orphan_grants_severity: str = "ERROR",
+    external_grants_severity: str = "INFO",
 ) -> str:
     """
     Render a human-readable summary of a GrantValidationResult.
@@ -1059,16 +1066,21 @@ def format_report(
     control which configured non-blocking grant findings are visible:
 
     * extra_grants_severity=OFF suppresses extra-only drift entries.
-    * orphan_grants_severity=OFF suppresses orphaned DCL entries.
+    * external_grants_severity=OFF suppresses external-grantee .dcl
+      entries (.dcl files for grantees that no DDL in the package
+      implies).
 
     Missing inferred privileges are always shown because they are
     package-blocking errors.
     """
     extra_grants_severity = extra_grants_severity.upper()
-    orphan_grants_severity = orphan_grants_severity.upper()
+    external_grants_severity = external_grants_severity.upper()
 
     def _should_show(status: GranteeStatus) -> bool:
-        if status.orphaned and orphan_grants_severity == "OFF":
+        # Internally still .orphaned on the dataclass; user-facing
+        # vocabulary is "external grant" — see the warn_external_grants
+        # rule for the rationale.
+        if status.orphaned and external_grants_severity == "OFF":
             return False
         if (
             status.drifted
@@ -1085,7 +1097,7 @@ def format_report(
     consistent_n = len([s for s in visible_statuses if s.consistent])
     drifted_n = len([s for s in visible_statuses if s.drifted])
     missing_n = len([s for s in visible_statuses if s.missing])
-    orphaned_n = len([s for s in visible_statuses if s.orphaned])
+    external_n = len([s for s in visible_statuses if s.orphaned])
 
     lines: List[str] = []
 
@@ -1094,7 +1106,7 @@ def format_report(
         f"{consistent_n} consistent, "
         f"{drifted_n} drifted, "
         f"{missing_n} missing, "
-        f"{orphaned_n} orphaned"
+        f"{external_n} external"
     )
     lines.append(f"  DDL files contributing grants: {result.ddl_count}")
 
@@ -1116,7 +1128,9 @@ def format_report(
             lines.append(f"\n  ✗ {status.grantee}: drift detected")
             lines.append(f"      File: {status.file_path}")
             if status.missing_privs:
-                lines.append("      Required grant missing from .dcl file:")
+                lines.append(
+                    "      Required by the package payload but absent from the .dcl:"
+                )
                 lines.append(
                     _format_missing_grant_statements(
                         status.grantee,
@@ -1124,7 +1138,9 @@ def format_report(
                     )
                 )
             if status.extra_privs and extra_grants_severity != "OFF":
-                lines.append("      Extra in .dcl file (not implied by DDL):")
+                lines.append(
+                    "      Grants specified but not required by the package payload:"
+                )
                 lines.append(_format_grants_block(status.extra_privs))
         elif status.missing:
             lines.append(f"\n  ! {status.grantee}: missing .dcl file")
@@ -1132,11 +1148,14 @@ def format_report(
             lines.append("      Inferred grants:")
             lines.append(_format_grants_block(status.expected_grants))
         elif status.orphaned:
-            lines.append(f"\n  ⚠ {status.grantee}: orphaned .dcl file")
+            lines.append(f"\n  ℹ {status.grantee}: external grant")
             lines.append(f"      File:    {status.file_path}")
             lines.append(
-                "      No DDL in this project implies grants for this "
-                "grantee. Review and remove manually if no longer needed."
+                "      This package grants access to the grantee but no DDL "
+                "in the package implies the grant (the grantee — a role, "
+                "database, or user — is external to the package). Often "
+                "legitimate; promote warn_external_grants to ERROR in "
+                "inspect.conf for fully self-contained packages."
             )
 
     return "\n".join(lines)

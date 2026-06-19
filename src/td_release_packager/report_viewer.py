@@ -314,17 +314,20 @@ SIGNAL_EXPLANATIONS: dict[str, tuple[str, str, str]] = {
         "the .dcl files persisted under DCL/inter_db/. Three outcomes are "
         "possible per grantee — Consistent (no action needed), Drifted (the .dcl "
         "exists but its privilege set differs from what the DDL implies), or "
-        "Orphaned (a .dcl file exists for a grantee that no DDL in the package "
-        "implies). Missing inferred grants are always a hard error. Drifted "
-        "entries with only extra manual privileges and orphaned DCL files have "
-        "configurable severity.",
+        "External (a .dcl file exists for a grantee — role, database, or user "
+        "— that no DDL in the package implies). Missing inferred grants are "
+        "always a hard error. Drifted entries with only extra manual "
+        "privileges have configurable severity, and external grants default "
+        "to INFO because they are commonly legitimate.",
         "Missing inferred grants: run 'ships inspect --fix-grants' to append "
         "the required GRANT statements to the correct .dcl file. "
         "Extra manual privileges (warn_extra_grants): set to WARNING or OFF in "
         "inspect.conf if intentional grants beyond what SHIPS infers are expected. "
-        "Orphaned DCL files (warn_orphan_grants): set to WARNING or OFF when a "
+        "External grants (warn_external_grants): default INFO — common when a "
         "role is granted access in this package but GRANT ROLE … TO USER is "
-        "managed outside it (by a DBA, IGA system, or agent).",
+        "managed outside it (by a DBA, IGA system, or agent). Promote to "
+        "ERROR for fully self-contained packages where every grant must be "
+        "traceable to in-package DDL.",
     ),
     "provenance_complete": (
         "Provenance file present",

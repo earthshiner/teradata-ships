@@ -414,10 +414,11 @@ environments: [{env_list}]
 # ---- Inspect-stage options ----
 # Grant validation behaviour is configured in config/inspect.conf:
 #
-#   warn_extra_grants=ERROR   # ERROR blocks, WARNING/WARN reports, OFF suppresses
-#                             # extra-only manual grant drift
-#   warn_orphan_grants=ERROR  # ERROR blocks, WARNING/WARN reports, OFF suppresses
-#                             # orphaned DCL grantees
+#   warn_extra_grants=ERROR     # ERROR blocks, WARNING/WARN reports, OFF suppresses
+#                               # extra-only manual grant drift
+#   warn_external_grants=INFO   # INFO surfaces (default), WARNING reports, ERROR
+#                               # blocks, OFF suppresses external-grantee .dcl files
+#                               # (grants to roles/databases outside the package)
 """
 
     with open(ships_yaml_path, "w", encoding="utf-8") as f:

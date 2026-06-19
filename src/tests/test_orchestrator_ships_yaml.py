@@ -392,5 +392,5 @@ class TestModuleInvariants:
 
 
 # ---------------------------------------------------------------
-# Tests for inspect.warn_orphan_grants
+# Tests for inspect.warn_external_grants (renamed from warn_orphan_grants)
 # ---------------------------------------------------------------

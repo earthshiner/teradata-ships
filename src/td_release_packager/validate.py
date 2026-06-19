@@ -94,11 +94,12 @@ DEFAULT_RULES: Dict[str, str] = {
     "type_suffix": "ERROR",
     "hardcoded_name": "WARNING",
     # keyword_case: lowercase SQL keywords are a stylistic preference, not
-    # a correctness defect — Teradata case-folds them and runs fine. Default
-    # to INFO so the rule documents the discipline without cluttering the
-    # error/warning counts on legacy onboarding. Projects that enforce
-    # UPPERCASE strictly can flip it back via ``config/inspect.conf``.
-    "keyword_case": "INFO",
+    # a correctness defect — Teradata case-folds them and runs fine. Most
+    # sites don't enforce UPPERCASE strictly, and surfacing the finding by
+    # default reads as friction during onboarding. Default OFF so the rule
+    # is opt-in. Projects that enforce the discipline can set
+    # ``keyword_case=WARNING`` (or ERROR/INFO) in ``config/inspect.conf``.
+    "keyword_case": "OFF",
     # comma_log_level controls the SEVERITY of a comma-style finding.
     # Use comma_style to control WHAT is checked (leading/trailing/as-per-source).
     "comma_log_level": "WARNING",
@@ -147,7 +148,18 @@ DEFAULT_RULES: Dict[str, str] = {
     # inferrer doesn't), not a packaging failure. Missing inferred grants
     # remain hard errors because required access is absent from the DCL.
     "warn_extra_grants": "WARNING",
-    "warn_orphan_grants": "ERROR",
+    # warn_external_grants applies to .dcl files for grantees that no DDL in
+    # the package implies (e.g. roles granted access inside this package
+    # whose GRANT ROLE ... TO USER is owned by a DBA, IGA system, or
+    # autonomous agent outside the package). These are commonly legitimate
+    # and require no operator action, so they default to INFO — surfaced
+    # in the report and audit trail without blocking the build.
+    #
+    # Renamed from warn_orphan_grants in 2026-06: the term "external"
+    # better reflects that the grantee lives outside the package's intent
+    # rather than being a deficiency. Old configs using warn_orphan_grants
+    # must be updated.
+    "warn_external_grants": "INFO",
 }
 
 # -- Valid severity values --
@@ -444,10 +456,11 @@ def generate_default_config() -> str:
         "#                       SHIPS infers and you do not want any noise.",
         f"warn_extra_grants={DEFAULT_RULES['warn_extra_grants']}",
         "#",
-        "# warn_orphan_grants",
+        "# warn_external_grants",
         "#   Controls .dcl files for a grantee that no DDL in the package implies —",
-        "#   i.e. the file exists but SHIPS found no DDL reference that would",
-        "#   require access to be granted to that grantee.",
+        "#   i.e. the grantee is external to the package's intent. The file exists",
+        "#   but SHIPS found no DDL reference that would require access to be granted",
+        "#   to that grantee.",
         "#",
         "#   Common legitimate causes:",
         "#     - A role is granted database access inside this package, but",
@@ -456,17 +469,18 @@ def generate_default_config() -> str:
         "#     - The package pre-provisions access rights that a downstream",
         "#       process or separate package will activate.",
         "#",
-        "#   ERROR   (default) — orphaned .dcl files block packaging. Use this",
-        "#                       posture for fully self-contained packages where",
-        "#                       every grant must be traceable to DDL in this",
-        "#                       package.",
-        "#   WARNING           — orphaned .dcl files are reported but do not",
-        "#                       block packaging.",
-        "#   OFF               — orphaned .dcl files are silently accepted.",
+        "#   INFO    (default) — external grants are surfaced in the report and",
+        "#                       audit trail. They do not block the build because",
+        "#                       they are commonly legitimate.",
+        "#   WARNING           — external grants are reported as warnings.",
+        "#   ERROR             — external grants block packaging. Use this posture",
+        "#                       for fully self-contained packages where every",
+        "#                       grant must be traceable to DDL in this package.",
+        "#   OFF               — external grants are silently accepted.",
         "#",
-        "# Note: orphaned .dcl files are never auto-deleted by --fix-grants.",
+        "# Note: external .dcl files are never auto-deleted by --fix-grants.",
         "# They require manual review and removal.",
-        f"warn_orphan_grants={DEFAULT_RULES['warn_orphan_grants']}",
+        f"warn_external_grants={DEFAULT_RULES['warn_external_grants']}",
         "",
         "",
         "# Security rules (GAP-003, GAP-008)",
@@ -2081,11 +2095,17 @@ def _check_keyword_case(rel_path: str, content: str) -> List[ValidationIssue]:
             ValidationIssue(
                 file=rel_path,
                 rule="keyword_case",
-                # Default severity for this rule is INFO — the framework
-                # will remap to whatever ``rules_config["keyword_case"]``
-                # says, so projects that enforce UPPERCASE strictly still
-                # get WARNING/ERROR via their inspect.conf.
-                severity="INFO",
+                # Emit at WARNING as a neutral floor — the framework
+                # remaps to whatever ``rules_config["keyword_case"]`` says.
+                # The default is OFF so the finding is suppressed for
+                # most projects; sites that enforce the discipline opt
+                # in by setting ``keyword_case=WARNING`` (or ERROR / INFO)
+                # in ``config/inspect.conf``. Emitting at INFO would
+                # collide with the framework's INFO-bypass (which keeps
+                # deliberate policy notes like ``comma_style=as-per-source``
+                # at INFO regardless of config), making the opt-in setting
+                # silently ineffective.
+                severity="WARNING",
                 message=f"{lowercase}/{total} SQL keywords are lowercase. "
                 f"Discipline prefers UPPERCASE keywords.",
             )

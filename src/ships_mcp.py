@@ -2695,6 +2695,86 @@ def ships_fix(project: str, rule_id: str, dry_run: bool = True) -> dict:
 
 
 # ---------------------------------------------------------------
+# [C] Clean — explicit reset of prior pipeline output.
+#
+# Synchronous (returns directly, no run_id). Defaults to dry_run=True
+# so an agent can preview the targets before applying. Implementation
+# lives in td_release_packager.cleaner; this wrapper exists so the
+# CLI can share the same code path without dragging FastMCP into it.
+# ---------------------------------------------------------------
+
+
+def _ships_clean_impl(
+    project: str,
+    scope: str = "payload",
+    dry_run: bool = True,
+) -> dict:
+    """Synchronous "wipe prior output" implementation.
+
+    Thin pass-through to :func:`td_release_packager.cleaner.clean_project`
+    so MCP and CLI share a single code path.
+    """
+    from td_release_packager.cleaner import clean_project
+
+    return clean_project(project=project, scope=scope, dry_run=dry_run)
+
+
+@mcp.tool()
+def ships_clean(
+    project: str,
+    scope: str = "payload",
+    dry_run: bool = True,
+) -> dict:
+    """Wipe prior pipeline output to give a clean re-run surface.
+
+    Synchronous — returns the result directly with no ``run_id`` and no
+    polling. Removes prior output by ``shutil.rmtree`` of whole subtrees,
+    never by reconstructing per-file paths (the latter is what produced
+    the contamination bug where differently-tokenised filenames survived
+    a re-harvest).
+
+    Defaults to ``dry_run=True`` so an agent can preview the targets
+    before applying. Idempotent: a second apply on an already-clean
+    target reports ``removed_files=0`` and succeeds.
+
+    Guards
+    ------
+    * Refuses any directory missing ``ships.yaml`` (returns a clean
+      error, never raises). This prevents a mistyped ``project`` path
+      from rmtree-ing something unrelated.
+    * Never touches ``config/`` or ``.build_counter`` — monotonic build
+      numbers are useful provenance across rebuilds.
+
+    Args:
+        project: SHIPS project directory (must contain ``ships.yaml``).
+        scope: Subtree(s) to remove:
+
+            * ``runs`` — ``.ships/runs/`` (dispatch sentinels + logs)
+            * ``payload`` (default) — ``payload/database/`` (harvested
+              and generated DDL/DCL/DML)
+            * ``releases`` — ``releases/`` (built archives)
+            * ``reports`` — ``output/reports/``
+            * ``decisions`` — ``ships.decisions.json`` (audit trail)
+            * ``all`` — full reset to scaffolded state (everything
+              above; ``.build_counter`` is preserved)
+
+        dry_run: When True (default), report the targets and counts
+            without touching the filesystem. Pass False to actually
+            delete.
+
+    Returns:
+        ``{"success": bool, "scope": str, "dry_run": bool,
+        "project_dir": str, "targets": [...], "removed_files": int,
+        "removed_dirs": int, "lifecycle_state_after": str | None,
+        "error": str | None}``.
+    """
+    try:
+        return _ships_clean_impl(project=project, scope=scope, dry_run=dry_run)
+    except Exception as e:  # noqa: BLE001
+        return {"success": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------
 # [G] Guidance — Phase D of #291 (#299)
 #
 # Read-only navigation: where am I in the pipeline (ships_status)
