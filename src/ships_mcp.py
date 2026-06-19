@@ -2534,6 +2534,258 @@ def ships_author_token_map(
 
 
 # ---------------------------------------------------------------
+# [A] Authoring — expected_collisions.yaml (token-collision audit)
+#
+# Operator allow-list for benign token collisions. Editing is via
+# the standard propose -> ships_apply_diff flow; safety invariant
+# is enforced by the audit at inspect time, not by the author.
+# ---------------------------------------------------------------
+
+
+_EXPECTED_COLLISIONS_HEADER = (
+    "# ===================================================================\n"
+    "# expected_collisions.yaml — operator-confirmed benign collisions.\n"
+    "#\n"
+    "# Each entry suppresses a value-level token collision whose token\n"
+    "# set is a subset of `tokens`, downgrading the finding to INFO and\n"
+    "# recording the rationale in ships.decisions.json.\n"
+    "#\n"
+    "# Safety invariant: the allow-list may only downgrade collisions\n"
+    "# the audit has classified as benign (SCALAR, ENV_LABEL, or\n"
+    "# identity-alias). An entry that names tokens whose audit-determined\n"
+    "# class is REAL (an object-identity clobber) is refused — the\n"
+    "# original ERROR stands and a separate collision_allowlist_rejected\n"
+    "# finding is emitted. You cannot allow-list a clobber away.\n"
+    "# ===================================================================\n"
+    "\n"
+)
+
+
+def _expected_collisions_path(project: str) -> str:
+    return os.path.join(project, "config", "expected_collisions.yaml")
+
+
+def _validate_expected_collisions_content(content: str) -> list:
+    """Run YAML through parse_allowlist; surface structural errors.
+
+    Empty content is valid (an absent allow-list is the common case).
+    """
+    from td_release_packager.expected_collisions import (
+        AllowlistParseError,
+        parse_allowlist,
+    )
+
+    try:
+        parse_allowlist(content)
+        return []
+    except AllowlistParseError as e:
+        return [{"path": "", "message": str(e)}]
+    except Exception as e:
+        return [{"path": "", "message": f"{type(e).__name__}: {e}"}]
+
+
+def _serialise_expected_collisions(entries: list) -> str:
+    """Render entries to deterministic YAML.
+
+    Entries are emitted in the order supplied (the author tool sorts before
+    calling this so the serialised file is stable). Each entry uses block
+    flow with the tokens list on one line for readability.
+    """
+    import yaml as _yaml
+
+    if not entries:
+        return _EXPECTED_COLLISIONS_HEADER + "expected: []\n"
+    lines = [_EXPECTED_COLLISIONS_HEADER.rstrip(), "", "expected:"]
+    for entry in entries:
+        tokens = entry.get("tokens", [])
+        reason = entry.get("reason", "")
+        # yaml.safe_dump for the list keeps quoting correct for unusual names.
+        tokens_yaml = _yaml.safe_dump(
+            list(tokens), default_flow_style=True, width=200
+        ).rstrip("\n")
+        lines.append(f"  - tokens: {tokens_yaml}")
+        if reason:
+            reason_yaml = _yaml.safe_dump(reason, default_flow_style=False).rstrip("\n")
+            # safe_dump may emit '...' for plain strings — strip the trailing
+            # ellipsis line.
+            if reason_yaml.endswith("\n..."):
+                reason_yaml = reason_yaml[:-4]
+            lines.append(f"    reason: {reason_yaml}")
+    return "\n".join(lines) + "\n"
+
+
+@mcp.tool()
+def ships_validate_expected_collisions(project: str) -> dict:
+    """Validate config/expected_collisions.yaml against the audit's vocabulary.
+
+    Checks the YAML parses, the top-level shape is correct (mapping with
+    'expected' list), and every entry has a non-empty tokens list of at
+    least two strings and a string reason. Does NOT check the safety
+    invariant (REAL clobber refusal) — that runs at inspect time against
+    the live audit, not against the YAML in isolation.
+
+    Args:
+        project: SHIPS project directory.
+
+    Returns:
+        {"success": bool, "exists": bool, "valid": bool, "path": str,
+         "errors": [{"path": str, "message": str}]}
+    """
+    try:
+        path = _expected_collisions_path(project)
+        if not os.path.exists(path):
+            # Absent file is "valid empty" — the audit treats this as
+            # "no suppressions recorded".
+            return {
+                "success": True,
+                "exists": False,
+                "valid": True,
+                "path": path,
+                "errors": [],
+            }
+        with open(path, "r", encoding="utf-8") as f:
+            errors = _validate_expected_collisions_content(f.read())
+        return {
+            "success": True,
+            "exists": True,
+            "valid": not errors,
+            "path": path,
+            "errors": errors,
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@mcp.tool()
+def ships_author_expected_collisions(
+    project: str,
+    action: str,
+    entries: Optional[list] = None,
+    remove_tokens: Optional[list] = None,
+) -> dict:
+    """Propose a change to config/expected_collisions.yaml.
+
+    Returns a proposal envelope. Apply via ``ships_apply_diff`` with the
+    returned ``expected_hash``. The propose-only flow means there is no
+    way for this tool to bypass the audit's safety invariant — the
+    rejected-suppression check still runs at inspect time after the file
+    is on disk.
+
+    Actions:
+        create  Generate expected_collisions.yaml with the stock header.
+                Optionally seeds initial entries from ``entries``.
+                Fails if the file already exists.
+        add     Append entries; preserves prior entries. Duplicate token
+                sets are rejected by the validator.
+        remove  Remove entries whose token set exactly equals any item in
+                ``remove_tokens`` (each item is itself a list of tokens).
+
+    Args:
+        project:        SHIPS project directory.
+        action:         One of "create", "add", "remove".
+        entries:        List of {"tokens": [str], "reason": str} entries.
+        remove_tokens:  List of token-set lists to remove. ``[["A", "B"]]``
+                        removes the entry whose tokens == {"A", "B"}.
+
+    Returns:
+        Standard proposal envelope.
+    """
+    try:
+        from td_release_packager import mcp_authoring as _ma
+        from td_release_packager.expected_collisions import parse_allowlist
+
+        path = _expected_collisions_path(project)
+        action_l = (action or "").lower()
+        if action_l not in {"create", "add", "remove"}:
+            return {
+                "success": False,
+                "error": f"unknown action {action!r}; expected create/add/remove",
+            }
+
+        if action_l == "create" and os.path.exists(path):
+            return {
+                "success": False,
+                "error": f"file already exists at {path}; use action=add to extend",
+            }
+        if action_l in {"add", "remove"} and not os.path.exists(path):
+            return {
+                "success": False,
+                "error": f"file not found at {path}; use action=create first",
+            }
+
+        # Load existing entries (if any) into a normalised list.
+        if action_l == "create":
+            existing: list = []
+        else:
+            current = _ma.read_or_empty(path)
+            try:
+                parsed = parse_allowlist(current)
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": f"existing file is invalid: {e}; fix it first",
+                }
+            existing = [
+                {"tokens": list(e.tokens), "reason": e.reason} for e in parsed.entries
+            ]
+
+        if action_l in {"create", "add"}:
+            for raw in entries or []:
+                if not isinstance(raw, dict):
+                    return {
+                        "success": False,
+                        "error": f"entry must be a dict, got {type(raw).__name__}",
+                    }
+                tokens = raw.get("tokens")
+                if (
+                    not isinstance(tokens, list)
+                    or len(tokens) < 2
+                    or not all(isinstance(t, str) and t for t in tokens)
+                ):
+                    return {
+                        "success": False,
+                        "error": "every entry needs tokens=[str, str, ...] with >=2 entries",
+                    }
+                reason = raw.get("reason", "")
+                if not isinstance(reason, str):
+                    return {
+                        "success": False,
+                        "error": "entry.reason must be a string",
+                    }
+                # Refuse duplicates (matches parser semantics).
+                if any(set(e["tokens"]) == set(tokens) for e in existing):
+                    return {
+                        "success": False,
+                        "error": f"entry with tokens {sorted(set(tokens))} already exists",
+                    }
+                existing.append({"tokens": sorted(set(tokens)), "reason": reason})
+
+        if action_l == "remove":
+            for raw in remove_tokens or []:
+                if not isinstance(raw, list) or not raw:
+                    return {
+                        "success": False,
+                        "error": "remove_tokens entries must be non-empty lists",
+                    }
+                target = set(raw)
+                existing = [e for e in existing if set(e["tokens"]) != target]
+
+        # Sort entries for deterministic serialisation: order by sorted token
+        # tuple so re-running the same author calls always yields the same
+        # bytes on disk.
+        existing.sort(key=lambda e: tuple(sorted(e["tokens"])))
+        proposed = _serialise_expected_collisions(existing)
+        validation_errors = _validate_expected_collisions_content(proposed)
+        proposal = _ma.build_proposal(
+            path, proposed, validation_errors=validation_errors
+        )
+        proposal["success"] = True
+        return proposal
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------
 # [R] Repair — Phase C of #291 (#297)
 #
 # Wraps the rules-catalogue remediation metadata and the existing

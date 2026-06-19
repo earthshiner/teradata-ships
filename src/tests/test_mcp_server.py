@@ -549,6 +549,8 @@ class TestToolRegistration:
             "ships_analyse_token_candidates",
             "ships_validate_token_map",
             "ships_author_token_map",
+            "ships_validate_expected_collisions",
+            "ships_author_expected_collisions",
             "ships_explain_violation",
             "ships_list_fixable_rules",
             "ships_fix",

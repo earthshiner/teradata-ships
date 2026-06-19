@@ -171,6 +171,12 @@ DEFAULT_RULES: Dict[str, str] = {
     # object (redundant alias). Not dangerous; a DRY-collapse candidate
     # handled by propose-only remediation in a later step. WARNING.
     "collision_identity_alias": "WARNING",
+    # collision_allowlist_rejected — emitted when expected_collisions.yaml
+    # tried to suppress a REAL clobber. Safety invariant: the allow-list may
+    # only downgrade benign classes; an attempt to mask an object-identity
+    # clobber is itself a defect. ERROR so the rejected suppression is
+    # always visible.
+    "collision_allowlist_rejected": "ERROR",
 }
 
 # -- Valid severity values --
@@ -583,6 +589,10 @@ def generate_default_config() -> str:
         "# (redundant alias). Not dangerous; a DRY-collapse candidate handled",
         "# by propose-only remediation. WARNING (default).",
         f"collision_identity_alias={DEFAULT_RULES['collision_identity_alias']}",
+        "#",
+        "# collision_allowlist_rejected: expected_collisions.yaml tried to",
+        "# suppress a REAL clobber. Always ERROR — the suppression is denied.",
+        f"collision_allowlist_rejected={DEFAULT_RULES['collision_allowlist_rejected']}",
     ]
     return "\n".join(lines) + "\n"
 

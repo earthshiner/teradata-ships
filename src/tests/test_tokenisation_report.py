@@ -254,6 +254,87 @@ def test_scalar_collision_is_benign_not_real(tmp_path):
     assert "✗" not in html
 
 
+def _write_allowlist(project_dir, content):
+    p = project_dir / "config" / "expected_collisions.yaml"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(content, encoding="utf-8")
+
+
+def test_allowlist_downgrades_benign_collision(tmp_path):
+    """A scalar pair recorded in expected_collisions.yaml becomes ALLOWLISTED."""
+    _write_env(
+        tmp_path,
+        "DEV",
+        ["ENV_PREFIX=A_D01", "PERM_SPACE=1e9", "SPOOL_SPACE=1e9"],
+    )
+    _write_payload(
+        tmp_path,
+        "DDL/tables/{{ENV_PREFIX}}.X.tbl",
+        "CREATE TABLE {{ENV_PREFIX}}.X (Id INT) AS PERM = {{PERM_SPACE}}, "
+        "SPOOL = {{SPOOL_SPACE}};",
+    )
+    _write_allowlist(
+        tmp_path,
+        "expected:\n"
+        "  - tokens: [PERM_SPACE, SPOOL_SPACE]\n"
+        "    reason: Interchangeable scalars.\n",
+    )
+    html = tokenisation_tab(str(tmp_path))
+    # ALLOWLISTED badge replaces the SCALAR badge for the recorded pair.
+    assert "ALLOWLISTED" in html
+    assert "SCALAR" not in html
+    # No REAL badge — nothing dangerous was downgraded.
+    assert "REAL" not in html
+
+
+def test_allowlist_cannot_suppress_real_clobber(tmp_path):
+    """Safety invariant: a yaml entry naming a clobber's tokens is rejected.
+
+    The original REAL collision stays ERROR-styled, and the Allow-list
+    rejected banner appears with the operator's reason quoted.
+    """
+    _write_env(tmp_path, "DEV", ["DB_A=SAME", "DB_B=SAME"])
+    _write_payload(
+        tmp_path,
+        "DDL/views/{{DB_A}}.MyView.viw",
+        "CREATE VIEW {{DB_A}}.MyView AS SELECT 1;",
+    )
+    _write_payload(
+        tmp_path,
+        "DDL/views/{{DB_B}}.MyView.viw",
+        "CREATE VIEW {{DB_B}}.MyView AS SELECT 1;",
+    )
+    _write_allowlist(
+        tmp_path,
+        "expected:\n  - tokens: [DB_A, DB_B]\n    reason: trying to mask the clobber\n",
+    )
+    html = tokenisation_tab(str(tmp_path))
+    # REAL preserved.
+    assert "REAL" in html
+    # Rejection banner present, with the operator's stated reason quoted.
+    assert "Allow-list rejected" in html
+    assert "trying to mask the clobber" in html
+
+
+def test_allowlist_parse_error_surfaces_in_report(tmp_path):
+    """A malformed expected_collisions.yaml shows a parse-error banner.
+
+    The audit still runs (with the allow-list treated as empty); the
+    operator sees both the parse error AND any underlying findings.
+    """
+    _write_env(tmp_path, "DEV", ["ENV_PREFIX=A_D01"])
+    _write_payload(
+        tmp_path,
+        "DDL/tables/{{ENV_PREFIX}}.X.tbl",
+        "CREATE TABLE {{ENV_PREFIX}}.X (Id INT);",
+    )
+    _write_allowlist(tmp_path, "expected: not_a_list\n")
+    html = tokenisation_tab(str(tmp_path))
+    assert "Allow-list parse error" in html
+    # The path is surfaced so the operator knows what to fix.
+    assert "expected_collisions.yaml" in html
+
+
 def test_multi_env_matrix_lists_all(tmp_path):
     _write_env(tmp_path, "DEV", ["ENV_PREFIX=A_D01"])
     _write_env(tmp_path, "PRD", ["ENV_PREFIX=A_P01"])

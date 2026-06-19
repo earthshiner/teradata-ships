@@ -532,6 +532,24 @@ _RULES: dict[str, dict[str, object]] = {
         "risk": "low",
         "requires_human_review": True,
     },
+    "collision_allowlist_rejected": {
+        "description": (
+            "An entry in config/expected_collisions.yaml attempted to "
+            "suppress a REAL object-identity clobber. The allow-list may "
+            "only downgrade benign collisions; the suppression was denied "
+            "and the original ERROR was retained."
+        ),
+        "default_severity": "ERROR",
+        "safe_fix_available": False,
+        "automation_level": "manual",
+        "recommended_action": (
+            "Remove the rejected entry from expected_collisions.yaml and "
+            "address the underlying collision_object_identity finding "
+            "instead. Allow-listing cannot mask a deploy-time clobber."
+        ),
+        "risk": "high",
+        "requires_human_review": True,
+    },
 }
 
 
