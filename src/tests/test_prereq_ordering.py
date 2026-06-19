@@ -79,6 +79,49 @@ class TestExtractPrereqParent:
         assert "CHILD_DB" in name
         assert "PARENT_DB" in parent
 
+    def test_compound_prefix_token_with_literal_suffix(self):
+        """A prefix-tokenised compound name like ``{{DB_PREFIX}}_DOM_BUS_V``
+        (token atom + literal suffix) must extract correctly.
+
+        Regression for the harvest path where every ``{{PFX}}_<suffix>.db``
+        was reported as UNRESOLVED with a spurious
+        "no CREATE DATABASE/USER FROM <parent> clause found" warning,
+        even though the FROM clause was present. Cause: the old regex
+        only accepted a bare ``{{TOKEN}}`` OR a plain identifier, not a
+        compound. Verified on the live YetAnotherDataProduct package.
+        """
+        ddl = (
+            "create database {{DB_PREFIX}}_DOM_BUS_V from {{DB_PREFIX}} "
+            "as perm = 0.0 spool = 4.46581964E8 fallback ;"
+        )
+        result = _extract_prereq_parent(ddl)
+        assert result is not None
+        name, parent = result
+        # The compound child should round-trip — both the token atom and
+        # the literal suffix are preserved (uppercased).
+        assert name == "{{DB_PREFIX}}_DOM_BUS_V"
+        assert parent == "{{DB_PREFIX}}"
+
+    def test_compound_literal_prefix_token_suffix(self):
+        """Compound names with a literal prefix and a token suffix
+        (e.g. ``Prefix_{{TOK}}``) also match."""
+        ddl = "CREATE DATABASE Prefix_{{TOK}}_suffix FROM {{PARENT}}_lit;"
+        result = _extract_prereq_parent(ddl)
+        assert result is not None
+        name, parent = result
+        assert name == "PREFIX_{{TOK}}_SUFFIX"
+        assert parent == "{{PARENT}}_LIT"
+
+    def test_lowercase_create_with_compound_token(self):
+        """Lowercase ``create database`` (as emitted by some Teradata
+        exports) plus a compound tokenised name still matches under the
+        ``re.IGNORECASE`` flag."""
+        ddl = "create database {{PFX}}_CHILD from {{PFX}} as perm = 0;"
+        assert _extract_prereq_parent(ddl) == (
+            "{{PFX}}_CHILD",
+            "{{PFX}}",
+        )
+
 
 # ---------------------------------------------------------------
 # _emit_prereq_order

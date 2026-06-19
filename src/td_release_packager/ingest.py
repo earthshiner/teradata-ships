@@ -1877,11 +1877,22 @@ _BTEQ_LINE_RE = re.compile(r"^\s*\.[A-Za-z][^\n]*$", re.MULTILINE)
 # objects may form a hierarchy (y1 → y2 → y3 → DBC), so the
 # deployer must process them in dependency order. This regex
 # extracts the names so we can topologically sort the payload files.
+# A single identifier "atom" is either a token like ``{{NAME}}`` or a
+# bare word ``[A-Za-z_]\w*``. A full identifier is one or more atoms
+# concatenated — this admits compound tokenised names produced by prefix
+# tokenisation, e.g. ``{{DB_PREFIX}}_DOM_BUS_V`` (token atom + word
+# atom), ``prefix_{{TOK}}_suffix`` (word + token + word), and adjacent
+# ``{{A}}{{B}}`` forms. Quoting (single or double) wraps the whole
+# identifier, not individual atoms. The previous regex only accepted a
+# bare ``{{TOKEN}}`` OR a plain identifier, never a compound — which
+# caused harvest to classify every ``{{PFX}}_<suffix>.db`` prereq as
+# UNRESOLVED and emit a spurious "no FROM clause found" warning even
+# when the FROM clause was clearly present.
+_PREREQ_IDENT_ATOM = r"(?:\{\{[A-Za-z_]\w*\}\}|[A-Za-z_]\w*)"
+_PREREQ_IDENT = rf"(?:['\"]?{_PREREQ_IDENT_ATOM}(?:{_PREREQ_IDENT_ATOM})*['\"]?)"
+
 _PREREQ_FROM_RE = re.compile(
-    r"^\s*CREATE\s+(?:DATABASE|USER)\s+"
-    r"(\{\{[A-Za-z_]\w*\}\}|['\"]?[A-Za-z_]\w*['\"]?)"  # name: {{TOKEN}}, 'quoted', or bare
-    r"\s+FROM\s+"
-    r"(\{\{[A-Za-z_]\w*\}\}|['\"]?[A-Za-z_]\w*['\"]?)",  # parent: same
+    rf"^\s*CREATE\s+(?:DATABASE|USER)\s+({_PREREQ_IDENT})\s+FROM\s+({_PREREQ_IDENT})",
     re.IGNORECASE | re.MULTILINE,
 )
 
