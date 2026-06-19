@@ -180,13 +180,13 @@ _RULES: dict[str, dict[str, object]] = {
             "and runs either way, so this is a style preference, not "
             "a correctness defect."
         ),
-        "default_severity": "INFO",
+        "default_severity": "OFF",
         "safe_fix_available": False,
         "automation_level": "manual",
         "recommended_action": (
-            "Uppercase the SQL keywords flagged in the message — or "
-            "set ``keyword_case=OFF`` in ``config/inspect.conf`` if "
-            "your project does not enforce the convention."
+            "Opt in by setting ``keyword_case=WARNING`` (or ERROR / INFO) "
+            "in ``config/inspect.conf`` if your project enforces the "
+            "UPPERCASE keyword convention. Most sites can leave this off."
         ),
         "risk": "low",
         "requires_human_review": False,

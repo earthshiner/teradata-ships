@@ -827,17 +827,19 @@ class TestCheckKeywordCase:
         assert len(issues) == 1
         assert issues[0].rule == "keyword_case"
 
-    def test_default_severity_is_info(self):
-        """Default severity is INFO — lowercase keywords are a style
-        preference, not a deploy-blocking defect. Projects can flip it
-        back to WARNING/ERROR via ``config/inspect.conf``."""
+    def test_default_severity_is_off(self):
+        """Default severity is OFF — lowercase keywords are a style
+        preference, not a deploy-blocking defect, and most sites don't
+        enforce the discipline. Projects that do can opt in via
+        ``keyword_case=WARNING`` (or ERROR / INFO) in
+        ``config/inspect.conf``."""
         from td_release_packager.validate import DEFAULT_RULES
 
-        assert DEFAULT_RULES["keyword_case"] == "INFO"
+        assert DEFAULT_RULES["keyword_case"] == "OFF"
 
-    def test_lowercase_keyword_finding_does_not_count_as_warning(self, tmp_path):
-        """A file that trips the rule under defaults must not bump the
-        warnings count — it surfaces as an INFO note only."""
+    def test_lowercase_keyword_does_not_fire_under_defaults(self, tmp_path):
+        """Under default settings the rule is silenced — a file full of
+        lowercase keywords produces no keyword_case finding at all."""
         f = tmp_path / "t.tbl"
         f.write_text(
             "create table x.y\n"
@@ -849,16 +851,27 @@ class TestCheckKeywordCase:
         )
         result = validate_directory(str(tmp_path))
         kc = [i for i in result.issues if i.rule == "keyword_case"]
-        assert kc, "Expected keyword_case to fire on lowercase DDL"
-        # The finding itself is INFO — the rule no longer bumps the
-        # warnings count for lowercase keywords. Other rules in the
-        # same file (e.g. set_multiset, leading_commas) may still
-        # raise warnings independently; the check here is just that
-        # the keyword_case finding did not contribute one.
-        assert all(i.severity == "INFO" for i in kc)
-        kc_severities = {i.severity for i in kc}
-        assert "WARNING" not in kc_severities
-        assert "ERROR" not in kc_severities
+        assert kc == [], "Default OFF — keyword_case must not surface"
+
+    def test_lowercase_keyword_fires_when_opted_in(self, tmp_path):
+        """Setting ``keyword_case=WARNING`` in inspect.conf surfaces the
+        finding for projects that enforce the UPPERCASE discipline."""
+        from td_release_packager.validate import DEFAULT_RULES
+
+        f = tmp_path / "t.tbl"
+        f.write_text(
+            "create table x.y\n"
+            "(id integer not null\n"
+            "   ,name varchar(100) default 'x'\n"
+            "   ,created date\n"
+            ") primary index (id);\n",
+            encoding="utf-8",
+        )
+        rules = dict(DEFAULT_RULES, keyword_case="WARNING")
+        result = validate_directory(str(tmp_path), rules_config=rules)
+        kc = [i for i in result.issues if i.rule == "keyword_case"]
+        assert kc, "Opted-in keyword_case must fire on lowercase DDL"
+        assert all(i.severity == "WARNING" for i in kc)
 
 
 # ---------------------------------------------------------------

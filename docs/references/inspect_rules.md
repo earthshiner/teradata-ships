@@ -27,7 +27,7 @@ Rules are configured via `inspect.conf` in the project root.
 | Code                       | Default Severity | Description                                                                  |
 |----------------------------|------------------|------------------------------------------------------------------------------|
 | `hardcoded_name`           | WARNING          | Database names should use `{{TOKENS}}` for environment portability.          |
-| `keyword_case`             | WARNING          | SQL keywords must be UPPERCASE.                                              |
+| `keyword_case`             | OFF              | SQL keywords prefer UPPERCASE. Off by default — most sites don't enforce the convention strictly. Opt in by setting `keyword_case=WARNING` (or ERROR / INFO) in `inspect.conf`. |
 | `comma_style`              | WARNING          | Comma placement must follow the configured style (default: `leading`). Set `comma_style=trailing` or `comma_style=as-per-source` in `inspect.conf` to change. |
 
 ---
