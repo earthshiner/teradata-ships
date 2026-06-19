@@ -1908,18 +1908,18 @@ INSERT INTO x.log_two (id) VALUES (2);
         assert not list(dcl_dir.rglob("*.dcl"))
         assert any(row[2] == "ORDERED_SQL" for row in result.files_placed)
 
-    def test_ingest_clean_preserves_gitkeep_and_control_files(
+    def test_ingest_clean_rmtrees_entire_payload_tree(
         self, tmp_path, tmp_project, ddl_create_table
     ):
-        """The pre-harvest clean preserves .gitkeep markers (so empty
-        directories stay tracked) and control files starting with
-        ``_`` such as a user-curated _order.txt.
+        """The pre-harvest clean wipes payload/database/ wholesale.
 
-        Pre-seeded directory receives no new placement during this
-        harvest, so .gitkeep is preserved by the clean alone — the
-        existing harvest logic strips .gitkeep from a directory only
-        when a real file is placed in it, which is correct behaviour
-        and orthogonal to the pre-clean."""
+        Updated contract (HANDOVER 2026-06-19, work item B): a full
+        harvest does ``shutil.rmtree`` on ``payload/database`` rather
+        than per-file unlink, so a re-harvest cannot inherit any
+        artefact of a prior run regardless of filename differences.
+        Hand-curated control files (e.g. a manually edited _order.txt)
+        belong under config/; pass ``--keep-existing`` to skip the
+        clean entirely when overlay semantics are required."""
         prereq_db_dir = (
             tmp_project / "payload" / "database" / "pre-requisites" / "databases"
         )
@@ -1939,17 +1939,47 @@ INSERT INTO x.log_two (id) VALUES (2);
 
         result = ingest_directory(str(src), str(tmp_project), detect_tokens=False)
 
-        assert (prereq_db_dir / ".gitkeep").exists(), "gitkeep must survive"
-        assert (prereq_db_dir / "_order.txt").exists(), (
-            "control file _order.txt must survive"
+        # Everything under the wiped subtree is gone — including the
+        # previously preserved markers. This is the deliberate fix for
+        # tokenised-filename contamination.
+        assert not (prereq_db_dir / "stale.db").exists()
+        assert not (prereq_db_dir / "_order.txt").exists()
+        assert not (prereq_db_dir / ".gitkeep").exists()
+        # rmtree reported the wipe — the count covers all three files.
+        assert result.cleaned >= 3
+        # The payload root itself is recreated with a fresh .gitkeep so
+        # git keeps tracking the (now empty) tree.
+        assert (tmp_project / "payload" / "database" / ".gitkeep").exists()
+
+    def test_ingest_keep_existing_preserves_curated_files(
+        self, tmp_path, tmp_project, ddl_create_table
+    ):
+        """``--keep-existing`` (clean_payload=False) is the escape hatch
+        for callers that need overlay semantics — nothing is rmtree'd."""
+        prereq_db_dir = (
+            tmp_project / "payload" / "database" / "pre-requisites" / "databases"
         )
-        assert not (prereq_db_dir / "stale.db").exists(), (
-            "stale harvest-owned file must be cleaned"
+        prereq_db_dir.mkdir(parents=True, exist_ok=True)
+        (prereq_db_dir / "_order.txt").write_text("a.db\nb.db\n", encoding="utf-8")
+        (prereq_db_dir / "curated.db").write_text(
+            "CREATE DATABASE curated;", encoding="utf-8"
         )
-        assert result.cleaned >= 1
-        assert (prereq_db_dir / "_order.txt").read_text(
-            encoding="utf-8"
-        ) == "a.db\nb.db\n"
+
+        src = tmp_path / "source"
+        src.mkdir()
+        (src / "customer.tbl").write_text(ddl_create_table, encoding="utf-8")
+
+        result = ingest_directory(
+            str(src),
+            str(tmp_project),
+            detect_tokens=False,
+            clean_payload=False,
+        )
+
+        assert (prereq_db_dir / "_order.txt").exists()
+        assert (prereq_db_dir / "curated.db").exists()
+        # No clean happened.
+        assert result.cleaned == 0
 
 
 # ---------------------------------------------------------------

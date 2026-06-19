@@ -364,6 +364,35 @@ Use this sparingly. The recommended pattern is: keep all source in version contr
 
 ---
 
+### Package fails with "undefined token" errors after re-harvesting with different tokenisation. How do I get a clean slate?
+
+This used to happen when the harvest payload-clean only diffed the produced file set against what was on disk — differently-tokenised filenames (e.g. `{{DB_PREFIX}}_FOO.dcl` from one run, `{{DB_PREFIX_FOO}}.dcl` from another) could survive a re-harvest and break the Package token-coverage scan.
+
+Two fixes are in place:
+
+1. **Harvest auto-clean uses rmtree.** A full (non-`--keep-existing`) harvest now `shutil.rmtree`s `payload/database/` up front and recreates it empty before placing fresh files. A single re-harvest can never inherit a prior run's output.
+2. **Explicit `ships clean` tool.** When you want to reset by hand, use:
+
+```bash
+# preview what would be removed
+python -m td_release_packager clean --project /my/project/ --scope payload
+
+# apply
+python -m td_release_packager clean --project /my/project/ --scope payload --apply
+```
+
+Scopes: `runs`, `payload` (default), `releases`, `reports`, `decisions`, `all`. `--scope all` resets to scaffolded state but leaves `.build_counter` intact so build provenance survives. `config/` and `ships.yaml` are never touched. The same tool is available to agents over MCP as `ships_clean` (synchronous — returns directly, no `run_id`).
+
+---
+
+### `--prefix-token` doesn't seem to do anything.
+
+`--prefix-token` only applies when `--auto-tokenise` is on. Without auto-tokenise, no token substitution runs at all and the prefix-token spec is inert.
+
+For consistent prefix tokens across DDL **and** DCL (the inter-database grant files), pass `--prefix-token <SOURCE>=<TOKEN>` with `--auto-tokenise` and **no** `--env-prefix`. `--env-prefix` drives the whole-name derivation that produces braced whole-name tokens in the `inter_db/*.dcl` files (e.g. `{{DB_PREFIX_SEM_BUS_V}}.dcl`), which is not what you want when the goal is a single prefix token.
+
+---
+
 ## Inspect errors and warnings
 
 ### What does `db_qualifier ERROR` mean?

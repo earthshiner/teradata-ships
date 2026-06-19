@@ -268,9 +268,47 @@ Args: {"name": "MortgagePlatform", "output": "/projects", "environments": "DEV,T
 
 ---
 
+#### `ships_clean`
+
+Wipe prior pipeline output to give a clean re-run surface. **Synchronous** (returns directly — no `run_id`, no `ships_poll_build`). Removes whole subtrees by `shutil.rmtree` and recreates them empty; never reconstructs per-file paths (which historically left differently-tokenised filenames behind across re-harvests).
+
+Defaults to `dry_run=true` so an agent can preview the targets before applying. Refuses any directory missing `ships.yaml` (returns a clean error, never raises). `config/` and `.build_counter` are never touched.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `project` | string | yes | SHIPS project directory (must contain `ships.yaml`) |
+| `scope` | string | no | One of `runs`, `payload` (default), `releases`, `reports`, `decisions`, `all` |
+| `dry_run` | bool | no | If true (default), preview targets without deleting |
+
+| Scope | Clears |
+|---|---|
+| `runs` | `.ships/runs/` (dispatch sentinels + logs) |
+| `payload` | `payload/database/` (harvested + generated DDL/DCL/DML) |
+| `releases` | `releases/` (built archives) |
+| `reports` | `output/reports/` |
+| `decisions` | `ships.decisions.json` (audit trail) |
+| `all` | Everything above (`.build_counter` preserved) |
+
+**Returns:** `{"success": bool, "scope": str, "dry_run": bool, "project_dir": str, "targets": [{"path": str, "kind": str, "exists": bool}], "removed_files": int, "removed_dirs": int, "lifecycle_state_after": str, "error": str}`
+
+**Example (preview then apply):**
+```
+Tool: ships_clean
+Args: {"project": "/projects/MortgagePlatform", "scope": "payload", "dry_run": true}
+# review the targets, then
+Args: {"project": "/projects/MortgagePlatform", "scope": "payload", "dry_run": false}
+```
+
+---
+
 #### `ships_harvest`
 
 Harvest raw DDL files from a source directory into a SHIPS project. Classifies each file by DDL content, injects MULTISET where missing, renames to the eponymous convention, and places files in the correct payload subdirectory.
+
+> **Note — full-ingest auto-clean.** When `--keep-existing` is not set, harvest now wipes `payload/database/` by `shutil.rmtree` before placing fresh files, rather than diffing against the produced set. This guarantees a re-harvest cannot inherit any artefact of a prior run (e.g. differently-tokenised `.dcl` filenames). Pass `--keep-existing` for overlay/incremental semantics.
+
+> **Note — `prefix_token` requires `auto_tokenise=true`.** Token substitution only runs when auto-tokenise is on. For consistent prefix tokens across DDL **and** DCL, pass `prefix_token=<SOURCE>=<TOKEN>` with `auto_tokenise=true` and **no** `env_prefix` (`env_prefix` drives the whole-name derivation that produces braced whole-name tokens in inter-database grants).
+
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
