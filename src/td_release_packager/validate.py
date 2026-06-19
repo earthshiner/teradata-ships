@@ -94,11 +94,12 @@ DEFAULT_RULES: Dict[str, str] = {
     "type_suffix": "ERROR",
     "hardcoded_name": "WARNING",
     # keyword_case: lowercase SQL keywords are a stylistic preference, not
-    # a correctness defect — Teradata case-folds them and runs fine. Default
-    # to INFO so the rule documents the discipline without cluttering the
-    # error/warning counts on legacy onboarding. Projects that enforce
-    # UPPERCASE strictly can flip it back via ``config/inspect.conf``.
-    "keyword_case": "INFO",
+    # a correctness defect — Teradata case-folds them and runs fine. Most
+    # sites don't enforce UPPERCASE strictly, and surfacing the finding by
+    # default reads as friction during onboarding. Default OFF so the rule
+    # is opt-in. Projects that enforce the discipline can set
+    # ``keyword_case=WARNING`` (or ERROR/INFO) in ``config/inspect.conf``.
+    "keyword_case": "OFF",
     # comma_log_level controls the SEVERITY of a comma-style finding.
     # Use comma_style to control WHAT is checked (leading/trailing/as-per-source).
     "comma_log_level": "WARNING",
@@ -2094,11 +2095,17 @@ def _check_keyword_case(rel_path: str, content: str) -> List[ValidationIssue]:
             ValidationIssue(
                 file=rel_path,
                 rule="keyword_case",
-                # Default severity for this rule is INFO — the framework
-                # will remap to whatever ``rules_config["keyword_case"]``
-                # says, so projects that enforce UPPERCASE strictly still
-                # get WARNING/ERROR via their inspect.conf.
-                severity="INFO",
+                # Emit at WARNING as a neutral floor — the framework
+                # remaps to whatever ``rules_config["keyword_case"]`` says.
+                # The default is OFF so the finding is suppressed for
+                # most projects; sites that enforce the discipline opt
+                # in by setting ``keyword_case=WARNING`` (or ERROR / INFO)
+                # in ``config/inspect.conf``. Emitting at INFO would
+                # collide with the framework's INFO-bypass (which keeps
+                # deliberate policy notes like ``comma_style=as-per-source``
+                # at INFO regardless of config), making the opt-in setting
+                # silently ineffective.
+                severity="WARNING",
                 message=f"{lowercase}/{total} SQL keywords are lowercase. "
                 f"Discipline prefers UPPERCASE keywords.",
             )
