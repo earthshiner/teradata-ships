@@ -88,6 +88,86 @@ def _context_file(pkg_dir: str, filename: str) -> str:
 logger = logging.getLogger(__name__)
 
 
+def _write_token_resolution_artefact(
+    *,
+    config,
+    pkg_dir: str,
+    token_values: Dict[str, str],
+    token_usage: Dict[str, set],
+) -> None:
+    """Audit token resolution for this build's environment and write the artefact.
+
+    Best-effort: an audit failure must never crash a build (the artefact is
+    diagnostic, not gating in this PR). On exception the function logs and
+    returns; the absent artefact will surface as a token_resolution_clean
+    UNKNOWN signal which is the right level of "I don't know" rather than
+    a fake PASS.
+    """
+    try:
+        from td_release_packager.expected_collisions import (
+            AllowlistParseError,
+            load_allowlist,
+            default_allowlist_path,
+        )
+        from td_release_packager.token_resolution_artefact import (
+            audit_envs_with_allowlist,
+            compute_artefact,
+            write_artefact,
+        )
+
+        # Build the (filename, sql_text) payload list with paths relative to
+        # the payload root, so the filename convention {{db}}.obj.ext drives
+        # clobber detection correctly.
+        payload_dir = _find_payload_dir(config.source_dir)
+        payload_files: list[tuple[str, str]] = []
+        for root, _dirs, files in os.walk(payload_dir):
+            for fname in files:
+                full = os.path.join(root, fname)
+                try:
+                    with open(full, encoding="utf-8", errors="replace") as fh:
+                        text = fh.read()
+                except OSError:
+                    continue
+                rel = os.path.relpath(full, payload_dir).replace(os.sep, "/")
+                payload_files.append((rel, text))
+
+        # Resolve internal {{TOKEN}} references for the audit pass.
+        try:
+            from td_release_packager.reporting.tokenisation import preview_resolve
+
+            resolved = preview_resolve(dict(token_values))
+        except Exception:
+            resolved = dict(token_values)
+
+        # Optional operator allow-list.
+        allowlist = None
+        try:
+            allowlist = load_allowlist(default_allowlist_path(config.source_dir))
+        except AllowlistParseError as exc:
+            logger.warning(
+                "expected_collisions.yaml is malformed; running audit without "
+                "allow-list: %s",
+                exc,
+            )
+
+        referenced: set[str] = set()
+        for tokens in token_usage.values():
+            referenced.update(tokens)
+
+        results = audit_envs_with_allowlist(
+            env_configs={config.environment: dict(token_values)},
+            resolved_envs={config.environment: resolved},
+            payload_files=payload_files,
+            allowlist=allowlist,
+            referenced_tokens=referenced,
+        )
+        document = compute_artefact(results)
+        path = write_artefact(pkg_dir, document)
+        logger.info("Token-resolution artefact: %s", path)
+    except Exception as exc:  # pragma: no cover - diagnostic, never crashes
+        logger.warning("Token-resolution audit failed; artefact not written (%s)", exc)
+
+
 def _package_copy_ignore(_directory: str, names: list[str]) -> set[str]:
     """Ignore transient or non-release artefacts when cloning package trees.
 
@@ -795,6 +875,18 @@ def _build_package_impl(
     manifest_path = _context_file(pkg_dir, "ships.build.json")
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest.__dict__, f, indent=2, ensure_ascii=False)
+
+    # -- Phase 8a.2: Token-resolution audit artefact --
+    # Runs the resolved-object-identity audit for this package's environment
+    # and writes context/ships.token_resolution.json. The artefact backs the
+    # sixth Trust signal (token_resolution_clean) below, so it MUST be
+    # written before compute_trust_report runs.
+    _write_token_resolution_artefact(
+        config=config,
+        pkg_dir=pkg_dir,
+        token_values=token_values,
+        token_usage=token_usage,
+    )
 
     # -- Phase 8b: Compute and stamp Phase 1 Trust Report --
     # Discrete signals (inspect results + package context artefacts) derive

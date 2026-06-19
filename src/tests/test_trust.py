@@ -204,6 +204,11 @@ class TestComputeTrustReport:
         (tmp_path / "context" / "ships.provenance.json").write_text(
             "{}", encoding="utf-8"
         )
+        # Empty token-resolution artefact keeps the sixth signal at PASS;
+        # no envs to audit -> nothing to find.
+        (tmp_path / "context" / "ships.token_resolution.json").write_text(
+            '{"schema_version": "1.0", "environments": []}', encoding="utf-8"
+        )
         report = compute_trust_report(str(tmp_path), str(tmp_path))
         assert report.status == STATUS_READY
 
@@ -332,6 +337,9 @@ class TestComputeTrustReport:
         (tmp_path / "context").mkdir(parents=True, exist_ok=True)
         (tmp_path / "context" / "ships.provenance.json").write_text(
             "{}", encoding="utf-8"
+        )
+        (tmp_path / "context" / "ships.token_resolution.json").write_text(
+            '{"schema_version": "1.0", "environments": []}', encoding="utf-8"
         )
 
         report = compute_trust_report(str(tmp_path), str(tmp_path))
@@ -561,15 +569,66 @@ class TestBuildPackageStampsTrust:
         assert "provenance_complete" in trust["signals"]
         assert trust["signals"]["provenance_complete"]["status"] == TRUST_PASS
         assert trust["signals"]["build_reproducible"]["status"] == TRUST_PASS
+        # The sixth signal must be present and driven by the new artefact.
+        assert "token_resolution_clean" in trust["signals"]
+
+    def test_build_writes_token_resolution_artefact(self, tmp_path, tmp_project):
+        """The builder writes context/ships.token_resolution.json alongside trust."""
+        from td_release_packager.builder import build_package
+        from td_release_packager.models import BuildConfig
+        from td_release_packager.token_resolution_artefact import ARTEFACT_FILENAME
+
+        _write(
+            tmp_project / "payload/database/DDL/tables/{{SHIPS_ENV}}.T.tbl",
+            "CREATE MULTISET TABLE {{SHIPS_ENV}}.T (Id INTEGER) PRIMARY INDEX (Id);\n",
+        )
+        props = tmp_path / "DEV.conf"
+        props.write_text("SHIPS_ENV=DEV\n", encoding="utf-8")
+
+        cfg = BuildConfig(
+            source_dir=str(tmp_project),
+            environment="DEV",
+            package_name="TestPkg",
+            env_config_file=str(props),
+            build_number=1,
+            output_dir=str(tmp_path),
+        )
+        (main_arc, _), _companion = build_package(cfg)
+
+        with zipfile.ZipFile(main_arc) as zf:
+            names = zf.namelist()
+            artefact_name = next(
+                (n for n in names if n.endswith(ARTEFACT_FILENAME)), None
+            )
+            assert artefact_name, (
+                f"{ARTEFACT_FILENAME} missing from package; got: "
+                f"{[n for n in names if n.endswith('.json')]}"
+            )
+            doc = json.loads(zf.read(artefact_name))
+
+        assert doc["schema_version"] == "1.0"
+        envs = doc["environments"]
+        assert len(envs) == 1
+        env = envs[0]
+        assert env["env"] == "DEV"
+        # SHIPS_ENV is referenced — not unused.
+        assert env["unused"] == []
+        # No clobbers in a single-token payload.
+        assert env["clobbers"] == []
+        # The role classifier saw SHIPS_ENV in an identity position.
+        assert env["roles"].get("SHIPS_ENV") == "IDENTITY"
 
     def test_trust_label_ready_with_clean_inspect(self, tmp_path, tmp_project):
         """When ships.decisions.json has a clean inspect run, label should be READY."""
         from td_release_packager.builder import build_package
         from td_release_packager.models import BuildConfig
 
+        # Reference SHIPS_ENV in payload so the token-resolution audit
+        # records it as used (otherwise the sixth signal warns about an
+        # unused token and downgrades trust to READY_WITH_CAVEATS).
         _write(
-            tmp_project / "payload/database/DDL/tables/Dev.T.tbl",
-            "CREATE MULTISET TABLE Dev.T (Id INTEGER) PRIMARY INDEX (Id);\n",
+            tmp_project / "payload/database/DDL/tables/{{SHIPS_ENV}}.T.tbl",
+            "CREATE MULTISET TABLE {{SHIPS_ENV}}.T (Id INTEGER) PRIMARY INDEX (Id);\n",
         )
         # Seed a clean ships.decisions.json
         decisions = {
