@@ -454,16 +454,21 @@ _RULES: dict[str, dict[str, object]] = {
         "risk": "low",
         "requires_human_review": True,
     },
-    "warn_orphan_grants": {
-        "description": ("DCL references an object that is not in the package."),
-        "default_severity": "ERROR",
+    "warn_external_grants": {
+        "description": (
+            "DCL grants access to a grantee that no DDL in the package implies "
+            "— i.e. the grantee is external to the package's intent."
+        ),
+        "default_severity": "INFO",
         "safe_fix_available": False,
         "automation_level": "manual",
         "recommended_action": (
-            "Remove the orphan grant from DCL, or add the referenced "
-            "object to the package."
+            "Often legitimate (e.g. roles or databases granted access from "
+            "outside this package). If the grant is unwanted, remove it from "
+            "DCL; if every grant must be traceable to in-package DDL, promote "
+            "this rule to ERROR in config/inspect.conf."
         ),
-        "risk": "medium",
+        "risk": "low",
         "requires_human_review": True,
     },
 }

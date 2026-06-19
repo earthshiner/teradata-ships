@@ -65,9 +65,9 @@ Step 2 compares the grants *implied* by the package's DDL against the `.dcl` fil
 | Consistent | —       | Persisted `.dcl` matches what the DDL implies. No action needed.     |
 | Drifted   | ERROR    | `.dcl` exists but its privilege set differs from the DDL implication. Run `--fix-grants` to append missing inferred grants. Extra grants are not removed automatically. |
 | Missing   | ERROR    | DDL implies a grant but no `.dcl` file exists. Run `--fix-grants` to create it. |
-| Orphaned  | ERROR *  | A `.dcl` file exists for a grantee that no DDL in the package implies. |
+| External  | INFO *   | A `.dcl` file exists for a grantee — role, database, or user — that no DDL in the package implies. The grantee is *external* to the package's intent. |
 
-\* **Orphaned grants can be downgraded to warnings** — see `inspect.warn_orphan_grants` below.
+\* **External grants are reported at INFO by default** — they are commonly legitimate (e.g. a role granted access in this package whose `GRANT ROLE … TO USER` lives outside). See `inspect.warn_external_grants` below to change the severity.
 
 #### `warn_extra_grants` — extra manual privileges treated as warnings
 
@@ -84,23 +84,25 @@ When `WARNING` or `WARN`, drifted grantees whose `.dcl` files contain only *extr
 
 **Important:** this flag only applies to *extra* privileges. If a `.dcl` file is *missing* a privilege that SHIPS inferred from the DDL (i.e. the DDL is referencing access that has not been granted), that remains a hard error regardless of this setting.
 
-#### `warn_orphan_grants` — configurable orphan severity
+#### `warn_external_grants` — configurable external-grant severity
 
 Set in `config/inspect.conf`:
 
 ```
-warn_orphan_grants=ERROR   # default: ERROR
-# also supports WARNING, WARN, and OFF
+warn_external_grants=INFO   # default: INFO
+# also supports WARNING, WARN, ERROR, and OFF
 ```
 
-When `ERROR` (the default), orphaned DCL files cause the package to be **BLOCKED**. This is the strict posture appropriate for fully self-contained packages.
+**Note on naming:** This rule was named `warn_orphan_grants` before 2026-06. The name was changed because "orphaned" implied operator action; the new term *external* reflects that the grantee — typically a role, database, or user — lives outside the package's DDL intent and the grant is commonly legitimate. Old configs using the previous key are no longer accepted; update to `warn_external_grants`.
 
-When `WARNING` or `WARN`, orphaned DCL files are reported as warnings only. When `OFF`, orphaned DCL files are suppressed. This is the correct posture when:
+When `INFO` (the default), external-grant `.dcl` files are surfaced in the report and audit trail without blocking the build. This is the correct default when:
 
 - A role is granted database access *within* the package (e.g. `GRANT SELECT ON {{DB_T}} TO {{READ_ROLE}}`), but the corresponding `GRANT ROLE … TO USER` statement is managed *outside* the package — for example, by a DBA, an IGA system, or an autonomous agent.
 - The package deliberately pre-provisions access rights that a downstream process will activate.
 
-Both settings can be set independently in `inspect.conf`. Missing grants (inferred by SHIPS but absent from the `.dcl` file) and missing `.dcl` files entirely remain hard errors regardless of either setting. Use `--fix-grants` to repair missing inferred grants additively: SHIPS appends the required `GRANT` statements to the correct `.dcl` file and leaves extra/orphaned grants untouched for review.
+When `WARNING` or `WARN`, external grants are reported as warnings. When `ERROR`, external grants cause the package to be **BLOCKED** — use this strict posture for fully self-contained packages where every grant must be traceable to in-package DDL. When `OFF`, external grants are suppressed entirely from the report.
+
+Both settings can be set independently in `inspect.conf`. Missing grants (inferred by SHIPS but absent from the `.dcl` file) and missing `.dcl` files entirely remain hard errors regardless of either setting. Use `--fix-grants` to repair missing inferred grants additively: SHIPS appends the required `GRANT` statements to the correct `.dcl` file and leaves extra/external grants untouched for review.
 
 ---
 
