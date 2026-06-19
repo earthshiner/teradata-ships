@@ -466,6 +466,72 @@ _RULES: dict[str, dict[str, object]] = {
         "risk": "medium",
         "requires_human_review": True,
     },
+    "collision_object_identity": {
+        "description": (
+            "Two or more distinct logical objects in the payload resolve to "
+            "the same physical name for this environment — a deploy-time "
+            "clobber. The audit attributes the clobber to the identity "
+            "tokens composing the colliding names."
+        ),
+        "default_severity": "ERROR",
+        "safe_fix_available": False,
+        "automation_level": "manual",
+        "recommended_action": (
+            "Give each colliding object a distinct identity. Inventing a "
+            "value for a real clobber is intentionally never automated; "
+            "review the env config or token map and pick deterministic "
+            "names per the deploy-time naming convention."
+        ),
+        "risk": "high",
+        "requires_human_review": True,
+    },
+    "collision_env_label": {
+        "description": (
+            "Env-label tokens (SHIPS_ENV, ENV_PREFIX, INSTANCE) share a "
+            "resolved value. Usually intentional (e.g. AGNOSTIC env)."
+        ),
+        "default_severity": "WARNING",
+        "safe_fix_available": False,
+        "automation_level": "manual",
+        "recommended_action": (
+            "Confirm the env labels are meant to share a value, then "
+            "record the pair in ``config/expected_collisions.yaml`` to "
+            "downgrade the finding to INFO."
+        ),
+        "risk": "low",
+        "requires_human_review": True,
+    },
+    "collision_scalar": {
+        "description": (
+            "Attribute/scalar tokens (PERM_SPACE, SPOOL_SPACE, numerics) "
+            "share a value. Expected and harmless; OFF by default."
+        ),
+        "default_severity": "OFF",
+        "safe_fix_available": False,
+        "automation_level": "manual",
+        "recommended_action": (
+            "No action required. Promote to WARNING in inspect.conf if "
+            "the project policy is to enforce distinct scalar values."
+        ),
+        "risk": "low",
+        "requires_human_review": False,
+    },
+    "collision_identity_alias": {
+        "description": (
+            "Two identity tokens resolve to the same value AND name the "
+            "same logical object — a DRY-collapse candidate, not a clobber."
+        ),
+        "default_severity": "WARNING",
+        "safe_fix_available": False,
+        "automation_level": "manual",
+        "recommended_action": (
+            "Collapse the redundant token to its twin in the env config "
+            "and source. Never auto-applied — choosing which name is "
+            "canonical is a source-semantics decision."
+        ),
+        "risk": "low",
+        "requires_human_review": True,
+    },
 }
 
 
