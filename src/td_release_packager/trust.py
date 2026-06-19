@@ -18,11 +18,12 @@ to fix.
 
 | Signal               | Source                                  | Fail condition                  |
 |----------------------|-----------------------------------------|---------------------------------|
-| inspect_token_format | ships.decisions.json inspect stage      | Any INSPECT_TOKEN_MALFORMED err |
-| inspect_lint         | ships.decisions.json inspect stage      | Any INSPECT_LINT_VIOLATION err  |
-| inspect_grants       | ships.decisions.json inspect stage      | Any INSPECT_GRANT_VIOLATION err |
-| provenance_complete  | context/ships.provenance.json existence | File absent from payload        |
-| build_reproducible   | context/ships.build.json.source_dirty   | source_dirty == true            |
+| inspect_token_format    | ships.decisions.json inspect stage      | Any INSPECT_TOKEN_MALFORMED err          |
+| inspect_lint            | ships.decisions.json inspect stage      | Any INSPECT_LINT_VIOLATION err           |
+| inspect_grants          | ships.decisions.json inspect stage      | Any INSPECT_GRANT_VIOLATION err          |
+| provenance_complete     | context/ships.provenance.json existence | File absent from payload                 |
+| build_reproducible      | context/ships.build.json.source_dirty   | source_dirty == true                     |
+| token_resolution_clean  | context/ships.token_resolution.json     | ≥1 clobber / undefined / rejected allow  |
 
 **Status derivation**
 
@@ -75,6 +76,7 @@ TRUST_RESULT_REF = f"context/{TRUST_RESULT_FILENAME}"
 _EVIDENCE_INSPECT = "ships.decisions.json"
 _EVIDENCE_PROVENANCE = "context/ships.provenance.json"
 _EVIDENCE_BUILD = "context/ships.build.json"
+_EVIDENCE_TOKEN_RESOLUTION = "context/ships.token_resolution.json"
 
 
 # ---------------------------------------------------------------
@@ -207,6 +209,7 @@ def compute_trust_report(source_dir: str, pkg_dir: str) -> TrustReport:
 
     signals["provenance_complete"] = _provenance_signal(pkg_dir)
     signals["build_reproducible"] = _build_reproducible_signal(pkg_dir)
+    signals["token_resolution_clean"] = _token_resolution_signal(pkg_dir)
 
     status = _derive_status(signals)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
@@ -405,6 +408,123 @@ def _build_reproducible_signal(pkg_dir: str) -> TrustSignal:
         status=TRUST_PASS,
         message="Built from a clean working tree — source_commit is authoritative",
         evidence_paths=[_EVIDENCE_BUILD],
+    )
+
+
+def _token_resolution_signal(pkg_dir: str) -> TrustSignal:
+    """Trust signal: did the token-resolution audit find anything dangerous?
+
+    Reads ``context/ships.token_resolution.json``. Per spec §4:
+
+    * **pass** — every env has 0 clobbers AND 0 undefined tokens AND 0
+      rejected allow-list entries.
+    * **warn** — clobber-free and no undefined/rejected, but at least one
+      env has unused tokens or WARNING-class collisions (env-label /
+      identity-alias).
+    * **fail** — any env has ≥1 clobber, undefined tokens, or rejected
+      allow-list entries.
+
+    Absent artefact is UNKNOWN — the audit never ran (older packager
+    versions, or a partial build). Promote when the artefact becomes
+    universal.
+    """
+    from td_release_packager.token_resolution_artefact import load_artefact
+
+    document = load_artefact(pkg_dir)
+    if document is None:
+        return TrustSignal(
+            status=TRUST_UNKNOWN,
+            message=(
+                "context/ships.token_resolution.json not found — token-resolution "
+                "audit did not run for this package. Rebuild with the current "
+                "SHIPS version."
+            ),
+            evidence_paths=[_EVIDENCE_TOKEN_RESOLUTION],
+        )
+
+    envs = document.get("environments", []) or []
+    if not envs:
+        return TrustSignal(
+            status=TRUST_PASS,
+            message="No environments to audit (single-env package).",
+            evidence_paths=[_EVIDENCE_TOKEN_RESOLUTION],
+        )
+
+    # Aggregate counters across every env in the package.
+    total_clobbers = 0
+    total_undefined: list[str] = []
+    total_rejected = 0
+    total_unused = 0
+    warning_class_collisions = 0
+    failing_envs: list[str] = []
+    warning_envs: list[str] = []
+    issues: list[str] = []
+
+    for env in envs:
+        name = env.get("env", "?")
+        clobber_count = len(env.get("clobbers", []) or [])
+        undefined = env.get("undefined", []) or []
+        rejected = env.get("rejected_allowlist", []) or []
+        unused = env.get("unused", []) or []
+        # WARNING-class: env_label / identity-alias collisions (per spec §4).
+        warn_classes = {"env_label", "alias"}
+        warns = [
+            c for c in env.get("collisions", []) or [] if c.get("class") in warn_classes
+        ]
+
+        env_has_fail = bool(clobber_count or undefined or rejected)
+        env_has_warn = bool(unused or warns)
+
+        if env_has_fail:
+            failing_envs.append(name)
+            total_clobbers += clobber_count
+            total_undefined.extend(undefined)
+            total_rejected += len(rejected)
+            if clobber_count:
+                issues.append(f"{name}: {clobber_count} object-identity clobber(s)")
+            if undefined:
+                issues.append(f"{name}: undefined token(s) {sorted(undefined)}")
+            if rejected:
+                issues.append(
+                    f"{name}: {len(rejected)} allow-list entries rejected "
+                    "(cannot suppress a clobber)"
+                )
+        elif env_has_warn:
+            warning_envs.append(name)
+            total_unused += len(unused)
+            warning_class_collisions += len(warns)
+
+    if failing_envs:
+        return TrustSignal(
+            status=TRUST_FAIL,
+            message=(
+                f"Token-resolution audit failed for {len(failing_envs)} env(s): "
+                f"{sorted(set(failing_envs))}"
+            ),
+            issues=issues[:10],
+            evidence_paths=[_EVIDENCE_TOKEN_RESOLUTION],
+        )
+
+    if warning_envs:
+        bits: list[str] = []
+        if total_unused:
+            bits.append(f"{total_unused} unused token(s)")
+        if warning_class_collisions:
+            bits.append(f"{warning_class_collisions} benign warning-class collision(s)")
+        return TrustSignal(
+            status=TRUST_WARN,
+            message=(
+                "Token-resolution audit clean of clobbers but found "
+                + ", ".join(bits)
+                + f" across {sorted(set(warning_envs))}"
+            ),
+            evidence_paths=[_EVIDENCE_TOKEN_RESOLUTION],
+        )
+
+    return TrustSignal(
+        status=TRUST_PASS,
+        message="Token-resolution audit clean — no clobbers or undefined tokens",
+        evidence_paths=[_EVIDENCE_TOKEN_RESOLUTION],
     )
 
 
