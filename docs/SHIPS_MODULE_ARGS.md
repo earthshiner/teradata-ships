@@ -51,10 +51,26 @@ usage: td_release_packager harvest [-h] [--source SOURCE] --project PROJECT
 | `--apply-tokens` | no | `` | `` | (Legacy) Comma-separated name=token pairs. Prefer --token-map instead. E.g. 'DEV01_STD={{STD_DATABASE}},DEV01_SEM={{SEM_DATABASE}}' |
 | `--no-detect-tokens` | no | `False` | `` | Skip hardcoded name detection. |
 | `--force` | no | `False` | `` | Overwrite existing files in the payload. Redundant under the default clean-payload mode (nothing pre-exists to overwrite); only meaningful alongside --keep-existing, where it governs per-file collisions during overlay re-harvest. |
-| `--keep-existing` | no | `False` | `` | Skip the pre-harvest payload clean and overlay new files on top of whatever is already in payload/database/. The default behaviour wipes harvest-owned files first (preserving .gitkeep and control files starting with '_' like a user-curated _order.txt) so the payload always reflects current source state without orphaned artefacts. |
+| `--keep-existing` | no | `False` | `` | Skip the pre-harvest payload clean and overlay new files on top of whatever is already in payload/database/. The default behaviour `shutil.rmtree`s payload/database/ first and recreates it with a fresh `.gitkeep`, so a re-harvest can never inherit any artefact of a prior run (e.g. differently-tokenised filenames). Use `--keep-existing` for overlay/incremental semantics. |
 | `--auto-tokenise` | no | `False` | `` | Auto-detect hardcoded database names and apply token substitutions in a single pass — no manual token_map.conf review step required. The token map is derived automatically from detected candidates (optionally stripped with --env-prefix) and applied immediately. Use in developer mode when speed matters more than reviewing every token. |
 | `--reconcile` | no | `False` | `` | Run interactive reconciliation: detect literal/tokenised twin file pairs in the harvested DDL tree and prompt to resolve each. Skips the normal harvest pipeline. Requires --project and config/token_map.conf; --source is ignored. |
 | `--json-out` | no | `` | `` | Override the default JSON audit destination (<project>/logs/reconcile_<timestamp>.json) for --reconcile mode. Relative paths resolve under --project. |
+
+### `clean`
+
+```text
+usage: td_release_packager clean [-h] --project PROJECT
+                                 [--scope {runs,payload,releases,reports,decisions,all}]
+                                 [--apply]
+```
+
+Wipe prior pipeline output by `shutil.rmtree` of whole subtrees. Synchronous and dry-run by default — pass `--apply` to actually delete. Refuses any path without `ships.yaml`. Never touches `config/` or `.build_counter`.
+
+| Argument | Required | Default | Choices | Description |
+|---|---:|---|---|---|
+| `--project` | yes | `` | `` | SHIPS project directory (must contain ships.yaml). |
+| `--scope` | no | `payload` | `runs, payload, releases, reports, decisions, all` | Subtree to remove. `payload` clears `payload/database/` for a clean re-harvest surface. `all` resets to scaffolded state (leaves `.build_counter` intact). |
+| `--apply` | no | `False` | `` | Actually delete. Without this flag, runs as a dry-run and reports what would be removed. |
 
 ### `generate`
 

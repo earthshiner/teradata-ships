@@ -307,6 +307,8 @@ def _main():
         _cmd_rollback(args)
     elif args.command == "keygen":
         _cmd_keygen(args)
+    elif args.command == "clean":
+        _cmd_clean(args)
     else:
         parser.print_help()
         sys.exit(1)
@@ -4815,6 +4817,44 @@ def _cmd_keygen(args):
     print()
 
 
+def _cmd_clean(args) -> None:
+    """Wipe prior pipeline output for a SHIPS project (CLI surface).
+
+    Thin wrapper around :func:`td_release_packager.cleaner.clean_project`
+    so the CLI and the ``ships_clean`` MCP tool share a single code path.
+    Defaults to dry-run; pass ``--apply`` to actually delete.
+    """
+    from td_release_packager.cleaner import clean_project
+
+    result = clean_project(
+        project=args.project,
+        scope=args.scope,
+        dry_run=not args.apply,
+    )
+
+    if not result.get("success"):
+        print(f"ERROR: {result.get('error', 'clean failed')}", file=sys.stderr)
+        sys.exit(1)
+
+    mode = "Would remove" if result["dry_run"] else "Removed"
+    print(
+        f"{mode} {result['removed_files']} file(s) across "
+        f"{len(result['targets'])} target(s) (scope={result['scope']})."
+    )
+    for target in result["targets"]:
+        marker = "·" if target["exists"] else " "
+        print(f"  {marker} {target['path']} ({target['kind']})")
+
+    if not result["dry_run"]:
+        state = result.get("lifecycle_state_after")
+        if state:
+            print(f"  lifecycle_state: {state}")
+        if result["dry_run"] is False and not state:
+            # State lookup failed but the deletion itself succeeded;
+            # surface a hint so the caller knows it's informational.
+            print("  lifecycle_state: <unavailable>")
+
+
 def _build_parser():
     """Build the argument parser."""
     parser = argparse.ArgumentParser(
@@ -5905,6 +5945,40 @@ def _build_parser():
         help=(
             "Directory to write ships_signing_private.pem and "
             "ships_signing_public.pem (default: current directory)."
+        ),
+    )
+
+    # -- clean --
+    # Explicit "reset prior pipeline output" subcommand. Synchronous,
+    # dry-run by default — pass --apply to actually delete. Backed by
+    # td_release_packager.cleaner.clean_project so it shares one code
+    # path with the ships_clean MCP tool.
+    cln = subs.add_parser(
+        "clean",
+        help="[C] Clean — wipe prior pipeline output by subtree (rmtree).",
+    )
+    cln.add_argument(
+        "--project",
+        required=True,
+        help="SHIPS project directory (must contain ships.yaml).",
+    )
+    cln.add_argument(
+        "--scope",
+        default="payload",
+        choices=["runs", "payload", "releases", "reports", "decisions", "all"],
+        help=(
+            "Subtree to remove. Default 'payload' clears "
+            "payload/database/ for a clean re-harvest surface. "
+            "'all' resets to scaffolded state (leaves .build_counter "
+            "intact)."
+        ),
+    )
+    cln.add_argument(
+        "--apply",
+        action="store_true",
+        help=(
+            "Actually delete. Without this flag, runs as a dry-run "
+            "and reports what would be removed."
         ),
     )
 
