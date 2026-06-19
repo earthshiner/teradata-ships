@@ -28,6 +28,10 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from td_release_packager.reporting import common, redaction
 from td_release_packager.reporting.common import h
+from td_release_packager.token_audit import (
+    CollisionClass,
+    audit_project,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -160,8 +164,91 @@ def _collision_groups(
     return sorted(groups, key=lambda g: g[1])
 
 
-def _env_summary(env_name: str, path: str, referenced: Set[str]) -> dict:
-    """Compute the resolution summary for one environment (never raises)."""
+def _payload_files(project_dir: str) -> List[Tuple[str, str]]:
+    """Return ``(relative_filename, sql_text)`` for the project payload.
+
+    Only files whose names match the SHIPS ``db.object.ext`` convention can
+    contribute to clobber detection, but every payload file is included so
+    role classification sees its content.
+    """
+    payload_dir = os.path.join(project_dir, _PAYLOAD_SUBPATH)
+    if not os.path.isdir(payload_dir):
+        return []
+    out: List[Tuple[str, str]] = []
+    for root, _dirs, files in os.walk(payload_dir):
+        for fname in files:
+            full = os.path.join(root, fname)
+            try:
+                with open(full, encoding="utf-8", errors="replace") as fh:
+                    text = fh.read()
+            except OSError:
+                continue
+            rel = os.path.relpath(full, payload_dir).replace(os.sep, "/")
+            out.append((rel, text))
+    return out
+
+
+def _classify_collisions(
+    raw: Dict[str, str],
+    payload: List[Tuple[str, str]],
+    env_name: str,
+    resolved: Dict[str, str],
+) -> Tuple[List[dict], List[dict], List[dict]]:
+    """Run the resolved-object-identity audit; return classified groups.
+
+    Returns ``(real, benign, all_classified)`` lists. Each entry is
+    ``{"value": str, "tokens": [str], "class": CollisionClass.value}``. The
+    audit ignores redacted tokens implicitly: they resolve to a placeholder
+    string that is unlikely to collide with anything else, and even if it
+    did the report filter below drops collision pairs containing any
+    redacted member.
+    """
+    report = audit_project(
+        env=env_name,
+        env_config=raw,
+        resolved_env=resolved,
+        payload_files=payload,
+    )
+    all_classified: List[dict] = []
+    for c in report.collisions:
+        # Drop any group containing a redacted token — preserves the existing
+        # secret-safety property of the pre-audit collision check.
+        if any(redaction.is_redacted(t, raw.get(t)) for t in c.tokens):
+            continue
+        all_classified.append(
+            {
+                "value": c.value,
+                "tokens": list(c.tokens),
+                "class": c.classification.value,
+            }
+        )
+    real = [g for g in all_classified if g["class"] == CollisionClass.REAL.value]
+    benign = [
+        g
+        for g in all_classified
+        if g["class"]
+        in (
+            CollisionClass.SCALAR.value,
+            CollisionClass.ENV_LABEL.value,
+            CollisionClass.ALLOWLISTED.value,
+        )
+    ]
+    return real, benign, all_classified
+
+
+def _env_summary(
+    env_name: str,
+    path: str,
+    referenced: Set[str],
+    payload: Optional[List[Tuple[str, str]]] = None,
+) -> dict:
+    """Compute the resolution summary for one environment (never raises).
+
+    ``payload`` is the project's ``(filename, sql_text)`` list; when supplied,
+    the new resolved-object-identity audit runs and the summary carries the
+    classified collisions. When omitted (callers that pre-date the audit) the
+    legacy value-only collision check is used so behaviour stays the same.
+    """
     raw = parse_raw_conf(path)
     resolved = preview_resolve(raw)
     defined = set(raw.keys())
@@ -173,11 +260,28 @@ def _env_summary(env_name: str, path: str, referenced: Set[str]) -> dict:
         for t in defined
         if resolved.get(t, "") == "" and not redaction.is_redacted(t, raw.get(t))
     )
-    collisions = _collision_groups(resolved, raw)
 
-    if undefined:
+    if payload is not None:
+        real_collisions, benign_collisions, classified = _classify_collisions(
+            raw, payload, env_name, resolved
+        )
+        # Legacy field kept for callers that already read summary["collisions"]
+        # — populated from the classified list, in the same (value, tokens) shape.
+        collisions = [(g["value"], list(g["tokens"])) for g in classified]
+    else:
+        real_collisions = []
+        benign_collisions = []
+        classified = [
+            {"value": v, "tokens": list(t), "class": CollisionClass.MIXED.value}
+            for v, t in _collision_groups(resolved, raw)
+        ]
+        collisions = [(g["value"], list(g["tokens"])) for g in classified]
+
+    # Status escalates only for hard problems. Benign collisions and unused
+    # tokens drop to warning; clobbers and undefined tokens are errors.
+    if undefined or real_collisions:
         status = "error"
-    elif unused or empty or collisions:
+    elif unused or empty or benign_collisions or classified:
         status = "warning"
     else:
         status = "success"
@@ -188,7 +292,10 @@ def _env_summary(env_name: str, path: str, referenced: Set[str]) -> dict:
         "undefined": undefined,
         "unused": unused,
         "empty": empty,
-        "collisions": collisions,
+        "collisions": collisions,  # legacy shape
+        "real_collisions": real_collisions,  # new
+        "benign_collisions": benign_collisions,  # new
+        "classified_collisions": classified,  # new — for class column
     }
 
 
@@ -245,11 +352,23 @@ def _token_examples(
 
 
 def _matrix_html(summaries: List[dict]) -> str:
-    """Render the per-environment resolution matrix table."""
+    """Render the per-environment resolution matrix table.
+
+    The Collisions column is split into Real (object-identity clobbers — the
+    only collisions that block packaging) and Benign (env-label / scalar /
+    identity-alias — surfaced for visibility but not gate-failing).
+    """
 
     def cell(value: int, danger: bool = False) -> str:
         colour = "#DC3545" if danger and value else "#333"
         return f'<td style="padding:7px 12px;color:{colour}">{h(value)}</td>'
+
+    def real_benign(s: dict) -> str:
+        # Old callers that built summaries without the new audit keys see
+        # everything as benign so the matrix still renders.
+        real_n = len(s.get("real_collisions", []))
+        benign_n = len(s.get("benign_collisions", []))
+        return cell(real_n, danger=True) + cell(benign_n)
 
     rows = "".join(
         f'<tr><td style="padding:7px 12px">'
@@ -258,7 +377,7 @@ def _matrix_html(summaries: List[dict]) -> str:
         f"{cell(len(s['undefined']), danger=True)}"
         f"{cell(len(s['unused']))}"
         f"{cell(len(s['empty']), danger=True)}"
-        f"{cell(len(s['collisions']), danger=True)}</tr>"
+        f"{real_benign(s)}</tr>"
         for s in summaries
     )
     return (
@@ -269,7 +388,8 @@ def _matrix_html(summaries: List[dict]) -> str:
         '<th style="padding:8px 12px;text-align:left">Undefined</th>'
         '<th style="padding:8px 12px;text-align:left">Unused</th>'
         '<th style="padding:8px 12px;text-align:left">Empty</th>'
-        '<th style="padding:8px 12px;text-align:left">Collisions</th>'
+        '<th style="padding:8px 12px;text-align:left" title="Object-identity clobbers — block packaging">Real collisions</th>'
+        '<th style="padding:8px 12px;text-align:left" title="Env-label, scalar, identity-alias — informational">Benign collisions</th>'
         f"</tr></thead><tbody>{rows}</tbody></table>"
     )
 
@@ -295,7 +415,43 @@ def _flags_html(summary: dict, conf_path: Optional[str] = None) -> str:
             f"<strong>Undefined</strong> — referenced but not in this env config; "
             f"these will ship unresolved: {items}.{edit_hint}</div>"
         )
-    if summary["collisions"]:
+    classified = summary.get("classified_collisions")
+    if classified:
+        # Class badge styling — REAL gets the red treatment, everything else
+        # is a yellow informational pill.
+        def _badge(klass: str) -> str:
+            colour = (
+                ("#F8D7DA", "#721C24")
+                if klass == CollisionClass.REAL.value
+                else ("#E2E3E5", "#383D41")
+            )
+            return (
+                f'<span style="background:{colour[0]};color:{colour[1]};'
+                f"border-radius:4px;padding:2px 8px;font-size:11px;"
+                f'margin-right:8px;letter-spacing:0.5px">'
+                f"{h(klass.upper())}</span>"
+            )
+
+        rows = "".join(
+            f"<li>{_badge(g['class'])}<code>{h(', '.join(g['tokens']))}</code> → "
+            f"<code>{h(g['value'])}</code></li>"
+            for g in classified
+        )
+        has_real = any(g["class"] == CollisionClass.REAL.value for g in classified)
+        bg, fg = ("#F8D7DA", "#721C24") if has_real else ("#FFF3CD", "#856404")
+        heading = (
+            "Collisions" if not has_real else "Collisions (object-identity clobber)"
+        )
+        parts.append(
+            f'<div style="background:{bg};color:{fg};border-radius:6px;'
+            f'padding:10px 14px;margin-bottom:8px;font-size:13px">'
+            f"<strong>{heading}</strong> — multiple tokens resolve to the same "
+            f"value. Class shows whether the collision is dangerous "
+            f"(real) or informational (env-label, scalar, alias).<ul "
+            f"style='margin:6px 0 0 18px;list-style:none;padding-left:0'>{rows}</ul></div>"
+        )
+    elif summary["collisions"]:
+        # Legacy fallback when no classification was performed.
         rows = "".join(
             f"<li><code>{h(', '.join(names))}</code> → <code>{h(value)}</code></li>"
             for value, names in summary["collisions"]
@@ -388,7 +544,10 @@ def tokenisation_tab(project_dir: str) -> str:
             "<code>.sample</code> extension are skipped by design).</p>"
         )
 
-    summaries = [_env_summary(name, path, referenced) for name, path in configs]
+    payload = _payload_files(project_dir)
+    summaries = [
+        _env_summary(name, path, referenced, payload=payload) for name, path in configs
+    ]
     focused = _focused_env(configs)
 
     note = (

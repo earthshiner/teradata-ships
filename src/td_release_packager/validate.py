@@ -148,6 +148,29 @@ DEFAULT_RULES: Dict[str, str] = {
     # remain hard errors because required access is absent from the DCL.
     "warn_extra_grants": "WARNING",
     "warn_orphan_grants": "ERROR",
+    # Token-resolution collision audit (spec: token-collision audit, step b).
+    # A "collision" is two or more tokens whose resolved values match for a
+    # given environment. Severity depends on the USAGE ROLE of the colliding
+    # tokens, not their names. The role classifier in token_roles.py
+    # determines which class each collision falls into; this dispatch decides
+    # how severely to report each class.
+    #
+    # collision_object_identity — two DISTINCT logical objects (databases,
+    # users, roles, qualified objects) resolve to the same physical name →
+    # deploy-time clobber. ERROR by default; this is the only collision class
+    # that should block packaging.
+    "collision_object_identity": "ERROR",
+    # collision_env_label — env-label roots (SHIPS_ENV, ENV_PREFIX, INSTANCE)
+    # share a value. Usually intentional (e.g. AGNOSTIC env). WARNING so the
+    # operator sees it without it blocking.
+    "collision_env_label": "WARNING",
+    # collision_scalar — attribute/scalar tokens (PERM_SPACE, SPOOL_SPACE,
+    # numerics) share a value. Expected and harmless; OFF by default.
+    "collision_scalar": "OFF",
+    # collision_identity_alias — two identity tokens name the SAME logical
+    # object (redundant alias). Not dangerous; a DRY-collapse candidate
+    # handled by propose-only remediation in a later step. WARNING.
+    "collision_identity_alias": "WARNING",
 }
 
 # -- Valid severity values --
@@ -534,6 +557,32 @@ def generate_default_config() -> str:
         "# characters. Teradata rejects longer comment strings with Error 5550.",
         "# Defaults to ERROR because this is a deterministic deploy-time failure.",
         f"comment_length={DEFAULT_RULES['comment_length']}",
+        "",
+        "",
+        "# Token-resolution collision audit",
+        "#",
+        "# A 'collision' is two or more tokens whose resolved values match for",
+        "# a given environment. Severity depends on the usage ROLE of the",
+        "# colliding tokens, not their names.",
+        "#",
+        "# collision_object_identity: two DISTINCT logical objects resolve to",
+        "# the same physical name — a deploy-time clobber. ERROR (default).",
+        "# This is the only collision class that should block packaging.",
+        f"collision_object_identity={DEFAULT_RULES['collision_object_identity']}",
+        "#",
+        "# collision_env_label: env-label roots (SHIPS_ENV, ENV_PREFIX,",
+        "# INSTANCE) share a value. Usually intentional (e.g. AGNOSTIC).",
+        "# WARNING (default).",
+        f"collision_env_label={DEFAULT_RULES['collision_env_label']}",
+        "#",
+        "# collision_scalar: attribute/scalar tokens (PERM_SPACE, SPOOL_SPACE,",
+        "# numerics) share a value. Expected and harmless. OFF (default).",
+        f"collision_scalar={DEFAULT_RULES['collision_scalar']}",
+        "#",
+        "# collision_identity_alias: two identity tokens name the SAME object",
+        "# (redundant alias). Not dangerous; a DRY-collapse candidate handled",
+        "# by propose-only remediation. WARNING (default).",
+        f"collision_identity_alias={DEFAULT_RULES['collision_identity_alias']}",
     ]
     return "\n".join(lines) + "\n"
 

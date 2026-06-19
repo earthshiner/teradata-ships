@@ -198,6 +198,62 @@ def test_collision_detected(tmp_path):
     assert "DB_A" in html and "DB_B" in html
 
 
+def test_real_vs_benign_collision_split(tmp_path):
+    """Matrix splits Real (identity clobber) from Benign (scalar / env-label).
+
+    A real clobber must render with the REAL badge; PERM_SPACE/SPOOL_SPACE
+    sharing a value must classify as SCALAR (benign).
+    """
+    _write_env(
+        tmp_path,
+        "DEV",
+        ["DB_A=SAME", "DB_B=SAME", "PERM_SPACE=1e9", "SPOOL_SPACE=1e9"],
+    )
+    # Two distinct sources resolving to the SAME physical name → clobber.
+    # Both files name an object MyView, qualified by different tokens that
+    # resolve to identical values.
+    _write_payload(
+        tmp_path,
+        "DDL/views/{{DB_A}}.MyView.viw",
+        "CREATE VIEW {{DB_A}}.MyView AS SELECT 1;",
+    )
+    _write_payload(
+        tmp_path,
+        "DDL/views/{{DB_B}}.MyView.viw",
+        "CREATE VIEW {{DB_B}}.MyView AS SELECT 1 "
+        "WHERE 1=1 AND PERM={{PERM_SPACE}} AND SPOOL={{SPOOL_SPACE}};",
+    )
+    html = tokenisation_tab(str(tmp_path))
+    # Matrix headers now show both columns.
+    assert "Real collisions" in html
+    assert "Benign collisions" in html
+    # The REAL badge appears for the identity clobber.
+    assert "REAL" in html
+    # Both DB tokens are surfaced.
+    assert "DB_A" in html and "DB_B" in html
+
+
+def test_scalar_collision_is_benign_not_real(tmp_path):
+    """PERM/SPOOL pair classifies as SCALAR, not REAL."""
+    _write_env(
+        tmp_path,
+        "DEV",
+        ["ENV_PREFIX=A_D01", "PERM_SPACE=1e9", "SPOOL_SPACE=1e9"],
+    )
+    _write_payload(
+        tmp_path,
+        "DDL/tables/{{ENV_PREFIX}}.X.tbl",
+        "CREATE TABLE {{ENV_PREFIX}}.X (Id INT) AS PERM = {{PERM_SPACE}}, "
+        "SPOOL = {{SPOOL_SPACE}};",
+    )
+    html = tokenisation_tab(str(tmp_path))
+    # SCALAR badge for the benign pair.
+    assert "SCALAR" in html
+    # Status badge is NOT error-styled (no real collisions).
+    # A real clobber would show ✗; a benign-only matrix is at most warning (⚠).
+    assert "✗" not in html
+
+
 def test_multi_env_matrix_lists_all(tmp_path):
     _write_env(tmp_path, "DEV", ["ENV_PREFIX=A_D01"])
     _write_env(tmp_path, "PRD", ["ENV_PREFIX=A_P01"])
