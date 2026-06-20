@@ -1055,13 +1055,19 @@ def _compute_phase_inventory(pkg_dir: str) -> Dict[str, int]:
     payload_dir = os.path.join(pkg_dir, "payload")
     if not os.path.isdir(payload_dir):
         return inventory
-    for phase in os.listdir(payload_dir):
+    # Sort the phase list, the directory walk, and the file iteration.
+    # PR1 invariant: every output-affecting traversal in the deterministic
+    # core must be stable run-to-run, regardless of filesystem traversal
+    # order. os.listdir / os.walk return entries in OS-dependent order
+    # (NTFS happens to be alphabetical on Windows; ext4 is not on Linux).
+    for phase in sorted(os.listdir(payload_dir)):
         phase_path = os.path.join(payload_dir, phase)
         if not os.path.isdir(phase_path):
             continue
         count = 0
-        for _root, _dirs, files in os.walk(phase_path):
-            for f in files:
+        for _root, dirs, files in os.walk(phase_path):
+            dirs.sort()
+            for f in sorted(files):
                 if f.startswith(".") or f == ".gitkeep":
                     continue
                 count += 1
@@ -2143,8 +2149,13 @@ def _copy_payload(
     filename_map = {}  # original → resolved (only changed names)
     provenance_doc = ProvenanceDocument()
 
+    # PR1 invariant: deterministic copy order. Sort both the directory
+    # walk (in-place to influence os.walk's own descent) and the file
+    # iteration so the order files are copied, tokens substituted, and
+    # the provenance document is built is byte-stable run-to-run.
     for root, dirs, files in os.walk(source_payload):
-        for filename in files:
+        dirs.sort()
+        for filename in sorted(files):
             # Skip scaffolding examples — not deployment artefacts
             if filename.endswith(".sample"):
                 continue
@@ -2645,8 +2656,14 @@ def _copy_order_files(source_payload: str, pkg_dir: str):
         source_payload: Source payload directory.
         pkg_dir:        Package root directory.
     """
+    # PR1 invariant: stable walk order so the sequence of copy2 calls
+    # is run-to-run identical. _order.txt files themselves are the
+    # control for downstream deploy order, so any reordering during
+    # the copy stage that affected which file wins a collision would
+    # be a silent semantic change.
     for root, dirs, files in os.walk(source_payload):
-        for filename in files:
+        dirs.sort()
+        for filename in sorted(files):
             if filename == "_order.txt":
                 src = os.path.join(root, filename)
                 rel = os.path.relpath(src, source_payload)
