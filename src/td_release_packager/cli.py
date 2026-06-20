@@ -2177,6 +2177,83 @@ def _run_inspect(args, stage, issue_codes) -> int:
             print("  All {{TOKEN}} markers are well-formed.")
 
         # ==============================================================
+        # Step 0b — Token coverage check (PR2)
+        # ==============================================================
+        # PR2 invariant (HANDOVER-ships-deterministic-deploy.md §PR2):
+        # no payload should pass inspect and fail package on the
+        # undefined-token scan. Inspect runs without a specific target
+        # env, so we cross-check every ``config/env/*.conf`` and treat
+        # any token undefined in any env as a coverage failure here.
+        # The same helper, ``validate_payload_token_coverage``, will be
+        # the entry point package's build can adopt in a follow-up
+        # rather than maintaining a separate per-env scan.
+        from td_release_packager.token_engine import (
+            validate_payload_token_coverage,
+        )
+
+        coverage_by_env = validate_payload_token_coverage(payload_dir, args.project)
+        if not coverage_by_env:
+            # No env configs found — coverage cannot be verified.
+            # Surface as an INFO note rather than a silent pass.
+            print(
+                "  ℹ Token coverage not verified — no env configs "
+                "discovered under config/env/. Add at least one "
+                "<ENV>.conf to gate undefined tokens at inspect time."
+            )
+            stage.add_issue(
+                "info",
+                issue_codes.TOKEN_UNDEFINED,
+                "Token coverage check skipped: no config/env/*.conf "
+                "files discovered under the project. Inspect cannot "
+                "guarantee package will not fail on undefined tokens.",
+            )
+        else:
+            total_undefined: Set[str] = set()
+            for env_name, summary in sorted(coverage_by_env.items()):
+                if not summary["undefined"]:
+                    continue
+                total_undefined.update(summary["undefined"])
+                print()
+                print(
+                    f"  ✗ Token coverage [{env_name}]: "
+                    f"{len(summary['undefined'])} undefined token(s) "
+                    f"in {summary['config_path']}"
+                )
+                for tok in summary["undefined"]:
+                    refs = summary["token_files"].get(tok, [])
+                    fn_refs = summary["filename_tokens"].get(tok, [])
+                    print(f"    {{{{{tok}}}}}")
+                    for ref in refs:
+                        try:
+                            rel = os.path.relpath(ref, args.project)
+                        except ValueError:
+                            rel = ref
+                        print(f"      content -> {rel}")
+                    for rel in fn_refs:
+                        print(f"      filename -> {rel}")
+                    # One issue per (env, token) — matches package's
+                    # one-per-token granularity so explain views show
+                    # parity between the two surfaces.
+                    location = refs[0] if refs else (fn_refs[0] if fn_refs else None)
+                    stage.add_issue(
+                        "error",
+                        issue_codes.TOKEN_UNDEFINED,
+                        (
+                            f"Token '{{{{{tok}}}}}' is referenced in the "
+                            f"payload but not defined in {env_name} "
+                            f"({summary['config_path']}). Package would "
+                            f"fail at substitution for this env."
+                        ),
+                        location=location,
+                    )
+                token_ok = False
+            if not total_undefined:
+                print(
+                    f"  All payload tokens are defined across "
+                    f"{len(coverage_by_env)} env config(s)."
+                )
+
+        # ==============================================================
         # Step 1 — Per-file DDL lint
         # ==============================================================
 
