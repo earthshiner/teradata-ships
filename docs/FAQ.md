@@ -385,11 +385,43 @@ Scopes: `runs`, `payload` (default), `releases`, `reports`, `decisions`, `all`. 
 
 ---
 
+### What's the canonical harvest recipe for a reverse-harvested DBC export?
+
+This is the single supported recipe for reverse-harvesting a deployed data product's DBC export — the first-class input path SHIPS now targets. Use it for any source whose database names follow the `<Project>_<Module>_<Tier>_<Kind>` shape.
+
+```bash
+python -m td_release_packager harvest \
+    --source /path/to/<Project>/DBC/export \
+    --project /path/to/SHIPS/project \
+    --auto-tokenise \
+    --prefix-token <Project>=DB_PREFIX \
+    --remove-view-type-affixes
+```
+
+What each flag does:
+
+- `--auto-tokenise` — detect literal database names in the source and apply the derived token map in a single pass.
+- `--prefix-token <Project>=DB_PREFIX` — rewrite the leading project segment of every identifier to `{{DB_PREFIX}}_<suffix>`, leaving the structural remainder literal. After this, the package is environment-independent on the project axis.
+- `--remove-view-type-affixes` — strip redundant `_v` view affixes during harvest so view names follow the SHIPS Object Placement Standard.
+
+**Do not pass `--env-prefix` on this path.** It engages a whole-name derivation that produces braced compound tokens like `{{DB_PREFIX_DOM_BUS_V}}.dcl` instead of the correct prefix form `{{DB_PREFIX}}_DOM_BUS_V.dcl`. The deterministic-deploy programme (PR1) retires `env_prefix` from the prefix path for exactly this reason.
+
+After harvest, define `DB_PREFIX` in each `config/env/<ENV>.conf`:
+
+```properties
+DB_PREFIX=CallCentre        # DEV
+DB_PREFIX=callcentre_prod   # PRD
+```
+
+Then `inspect` will gate the token coverage against every env (PR2), and `package` cannot fail on undefined tokens.
+
+---
+
 ### `--prefix-token` doesn't seem to do anything.
 
-`--prefix-token` only applies when `--auto-tokenise` is on. Without auto-tokenise, no token substitution runs at all and the prefix-token spec is inert.
+For `--prefix-token` to substitute, pair it with `--auto-tokenise`. The substitution is engaged unconditionally once a token map exists, but on the CLI/MCP surface the candidate map is only built when auto-tokenise is on. Use the recipe above — that's the supported flow.
 
-For consistent prefix tokens across DDL **and** DCL (the inter-database grant files), pass `--prefix-token <SOURCE>=<TOKEN>` with `--auto-tokenise` and **no** `--env-prefix`. `--env-prefix` drives the whole-name derivation that produces braced whole-name tokens in the `inter_db/*.dcl` files (e.g. `{{DB_PREFIX_SEM_BUS_V}}.dcl`), which is not what you want when the goal is a single prefix token.
+If you've stripped down to the bare `--prefix-token` call, no token map is assembled and no substitution happens. Pass `--auto-tokenise` alongside.
 
 ---
 

@@ -253,6 +253,27 @@ def read_inspect_config(config_path: str) -> Dict[str, str]:
             name, value = stripped.split("=", 1)
             name = name.strip().lower()
 
+            # -- Retired key shim --
+            # PR6 of the deterministic-deploy programme renamed
+            # ``warn_orphan_grants`` to ``warn_external_grants`` (default
+            # INFO). Per the user-confirmed handover plan, the old key
+            # is NOT silently accepted: an inspect.conf carrying it
+            # would otherwise inherit the new INFO default for the
+            # external-grant rule without the operator noticing, which
+            # is the silent-failure mode we are trying to prevent.
+            # Surface a clear, actionable error here so a stale config
+            # is fixed at inspect time rather than discovered later
+            # via Trust Report drift.
+            if name == "warn_orphan_grants":
+                raise ValueError(
+                    f"inspect.conf line {lineno}: 'warn_orphan_grants' "
+                    "has been renamed to 'warn_external_grants' "
+                    "(2026-06; default INFO). Rename the key and re-run. "
+                    "The old key is no longer accepted — see "
+                    "docs/references/inspect_rules.md for the new "
+                    "semantics."
+                )
+
             # Domain-value rules (e.g. comma_style) accept a specific
             # vocabulary rather than ERROR/WARNING/OFF.
             if name in _DOMAIN_VALUE_RULES:
