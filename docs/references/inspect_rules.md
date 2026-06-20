@@ -93,7 +93,9 @@ warn_external_grants=INFO   # default: INFO
 # also supports WARNING, WARN, ERROR, and OFF
 ```
 
-**Note on naming:** This rule was named `warn_orphan_grants` before 2026-06. The name was changed because "orphaned" implied operator action; the new term *external* reflects that the grantee — typically a role, database, or user — lives outside the package's DDL intent and the grant is commonly legitimate. Old configs using the previous key are no longer accepted; update to `warn_external_grants`.
+**Note on naming.** This rule was named `warn_orphan_grants` before 2026-06. The name was changed because "orphaned" implied operator action; the new term *external* reflects that the grantee — typically a role, database, or user — lives outside the package's DDL intent and the grant is commonly legitimate.
+
+The old key is **not silently accepted** under the new release. An `inspect.conf` that still carries `warn_orphan_grants=…` raises a clear error at config-read time pointing to the new key and the line number — no silent inheritance of the new INFO default. Rename the line to `warn_external_grants=…` and re-run.
 
 When `INFO` (the default), external-grant `.dcl` files are surfaced in the report and audit trail without blocking the build. This is the correct default when:
 

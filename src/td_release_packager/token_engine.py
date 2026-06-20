@@ -709,9 +709,29 @@ def validate_tokens(
         for fpath in files:
             errors.append(f"  → used in: {fpath}")
 
-    # Tokens defined but never used — warning
-    # Exclude reserved metadata keys (not deployment tokens)
-    _RESERVED_PROPERTIES = {"SHIPS_ENV", "SHIPS_PROJECT", "ENV_PREFIX"}
+    # Tokens defined but never used — warning.
+    # Two classes are excluded from the warning:
+    #
+    # 1. Reserved metadata keys (SHIPS_ENV / SHIPS_PROJECT / ENV_PREFIX).
+    #    These configure the env itself rather than substituting into
+    #    DDL, so "never referenced in payload" is structural, not a
+    #    deficiency.
+    # 2. Stock provisioning tokens (PERM_SPACE, SPOOL_SPACE,
+    #    TEMP_SPACE). The scaffolded env config writes these by
+    #    default; they're consumed during database/user creation
+    #    rather than always appearing inside DDL bodies. Flagging
+    #    them as "orphans" in every faithful build was the cosmetic
+    #    READY_WITH_CAVEATS trigger the handover (PR6, Appendix A8)
+    #    asked us to retire — see also the matching commentary on
+    #    the trust report's unreferenced-token signal.
+    _RESERVED_PROPERTIES = {
+        "SHIPS_ENV",
+        "SHIPS_PROJECT",
+        "ENV_PREFIX",
+        "PERM_SPACE",
+        "SPOOL_SPACE",
+        "TEMP_SPACE",
+    }
     unused = defined - all_referenced - _RESERVED_PROPERTIES
     warnings = [
         f"Token '{{{{{t}}}}}' is defined in the env config{_cfg} but never referenced in any payload file."
