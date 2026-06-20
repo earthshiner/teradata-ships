@@ -572,28 +572,38 @@ def _build_package_impl(
         )
 
     # -- Phase 3: Validate tokens --
-    errors, warnings = validate_tokens(
-        token_values, token_usage, config_file=config.env_config_file
+    #
+    # PR2 follow-up: package now drives the same coverage helper
+    # inspect Step 0 uses. The earlier ``validate_tokens`` flow only
+    # saw content tokens; a payload referencing a token only via a
+    # tokenised filename (e.g. ``{{DB_PREFIX}}_BUS_V.dcl``) slipped
+    # through package even after PR2 made inspect catch it. The
+    # shared helper scans filenames too, so the package-side gate
+    # cannot now be looser than the inspect-side one.
+    from td_release_packager.token_engine import validate_payload_against_env
+
+    coverage = validate_payload_against_env(
+        payload_dir,
+        config.source_dir,
+        config.env_config_file,
     )
+    undefined = coverage["undefined"]
+    unreferenced = coverage["unreferenced"]
+    token_to_files = coverage["token_files"]
+    filename_tokens = coverage["filename_tokens"]
+    # Build the warnings list the build manifest used to receive from
+    # ``validate_tokens``. Preserves the on-disk shape for downstream
+    # tooling (trust report, decisions ledger, stage_results) — the
+    # manifest's ``warnings`` field has always been a list of
+    # human-readable strings, not a structured undefined-set.
+    _cfg = f" in {config.env_config_file}" if config.env_config_file else ""
+    warnings = [
+        f"Token '{{{{{t}}}}}' is defined in the env config{_cfg} "
+        "but never referenced in any payload file."
+        for t in unreferenced
+    ]
 
-    if errors or warnings:
-        # -- Build structured report from raw data --
-        # token_usage is {filename: set_of_tokens}
-        # Invert to {token: [filenames]} for undefined token reporting
-        token_to_files: Dict[str, list] = {}
-        for filepath, tokens in token_usage.items():
-            for token in tokens:
-                token_to_files.setdefault(token, []).append(filepath)
-
-        # Compute sets
-        all_referenced = set()
-        for tokens in token_usage.values():
-            all_referenced.update(tokens)
-
-        defined_tokens = set(token_values.keys())
-        undefined = sorted(all_referenced - defined_tokens)
-        unreferenced = sorted(defined_tokens - all_referenced)
-
+    if undefined or unreferenced:
         # -- Print structured report --
         print(f"\n{'=' * 64}")
         print("  Token Validation")
@@ -607,11 +617,13 @@ def _build_package_impl(
 
             for token in undefined:
                 print(f"    {{{{{token}}}}}")
-                files = sorted(token_to_files.get(token, []))
-                # Show paths relative to source for readability
-                for fpath in files:
+                # Content references — show paths relative to source.
+                for fpath in token_to_files.get(token, []):
                     rel = os.path.relpath(fpath, config.source_dir)
-                    print(f"      -> {rel}")
+                    print(f"      content  -> {rel}")
+                # Filename references — already relative to payload_dir.
+                for rel in filename_tokens.get(token, []):
+                    print(f"      filename -> {rel}")
                 print()
 
             print("  Action: add these tokens to your .conf file,")

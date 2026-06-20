@@ -825,6 +825,125 @@ def _discover_env_configs(project_dir: str) -> List[str]:
     )
 
 
+# Reserved env-config keys that are configuration metadata or
+# build-gate inputs, not substituted tokens. Sourced from the same
+# set ``validate_tokens`` filters with so the per-env summary's
+# ``unreferenced`` list matches that legacy report's contents.
+_COVERAGE_RESERVED_PROPERTIES = {
+    "SHIPS_ENV",
+    "SHIPS_PROJECT",
+    "ENV_PREFIX",
+    "PERM_SPACE",
+    "SPOOL_SPACE",
+    "TEMP_SPACE",
+    "EXTERNAL_PARENTS",
+}
+
+
+def _summarise_env_coverage(
+    content_usage: Dict[str, Set[str]],
+    filename_usage: Dict[str, Set[str]],
+    token_values: Dict[str, str],
+    config_path: str,
+) -> Dict[str, object]:
+    """Per-env summary builder shared by the public entry points.
+
+    Pure function over already-scanned token usage and a loaded env
+    config — does no filesystem I/O of its own. Both ``undefined`` and
+    ``unreferenced`` are derived from the same combined (content +
+    filename) reference set so the package-side gate and the inspect-
+    side report agree on what counts as referenced. The
+    ``unreferenced`` list excludes reserved metadata keys (matching
+    the legacy ``validate_tokens`` filter).
+
+    Returns ``{config_path, undefined, token_files, filename_tokens,
+    unreferenced}``.
+    """
+    all_referenced: Set[str] = set()
+    for tokens in content_usage.values():
+        all_referenced.update(tokens)
+    for tokens in filename_usage.values():
+        all_referenced.update(tokens)
+
+    defined = set(token_values.keys())
+    undefined = sorted(all_referenced - defined)
+    unreferenced = sorted(defined - all_referenced - _COVERAGE_RESERVED_PROPERTIES)
+
+    token_to_files: Dict[str, List[str]] = {}
+    for path, tokens in content_usage.items():
+        for tok in tokens:
+            if tok in undefined:
+                token_to_files.setdefault(tok, []).append(path)
+    for tok in token_to_files:
+        token_to_files[tok] = sorted(token_to_files[tok])
+
+    filename_tokens: Dict[str, List[str]] = {}
+    for rel, tokens in filename_usage.items():
+        for tok in tokens:
+            if tok in undefined:
+                filename_tokens.setdefault(tok, []).append(rel)
+    for tok in filename_tokens:
+        filename_tokens[tok] = sorted(filename_tokens[tok])
+
+    return {
+        "config_path": config_path,
+        "undefined": undefined,
+        "token_files": token_to_files,
+        "filename_tokens": filename_tokens,
+        "unreferenced": unreferenced,
+    }
+
+
+def validate_payload_against_env(
+    payload_dir: str,
+    project_dir: str,
+    env_config_path: str,
+    *,
+    content_usage: Optional[Dict[str, Set[str]]] = None,
+    filename_usage: Optional[Dict[str, Set[str]]] = None,
+) -> Dict[str, object]:
+    """Single-env coverage check — the per-env primitive shared by
+    inspect Step 0 (loops across all envs) and package's build-time
+    token validation (validates the one env being packaged).
+
+    The PR2 follow-up: package's Phase 3 used to run its own bespoke
+    ``validate_tokens`` flow that didn't see filename tokens, so a
+    payload referencing a token only via a tokenised filename could
+    sail through package even after PR2 made inspect catch it. This
+    helper closes that loop — package now hits the same scanner
+    inspect does, including filename coverage.
+
+    Args:
+        payload_dir: The payload to scan. Typically
+            ``<project>/payload/database`` but accepts any directory.
+        project_dir: Project root, used by the discovery-extension
+            whitelist when the payload scan is performed here.
+        env_config_path: Path to the env config file to validate
+            against.
+        content_usage: Optional pre-computed content scan, useful when
+            the caller already has it (e.g. inspect's loop over envs).
+            When ``None`` the helper scans the payload itself.
+        filename_usage: Optional pre-computed filename scan, same
+            rationale.
+
+    Returns:
+        The standard per-env summary dict — see
+        :func:`_summarise_env_coverage`.
+    """
+    if content_usage is None:
+        content_usage = scan_tokens_in_directory(payload_dir, project_dir=project_dir)
+    if filename_usage is None:
+        filename_usage = _scan_filename_tokens(payload_dir)
+
+    token_values = read_env_config(env_config_path)
+    return _summarise_env_coverage(
+        content_usage,
+        filename_usage,
+        token_values,
+        env_config_path,
+    )
+
+
 def validate_payload_token_coverage(
     payload_dir: str,
     project_dir: str,
@@ -834,6 +953,11 @@ def validate_payload_token_coverage(
     For each env config under ``project_dir/config/env/*.conf``,
     cross-references every token referenced in the payload (file
     contents *and* filenames) against the env's defined tokens.
+
+    Internally delegates to :func:`validate_payload_against_env` so the
+    per-env coverage semantics are guaranteed identical across the two
+    public surfaces — when inspect and package both pass through this
+    module, "inspect green" implies "package coverage clean".
 
     Args:
         payload_dir: The payload to scan. Typically
@@ -862,56 +986,26 @@ def validate_payload_token_coverage(
     if not env_configs:
         return {}
 
-    # Content tokens — single scan reused across all envs.
+    # Single payload scan reused across all envs.
     content_usage = scan_tokens_in_directory(payload_dir, project_dir=project_dir)
     filename_usage = _scan_filename_tokens(payload_dir)
-
-    # Combined usage: union over content + filenames so a token that
-    # appears only in a filename is still treated as referenced.
-    combined_usage: Dict[str, Set[str]] = {}
-    for path, tokens in content_usage.items():
-        combined_usage.setdefault(path, set()).update(tokens)
-    for rel, tokens in filename_usage.items():
-        combined_usage.setdefault(rel, set()).update(tokens)
 
     out: Dict[str, Dict[str, List]] = {}
     for cfg_path in env_configs:
         try:
-            token_values = read_env_config(cfg_path)
+            summary = validate_payload_against_env(
+                payload_dir,
+                project_dir,
+                cfg_path,
+                content_usage=content_usage,
+                filename_usage=filename_usage,
+            )
         except (FileNotFoundError, ValueError, OSError) as exc:
             logger.warning("Could not read env config %s: %s", cfg_path, exc)
             continue
 
-        all_referenced: Set[str] = set()
-        for tokens in combined_usage.values():
-            all_referenced.update(tokens)
-
-        defined = set(token_values.keys())
-        undefined = sorted(all_referenced - defined)
-
-        token_to_files: Dict[str, List[str]] = {}
-        for path, tokens in content_usage.items():
-            for tok in tokens:
-                if tok in undefined:
-                    token_to_files.setdefault(tok, []).append(path)
-        for tok in token_to_files:
-            token_to_files[tok] = sorted(token_to_files[tok])
-
-        filename_tokens: Dict[str, List[str]] = {}
-        for rel, tokens in filename_usage.items():
-            for tok in tokens:
-                if tok in undefined:
-                    filename_tokens.setdefault(tok, []).append(rel)
-        for tok in filename_tokens:
-            filename_tokens[tok] = sorted(filename_tokens[tok])
-
         env_name = os.path.splitext(os.path.basename(cfg_path))[0]
-        out[env_name] = {
-            "config_path": cfg_path,
-            "undefined": undefined,
-            "token_files": token_to_files,
-            "filename_tokens": filename_tokens,
-        }
+        out[env_name] = summary
 
     return out
 
