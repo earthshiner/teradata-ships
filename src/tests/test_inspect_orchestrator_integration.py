@@ -118,7 +118,24 @@ class TestInspectCleanRun:
         stage = run["stages"][0]
         assert stage["stage"] == "inspect"
         assert stage["status"] == "success"
-        assert stage["issues"] == []
+        # PR2 (#351 follow-up): inspect now runs a token-coverage check
+        # against every ``config/env/*.conf``. This fixture has no env
+        # configs, so inspect emits a single INFO note documenting that
+        # coverage could not be verified — the issue is informational
+        # and does not bump the warnings/errors counters, so the run
+        # stays ``status=success``. Allow that single INFO entry; any
+        # other issue is still a regression.
+        non_info_issues = [
+            i for i in stage["issues"] if i.get("severity") != "info"
+        ]
+        assert non_info_issues == []
+        coverage_notes = [
+            i
+            for i in stage["issues"]
+            if i.get("severity") == "info"
+            and i.get("code") == "TOKEN_UNDEFINED"
+        ]
+        assert len(coverage_notes) == 1
 
     def test_records_config_resolved_with_provenance(self, tmp_path, capsys):
         project = _make_project(tmp_path)

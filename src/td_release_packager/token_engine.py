@@ -718,6 +718,175 @@ def validate_tokens(
     return (errors, warnings)
 
 
+# ---------------------------------------------------------------
+# Shared token-coverage scanner (PR2 of the deterministic-deploy
+# programme)
+# ---------------------------------------------------------------
+#
+# Background. Before PR2 there were two token scanners that did not
+# agree: inspect Step 0 only checked token *format* (well-formed
+# braces), while package's token-validation phase additionally checked
+# *coverage* (every {{TOKEN}} in the payload is defined in the env
+# config). A payload could therefore PASS inspect and FAIL package on
+# undefined tokens — exactly the structural betrayal the handover
+# (HANDOVER-ships-deterministic-deploy.md, §PR2) is asking us to fix.
+#
+# This helper extracts package's coverage check into a form inspect
+# can drive too. Inspect runs without a target env, so the helper
+# walks ``config/env/*.conf`` and validates against every env config
+# it finds. The contract: if inspect is green, packaging for any of
+# those envs cannot fail on the coverage check.
+#
+# It also extends coverage to *filenames*. The handover explicitly
+# lists filename tokens (e.g. ``{{DB_PREFIX}}_DOM_BUS_V.dcl``) as
+# part of the coverage surface because they too need substitution at
+# build time. ``scan_tokens_in_directory`` only reads file contents;
+# we walk filenames here.
+
+# Filename-token regex — same shape as the content regex but applied
+# to path components. Captures every ``{{NAME}}`` reference embedded
+# in a filename so a payload that names a file ``{{UNDEFINED}}.tbl``
+# is treated the same as one that references ``{{UNDEFINED}}`` inside
+# a file.
+_FILENAME_TOKEN_RE = re.compile(r"\{\{([A-Za-z_][A-Za-z0-9_-]*)\}\}")
+
+
+def _scan_filename_tokens(directory: str) -> Dict[str, Set[str]]:
+    """Walk ``directory`` and return ``{relpath: {token, ...}}`` for
+    every file or directory whose name contains ``{{TOKEN}}`` markers.
+
+    Only filename text is examined — content scanning is the job of
+    :func:`scan_tokens_in_directory`. Hidden files and dirs are
+    skipped, matching the content scanner's policy. Walks are sorted
+    in-place so the returned dict is stable run-to-run; PR1b enforces
+    the same invariant elsewhere in the token engine.
+    """
+    results: Dict[str, Set[str]] = {}
+    if not os.path.isdir(directory):
+        return results
+    for root, dirs, files in os.walk(directory):
+        dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+        for name in sorted(dirs) + sorted(files):
+            if name.startswith("."):
+                continue
+            tokens = set(_FILENAME_TOKEN_RE.findall(name))
+            if not tokens:
+                continue
+            path = os.path.join(root, name)
+            rel = os.path.relpath(path, directory).replace("\\", "/")
+            results[rel] = tokens
+    return results
+
+
+def _discover_env_configs(project_dir: str) -> List[str]:
+    """Return the sorted list of ``config/env/*.conf`` paths in
+    ``project_dir``.
+
+    Empty list when the directory is missing — coverage validation
+    then degrades silently. Inspect surfaces the absence in its own
+    output; this helper does not.
+    """
+    env_dir = os.path.join(project_dir, "config", "env")
+    if not os.path.isdir(env_dir):
+        return []
+    return sorted(
+        os.path.join(env_dir, name)
+        for name in os.listdir(env_dir)
+        if name.endswith(".conf") and not name.startswith(".")
+    )
+
+
+def validate_payload_token_coverage(
+    payload_dir: str,
+    project_dir: str,
+) -> Dict[str, Dict[str, List]]:
+    """Cross-env coverage check shared by inspect Step 0 and package.
+
+    For each env config under ``project_dir/config/env/*.conf``,
+    cross-references every token referenced in the payload (file
+    contents *and* filenames) against the env's defined tokens.
+
+    Args:
+        payload_dir: The payload to scan. Typically
+            ``<project>/payload/database`` but accepts any directory.
+        project_dir: Project root, used to find ``config/env/*.conf``
+            and to resolve the discovery-extension whitelist.
+
+    Returns:
+        Dict keyed by env config basename (e.g. ``"DEV"``,
+        ``"PRD"``). Each value::
+
+            {
+                "config_path": str,
+                "undefined": [token, ...],        # sorted
+                "token_files": {token: [path, ...]},  # source files
+                "filename_tokens": {token: [relpath, ...]},
+            }
+
+        ``undefined`` lists every token referenced in the payload but
+        absent from the env config. The empty list means full coverage.
+        When no env configs are discovered the returned dict is empty
+        and the caller should treat that as "coverage unverifiable";
+        inspect emits an explicit informational note in that case.
+    """
+    env_configs = _discover_env_configs(project_dir)
+    if not env_configs:
+        return {}
+
+    # Content tokens — single scan reused across all envs.
+    content_usage = scan_tokens_in_directory(payload_dir, project_dir=project_dir)
+    filename_usage = _scan_filename_tokens(payload_dir)
+
+    # Combined usage: union over content + filenames so a token that
+    # appears only in a filename is still treated as referenced.
+    combined_usage: Dict[str, Set[str]] = {}
+    for path, tokens in content_usage.items():
+        combined_usage.setdefault(path, set()).update(tokens)
+    for rel, tokens in filename_usage.items():
+        combined_usage.setdefault(rel, set()).update(tokens)
+
+    out: Dict[str, Dict[str, List]] = {}
+    for cfg_path in env_configs:
+        try:
+            token_values = read_env_config(cfg_path)
+        except (FileNotFoundError, ValueError, OSError) as exc:
+            logger.warning("Could not read env config %s: %s", cfg_path, exc)
+            continue
+
+        all_referenced: Set[str] = set()
+        for tokens in combined_usage.values():
+            all_referenced.update(tokens)
+
+        defined = set(token_values.keys())
+        undefined = sorted(all_referenced - defined)
+
+        token_to_files: Dict[str, List[str]] = {}
+        for path, tokens in content_usage.items():
+            for tok in tokens:
+                if tok in undefined:
+                    token_to_files.setdefault(tok, []).append(path)
+        for tok in token_to_files:
+            token_to_files[tok] = sorted(token_to_files[tok])
+
+        filename_tokens: Dict[str, List[str]] = {}
+        for rel, tokens in filename_usage.items():
+            for tok in tokens:
+                if tok in undefined:
+                    filename_tokens.setdefault(tok, []).append(rel)
+        for tok in filename_tokens:
+            filename_tokens[tok] = sorted(filename_tokens[tok])
+
+        env_name = os.path.splitext(os.path.basename(cfg_path))[0]
+        out[env_name] = {
+            "config_path": cfg_path,
+            "undefined": undefined,
+            "token_files": token_to_files,
+            "filename_tokens": filename_tokens,
+        }
+
+    return out
+
+
 def substitute_tokens(
     content: str,
     token_values: Dict[str, str],
