@@ -1,0 +1,37 @@
+
+REPLACE VIEW CallCentre_DOM_STD_V.Agent_H
+(
+      agent_id
+    , agent_key
+    , agent_name
+    , source_agent_name
+    , valid_from_dts
+    , valid_to_dts
+    , is_current
+    , is_deleted
+)
+AS
+LOCKING ROW FOR ACCESS
+SELECT
+      agent_id
+    , agent_key
+    , agent_name
+    , source_agent_name
+    , valid_from_dts
+    , valid_to_dts
+    , is_current
+    , is_deleted
+FROM CallCentre_DOM_STD_T.Agent_H;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_DOM_STD_V.Agent_H.agent_id|INTEGER
+--CallCentre_DOM_STD_V.Agent_H.agent_key|VARCHAR(50)
+--CallCentre_DOM_STD_V.Agent_H.agent_name|VARCHAR(200)
+--CallCentre_DOM_STD_V.Agent_H.source_agent_name|VARCHAR(200)
+--CallCentre_DOM_STD_V.Agent_H.valid_from_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_DOM_STD_V.Agent_H.valid_to_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_DOM_STD_V.Agent_H.is_current|BYTEINT
+--CallCentre_DOM_STD_V.Agent_H.is_deleted|BYTEINT
+

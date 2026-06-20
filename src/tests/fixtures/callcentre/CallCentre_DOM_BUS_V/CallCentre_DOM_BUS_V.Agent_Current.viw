@@ -1,0 +1,25 @@
+
+REPLACE VIEW CallCentre_DOM_BUS_V.Agent_Current
+(
+      agent_id
+    , agent_key
+    , agent_name
+    , source_agent_name
+)
+AS
+SELECT
+      src.agent_id AS agent_id
+    , src.agent_key AS agent_key
+    , src.agent_name AS agent_name
+    , src.source_agent_name AS source_agent_name
+FROM CallCentre_DOM_STD_V.Agent_H AS src
+WHERE is_current = 1 AND is_deleted = 0;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_DOM_BUS_V.Agent_Current.agent_id|INTEGER
+--CallCentre_DOM_BUS_V.Agent_Current.agent_key|VARCHAR(50)
+--CallCentre_DOM_BUS_V.Agent_Current.agent_name|VARCHAR(200)
+--CallCentre_DOM_BUS_V.Agent_Current.source_agent_name|VARCHAR(200)
+

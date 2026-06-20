@@ -1,0 +1,42 @@
+-- Granted by Dropped User
+grant CREATE AUTHORIZATION on CallCentre to CallCentre;
+-- Granted by Dropped User
+grant CREATE TRIGGER on CallCentre to CallCentre;
+-- Granted by Dropped User
+grant CREATE MACRO on CallCentre to CallCentre;
+-- Granted by Dropped User
+grant CHECKPOINT on CallCentre to CallCentre;
+-- Granted by Dropped User
+grant CREATE TABLE on CallCentre to CallCentre;
+-- Granted by Dropped User
+grant CREATE VIEW on CallCentre to CallCentre;
+-- Granted by Dropped User
+grant DELETE on CallCentre to CallCentre;
+-- Granted by Dropped User
+grant DROP AUTHORIZATION on CallCentre to CallCentre;
+-- Granted by Dropped User
+grant DROP FUNCTION on CallCentre to CallCentre;
+-- Granted by Dropped User
+grant DROP TRIGGER on CallCentre to CallCentre;
+-- Granted by Dropped User
+grant DROP MACRO on CallCentre to CallCentre;
+-- Granted by Dropped User
+grant DUMP on CallCentre to CallCentre;
+-- Granted by Dropped User
+grant DROP TABLE on CallCentre to CallCentre;
+-- Granted by Dropped User
+grant DROP VIEW on CallCentre to CallCentre;
+-- Granted by Dropped User
+grant EXECUTE on CallCentre to CallCentre;
+-- Granted by Dropped User
+grant INSERT on CallCentre to CallCentre;
+-- Granted by Dropped User
+grant DROP PROCEDURE on CallCentre to CallCentre;
+-- Granted by Dropped User
+grant SELECT on CallCentre to CallCentre;
+-- Granted by Dropped User
+grant RESTORE on CallCentre to CallCentre;
+-- Granted by Dropped User
+grant STATISTICS on CallCentre to CallCentre;
+-- Granted by Dropped User
+grant UPDATE on CallCentre to CallCentre;

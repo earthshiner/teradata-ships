@@ -1,0 +1,2 @@
+
+create database CallCentre_DOM_STD_T from CallCentre as perm = 0.0 spool = 1.410065408E9 fallback ;
