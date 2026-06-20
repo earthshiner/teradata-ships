@@ -940,7 +940,7 @@ def _build_package_impl(
     # so the user never has to fix it manually.
     if _is_auto_split_needed(pkg_dir):
         (main_pair, prereqs_pair) = _split_into_paired_packages(
-            pkg_dir, manifest, config.archive_format
+            pkg_dir, manifest, config.archive_format, token_values=token_values
         )
         main_archive, main_manifest = main_pair
         prereqs_archive, _prereqs_manifest = prereqs_pair
@@ -1139,6 +1139,7 @@ def _create_environment_prereqs_package_if_needed(
     manifest: BuildManifest,
     release_group: str,
     archive_format: str,
+    known_external_parents: Optional[set] = None,
 ) -> Optional[Tuple[str, BuildManifest]]:
     """Emit a _00_environment_prereqs package when external parents exist.
 
@@ -1158,7 +1159,10 @@ def _create_environment_prereqs_package_if_needed(
         ``(archive_path, manifest)`` for the generated environment prereq
         package, or ``None`` when no external parent requirements exist.
     """
-    requirements = analyse_environment_parent_requirements(prereqs_pkg_dir)
+    requirements = analyse_environment_parent_requirements(
+        prereqs_pkg_dir,
+        known_external_parents=known_external_parents,
+    )
     if not requirements:
         return None
 
@@ -1368,6 +1372,7 @@ def _split_into_paired_packages(
     pkg_dir: str,
     manifest: BuildManifest,
     archive_format: str,
+    token_values: Optional[Dict[str, str]] = None,
 ) -> Tuple[Tuple[str, BuildManifest], Tuple[str, BuildManifest]]:
     """Partition a fully-built package into a prereqs + main pair.
 
@@ -1502,11 +1507,33 @@ def _split_into_paired_packages(
     # fail before the child can be created.  Rather than leaving a loose DBA
     # script outside the audit trail, SHIPS emits a sibling package carrying
     # a review script and machine-readable requirement/evidence contract.
+    # PR5a: feed env-config's EXTERNAL_PARENTS declaration through so
+    # the build's environment-prereq gate knows about platform-owned
+    # parents the package depends on but does not create itself.
+    # Without this, every reverse-harvested product whose root sits
+    # under a real database (e.g. DATAPRODUCTS) trips an
+    # environment-prereqs package and forces a manual DBA amendment.
+    # Union with the default DBC so we keep the existing safety net
+    # for the universal platform root.
+    from td_release_packager.environment_prereqs import (
+        _DEFAULT_KNOWN_EXTERNAL_PARENTS,
+        parse_external_parents_from_env,
+    )
+
+    declared_external_parents = (
+        parse_external_parents_from_env(token_values) if token_values else set()
+    )
+    effective_external_parents = (
+        set(_DEFAULT_KNOWN_EXTERNAL_PARENTS) | declared_external_parents
+        if declared_external_parents
+        else None
+    )
     env_prereq_pair = _create_environment_prereqs_package_if_needed(
         prereqs_pkg_dir=prereqs_pkg_dir,
         manifest=manifest,
         release_group=release_group,
         archive_format=archive_format,
+        known_external_parents=effective_external_parents,
     )
     if env_prereq_pair is not None:
         env_archive, _env_manifest = env_prereq_pair

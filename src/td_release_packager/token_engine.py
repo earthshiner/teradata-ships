@@ -731,6 +731,12 @@ def validate_tokens(
         "PERM_SPACE",
         "SPOOL_SPACE",
         "TEMP_SPACE",
+        # PR5a: env-config declaration of external parents the package
+        # depends on but does not create itself (e.g. CallCentre under
+        # DATAPRODUCTS). Consumed by the build's environment-prereq
+        # gate; never substituted into DDL. Exclude from the
+        # unreferenced-token warning.
+        "EXTERNAL_PARENTS",
     }
     unused = defined - all_referenced - _RESERVED_PROPERTIES
     warnings = [

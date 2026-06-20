@@ -286,6 +286,27 @@ def _generate_properties(
             f.write("# Spool space (bytes)\n")
             f.write(f"SPOOL_SPACE={spool}\n\n")
 
+            # -- Section 2b: External parents (PR5a) --
+            f.write("# ---- External parent databases ----\n")
+            f.write(
+                "# Comma-separated list of databases/users that already exist on the\n"
+                "# target environment and that this package depends on as a CREATE\n"
+                "# DATABASE/USER ... FROM <parent> target. Declaring them here lets\n"
+                "# the build's environment-prereq gate confirm they're expected to\n"
+                "# pre-exist, instead of emitting a DBA_INSTRUCTIONS.md amendment\n"
+                "# step.\n"
+                "#\n"
+                "# DBC is always implicit; do not list it.\n"
+                "#\n"
+                "# Example (CallCentre reverse-harvested from a DBC export under\n"
+                "# DataProducts):\n"
+                "#   EXTERNAL_PARENTS=DATAPRODUCTS\n"
+                "#\n"
+                "# Default (none) preserves the historic DBA-review gate for any\n"
+                "# external parent the package's prereqs reference.\n"
+                "# EXTERNAL_PARENTS=\n\n"
+            )
+
             # -- Section 3: Project tokens --
             f.write("# ---- Project tokens ----\n")
             f.write("# All values below resolve from ENV_PREFIX and SHIPS_PROJECT.\n")

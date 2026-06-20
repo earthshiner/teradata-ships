@@ -31,8 +31,37 @@ _PERM_RE = re.compile(
 )
 
 # Parents that are normally platform roots and should not trigger a generated
-# SHIPS environment-prerequisite package.
+# SHIPS environment-prerequisite package. ``DBC`` is the only universally-true
+# entry; project-specific external parents (e.g. ``DATAPRODUCTS`` for a
+# reverse-harvested CallCentre export) are added by ``EXTERNAL_PARENTS=...``
+# in the env config — see :func:`parse_external_parents_from_env`.
 _DEFAULT_KNOWN_EXTERNAL_PARENTS = frozenset({"DBC"})
+
+
+def parse_external_parents_from_env(token_values: dict) -> set[str]:
+    """Parse the ``EXTERNAL_PARENTS`` env-config declaration.
+
+    PR5a (handover §PR5, option (b)): rather than relying on the
+    operator's DBA amending the generated ``DBA_INSTRUCTIONS.md`` for
+    every legitimate external parent, the env config self-describes
+    them. A reverse-harvested CallCentre export under ``DATAPRODUCTS``
+    declares ``EXTERNAL_PARENTS=DATAPRODUCTS`` and the build no longer
+    spuriously requires DBA review for that parent.
+
+    Args:
+        token_values: The env config dict as returned by
+            :func:`td_release_packager.token_engine.read_env_config`.
+
+    Returns:
+        Normalised (upper-cased, comment-stripped) set of parent names.
+        Empty when the key is absent or empty. The default DBC entry is
+        union'd in by the caller (``analyse_environment_parent_requirements``).
+    """
+    raw = token_values.get("EXTERNAL_PARENTS", "")
+    if not raw:
+        return set()
+    return {_normalise_identifier(part) for part in raw.split(",") if part.strip()}
+
 
 _DBA_PARENT_PLACEHOLDER = "<DBA_SELECTED_PARENT>"
 _DBA_PERM_PLACEHOLDER = "<DBA_REVIEWED_PERM>"

@@ -425,6 +425,24 @@ If you've stripped down to the bare `--prefix-token` call, no token map is assem
 
 ---
 
+### My package keeps generating a `_00_environment_prereqs` archive that demands DBA review for a parent database that obviously already exists (e.g. `DATAPRODUCTS`).
+
+Reverse-harvested products typically inherit a root `CREATE DATABASE <Project> FROM <ExternalParent>` from the DBC export. By default SHIPS treats any non-DBC external parent as a DBA-review gate and emits the `_00_environment_prereqs` package + `DBA_INSTRUCTIONS.md` step. For products whose parent is a well-known platform database that already exists on every target, that gate is friction.
+
+Declare the parent in your env config so the build knows it's expected to pre-exist:
+
+```properties
+# config/env/DEV.conf
+EXTERNAL_PARENTS=DATAPRODUCTS
+
+# config/env/PRD.conf
+EXTERNAL_PARENTS=DATAPRODUCTS,SYSDBA
+```
+
+Comma-separated, case-insensitive. `DBC` is implicit and does not need to be listed. The next build skips the environment-prereqs package for declared parents and proceeds straight to the main + prereqs split. Undeclared external parents still trigger the safety net — the exemption is targeted.
+
+---
+
 ## Inspect errors and warnings
 
 ### What does `db_qualifier ERROR` mean?
