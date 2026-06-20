@@ -450,9 +450,11 @@ def scan_tokens_in_directory(
     allowed_extensions = resolve_harvest_extensions(project_dir=project_dir)
 
     results = {}
+    # PR1 invariant: sort dirs in-place so the walk order is stable.
+    # File iteration is already sorted; dir descent was not.
     for root, dirs, files in os.walk(directory):
-        # Skip hidden directories.
-        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        # Skip hidden directories, sorted for deterministic descent.
+        dirs[:] = sorted(d for d in dirs if not d.startswith("."))
         for filename in sorted(files):
             # Skip hidden and underscore-prefixed files.
             if filename.startswith(".") or filename.startswith("_"):
@@ -581,8 +583,9 @@ def scan_malformed_tokens_in_directory(
     allowed_extensions = resolve_harvest_extensions(project_dir=project_dir)
 
     results: Dict[str, List[Dict]] = {}
+    # PR1 invariant: sort dirs in-place so the walk order is stable.
     for root, dirs, files in os.walk(directory):
-        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        dirs[:] = sorted(d for d in dirs if not d.startswith("."))
         for filename in sorted(files):
             # Skip hidden and underscore-prefixed files.
             if filename.startswith(".") or filename.startswith("_"):

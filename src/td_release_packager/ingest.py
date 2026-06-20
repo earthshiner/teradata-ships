@@ -2322,7 +2322,16 @@ def _apply_view_type_affix_renames(
     scan = strip_comments_and_string_literals(content)
     replacements: List[Tuple[int, int, str]] = []
 
-    for (db_name, old_obj), new_obj in renames.items():
+    # PR1 invariant: iterate renames in a stable, semantically correct
+    # order — longest (db_name, old_obj) pair first, then alphabetical.
+    # Same rationale as the apply_tokens loop in ``_token_substitute``:
+    # ensures more specific rename targets win when generic and specific
+    # entries could both match overlapping text, and removes any
+    # dependency on dict insertion order.
+    for (db_name, old_obj), new_obj in sorted(
+        renames.items(),
+        key=lambda kv: (-(len(kv[0][0]) + len(kv[0][1])), kv[0]),
+    ):
         pattern = re.compile(
             rf"(?<![A-Za-z0-9_]){re.escape(db_name)}\s*\.\s*"
             rf"{re.escape(old_obj)}(?![A-Za-z0-9_])",
@@ -2533,7 +2542,23 @@ def _apply_kind_aware_tokens(
 
     replacements: List[tuple] = []
 
-    for literal, token_with_braces in apply_tokens.items():
+    # PR1 invariant: iterate apply_tokens in a stable, semantically
+    # correct order — longest literal first, then alphabetical. The
+    # downstream ``replacements.sort(key=lambda r: r[0], reverse=True)``
+    # is a Python *stable* sort, so when two replacements land at the
+    # same start position, their relative order falls back to the
+    # input order. If ``apply_tokens.items()`` were iterated in dict
+    # insertion order, and that insertion order varied between runs
+    # (which it could when apply_tokens is constructed from a non-
+    # deterministic detection pass), the winner of a same-position
+    # collision could flip — producing the whole-name vs prefix-form
+    # ``.dcl`` filename mismatch the handover Appendix A1 captured.
+    # Longest-first also gets the semantics right: a more specific
+    # literal (``CallCentre_PRE_STD_V``) wins over its prefix
+    # (``CallCentre``) when both are present in the token map.
+    for literal, token_with_braces in sorted(
+        apply_tokens.items(), key=lambda kv: (-len(kv[0]), kv[0])
+    ):
         # Extract base token name: "{{MortgagePlatform_Domain}}" → "MortgagePlatform_Domain"
         base_token = token_with_braces.strip("{}")
 

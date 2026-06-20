@@ -925,14 +925,20 @@ def find_ddl_files(project_dir: Path) -> List[Path]:
         scan_root = project_dir
 
     ddl_files = []
+    # PR1 invariant: sort the walk in-place. The final ``return
+    # sorted(ddl_files)`` below already canonicalises the output list,
+    # but the walk order also drives the *order of `_read_text` calls*
+    # and the order any cache or memoisation layer downstream sees —
+    # defence-in-depth sort costs nothing and keeps any future direct
+    # iteration over the walk safe.
     for root, dirs, files in os.walk(scan_root):
-        dirs[:] = [
+        dirs[:] = sorted(
             dirname
             for dirname in dirs
             if not dirname.startswith(".")
             and dirname not in {"releases", "graphs", "__pycache__"}
-        ]
-        for fname in files:
+        )
+        for fname in sorted(files):
             ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else ""
             if ext in SCANNABLE_EXTENSIONS:
                 ddl_files.append(Path(root) / fname)
