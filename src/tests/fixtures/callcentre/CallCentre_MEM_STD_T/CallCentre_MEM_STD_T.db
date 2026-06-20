@@ -1,0 +1,2 @@
+
+create database CallCentre_MEM_STD_T from CallCentre as perm = 0.0 spool = 2.0E9 fallback ;

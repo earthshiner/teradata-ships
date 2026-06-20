@@ -1,0 +1,2 @@
+
+create database CallCentre_MEM_BUS_V from CallCentre as perm = 0.0 spool = 4.46581964E8 fallback ;

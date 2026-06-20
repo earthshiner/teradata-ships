@@ -1,0 +1,43 @@
+
+
+
+/* CallCentre_MEM_BUS_V.Business_Glossary
+ * canonical view alongside friendly alias Glossary_Active.
+ * Faithful full passthrough of CallCentre_MEM_STD_V.Business_Glossary (all rows, all columns).
+ * Consumer filter: consumers filter WHERE is_active = 1 (and validity).
+ */
+REPLACE VIEW CallCentre_MEM_BUS_V.Business_Glossary
+(
+      glossary_key, term, term_category, definition
+    , business_context, synonyms, related_terms, related_table
+    , related_column, source_module, module_version, is_active
+    , valid_from, valid_to, created_timestamp, updated_timestamp
+)
+AS
+SELECT
+      glossary_key, term, term_category, definition
+    , business_context, synonyms, related_terms, related_table
+    , related_column, source_module, module_version, is_active
+    , valid_from, valid_to, created_timestamp, updated_timestamp
+FROM CallCentre_MEM_STD_V.Business_Glossary;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_MEM_BUS_V.Business_Glossary.glossary_key|BIGINT
+--CallCentre_MEM_BUS_V.Business_Glossary.term|VARCHAR(200)
+--CallCentre_MEM_BUS_V.Business_Glossary.term_category|VARCHAR(50)
+--CallCentre_MEM_BUS_V.Business_Glossary.definition|CLOB(2097088000)
+--CallCentre_MEM_BUS_V.Business_Glossary.business_context|CLOB(2097088000)
+--CallCentre_MEM_BUS_V.Business_Glossary.synonyms|VARCHAR(500)
+--CallCentre_MEM_BUS_V.Business_Glossary.related_terms|VARCHAR(500)
+--CallCentre_MEM_BUS_V.Business_Glossary.related_table|VARCHAR(200)
+--CallCentre_MEM_BUS_V.Business_Glossary.related_column|VARCHAR(200)
+--CallCentre_MEM_BUS_V.Business_Glossary.source_module|VARCHAR(50)
+--CallCentre_MEM_BUS_V.Business_Glossary.module_version|VARCHAR(20)
+--CallCentre_MEM_BUS_V.Business_Glossary.is_active|BYTEINT
+--CallCentre_MEM_BUS_V.Business_Glossary.valid_from|DATE
+--CallCentre_MEM_BUS_V.Business_Glossary.valid_to|DATE
+--CallCentre_MEM_BUS_V.Business_Glossary.created_timestamp|TIMESTAMP WITH TIME ZONE
+--CallCentre_MEM_BUS_V.Business_Glossary.updated_timestamp|TIMESTAMP WITH TIME ZONE
+

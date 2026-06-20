@@ -1,0 +1,6 @@
+Qualified Column|DataType
+CallCentre_DOM_BUS_V.Agent_Current.agent_id|INTEGER
+CallCentre_DOM_BUS_V.Agent_Current.agent_key|VARCHAR(50)
+CallCentre_DOM_BUS_V.Agent_Current.agent_name|VARCHAR(200)
+CallCentre_DOM_BUS_V.Agent_Current.source_agent_name|VARCHAR(200)
+

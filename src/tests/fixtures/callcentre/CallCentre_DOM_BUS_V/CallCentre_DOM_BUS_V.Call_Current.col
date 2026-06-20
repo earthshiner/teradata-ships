@@ -1,0 +1,7 @@
+Qualified Column|DataType
+CallCentre_DOM_BUS_V.Call_Current.call_id|INTEGER
+CallCentre_DOM_BUS_V.Call_Current.agent_id|INTEGER
+CallCentre_DOM_BUS_V.Call_Current.start_hour|BYTEINT
+CallCentre_DOM_BUS_V.Call_Current.start_ts|TIMESTAMP WITH TIME ZONE
+CallCentre_DOM_BUS_V.Call_Current.day_of_week|VARCHAR(10)
+
