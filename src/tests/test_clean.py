@@ -39,7 +39,8 @@ def _make_project(root: Path) -> Path:
     (root / "config" / "env").mkdir(parents=True)
     (root / "config" / "token_map.conf").write_text("# token map\n", encoding="utf-8")
     (root / "ships.yaml").write_text("project: test\n", encoding="utf-8")
-    (root / ".build_counter").write_text("42\n", encoding="utf-8")
+    (root / ".ships").mkdir(parents=True, exist_ok=True)
+    (root / ".ships" / ".build_counter").write_text("42\n", encoding="utf-8")
 
     payload_db = root / "payload" / "database"
     (payload_db / "DDL").mkdir(parents=True)
@@ -150,7 +151,9 @@ def test_apply_payload_scope_clears_database_tree(tmp_path: Path) -> None:
     assert (project / "config" / "token_map.conf").exists()
     assert (project / "ships.yaml").exists()
     # .build_counter intact even for narrow scope.
-    assert (project / ".build_counter").read_text(encoding="utf-8").strip() == "42"
+    assert (project / ".ships" / ".build_counter").read_text(
+        encoding="utf-8"
+    ).strip() == "42"
 
 
 # ---------------------------------------------------------------
@@ -166,7 +169,9 @@ def test_scope_all_preserves_build_counter_and_config(tmp_path: Path) -> None:
     result = clean_project(str(project), scope="all", dry_run=False)
 
     assert result["success"] is True
-    assert (project / ".build_counter").read_text(encoding="utf-8").strip() == "42"
+    assert (project / ".ships" / ".build_counter").read_text(
+        encoding="utf-8"
+    ).strip() == "42"
     assert (project / "config" / "token_map.conf").exists()
     # Decisions file gone (it's a single-file target).
     assert not (project / "ships.decisions.json").exists()

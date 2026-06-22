@@ -19,6 +19,16 @@ from td_release_packager.build_counter import (
     _write_counter,
     COUNTER_FILENAME,
 )
+from td_release_packager.project_paths import build_counter_path
+
+
+def _seed_counter(project_dir, content: str) -> None:
+    """Helper: write the counter file under the project's .ships/ dir."""
+    import os
+
+    os.makedirs(os.path.join(str(project_dir), ".ships"), exist_ok=True)
+    with open(build_counter_path(str(project_dir)), "w", encoding="utf-8") as fh:
+        fh.write(content)
 
 
 # ---------------------------------------------------------------
@@ -31,19 +41,19 @@ class TestReadBuildNumber:
 
     def test_read_zero(self, tmp_path):
         """Freshly scaffolded counter reads 0."""
-        (tmp_path / COUNTER_FILENAME).write_text("0\n", encoding="utf-8")
+        _seed_counter(tmp_path, "0\n")
 
         assert read_build_number(str(tmp_path)) == 0
 
     def test_read_positive_number(self, tmp_path):
         """Counter with a positive integer reads correctly."""
-        (tmp_path / COUNTER_FILENAME).write_text("42\n", encoding="utf-8")
+        _seed_counter(tmp_path, "42\n")
 
         assert read_build_number(str(tmp_path)) == 42
 
     def test_read_strips_whitespace(self, tmp_path):
         """Leading/trailing whitespace is stripped."""
-        (tmp_path / COUNTER_FILENAME).write_text("  15  \n", encoding="utf-8")
+        _seed_counter(tmp_path, "  15  \n")
 
         assert read_build_number(str(tmp_path)) == 15
 
@@ -54,14 +64,14 @@ class TestReadBuildNumber:
 
     def test_invalid_content_raises(self, tmp_path):
         """Non-integer content raises ValueError."""
-        (tmp_path / COUNTER_FILENAME).write_text("not_a_number\n", encoding="utf-8")
+        _seed_counter(tmp_path, "not_a_number\n")
 
         with pytest.raises(ValueError, match="invalid"):
             read_build_number(str(tmp_path))
 
     def test_empty_file_raises(self, tmp_path):
         """Empty counter file raises ValueError."""
-        (tmp_path / COUNTER_FILENAME).write_text("", encoding="utf-8")
+        _seed_counter(tmp_path, "")
 
         with pytest.raises(ValueError):
             read_build_number(str(tmp_path))
@@ -77,7 +87,7 @@ class TestNextBuildNumber:
 
     def test_increment_from_zero(self, tmp_path):
         """First increment: 0 → 1."""
-        (tmp_path / COUNTER_FILENAME).write_text("0\n", encoding="utf-8")
+        _seed_counter(tmp_path, "0\n")
 
         result = next_build_number(str(tmp_path))
 
@@ -86,7 +96,7 @@ class TestNextBuildNumber:
 
     def test_increment_from_existing(self, tmp_path):
         """Increment from existing value: 11 → 12."""
-        (tmp_path / COUNTER_FILENAME).write_text("11\n", encoding="utf-8")
+        _seed_counter(tmp_path, "11\n")
 
         result = next_build_number(str(tmp_path))
 
@@ -94,7 +104,7 @@ class TestNextBuildNumber:
 
     def test_successive_increments(self, tmp_path):
         """Multiple increments produce monotonically increasing numbers."""
-        (tmp_path / COUNTER_FILENAME).write_text("0\n", encoding="utf-8")
+        _seed_counter(tmp_path, "0\n")
 
         n1 = next_build_number(str(tmp_path))
         n2 = next_build_number(str(tmp_path))
@@ -106,12 +116,18 @@ class TestNextBuildNumber:
 
     def test_counter_persisted_to_disk(self, tmp_path):
         """Counter value is persisted — survives re-read."""
-        (tmp_path / COUNTER_FILENAME).write_text("5\n", encoding="utf-8")
+        _seed_counter(tmp_path, "5\n")
 
         next_build_number(str(tmp_path))
 
         # Re-read from disk
-        content = (tmp_path / COUNTER_FILENAME).read_text(encoding="utf-8").strip()
+        import pathlib
+
+        content = (
+            pathlib.Path(build_counter_path(str(tmp_path)))
+            .read_text(encoding="utf-8")
+            .strip()
+        )
         assert content == "6"
 
 
@@ -131,7 +147,7 @@ class TestWriteCounter:
 
     def test_write_overwrites_existing(self, tmp_path):
         """Writing overwrites the existing counter value."""
-        (tmp_path / COUNTER_FILENAME).write_text("10\n", encoding="utf-8")
+        _seed_counter(tmp_path, "10\n")
 
         _write_counter(str(tmp_path), 20)
 
@@ -155,7 +171,7 @@ class TestResetBuildNumber:
 
     def test_reset_to_zero(self, tmp_path):
         """Reset sets counter back to 0."""
-        (tmp_path / COUNTER_FILENAME).write_text("42\n", encoding="utf-8")
+        _seed_counter(tmp_path, "42\n")
 
         reset_build_number(str(tmp_path))
 
@@ -163,7 +179,7 @@ class TestResetBuildNumber:
 
     def test_reset_to_specific_value(self, tmp_path):
         """Reset to a specific value."""
-        (tmp_path / COUNTER_FILENAME).write_text("42\n", encoding="utf-8")
+        _seed_counter(tmp_path, "42\n")
 
         reset_build_number(str(tmp_path), value=100)
 
@@ -186,7 +202,7 @@ class TestPromotionScenario:
 
     def test_no_increment_reads_same_number(self, tmp_path):
         """Reading without incrementing returns the same number."""
-        (tmp_path / COUNTER_FILENAME).write_text("0\n", encoding="utf-8")
+        _seed_counter(tmp_path, "0\n")
 
         # DEV build: increment
         dev_build = next_build_number(str(tmp_path))

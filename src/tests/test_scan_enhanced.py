@@ -76,7 +76,8 @@ def _make_project(
         (env_dir / f"{env_name}.conf").write_text("\n".join(lines), encoding="utf-8")
 
     # Build counter
-    (project / ".build_counter").write_text("0\n", encoding="utf-8")
+    (project / ".ships").mkdir(parents=True, exist_ok=True)
+    (project / ".ships" / ".build_counter").write_text("0\n", encoding="utf-8")
 
     return project
 
@@ -366,6 +367,7 @@ class TestCleanRun:
             "CREATE MULTISET TABLE DB.T (Id INTEGER) PRIMARY INDEX (Id);",
             encoding="utf-8",
         )
-        (project / ".build_counter").write_text("0\n", encoding="utf-8")
+        (project / ".ships").mkdir(parents=True, exist_ok=True)
+        (project / ".ships" / ".build_counter").write_text("0\n", encoding="utf-8")
         result = _ships(["scan", "--project", str(project)])
         assert result.returncode == 0

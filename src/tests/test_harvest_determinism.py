@@ -184,7 +184,8 @@ def _scaffold_minimal_project(root: Path) -> Path:
     ):
         (payload / sub).mkdir(parents=True, exist_ok=True)
     (root / "config").mkdir(exist_ok=True)
-    (root / ".build_counter").write_text("0", encoding="utf-8")
+    (root / ".ships").mkdir(parents=True, exist_ok=True)
+    (root / ".ships" / ".build_counter").write_text("0", encoding="utf-8")
     return root
 
 

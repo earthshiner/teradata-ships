@@ -72,8 +72,8 @@ class TestShipsScaffold:
         assert "project_dir" in result
         project_dir = Path(result["project_dir"])
         assert project_dir.is_dir()
-        # .build_counter is always created by scaffold
-        assert (project_dir / ".build_counter").exists()
+        # .build_counter is always created by scaffold under .ships/
+        assert (project_dir / ".ships" / ".build_counter").exists()
 
     def test_environments_list(self, tmp_path):
         from ships_mcp import ships_scaffold

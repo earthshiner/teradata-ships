@@ -1,13 +1,14 @@
 """
 build_counter.py — Automated build number management.
 
-Manages a `.build_counter` file in the project root that stores
-the current build number as a single integer. Each build reads
-the current value, increments it, and writes back atomically.
+Manages a ``.build_counter`` file under ``<project>/.ships/`` that
+stores the current build number as a single integer. Each build
+reads the current value, increments it, and writes back atomically.
 
-The counter file is designed to be committed to Git — it tracks
-the build sequence across the team. The write uses a temp-then-
-rename pattern for crash safety.
+The counter lives under ``.ships/`` alongside the other machine-
+managed state (``ships.decisions.json``, ``_waves.txt``). Each
+developer / CI pipeline keeps its own counter — ``.ships/`` is in
+the scaffolded ``.gitignore``.
 
 File format:
     A single line containing an integer, e.g. "12\\n".
@@ -16,9 +17,20 @@ File format:
 import logging
 import os
 
+from td_release_packager.project_paths import (
+    BUILD_COUNTER_FILENAME as COUNTER_FILENAME,
+    build_counter_path,
+    ensure_ships_state_dir,
+)
+
 logger = logging.getLogger(__name__)
 
-COUNTER_FILENAME = ".build_counter"
+__all__ = [
+    "COUNTER_FILENAME",
+    "read_build_number",
+    "next_build_number",
+    "reset_build_number",
+]
 
 
 def read_build_number(project_dir: str) -> int:
@@ -32,10 +44,10 @@ def read_build_number(project_dir: str) -> int:
         The current build number.
 
     Raises:
-        FileNotFoundError: If .build_counter does not exist.
+        FileNotFoundError: If the build counter does not exist.
                            Run the scaffolder to create it.
     """
-    counter_path = os.path.join(project_dir, COUNTER_FILENAME)
+    counter_path = build_counter_path(project_dir)
 
     if not os.path.exists(counter_path):
         raise FileNotFoundError(
@@ -93,7 +105,8 @@ def _write_counter(project_dir: str, value: int):
         project_dir: Project root directory.
         value:       The build number to write.
     """
-    counter_path = os.path.join(project_dir, COUNTER_FILENAME)
+    ensure_ships_state_dir(project_dir)
+    counter_path = build_counter_path(project_dir)
     tmp_path = counter_path + ".tmp"
 
     with open(tmp_path, "w", encoding="utf-8") as f:
