@@ -1431,7 +1431,8 @@ class TestShipsStatus:
         Avoids the full package flow because Windows path-length limits
         bite when releases/ is written under a tmp_path-rooted project.
         """
-        from ships_mcp import ships_inspect, ships_status
+        from ships_mcp import _ships_inspect_impl as ships_inspect
+        from ships_mcp import ships_status
 
         project = _make_project(tmp_path)
         _seed_table(project)
