@@ -29,7 +29,7 @@ from database_package_deployer.models import (
 )
 from database_package_deployer.provenance import ProvenanceChain, ProvenanceDocument
 from database_package_deployer.provenance_renderer import PROVENANCE_CSS, render_chain
-from database_package_deployer.report_viewer import (
+from td_release_packager.report_viewer import (
     SQL_KEYWORDS as _SQL_KEYWORDS,
     highlight_sql as _highlight_sql,
     safe_viewer_filename as _safe_viewer_filename,
