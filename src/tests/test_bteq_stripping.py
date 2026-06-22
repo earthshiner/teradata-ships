@@ -146,7 +146,8 @@ def _make_project(tmp_path: Path) -> Path:
         "config/env",
     ):
         (project / sub).mkdir(parents=True, exist_ok=True)
-    (project / ".build_counter").write_text("0\n", encoding="utf-8")
+    (project / ".ships").mkdir(parents=True, exist_ok=True)
+    (project / ".ships" / ".build_counter").write_text("0\n", encoding="utf-8")
     return project
 
 

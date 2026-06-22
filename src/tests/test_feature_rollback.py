@@ -38,7 +38,8 @@ from td_release_packager.rollback import (
 
 
 def _counter(tmp_path: Path, value: int) -> Path:
-    p = tmp_path / ".build_counter"
+    (tmp_path / ".ships").mkdir(parents=True, exist_ok=True)
+    p = tmp_path / ".ships" / ".build_counter"
     p.write_text(str(value) + "\n", encoding="utf-8")
     return p
 

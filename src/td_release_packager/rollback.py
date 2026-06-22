@@ -132,20 +132,28 @@ def extract_tagged_source(project_dir: str, tag: str, dest_dir: str) -> None:
 
 
 def _read_build_number(project_dir: str) -> int:
-    """Read the current build number from ``.build_counter``."""
-    counter_path = os.path.join(project_dir, ".build_counter")
+    """Read the current build number from ``.ships/.build_counter``."""
+    from td_release_packager.project_paths import build_counter_path
+
+    counter_path = build_counter_path(project_dir)
     if not os.path.isfile(counter_path):
         raise FileNotFoundError(
-            f"No .build_counter found in {project_dir}.\n"
+            f"No .build_counter found at {counter_path}.\n"
             f"  Run 'td_release_packager scaffold' to create a project, or\n"
-            f"  create .build_counter containing '0'."
+            f"  create .ships/.build_counter containing '0'."
         )
     return int(open(counter_path).read().strip())
 
 
 def _write_build_number(project_dir: str, number: int) -> None:
-    """Write ``number`` back to ``.build_counter``."""
-    counter_path = os.path.join(project_dir, ".build_counter")
+    """Write ``number`` back to ``.ships/.build_counter``."""
+    from td_release_packager.project_paths import (
+        build_counter_path,
+        ensure_ships_state_dir,
+    )
+
+    ensure_ships_state_dir(project_dir)
+    counter_path = build_counter_path(project_dir)
     with open(counter_path, "w", encoding="utf-8") as f:
         f.write(str(number) + "\n")
 

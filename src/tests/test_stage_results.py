@@ -295,7 +295,8 @@ class TestStandaloneBuildEmitsStageResults:
         env_conf = project / "config" / "env" / "DEV.conf"
         env_conf.parent.mkdir(parents=True)
         env_conf.write_text("CORE_T = DEV_CORE_T\n", encoding="utf-8")
-        (project / ".build_counter").write_text("0", encoding="utf-8")
+        (project / ".ships").mkdir(parents=True, exist_ok=True)
+        (project / ".ships" / ".build_counter").write_text("0", encoding="utf-8")
 
         # Seed decisions.json with harvest+inspect+analyse stages from
         # separate prior runs.

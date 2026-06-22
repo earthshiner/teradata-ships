@@ -85,7 +85,8 @@ def tmp_project(tmp_path):
                         inter_db/
             config/
                 properties/
-            .build_counter   (contains "0")
+            .ships/
+                .build_counter   (contains "0")
     """
     project = tmp_path / "project"
     project.mkdir()
@@ -116,8 +117,9 @@ def tmp_project(tmp_path):
     # -- Config directories --
     (project / "config" / "properties").mkdir(parents=True)
 
-    # -- Build counter --
-    (project / ".build_counter").write_text("0\n", encoding="utf-8")
+    # -- Build counter under machine-managed .ships/ --
+    (project / ".ships").mkdir(exist_ok=True)
+    (project / ".ships" / ".build_counter").write_text("0\n", encoding="utf-8")
 
     return project
 
