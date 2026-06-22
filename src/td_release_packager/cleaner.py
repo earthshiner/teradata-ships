@@ -37,7 +37,7 @@ _SCOPE_TARGETS: Dict[str, List[Tuple[str, str]]] = {
     "payload": [(os.path.join("payload", "database"), "dir")],
     "releases": [("releases", "dir")],
     "reports": [(os.path.join("output", "reports"), "dir")],
-    "decisions": [("ships.decisions.json", "file")],
+    "decisions": [(os.path.join(".ships", "ships.decisions.json"), "file")],
 }
 
 # Scopes that ``scope=all`` expands to. ``.build_counter`` is

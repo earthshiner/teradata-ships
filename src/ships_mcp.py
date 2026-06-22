@@ -635,7 +635,13 @@ def _ships_analyse_impl(
 
         waves_path = None
         if result.waves and overwrite:
-            waves_path = os.path.join(project, "_waves.txt")
+            from td_release_packager.project_paths import (
+                ensure_ships_state_dir,
+                waves_txt_path,
+            )
+
+            ensure_ships_state_dir(project)
+            waves_path = waves_txt_path(project)
             with open(waves_path, "w", encoding="utf-8") as f:
                 f.write(result.waves_file_content)
 
@@ -1515,7 +1521,9 @@ def ships_decisions(project: str, run_id: Optional[str] = None) -> dict:
         no specific run is requested and the file has multiple runs.
     """
     try:
-        decisions_path = os.path.join(project, "ships.decisions.json")
+        from td_release_packager.project_paths import decisions_json_path
+
+        decisions_path = decisions_json_path(project)
         if not os.path.exists(decisions_path):
             return {
                 "success": False,
@@ -1555,7 +1563,9 @@ def ships_verify(project: str) -> dict:
         {"ready": bool, "trust_status": str, "checks": [...], "archive_path": str}
     """
     try:
-        decisions_path = os.path.join(project, "ships.decisions.json")
+        from td_release_packager.project_paths import decisions_json_path
+
+        decisions_path = decisions_json_path(project)
         if not os.path.exists(decisions_path):
             return {
                 "success": False,
@@ -1647,7 +1657,9 @@ def ships_explain_run(
          "duration_ms": int, "stages": [...], "issues_summary": {...}}
     """
     try:
-        decisions_path = os.path.join(project, "ships.decisions.json")
+        from td_release_packager.project_paths import decisions_json_path
+
+        decisions_path = decisions_json_path(project)
         if not os.path.exists(decisions_path):
             return {"success": False, "error": "ships.decisions.json not found"}
 

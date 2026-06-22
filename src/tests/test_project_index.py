@@ -37,7 +37,8 @@ def _make_project(tmp_path: Path, name: str = "demo_project") -> Path:
 
 
 def _write_decisions(project: Path, runs):
-    (project / "ships.decisions.json").write_text(
+    (project / ".ships").mkdir(parents=True, exist_ok=True)
+    (project / ".ships" / "ships.decisions.json").write_text(
         json.dumps({"schema_version": 1, "runs": runs}), encoding="utf-8"
     )
 
@@ -161,7 +162,7 @@ class TestReferences:
         project = _make_project(tmp_path)
         _write_decisions(project, [_run("scaffold")])
         index = compute_project_index(str(project))
-        assert index.references.get("decisions_log") == "ships.decisions.json"
+        assert index.references.get("decisions_log") == ".ships/ships.decisions.json"
 
     def test_env_configs_listed(self, tmp_path):
         project = _make_project(tmp_path)

@@ -78,7 +78,7 @@ def test_write_context_artifacts_emits_agent_context_contract(tmp_path):
         "context/stages/process.result.json"
         in index["entrypoints"]["stage_results"]["contains"]
     )
-    assert index["entrypoints"]["decisions"]["path"] == "ships.decisions.json"
+    assert index["entrypoints"]["decisions"]["path"] == ".ships/ships.decisions.json"
     assert index["entrypoints"]["decisions"]["package_local"] is False
     assert index["entrypoints"]["prompts"]["path"] == "context/prompts/"
     assert (

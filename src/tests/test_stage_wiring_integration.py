@@ -44,7 +44,9 @@ from td_release_packager.orchestrator import issue_codes
 
 
 def _read_decisions(project: Path) -> dict:
-    return json.loads((project / "ships.decisions.json").read_text(encoding="utf-8"))
+    return json.loads(
+        (project / ".ships" / "ships.decisions.json").read_text(encoding="utf-8")
+    )
 
 
 def _run(fn, args) -> int:
@@ -122,7 +124,7 @@ class TestScaffoldStageRecording:
 
     def test_scaffold_writes_decisions_json(self, tmp_path):
         project = _make_project(tmp_path)
-        assert (project / "ships.decisions.json").exists()
+        assert (project / ".ships" / "ships.decisions.json").exists()
 
     def test_scaffold_stage_has_success_status(self, tmp_path):
         project = _make_project(tmp_path)
@@ -165,7 +167,7 @@ class TestScaffoldStageRecording:
     def test_scaffold_non_project_parent_no_litter(self, tmp_path):
         """Scaffold records decisions INSIDE the new project, not the parent."""
         _make_project(tmp_path)
-        assert not (tmp_path / "ships.decisions.json").exists()
+        assert not (tmp_path / ".ships" / "ships.decisions.json").exists()
 
 
 # ---------------------------------------------------------------
@@ -391,7 +393,7 @@ class TestAnalyseStageRecording:
         args = _make_analyse_args(loose)
         _run(_cmd_analyze, args)
 
-        assert not (loose / "ships.decisions.json").exists()
+        assert not (loose / ".ships" / "ships.decisions.json").exists()
 
 
 # ---------------------------------------------------------------
@@ -730,7 +732,7 @@ class TestExplainCommand:
         # Don't run any pipeline — no ships.decisions.json content beyond scaffold
         # (scaffold writes ships.decisions.json but has no process run)
         # Delete it to simulate truly empty state
-        (project / "ships.decisions.json").unlink(missing_ok=True)
+        (project / ".ships" / "ships.decisions.json").unlink(missing_ok=True)
         args = _make_explain_args(project)
         rc = _run(_cmd_explain, args)
         assert rc == 1
@@ -796,7 +798,7 @@ class TestVerifyCommand:
 
     def test_verify_no_decisions_json_exits_1(self, tmp_path):
         project = _make_project(tmp_path)
-        (project / "ships.decisions.json").unlink(missing_ok=True)
+        (project / ".ships" / "ships.decisions.json").unlink(missing_ok=True)
         args = _make_verify_args(project)
         rc = _run(_cmd_verify, args)
         assert rc == 1

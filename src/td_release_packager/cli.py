@@ -519,11 +519,9 @@ def _stage_recording(project_dir: str, stage_name: str):
     """
     from contextlib import contextmanager
 
-    from td_release_packager.orchestrator import (
-        DECISIONS_FILENAME,
-        DecisionsManifest,
-    )
+    from td_release_packager.orchestrator import DecisionsManifest
     from td_release_packager.otel import ships_span
+    from td_release_packager.project_paths import decisions_json_path
 
     @contextmanager
     def _ctx():
@@ -535,7 +533,7 @@ def _stage_recording(project_dir: str, stage_name: str):
                 yield _NullStageRecorder()
                 return
 
-            manifest_path = os.path.join(project_dir, DECISIONS_FILENAME)
+            manifest_path = decisions_json_path(project_dir)
             manifest = DecisionsManifest(manifest_path)
             with manifest.run(stage_name) as run:
                 with run.stage(stage_name) as stage:
@@ -667,12 +665,9 @@ def _process_recording(project_dir: str):
     """
     from contextlib import contextmanager
 
-    from td_release_packager.orchestrator import (
-        DECISIONS_FILENAME,
-        DecisionsManifest,
-    )
-
+    from td_release_packager.orchestrator import DecisionsManifest
     from td_release_packager.otel import ships_span
+    from td_release_packager.project_paths import decisions_json_path
 
     @contextmanager
     def _ctx():
@@ -684,7 +679,7 @@ def _process_recording(project_dir: str):
                 yield _NullRunRecorder()
                 return
 
-            manifest_path = os.path.join(project_dir, DECISIONS_FILENAME)
+            manifest_path = decisions_json_path(project_dir)
             manifest = DecisionsManifest(manifest_path)
             with manifest.run("process") as run:
                 yield run
@@ -3293,8 +3288,10 @@ def _build_standalone_stage_results(
     stage shows up in the freshly-built archive even though
     ``DecisionsManifest.save()`` runs slightly after the archive write.
     """
+    from td_release_packager.project_paths import decisions_json_path
+
     results: Dict[str, Dict[str, Any]] = {}
-    decisions_path = os.path.join(project_dir, "ships.decisions.json")
+    decisions_path = decisions_json_path(project_dir)
     decisions_data: Dict[str, Any] = {}
     if os.path.exists(decisions_path):
         try:
@@ -3332,6 +3329,8 @@ def _build_package_process_results(
     process run so an extracted archive is useful to agents without copying the
     whole project history into every package.
     """
+    from td_release_packager.project_paths import decisions_json_path
+
     stages = run_entry.get("stages", [])
     stage_summaries = [
         {
@@ -3353,7 +3352,7 @@ def _build_package_process_results(
             "started_at": run_entry.get("started_at"),
             "finished_at": run_entry.get("finished_at"),
             "duration_ms": run_entry.get("duration_ms", 0),
-            "project_decisions_path": os.path.join(project_dir, "ships.decisions.json"),
+            "project_decisions_path": decisions_json_path(project_dir),
             "package_local": True,
             "stages": stage_summaries,
         }
@@ -3661,7 +3660,11 @@ def _cmd_process_impl(args):
     print(f"\n{'=' * 64}")
     if failed_stages:
         print(f"  Process completed with errors in: {', '.join(failed_stages)}")
-        decisions_path = os.path.join(project_dir, "ships.decisions.json")
+        from td_release_packager.project_paths import (
+            decisions_json_path as _decisions_json_path,
+        )
+
+        decisions_path = _decisions_json_path(project_dir)
         print(f"  Review {decisions_path} for full process detail.")
         if package_context_archives:
             print(
@@ -3878,11 +3881,16 @@ def _cmd_decisions_prune(args):
     """Prune old run entries from ships.decisions.json."""
     from td_release_packager.orchestrator.decisions import prune_decisions
 
+    from td_release_packager.project_paths import decisions_json_path
+
     project = args.project
-    decisions_path = os.path.join(project, "ships.decisions.json")
+    decisions_path = decisions_json_path(project)
 
     if not os.path.isfile(decisions_path):
-        print(f"ERROR: ships.decisions.json not found in {project}", file=sys.stderr)
+        print(
+            f"ERROR: ships.decisions.json not found at {decisions_path}",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     keep_runs = getattr(args, "keep_runs", None)
@@ -3945,17 +3953,18 @@ def _cmd_explain(args):
     a full issues table.  Designed as a pre-promotion checklist — the
     DBA reads this before promoting from DEV to TST.
     """
-    from td_release_packager.orchestrator import DECISIONS_FILENAME, DecisionsManifest
+    from td_release_packager.orchestrator import DecisionsManifest
+    from td_release_packager.project_paths import decisions_json_path
 
     project_dir = args.project
     if not os.path.isdir(project_dir):
         print(f"ERROR: Project directory not found: {project_dir}", file=sys.stderr)
         sys.exit(1)
 
-    manifest_path = os.path.join(project_dir, DECISIONS_FILENAME)
+    manifest_path = decisions_json_path(project_dir)
     if not os.path.exists(manifest_path):
         print(
-            f"ERROR: No ships.decisions.json found in {project_dir}.\n"
+            f"ERROR: No ships.decisions.json found at {manifest_path}.\n"
             "  Run the pipeline first:  ships process --project <dir>",
             file=sys.stderr,
         )
@@ -4118,17 +4127,18 @@ def _cmd_verify(args):
     issues were recorded, and the build looks complete.  Intended as
     the final gate before an operator runs ``deploy``.
     """
-    from td_release_packager.orchestrator import DECISIONS_FILENAME, DecisionsManifest
+    from td_release_packager.orchestrator import DecisionsManifest
+    from td_release_packager.project_paths import decisions_json_path
 
     project_dir = args.project
     if not os.path.isdir(project_dir):
         print(f"ERROR: Project directory not found: {project_dir}", file=sys.stderr)
         sys.exit(1)
 
-    manifest_path = os.path.join(project_dir, DECISIONS_FILENAME)
+    manifest_path = decisions_json_path(project_dir)
     if not os.path.exists(manifest_path):
         print(
-            f"ERROR: No ships.decisions.json found in {project_dir}.",
+            f"ERROR: No ships.decisions.json found at {manifest_path}.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -4766,7 +4776,13 @@ def _run_analyze(args, stage, issue_codes) -> int:
     if args.output:
         waves_path = args.output
     else:
-        waves_path = os.path.join(source_dir, "_waves.txt")
+        from td_release_packager.project_paths import (
+            ensure_ships_state_dir,
+            waves_txt_path,
+        )
+
+        ensure_ships_state_dir(source_dir)
+        waves_path = waves_txt_path(source_dir)
 
     if result.waves:
         if os.path.exists(waves_path) and not args.overwrite:

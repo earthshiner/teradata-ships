@@ -215,7 +215,8 @@ def test_tab_appears_in_pipeline_report(tmp_path):
 
     from td_release_packager.reporting import generate_pipeline_report
 
-    (tmp_path / "ships.decisions.json").write_text(
+    (tmp_path / ".ships").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".ships" / "ships.decisions.json").write_text(
         json.dumps(
             {
                 "schema_version": 1,

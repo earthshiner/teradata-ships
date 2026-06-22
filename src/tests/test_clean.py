@@ -67,7 +67,7 @@ def _make_project(root: Path) -> Path:
     (root / ".ships" / "runs").mkdir(parents=True)
     (root / ".ships" / "runs" / "run_abc.json").write_text("{}", encoding="utf-8")
 
-    (root / "ships.decisions.json").write_text("[]", encoding="utf-8")
+    (root / ".ships" / "ships.decisions.json").write_text("[]", encoding="utf-8")
 
     return root
 
@@ -174,7 +174,7 @@ def test_scope_all_preserves_build_counter_and_config(tmp_path: Path) -> None:
     ).strip() == "42"
     assert (project / "config" / "token_map.conf").exists()
     # Decisions file gone (it's a single-file target).
-    assert not (project / "ships.decisions.json").exists()
+    assert not (project / ".ships" / "ships.decisions.json").exists()
     # Subtrees recreated empty.
     assert (project / "releases").is_dir()
     assert (project / "output" / "reports").is_dir()

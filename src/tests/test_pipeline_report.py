@@ -20,8 +20,10 @@ from td_release_packager.reporting.pipeline_report import (
 
 
 def _write_decisions(project_dir, runs):
-    """Write a minimal ships.decisions.json with the given runs list."""
-    path = project_dir / "ships.decisions.json"
+    """Write a minimal ships.decisions.json under the project's .ships/ dir."""
+    state_dir = project_dir / ".ships"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    path = state_dir / "ships.decisions.json"
     path.write_text(
         json.dumps({"schema_version": 1, "project": {}, "runs": runs}, indent=2),
         encoding="utf-8",
@@ -388,7 +390,8 @@ def test_scan_project_payload_classifies_and_assigns_waves(tmp_path):
             ("DCL/inter_db/APP_DB.role.grt", "GRANT SELECT ON DB TO role;"),
         ],
     )
-    (tmp_path / "_waves.txt").write_text(
+    (tmp_path / ".ships").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".ships" / "_waves.txt").write_text(
         "payload/database/DDL/tables/DB.Customer.tbl\n"
         "---\n"
         "payload/database/DDL/views/DB.ActiveVw.viw\n",
@@ -463,7 +466,8 @@ def test_payload_tab_renders_wave_svg(tmp_path):
         tmp_path,
         [("DDL/tables/DB.T.tbl", "CREATE TABLE DB.T (Id INT);")],
     )
-    (tmp_path / "_waves.txt").write_text(
+    (tmp_path / ".ships").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".ships" / "_waves.txt").write_text(
         "payload/database/DDL/tables/DB.T.tbl\n", encoding="utf-8"
     )
     generate_pipeline_report(str(tmp_path))

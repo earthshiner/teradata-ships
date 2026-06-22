@@ -122,7 +122,9 @@ def load_latest_run(project_dir: str) -> Optional[dict]:
         with merged ``stages``, or ``None`` when the file is absent,
         unreadable, malformed, or empty.
     """
-    path = os.path.join(project_dir, DECISIONS_FILENAME)
+    from td_release_packager.project_paths import decisions_json_path
+
+    path = decisions_json_path(project_dir)
     if not os.path.isfile(path):
         return None
     try:
@@ -380,7 +382,9 @@ def scan_project_payload(project_dir: str) -> List[dict]:
     if not os.path.isdir(payload_root):
         return []
 
-    wave_map = waves.parse_waves_txt(os.path.join(project_dir, "_waves.txt"))
+    from td_release_packager.project_paths import waves_txt_path
+
+    wave_map = waves.parse_waves_txt(waves_txt_path(project_dir))
     records: List[dict] = []
     for root, dirs, files in os.walk(payload_root):
         dirs.sort()

@@ -175,7 +175,9 @@ def _read_project_name(project_dir: str) -> str:
 
 def _read_decisions(project_dir: str) -> dict:
     """Load ships.decisions.json or return an empty structure."""
-    path = os.path.join(project_dir, "ships.decisions.json")
+    from td_release_packager.project_paths import decisions_json_path
+
+    path = decisions_json_path(project_dir)
     if not os.path.isfile(path):
         return {"runs": []}
     try:
@@ -245,7 +247,7 @@ def _references(project_dir: str) -> Dict[str, Any]:
             refs[key] = rel_path
 
     _add_if_exists("ships_yaml", "ships.yaml")
-    _add_if_exists("decisions_log", "ships.decisions.json")
+    _add_if_exists("decisions_log", ".ships/ships.decisions.json")
     _add_if_exists("tokenise_config", "config/tokenise.conf")
     env_configs = _collect_env_configs(project_dir)
     if env_configs:

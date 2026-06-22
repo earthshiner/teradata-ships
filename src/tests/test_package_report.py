@@ -1260,7 +1260,8 @@ class TestBuildProvenanceTab:
                 },
             ],
         }
-        (tmp_path / "ships.decisions.json").write_text(
+        (tmp_path / ".ships").mkdir(parents=True, exist_ok=True)
+        (tmp_path / ".ships" / "ships.decisions.json").write_text(
             json.dumps(decisions), encoding="utf-8"
         )
         stages = _load_build_provenance(str(tmp_path))
@@ -1276,7 +1277,8 @@ class TestBuildProvenanceTab:
             "schema_version": 1,
             "runs": [{"run_id": "r1", "stages": self._sample_stages()}],
         }
-        (tmp_path / "ships.decisions.json").write_text(
+        (tmp_path / ".ships").mkdir(parents=True, exist_ok=True)
+        (tmp_path / ".ships" / "ships.decisions.json").write_text(
             json.dumps(decisions), encoding="utf-8"
         )
         subdir = tmp_path / "releases" / "pkg"
@@ -1296,7 +1298,8 @@ class TestBuildProvenanceTab:
         from td_release_packager.package_report import _load_build_provenance
 
         decisions = {"schema_version": 1, "runs": []}
-        (tmp_path / "ships.decisions.json").write_text(
+        (tmp_path / ".ships").mkdir(parents=True, exist_ok=True)
+        (tmp_path / ".ships" / "ships.decisions.json").write_text(
             json.dumps(decisions), encoding="utf-8"
         )
         result = _load_build_provenance(str(tmp_path))
@@ -1390,7 +1393,8 @@ class TestBuildProvenanceTab:
             "schema_version": 1,
             "runs": [{"run_id": "r1", "stages": self._sample_stages()}],
         }
-        (tmp_path / "ships.decisions.json").write_text(
+        (tmp_path / ".ships").mkdir(parents=True, exist_ok=True)
+        (tmp_path / ".ships" / "ships.decisions.json").write_text(
             json.dumps(decisions), encoding="utf-8"
         )
         _make_payload(

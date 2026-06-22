@@ -159,6 +159,7 @@ class TestCollectLatestStageEntries:
 def decisions_project(tmp_path):
     project = tmp_path / "proj"
     project.mkdir()
+    (project / ".ships").mkdir(parents=True, exist_ok=True)
     decisions = {
         "schema_version": "1.0",
         "runs": [
@@ -212,7 +213,7 @@ def decisions_project(tmp_path):
             },
         ],
     }
-    (project / "ships.decisions.json").write_text(
+    (project / ".ships" / "ships.decisions.json").write_text(
         json.dumps(decisions), encoding="utf-8"
     )
     return project
@@ -353,7 +354,7 @@ class TestStandaloneBuildEmitsStageResults:
                 },
             ],
         }
-        (project / "ships.decisions.json").write_text(
+        (project / ".ships" / "ships.decisions.json").write_text(
             json.dumps(decisions), encoding="utf-8"
         )
 

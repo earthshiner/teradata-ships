@@ -2791,7 +2791,9 @@ def _copy_waves_file(
     if token_values is None:
         token_values = {}
 
-    waves_src = os.path.join(project_dir, "_waves.txt")
+    from td_release_packager.project_paths import waves_txt_path
+
+    waves_src = waves_txt_path(project_dir)
     if not os.path.exists(waves_src):
         return
 
