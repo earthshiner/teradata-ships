@@ -69,7 +69,9 @@ def _run_inspect(args) -> int:
 
 
 def _read_decisions(project: Path) -> dict:
-    return json.loads((project / "ships.decisions.json").read_text(encoding="utf-8"))
+    return json.loads(
+        (project / ".ships" / "ships.decisions.json").read_text(encoding="utf-8")
+    )
 
 
 def _make_project(tmp_path: Path) -> Path:
@@ -125,15 +127,12 @@ class TestInspectCleanRun:
         # and does not bump the warnings/errors counters, so the run
         # stays ``status=success``. Allow that single INFO entry; any
         # other issue is still a regression.
-        non_info_issues = [
-            i for i in stage["issues"] if i.get("severity") != "info"
-        ]
+        non_info_issues = [i for i in stage["issues"] if i.get("severity") != "info"]
         assert non_info_issues == []
         coverage_notes = [
             i
             for i in stage["issues"]
-            if i.get("severity") == "info"
-            and i.get("code") == "TOKEN_UNDEFINED"
+            if i.get("severity") == "info" and i.get("code") == "TOKEN_UNDEFINED"
         ]
         assert len(coverage_notes) == 1
 
@@ -349,4 +348,4 @@ class TestInspectSkipsManifestForNonProject:
         capsys.readouterr()
 
         # Stdout still works; ships.decisions.json must NOT have appeared.
-        assert not (loose_dir / "ships.decisions.json").exists()
+        assert not (loose_dir / ".ships" / "ships.decisions.json").exists()

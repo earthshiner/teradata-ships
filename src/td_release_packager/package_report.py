@@ -748,9 +748,11 @@ def _load_build_provenance(pkg_dir: str) -> List[dict]:
     """
     import json as _json
 
+    from td_release_packager.project_paths import decisions_json_path
+
     candidate = os.path.abspath(pkg_dir)
     for _ in range(6):  # current dir + up to 5 ancestors
-        decisions_path = os.path.join(candidate, "ships.decisions.json")
+        decisions_path = decisions_json_path(candidate)
         if os.path.isfile(decisions_path):
             try:
                 with open(decisions_path, encoding="utf-8") as fh:

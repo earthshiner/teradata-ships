@@ -192,7 +192,7 @@ def _write_decisions(path: Path, runs: list) -> None:
 class TestComputeTrustReport:
     def test_ready_with_clean_decisions(self, tmp_path):
         _write_decisions(
-            tmp_path / "ships.decisions.json",
+            tmp_path / ".ships" / "ships.decisions.json",
             [
                 {
                     "command": "inspect",
@@ -209,7 +209,7 @@ class TestComputeTrustReport:
 
     def test_blocked_on_token_malformed_error(self, tmp_path):
         _write_decisions(
-            tmp_path / "ships.decisions.json",
+            tmp_path / ".ships" / "ships.decisions.json",
             [
                 {
                     "command": "inspect",
@@ -235,7 +235,7 @@ class TestComputeTrustReport:
 
     def test_caveats_on_lint_warning(self, tmp_path):
         _write_decisions(
-            tmp_path / "ships.decisions.json",
+            tmp_path / ".ships" / "ships.decisions.json",
             [
                 {
                     "command": "inspect",
@@ -265,7 +265,7 @@ class TestComputeTrustReport:
 
     def test_lint_issues_keep_file_location(self, tmp_path):
         _write_decisions(
-            tmp_path / "ships.decisions.json",
+            tmp_path / ".ships" / "ships.decisions.json",
             [
                 {
                     "command": "inspect",
@@ -308,7 +308,7 @@ class TestComputeTrustReport:
             / "OldProc.spl"
         )
         _write_decisions(
-            tmp_path / "ships.decisions.json",
+            tmp_path / ".ships" / "ships.decisions.json",
             [
                 {
                     "command": "inspect",
@@ -352,7 +352,7 @@ class TestComputeTrustReport:
     def test_uses_last_inspect_stage(self, tmp_path):
         """When multiple runs exist, the last inspect stage wins."""
         _write_decisions(
-            tmp_path / "ships.decisions.json",
+            tmp_path / ".ships" / "ships.decisions.json",
             [
                 {
                     "command": "inspect",
@@ -588,7 +588,8 @@ class TestBuildPackageStampsTrust:
                 }
             ],
         }
-        (tmp_project / "ships.decisions.json").write_text(
+        (tmp_project / ".ships").mkdir(parents=True, exist_ok=True)
+        (tmp_project / ".ships" / "ships.decisions.json").write_text(
             json.dumps(decisions), encoding="utf-8"
         )
         # Seed provenance

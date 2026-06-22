@@ -37,7 +37,9 @@ def _make_project(tmp_path: Path, *, ddl_content: str) -> Path:
 
 
 def _read_decisions(project: Path) -> dict:
-    return json.loads((project / "ships.decisions.json").read_text(encoding="utf-8"))
+    return json.loads(
+        (project / ".ships" / "ships.decisions.json").read_text(encoding="utf-8")
+    )
 
 
 # ---------------------------------------------------------------
@@ -209,7 +211,7 @@ class TestScanSkipsManifestForNonProjectDirectories:
         capsys.readouterr()
 
         # Stdout still works; ships.decisions.json must NOT have appeared
-        assert not (loose_dir / "ships.decisions.json").exists()
+        assert not (loose_dir / ".ships" / "ships.decisions.json").exists()
 
     def test_manifest_written_when_ships_yaml_present(self, tmp_path, capsys):
         """ships.yaml alone (no payload/) is sufficient to trigger
@@ -221,7 +223,7 @@ class TestScanSkipsManifestForNonProjectDirectories:
         _cmd_scan(Namespace(project=str(proj), env_config=None))
         capsys.readouterr()
 
-        assert (proj / "ships.decisions.json").exists()
+        assert (proj / ".ships" / "ships.decisions.json").exists()
 
 
 # ---------------------------------------------------------------

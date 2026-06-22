@@ -53,7 +53,8 @@ def _seed_table(project: Path) -> None:
 
 
 def _seed_decisions(project: Path, runs: list) -> None:
-    (project / "ships.decisions.json").write_text(
+    (project / ".ships").mkdir(parents=True, exist_ok=True)
+    (project / ".ships" / "ships.decisions.json").write_text(
         json.dumps({"schema_version": 1, "runs": runs}), encoding="utf-8"
     )
 

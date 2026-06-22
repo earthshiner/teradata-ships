@@ -179,7 +179,9 @@ def compute_trust_report(source_dir: str, pkg_dir: str) -> TrustReport:
     """
     signals: Dict[str, TrustSignal] = {}
 
-    decisions_path = os.path.join(source_dir, "ships.decisions.json")
+    from td_release_packager.project_paths import decisions_json_path
+
+    decisions_path = decisions_json_path(source_dir)
     decisions = _load_decisions(decisions_path)
     inspect_stage = _find_latest_inspect_stage(decisions)
 

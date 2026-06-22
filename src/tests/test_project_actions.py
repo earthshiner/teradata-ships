@@ -36,7 +36,8 @@ def _make_project(tmp_path: Path, name: str = "demo_project") -> Path:
 
 
 def _write_decisions(project: Path, runs):
-    (project / "ships.decisions.json").write_text(
+    (project / ".ships").mkdir(parents=True, exist_ok=True)
+    (project / ".ships" / "ships.decisions.json").write_text(
         json.dumps({"schema_version": 1, "runs": runs}), encoding="utf-8"
     )
 

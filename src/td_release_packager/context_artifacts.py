@@ -869,7 +869,7 @@ DEFAULT_SCHEMAS: Dict[str, Dict[str, Any]] = {
                 "override_allowed": False,
                 "evaluated_at": "2026-05-19T00:00:00+00:00",
                 "evidence_paths": [
-                    "ships.decisions.json",
+                    ".ships/ships.decisions.json",
                     "context/ships.provenance.json",
                     "context/ships.build.json",
                 ],
@@ -1276,8 +1276,8 @@ def _entrypoints() -> Dict[str, Dict[str, Any]]:
             "schema": "context/schemas/ships.stage_result.schema.json",
         },
         "decisions": {
-            "path": DECISIONS_FILENAME,
-            "description": "Project-level decision log. This normally lives in the SHIPS project root, not inside the package. Use stage_results for package-local current-run evidence.",
+            "path": f".ships/{DECISIONS_FILENAME}",
+            "description": "Project-level decision log. Lives under <project>/.ships/ alongside other machine-managed state (build counter, analyse output), NOT at the project root and NOT inside the package. Use stage_results for package-local current-run evidence.",
             "required": False,
             "audience": ["human", "governance"],
             "package_local": False,
