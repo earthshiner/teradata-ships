@@ -1,0 +1,5 @@
+COLLECT STATISTICS 
+                   -- default SYSTEM SAMPLE PERCENT 
+            COLUMN ( lineage_id ) , 
+            COLUMN ( lineage_run_id ) 
+                ON {{CallCentre_OBS_STD_T}}.lineage_run ;

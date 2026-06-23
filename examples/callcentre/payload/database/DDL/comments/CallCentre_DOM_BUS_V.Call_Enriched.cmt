@@ -1,0 +1,42 @@
+comment on column {{CallCentre_DOM_BUS_V}}.Call_Enriched.topic is 'Business area classification of the call. Six values: Other (30.9%), Vet & Pet (29.5%), Healthcare Scheduling (18.4%), Medical Insurance (11.8%), Automotive (5.6%), Home Services (3.8%).';
+comment on column {{CallCentre_DOM_BUS_V}}.Call_Enriched.conversation_summary is 'AI-generated call summary (CLOB). PII replaced with placeholders such as [PERSON_NAME], [LOCATION], [DATE_OF_BIRTH]. Input to Search module vector embeddings and RAG pipeline. Typically 1-4 sentences.';
+
+comment on column {{CallCentre_DOM_BUS_V}}.Call_Enriched.communication_quality_avg_sim is 'Average cosine similarity across all Communication Quality dimensions: active_listening, avoiding_interruptions, turn_taking, clarification_questions, concise_explanations, avoiding_jargon, and 8 others.';
+
+comment on column {{CallCentre_DOM_BUS_V}}.Call_Enriched.conduct_and_professionalism_avg_sim is 'Average cosine similarity across all Conduct and Professionalism dimensions: de_escalation, calm_under_pressure, confidence_and_reassurance, internal_handoff_transfer, technical_troubleshooting, and 5 others.';
+
+comment on column {{CallCentre_DOM_BUS_V}}.Call_Enriched.customer_experience_avg_sim is 'Average cosine similarity across all Customer Experience dimensions: empathetic_tone, reassurance_and_support, positive_framing, frustration_acknowledgement, brand_aligned_tone, and 8 others.';
+
+comment on column {{CallCentre_DOM_BUS_V}}.Call_Enriched.compliance_avg_sim is 'Average cosine similarity across all Compliance dimensions: regulatory_obligations, privacy_disclosure, identity_verification, script_adherence, fee_charge_disclosure, and 7 others.';
+
+comment on column {{CallCentre_DOM_BUS_V}}.Call_Enriched.call_handling_avg_sim is 'Average cosine similarity across all Call Handling dimensions: resolution_confirmation, action_commitment_next_steps, wrap_up_summary, ownership_and_accountability, time_awareness, and 4 others.';
+
+comment on column {{CallCentre_DOM_BUS_V}}.Call_Enriched.compliance_all_hit is 'BYTEINT flag: 1 = all Compliance dimensions scored non-zero;
+
+ 0 = at least one was absent. A compliance_all_hit = 0 is the primary flag for compliance coaching interventions.';
+
+comment on column {{CallCentre_DOM_BUS_V}}.Call_Enriched.call_duration_sec is 'Total duration of the call in seconds, measured from first audio to call end.';
+
+comment on column {{CallCentre_DOM_BUS_V}}.Call_Enriched.total_word_count is 'Total number of words spoken across both the agent and caller during the call.';
+
+comment on column {{CallCentre_DOM_BUS_V}}.Call_Enriched.words_per_min is 'Overall speaking rate for the call in words per minute, calculated as total_word_count / (call_duration_sec / 60).';
+
+comment on column {{CallCentre_DOM_BUS_V}}.Call_Enriched.agent_talk_ratio is 'Proportion of total active speaking time accounted for by the agent (0.0-1.0). A healthy ratio is typically 0.4-0.6;
+
+ values above 0.7 suggest the agent is dominating the conversation.';
+
+comment on column {{CallCentre_DOM_BUS_V}}.Call_Enriched.caller_talk_ratio is 'Proportion of total active speaking time accounted for by the caller (0.0-1.0). Complement of agent_talk_ratio when there is no silence.';
+
+comment on column {{CallCentre_DOM_BUS_V}}.Call_Enriched.call_sentiment is 'Overall call sentiment score on a scale of -1.0 (very negative) to +1.0 (very positive), averaged across all speakers and the full duration.';
+
+comment on column {{CallCentre_DOM_BUS_V}}.Call_Enriched.call_change_in_sentiment is 'Change in overall sentiment from the start to the end of the call (end_sentiment minus start sentiment). Positive values indicate the call improved the caller''s mood;
+
+ negative values indicate deterioration.';
+
+comment on column {{CallCentre_DOM_BUS_V}}.Call_Enriched.agent_sentiment is 'Average sentiment score for the agent''s speech across the full call.';
+
+comment on column {{CallCentre_DOM_BUS_V}}.Call_Enriched.caller_sentiment is 'Average sentiment score for the caller''s speech across the full call. Key indicator of customer experience.';
+
+comment on column {{CallCentre_DOM_BUS_V}}.Call_Enriched.overtalk_incidents is 'Total count of overtalk incidents (both parties speaking simultaneously above a minimum overlap threshold) during the call.';
+
+comment on column {{CallCentre_DOM_BUS_V}}.Call_Enriched.silence_ratio is 'Proportion of total call duration occupied by silence (0.0-1.0). High values may indicate hold time, on-hold music, or dead air issues. Correlates with escalation_to_higher_tier in the discovered patterns.';

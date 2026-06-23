@@ -1,0 +1,4 @@
+COLLECT STATISTICS 
+                   -- default SYSTEM SAMPLE PERCENT 
+            COLUMN ( database_name,view_name,column_name ) 
+                ON {{CallCentre_SEM_STD_T}}.view_column_type ;

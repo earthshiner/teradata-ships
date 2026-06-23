@@ -1,0 +1,32 @@
+REPLACE VIEW {{CallCentre_SEM_BUS_V}}.data_lineage (
+      lineage_id, source_database, source_table, source_system, target_database,
+      target_table, transformation_type, transformation_logic, job_name,
+      openlineage_job_name, openlineage_namespace, created_at, is_active,
+      registered_dts, retired_dts
+) AS
+SELECT
+      lineage_id, source_database, source_table, source_system, target_database,
+      target_table, transformation_type, transformation_logic, job_name,
+      openlineage_job_name, openlineage_namespace, created_at, is_active,
+      registered_dts, retired_dts
+FROM {{CallCentre_SEM_STD_V}}.data_lineage;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_SEM_BUS_V.data_lineage.lineage_id|INTEGER
+--CallCentre_SEM_BUS_V.data_lineage.source_database|VARCHAR(100)
+--CallCentre_SEM_BUS_V.data_lineage.source_table|VARCHAR(100)
+--CallCentre_SEM_BUS_V.data_lineage.source_system|VARCHAR(100)
+--CallCentre_SEM_BUS_V.data_lineage.target_database|VARCHAR(100)
+--CallCentre_SEM_BUS_V.data_lineage.target_table|VARCHAR(100)
+--CallCentre_SEM_BUS_V.data_lineage.transformation_type|VARCHAR(50)
+--CallCentre_SEM_BUS_V.data_lineage.transformation_logic|VARCHAR(4000)
+--CallCentre_SEM_BUS_V.data_lineage.job_name|VARCHAR(200)
+--CallCentre_SEM_BUS_V.data_lineage.openlineage_job_name|VARCHAR(200)
+--CallCentre_SEM_BUS_V.data_lineage.openlineage_namespace|VARCHAR(200)
+--CallCentre_SEM_BUS_V.data_lineage.created_at|TIMESTAMP WITH TIME ZONE
+--CallCentre_SEM_BUS_V.data_lineage.is_active|BYTEINT
+--CallCentre_SEM_BUS_V.data_lineage.registered_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_SEM_BUS_V.data_lineage.retired_dts|TIMESTAMP WITH TIME ZONE
+

@@ -1,0 +1,56 @@
+REPLACE VIEW {{CallCentre_SCH_BUS_V}}.call_searchable
+(
+      searchable_text_id
+    , call_id
+    , agent_id
+    , agent_name
+    , {{start_ts_V}}
+    , day_of_week
+    , topic
+    , conversation_summary
+    , overall_quality_score
+    , call_sentiment
+    , searchable_text
+    , embedded_columns
+    , generated_dts
+    , is_current
+)
+AS
+SELECT
+      t.searchable_text_id
+    , {{c_V}}.call_id
+    , {{c_V}}.agent_id
+    , {{c_V}}.agent_name
+    , {{c_V}}.{{start_ts_V}}
+    , {{c_V}}.day_of_week
+    , {{c_V}}.topic
+    , {{c_V}}.conversation_summary
+    , t.overall_quality_score
+    , t.call_sentiment
+    , t.searchable_text
+    , t.embedded_columns
+    , t.generated_dts
+    , t.is_current
+FROM {{CallCentre_SCH_STD_V}}.call_searchable_text t
+INNER JOIN {{CallCentre_DOM_BUS_V}}.Call_Enriched {{c_V}}
+    ON {{c_V}}.call_id = t.call_id
+WHERE t.is_current = 1;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_SCH_BUS_V.call_searchable.searchable_text_id|INTEGER
+--CallCentre_SCH_BUS_V.call_searchable.call_id|INTEGER
+--CallCentre_SCH_BUS_V.call_searchable.agent_id|INTEGER
+--CallCentre_SCH_BUS_V.call_searchable.agent_name|VARCHAR(200)
+--CallCentre_SCH_BUS_V.call_searchable.start_ts|TIMESTAMP WITH TIME ZONE
+--CallCentre_SCH_BUS_V.call_searchable.day_of_week|VARCHAR(10)
+--CallCentre_SCH_BUS_V.call_searchable.topic|VARCHAR(500)
+--CallCentre_SCH_BUS_V.call_searchable.conversation_summary|CLOB(2097088000)
+--CallCentre_SCH_BUS_V.call_searchable.overall_quality_score|DECIMAL(5,4)
+--CallCentre_SCH_BUS_V.call_searchable.call_sentiment|DECIMAL(8,6)
+--CallCentre_SCH_BUS_V.call_searchable.searchable_text|CLOB(2097088000)
+--CallCentre_SCH_BUS_V.call_searchable.embedded_columns|VARCHAR(200)
+--CallCentre_SCH_BUS_V.call_searchable.generated_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_SCH_BUS_V.call_searchable.is_current|BYTEINT
+

@@ -1,0 +1,542 @@
+comment on column {{CallCentre_DOM_STD_T}}.Agent_H.agent_id is 'Surrogate integer key for the agent, assigned by the data product ETL. Values 1-12 map to the 12 agents in the source telephony system.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Agent_H.agent_key is 'Natural business key for the agent in AGT-NNNN format, e.g. AGT-0001. Stable across system migrations.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Agent_H.agent_name is 'Display name of the agent used within the data product. Format: FirstName LastName.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Agent_H.source_agent_name is 'Agent name exactly as it appears in the source CRM or telephony system. Preserved for lineage and reconciliation. May differ from agent_name if anonymisation or normalisation has been applied.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Agent_H.valid_from_dts is 'TIMESTAMP WITH TIME ZONE marking the start of this SCD-2 version. Set to the ETL batch load time when the record was first created or changed.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Agent_H.valid_to_dts is 'TIMESTAMP WITH TIME ZONE marking the end of this SCD-2 version. Set to 9999-12-31 00:00:00+00:00 for the currently active version.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Agent_H.is_current is 'BYTEINT flag: 1 = this is the active (current) version of the agent record;
+ 0 = a superseded historical version. Filter WHERE is_current = 1 for current-state queries.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Agent_H.is_deleted is 'BYTEINT flag: 1 = the agent has been logically deleted from the source system;
+ 0 = active. Logically deleted rows are retained for historical call linkage.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Category_Score_H.call_category_score_id is 'Surrogate integer key for this category score row.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Category_Score_H.call_id is 'Foreign key to Call_H.call_id. One row per call where category rollup scores have been computed.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Category_Score_H.communication_quality_avg_sim is 'Average cosine similarity across all Communication Quality dimensions: active_listening, avoiding_interruptions, turn_taking, clarification_questions, concise_explanations, avoiding_jargon, and 8 others.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Category_Score_H.conduct_and_professionalism_avg_sim is 'Average cosine similarity across all Conduct and Professionalism dimensions: de_escalation, calm_under_pressure, confidence_and_reassurance, internal_handoff_transfer, technical_troubleshooting, and 5 others.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Category_Score_H.customer_experience_avg_sim is 'Average cosine similarity across all Customer Experience dimensions: empathetic_tone, reassurance_and_support, positive_framing, frustration_acknowledgement, brand_aligned_tone, and 8 others.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Category_Score_H.compliance_avg_sim is 'Average cosine similarity across all Compliance dimensions: regulatory_obligations, privacy_disclosure, identity_verification, script_adherence, fee_charge_disclosure, and 7 others.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Category_Score_H.call_handling_avg_sim is 'Average cosine similarity across all Call Handling dimensions: resolution_confirmation, action_commitment_next_steps, wrap_up_summary, ownership_and_accountability, time_awareness, and 4 others.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Category_Score_H.communication_quality_total_cnt is 'Count of Communication Quality dimension scores that were non-zero (i.e. the behaviour was detected at least once in the transcript) for this call.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Category_Score_H.conduct_and_professionalism_total_cnt is 'Count of Conduct and Professionalism dimension scores that were non-zero for this call.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Category_Score_H.customer_experience_total_cnt is 'Count of Customer Experience dimension scores that were non-zero for this call.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Category_Score_H.compliance_total_cnt is 'Count of Compliance dimension scores that were non-zero for this call.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Category_Score_H.call_handling_total_cnt is 'Count of Call Handling dimension scores that were non-zero for this call.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Category_Score_H.communication_quality_all_hit is 'BYTEINT flag: 1 = all Communication Quality dimensions scored non-zero for this call (perfect category coverage);
+ 0 = at least one dimension was absent. Used for all-hit rate KPI reporting.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Category_Score_H.conduct_and_professionalism_all_hit is 'BYTEINT flag: 1 = all Conduct and Professionalism dimensions scored non-zero;
+ 0 = at least one was absent.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Category_Score_H.customer_experience_all_hit is 'BYTEINT flag: 1 = all Customer Experience dimensions scored non-zero;
+ 0 = at least one was absent.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Category_Score_H.compliance_all_hit is 'BYTEINT flag: 1 = all Compliance dimensions scored non-zero;
+ 0 = at least one was absent. A compliance_all_hit = 0 is the primary flag for compliance coaching interventions.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Category_Score_H.call_handling_all_hit is 'BYTEINT flag: 1 = all Call Handling dimensions scored non-zero;
+ 0 = at least one was absent.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Category_Score_H.valid_from_dts is 'TIMESTAMP WITH TIME ZONE marking the start of this SCD-2 version.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Category_Score_H.valid_to_dts is 'TIMESTAMP WITH TIME ZONE marking the end of this SCD-2 version.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Category_Score_H.is_current is 'BYTEINT flag: 1 = current version;
+ 0 = superseded.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Category_Score_H.is_deleted is 'BYTEINT flag: 1 = logically deleted;
+ 0 = active.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.call_dynamics_id is 'Surrogate integer key for this dynamics row.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.call_id is 'Foreign key to Call_H.call_id. One dynamics row per call where acoustic/conversational metrics were extracted from the audio transcript.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.call_duration_sec is 'Total duration of the call in seconds, measured from first audio to call end.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.total_word_count is 'Total number of words spoken across both the agent and caller during the call.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.words_per_min is 'Overall speaking rate for the call in words per minute, calculated as total_word_count / (call_duration_sec / 60).';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.first_response_latency_sec is 'Number of seconds from the start of the call until the agent first spoke. High values may indicate routing delays or hold-music issues.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.turn_count is 'Total number of conversational turns (alternations between agent and caller speaking) during the call. A proxy for interaction complexity.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.avg_turn_duration_ms is 'Average duration of a single conversational turn in milliseconds, across both participants.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.median_turn_duration_ms is 'Median duration of a single turn in milliseconds. Less sensitive to outlier monologues than the average.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.longest_turn_duration_ms is 'Duration in milliseconds of the longest single turn in the call, from either participant. A very long agent turn may indicate a monologue or poor listening behaviour.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.avg_turn_words is 'Average number of words spoken per turn across both participants.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.agent_turn_count is 'Number of conversational turns taken by the agent.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.agent_avg_turn_duration_ms is 'Average duration of the agent''s turns in milliseconds.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.agent_median_turn_duration_ms is 'Median duration of the agent''s turns in milliseconds.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.agent_longest_turn_duration_ms is 'Longest single agent turn in milliseconds. Outliers here correlate with lower active_listening scores.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.agent_avg_turn_words is 'Average number of words spoken per agent turn.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.caller_turn_count is 'Number of conversational turns taken by the caller.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.caller_avg_turn_duration_ms is 'Average duration of the caller''s turns in milliseconds.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.caller_median_turn_duration_ms is 'Median duration of the caller''s turns in milliseconds.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.caller_longest_turn_duration_ms is 'Longest single caller turn in milliseconds.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.caller_avg_turn_words is 'Average number of words spoken per caller turn.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.agent_talk_ratio is 'Proportion of total active speaking time accounted for by the agent (0.0-1.0). A healthy ratio is typically 0.4-0.6;
+ values above 0.7 suggest the agent is dominating the conversation.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.caller_talk_ratio is 'Proportion of total active speaking time accounted for by the caller (0.0-1.0). Complement of agent_talk_ratio when there is no silence.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.agent_wpm is 'Agent''s speaking rate in words per minute. Values above 180 may indicate rushed communication;
+ below 100 may indicate hesitation.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.caller_wpm is 'Caller''s speaking rate in words per minute.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.agent_to_caller_wpm_ratio is 'Ratio of agent_wpm to caller_wpm. Values significantly above 1.0 indicate the agent is speaking much faster than the caller, which may impair comprehension.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.silence_incidents is 'Count of distinct silence periods (defined as gaps in audio above a minimum threshold, typically 2 seconds) during the call.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.silence_ratio is 'Proportion of total call duration occupied by silence (0.0-1.0). High values may indicate hold time, on-hold music, or dead air issues. Correlates with escalation_to_higher_tier in the discovered patterns.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.avg_pause_sec is 'Average duration of individual silence periods in seconds.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.overall_lexical_density is 'Proportion of content words (nouns, verbs, adjectives, adverbs) to total words across both participants. Higher values indicate more information-dense conversation.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.overall_type_token_ratio is 'Ratio of unique word types to total word tokens across the full conversation. A proxy for vocabulary diversity;
+ higher values indicate more varied language.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.overall_avg_word_length_chars is 'Average number of characters per word across the full conversation. A rough indicator of vocabulary sophistication.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.overall_disfluency_ratio is 'Proportion of words that are disfluencies (um, uh, er, like used as fillers) across both participants. High overall values may indicate a difficult call or poor preparation.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.agent_lexical_density is 'Lexical density of the agent''s speech only.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.agent_type_token_ratio is 'Type-token ratio of the agent''s speech only.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.agent_avg_word_length_chars is 'Average word length in characters for the agent''s speech only.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.agent_disfluency_ratio is 'Disfluency ratio for the agent''s speech only. Higher values correlate with lower avoiding_filler_or_uncertainty scores.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.caller_lexical_density is 'Lexical density of the caller''s speech only.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.caller_type_token_ratio is 'Type-token ratio of the caller''s speech only.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.caller_avg_word_length_chars is 'Average word length in characters for the caller''s speech only.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.caller_disfluency_ratio is 'Disfluency ratio for the caller''s speech only. High values may indicate caller confusion or frustration.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.agent_average_streak_sec is 'Average duration in seconds of the agent''s uninterrupted speaking streaks (consecutive turns without caller interruption).';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.agent_median_streak_sec is 'Median duration in seconds of the agent''s uninterrupted speaking streaks.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.agent_longest_streak_sec is 'Duration in seconds of the agent''s longest uninterrupted monologue. Values above 60 seconds are associated with lower active_listening and avoiding_interruptions scores.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.caller_average_streak_sec is 'Average duration in seconds of the caller''s uninterrupted speaking streaks.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.caller_median_streak_sec is 'Median duration in seconds of the caller''s uninterrupted speaking streaks.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.caller_longest_streak_sec is 'Duration in seconds of the caller''s longest uninterrupted monologue. Very long caller streaks suggest the agent may be failing to guide the conversation.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.overall_average_streak_sec is 'Average uninterrupted streak duration across both participants.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.overall_median_streak_sec is 'Median uninterrupted streak duration across both participants.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.overall_longest_streak_sec is 'Longest uninterrupted streak across either participant.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.agent_wpm_change is 'Change in the agent''s words-per-minute rate from the first quarter to the last quarter of the call. Positive values indicate acceleration;
+ negative values indicate slowing. A large negative value may indicate fatigue or increased call complexity.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.caller_wpm_change is 'Change in the caller''s words-per-minute rate from the first to last quarter of the call.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.overtalk_incidents is 'Total count of overtalk incidents (both parties speaking simultaneously above a minimum overlap threshold) during the call.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.overtalk_ms is 'Total cumulative duration of overtalk in milliseconds.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.overtalk_ratio is 'Proportion of total call duration occupied by overtalk (0.0-1.0). High values correlate with dispute-type calls and lower de-escalation scores.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.agent_overtalk_incidents is 'Count of overtalk incidents initiated by the agent (agent started speaking while the caller was still speaking).';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.agent_overtalk_ms is 'Total duration in milliseconds of agent-initiated overtalk.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.agent_overtalk_ratio is 'Proportion of call duration occupied by agent-initiated overtalk. Directly penalises avoiding_interruptions score when elevated.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.caller_overtalk_incidents is 'Count of overtalk incidents initiated by the caller.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.caller_overtalk_ms is 'Total duration in milliseconds of caller-initiated overtalk.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.caller_overtalk_ratio is 'Proportion of call duration occupied by caller-initiated overtalk. High values may indicate caller frustration.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.call_sentiment is 'Overall call sentiment score on a scale of -1.0 (very negative) to +1.0 (very positive), averaged across all speakers and the full duration.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.end_sentiment is 'Sentiment score for the final portion of the call (last 20% of duration). A proxy for caller satisfaction at close. Strongly predictive of repeat contacts and complaint likelihood.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.call_change_in_sentiment is 'Change in overall sentiment from the start to the end of the call (end_sentiment minus start sentiment). Positive values indicate the call improved the caller''s mood;
+ negative values indicate deterioration.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.agent_sentiment is 'Average sentiment score for the agent''s speech across the full call.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.agent_start_sentiment is 'Agent sentiment score at the start of the call (first 20% of duration). Indicates the agent''s initial demeanour.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.agent_end_sentiment is 'Agent sentiment score at the end of the call (last 20% of duration).';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.agent_intra_call_change_in_sentiment is 'Change in agent sentiment from start to end of call. A negative shift may indicate agent fatigue or a particularly difficult interaction.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.caller_sentiment is 'Average sentiment score for the caller''s speech across the full call. Key indicator of customer experience.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.caller_start_sentiment is 'Caller sentiment at the start of the call. Callers often begin with a negative sentiment when reporting a problem.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.caller_end_sentiment is 'Caller sentiment at the end of the call. A positive end_sentiment despite a negative start indicates successful issue resolution.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.caller_intra_call_change_in_sentiment is 'Change in caller sentiment from start to end of call. The most operationally important single metric for gauging resolution success. A large positive shift (e.g. > 0.3) strongly indicates effective de-escalation and resolution.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.valid_from_dts is 'TIMESTAMP WITH TIME ZONE marking the start of this SCD-2 version.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.valid_to_dts is 'TIMESTAMP WITH TIME ZONE marking the end of this SCD-2 version.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.is_current is 'BYTEINT flag: 1 = current version;
+ 0 = superseded.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Dynamics_H.is_deleted is 'BYTEINT flag: 1 = logically deleted;
+ 0 = active.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_H.call_id is 'Unique identifier for each call record assigned by the source telephony system. Range approximately 0-95952. Gaps in the sequence indicate calls filtered during ingestion (e.g. test calls, abandoned calls below minimum duration threshold).';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_H.agent_id is 'Foreign key to Agent_H.agent_id identifying the agent who handled this call. Joins to Agent_H WHERE is_current = 1 for the current agent name.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_H.start_hour is 'Derived BYTEINT (0-23) representing the hour of day in which the call started, extracted from start_ts. Pre-computed to avoid repeated EXTRACT calls in GROUP BY queries. Used for peak-hour capacity planning and shift optimisation analysis.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_H.day_of_week is 'Day of the week on which the call occurred, stored as a text label (Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday). Monday carries the highest call volume;
+ Sunday the lowest across the loaded dataset.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_H.valid_from_dts is 'TIMESTAMP WITH TIME ZONE marking the start of this SCD-2 version of the call record.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_H.valid_to_dts is 'TIMESTAMP WITH TIME ZONE marking the end of this SCD-2 version. 9999-12-31 00:00:00+00:00 for the current version.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_H.is_current is 'BYTEINT flag: 1 = current version of this call record;
+ 0 = superseded. Always filter WHERE is_current = 1 for point-in-time correct call counts.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_H.is_deleted is 'BYTEINT flag: 1 = call has been logically deleted from the source;
+ 0 = active.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.call_score_cnt_id is 'Surrogate integer key for this count row.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.call_id is 'Foreign key to Call_H.call_id. One row per call where per-behaviour instance counts have been computed.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.regulatory_obligations_cnt is 'Number of transcript segments in which the regulatory obligations behaviour was detected and scored. A count of 0 means the behaviour was completely absent;
+ higher counts indicate repeated or sustained fulfilment.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.privacy_disclosure_cnt is 'Number of segments in which a privacy or call-recording disclosure was detected.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.complaint_rights_cnt is 'Number of segments in which complaint rights or dispute processes were communicated.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.terms_and_conditions_explained_cnt is 'Number of segments in which terms and conditions were explained.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.consent_gathering_cnt is 'Number of segments in which explicit consent was sought.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.identity_verification_cnt is 'Number of segments in which identity verification steps were performed. A count of 0 on a call that required verification is a compliance red flag.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.account_access_verification_cnt is 'Number of segments in which account access was verified.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.script_adherence_cnt is 'Number of segments judged to conform to the approved call script.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.fee_charge_disclosure_cnt is 'Number of segments in which fees or charges were disclosed to the caller.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.avoidance_of_overpromise_cnt is 'Number of segments demonstrating avoidance of over-commitment.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.limitation_of_liability_cnt is 'Number of segments in which liability limitations were appropriately communicated.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.call_recording_disclosure_cnt is 'Number of segments in which the agent disclosed that the call was being recorded.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.customer_centric_language_cnt is 'Number of segments containing customer-centric language.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.reassurance_and_support_cnt is 'Number of segments in which reassurance or supportive language was used.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.customer_appreciation_cnt is 'Number of segments containing explicit expressions of customer appreciation.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.empathetic_tone_cnt is 'Number of segments demonstrating an empathetic tone.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.empathy_statements_cnt is 'Number of explicit empathy statements made during the call.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.positive_framing_cnt is 'Number of segments in which positive framing was applied.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.avoiding_negativity_cnt is 'Number of segments free from negative language or tone.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.avoidance_of_blame_or_deflection_cnt is 'Number of segments in which blame or deflection was successfully avoided.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.apology_or_regret_cnt is 'Number of segments containing apologies or expressions of regret.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.respectful_language_cnt is 'Number of segments scored positively for respectful language.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.personalisation_contextualisation_cnt is 'Number of segments in which the agent personalised the conversation using caller-specific context.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.frustration_acknowledgement_cnt is 'Number of instances where the agent explicitly acknowledged caller frustration.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.brand_aligned_tone_cnt is 'Number of segments demonstrating brand-aligned tone.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.active_listening_cnt is 'Number of segments demonstrating active listening behaviours.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.avoiding_interruptions_cnt is 'Number of segments free from agent interruptions.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.turn_taking_cnt is 'Number of segments demonstrating balanced turn-taking.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.clarification_questions_cnt is 'Number of clarifying questions asked during the call.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.appropriate_questioning_technique_cnt is 'Number of segments demonstrating appropriate questioning technique.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.concise_explanations_cnt is 'Number of segments rated positively for conciseness.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.avoiding_jargon_cnt is 'Number of segments free from unexplained jargon.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.process_explanation_cnt is 'Number of segments in which a process or procedure was clearly explained.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.structured_signposting_cnt is 'Number of signposting or transitional guidance phrases used.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.repetition_for_emphasis_cnt is 'Number of segments in which strategic repetition was used to reinforce key information.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.confirmation_of_understanding_cnt is 'Number of instances where the agent confirmed the caller understood key information.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.reframing_or_simplification_cnt is 'Number of instances where the agent successfully reframed or simplified complex information.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.pacing_and_flow_control_cnt is 'Number of segments demonstrating appropriate pacing and flow.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.avoiding_filler_or_uncertainty_cnt is 'Number of segments free from filler words or uncertainty signals.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.resolution_confirmation_cnt is 'Number of times the agent explicitly confirmed the resolution with the caller.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.action_commitment_next_steps_cnt is 'Number of action commitments or next-steps communicated during the call.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.wrap_up_summary_cnt is 'Number of wrap-up summary statements made before closing the call.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.case_logging_notetaking_cnt is 'Number of segments in which the agent confirmed case logging or note-taking actions.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.order_placement_modification_cnt is 'Number of order placement or modification actions confirmed during the call.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.ownership_and_accountability_cnt is 'Number of segments demonstrating personal ownership and accountability.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.time_estimation_sla_mention_cnt is 'Number of timeframe or SLA commitments communicated to the caller.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.status_update_progress_report_cnt is 'Number of proactive status updates or progress reports provided.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.time_awareness_cnt is 'Number of segments demonstrating time-aware call management.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.de_escalation_cnt is 'Number of de-escalation technique applications detected.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.calm_under_pressure_cnt is 'Number of segments demonstrating composure under difficult call conditions.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.confidence_and_reassurance_cnt is 'Number of segments in which the agent projected confidence and reassurance.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.confidence_building_cnt is 'Number of confidence-building statements made during the call.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.internal_handoff_transfer_cnt is 'Number of internal handoffs or transfers executed during the call.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.escalation_to_higher_tier_cnt is 'Number of escalations to a senior agent or supervisor. A count > 0 indicates a complex or unresolved call.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.billing_and_payment_discussion_cnt is 'Number of segments in which billing or payment was discussed.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.call_control_direction_cnt is 'Number of segments demonstrating effective call steering.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.call_purpose_disclosure_cnt is 'Number of instances where the call purpose was explicitly stated.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.technical_troubleshooting_cnt is 'Number of distinct technical troubleshooting steps performed during the call.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.valid_from_dts is 'TIMESTAMP WITH TIME ZONE marking the start of this SCD-2 version.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.valid_to_dts is 'TIMESTAMP WITH TIME ZONE marking the end of this SCD-2 version.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.is_current is 'BYTEINT flag: 1 = current version;
+ 0 = superseded.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_Cnt_H.is_deleted is 'BYTEINT flag: 1 = logically deleted;
+ 0 = active.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.call_score_id is 'Surrogate integer key for this score row, generated by the ETL.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.call_id is 'Foreign key to Call_H.call_id. One score row exists per call where AI scoring was completed. Approximately 95,939 of 95,952 calls have scores.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.regulatory_obligations_avg_sim is 'Average cosine similarity (0-1) measuring agent coverage of regulatory obligations. 0 = behaviour absent;
+ above 0.75 = strong alignment with reference rubric. Compliance category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.privacy_disclosure_avg_sim is 'Average cosine similarity score measuring whether the agent disclosed privacy/recording notice information. Compliance category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.complaint_rights_avg_sim is 'Average cosine similarity score measuring whether the agent informed the caller of their complaint and dispute rights. Compliance category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.terms_and_conditions_explained_avg_sim is 'Average cosine similarity score measuring clarity and completeness of terms and conditions explanation. Compliance category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.consent_gathering_avg_sim is 'Average cosine similarity score measuring whether explicit consent was sought before proceeding with account actions or data sharing. Compliance category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.identity_verification_avg_sim is 'Average cosine similarity score measuring the rigour and completeness of caller identity verification. A critical compliance metric;
+ low scores indicate potential authentication gaps. Compliance category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.account_access_verification_avg_sim is 'Average cosine similarity score measuring whether account access was properly verified before sensitive actions were taken. Compliance category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.script_adherence_avg_sim is 'Average cosine similarity score measuring agent adherence to approved call scripts and talking points. Compliance category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.fee_charge_disclosure_avg_sim is 'Average cosine similarity score measuring whether applicable fees and charges were clearly disclosed to the caller. Compliance category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.avoidance_of_overpromise_avg_sim is 'Average cosine similarity score measuring whether the agent avoided making commitments or promises beyond what the organisation can deliver. Compliance category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.limitation_of_liability_avg_sim is 'Average cosine similarity score measuring appropriate acknowledgement of liability limitations. Compliance category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.call_recording_disclosure_avg_sim is 'Average cosine similarity score measuring whether the agent disclosed that the call was being recorded. Compliance category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.customer_centric_language_avg_sim is 'Average cosine similarity score measuring use of customer-first, inclusive language that focuses on the caller''s needs. Customer Experience category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.reassurance_and_support_avg_sim is 'Average cosine similarity score measuring how effectively the agent reassured and supported the caller, particularly during uncertain or stressful situations. Customer Experience category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.customer_appreciation_avg_sim is 'Average cosine similarity score measuring expressions of genuine gratitude and appreciation directed at the caller. Customer Experience category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.empathetic_tone_avg_sim is 'Average cosine similarity score measuring the warmth and empathetic tone maintained throughout the call. Customer Experience category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.empathy_statements_avg_sim is 'Average cosine similarity score measuring the use of explicit empathy statements (e.g. "I understand how frustrating that must be"). Customer Experience category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.positive_framing_avg_sim is 'Average cosine similarity score measuring the agent''s tendency to frame responses positively (what can be done rather than what cannot). Customer Experience category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.avoiding_negativity_avg_sim is 'Average cosine similarity score measuring avoidance of negative language, blame, or dismissive phrasing. Customer Experience category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.avoidance_of_blame_or_deflection_avg_sim is 'Average cosine similarity score measuring whether the agent took ownership rather than deflecting responsibility to other teams or systems. Customer Experience category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.apology_or_regret_avg_sim is 'Average cosine similarity score measuring the appropriate and sincere use of apologies or expressions of regret where warranted. Customer Experience category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.respectful_language_avg_sim is 'Average cosine similarity score measuring consistent use of respectful, professional language throughout the call. Customer Experience category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.personalisation_contextualisation_avg_sim is 'Average cosine similarity score measuring the agent''s use of caller-specific context (name, account history, prior interactions) to personalise the conversation. Customer Experience category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.frustration_acknowledgement_avg_sim is 'Average cosine similarity score measuring whether the agent explicitly acknowledged caller frustration before attempting resolution. Customer Experience category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.brand_aligned_tone_avg_sim is 'Average cosine similarity score measuring alignment of the agent''s language and tone with the brand voice guidelines. Customer Experience category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.active_listening_avg_sim is 'Average cosine similarity score measuring observable active listening behaviours such as paraphrasing, affirming, and summarising caller input. Communication Quality category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.avoiding_interruptions_avg_sim is 'Average cosine similarity score measuring the agent''s avoidance of interrupting the caller mid-sentence or mid-thought. Communication Quality category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.turn_taking_avg_sim is 'Average cosine similarity score measuring balanced, orderly turn-taking throughout the dialogue. Communication Quality category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.clarification_questions_avg_sim is 'Average cosine similarity score measuring the effective use of clarifying questions to ensure mutual understanding. Communication Quality category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.appropriate_questioning_technique_avg_sim is 'Average cosine similarity score measuring the use of open, closed, and probing questions at contextually appropriate moments. Communication Quality category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.concise_explanations_avg_sim is 'Average cosine similarity score measuring whether explanations were delivered concisely without unnecessary repetition or verbosity. Communication Quality category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.avoiding_jargon_avg_sim is 'Average cosine similarity score measuring the agent''s avoidance of technical jargon or industry terms that the caller may not understand. Communication Quality category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.process_explanation_avg_sim is 'Average cosine similarity score measuring the clarity and completeness of process explanations provided to the caller. Communication Quality category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.structured_signposting_avg_sim is 'Average cosine similarity score measuring the use of clear signposting phrases to guide the caller through the conversation structure. Communication Quality category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.repetition_for_emphasis_avg_sim is 'Average cosine similarity score measuring the strategic use of repetition to reinforce key information. Communication Quality category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.confirmation_of_understanding_avg_sim is 'Average cosine similarity score measuring whether the agent confirmed the caller''s understanding of key information before proceeding. Communication Quality category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.reframing_or_simplification_avg_sim is 'Average cosine similarity score measuring the agent''s ability to reframe complex information in simpler terms when the caller showed confusion. Communication Quality category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.pacing_and_flow_control_avg_sim is 'Average cosine similarity score measuring natural pacing and smooth conversational flow throughout the call. Communication Quality category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.avoiding_filler_or_uncertainty_avg_sim is 'Average cosine similarity score measuring the agent''s avoidance of filler words (um, uh, like) and phrases that project uncertainty. Communication Quality category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.resolution_confirmation_avg_sim is 'Average cosine similarity score measuring whether the agent explicitly confirmed the resolution with the caller before closing. Call Handling category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.action_commitment_next_steps_avg_sim is 'Average cosine similarity score measuring the clarity and specificity of any action commitments or next steps communicated to the caller. Call Handling category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.wrap_up_summary_avg_sim is 'Average cosine similarity score measuring the quality and completeness of the call wrap-up summary provided before closing. Call Handling category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.case_logging_notetaking_avg_sim is 'Average cosine similarity score measuring whether the agent verbally confirmed that the interaction was being logged or noted for follow-up. Call Handling category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.order_placement_modification_avg_sim is 'Average cosine similarity score measuring the accuracy and completeness of order placement or modification actions confirmed during the call. Call Handling category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.ownership_and_accountability_avg_sim is 'Average cosine similarity score measuring the agent''s demonstration of personal ownership and accountability for the caller''s issue. Call Handling category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.time_estimation_sla_mention_avg_sim is 'Average cosine similarity score measuring whether realistic timeframes or SLA commitments were communicated to the caller. Call Handling category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.status_update_progress_report_avg_sim is 'Average cosine similarity score measuring whether the agent proactively provided status updates or progress reports during longer interactions. Call Handling category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.time_awareness_avg_sim is 'Average cosine similarity score measuring the agent''s sensitivity to call duration and appropriate management of time. Call Handling category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.de_escalation_avg_sim is 'Average cosine similarity score measuring the effectiveness of de-escalation techniques used when the caller was distressed or hostile. Conduct and Professionalism category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.calm_under_pressure_avg_sim is 'Average cosine similarity score measuring the agent''s composure and professional demeanour under difficult call conditions. Conduct and Professionalism category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.confidence_and_reassurance_avg_sim is 'Average cosine similarity score measuring the agent''s projection of confidence and ability to reassure the caller about the outcome. Conduct and Professionalism category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.confidence_building_avg_sim is 'Average cosine similarity score measuring specific confidence-building language used to increase caller trust in the agent and organisation. Conduct and Professionalism category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.internal_handoff_transfer_avg_sim is 'Average cosine similarity score measuring the quality of internal handoff or transfer execution, including warm transfer protocols and caller briefing. Conduct and Professionalism category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.escalation_to_higher_tier_avg_sim is 'Average cosine similarity score measuring the appropriateness and quality of escalations to senior agents or supervisors. Conduct and Professionalism category. High values correlate with difficult or complex calls.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.billing_and_payment_discussion_avg_sim is 'Average cosine similarity score measuring the accuracy and sensitivity of billing or payment discussions. Conduct and Professionalism category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.call_control_direction_avg_sim is 'Average cosine similarity score measuring the agent''s ability to steer the conversation purposefully without being dismissive of the caller. Conduct and Professionalism category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.call_purpose_disclosure_avg_sim is 'Average cosine similarity score measuring whether the agent clearly stated the purpose of an outbound call or confirmed the purpose of an inbound call at the outset. Conduct and Professionalism category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.technical_troubleshooting_avg_sim is 'Average cosine similarity score measuring the effectiveness and structure of technical troubleshooting steps performed during the call. Conduct and Professionalism category.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.valid_from_dts is 'TIMESTAMP WITH TIME ZONE marking the start of this SCD-2 version of the score record.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.valid_to_dts is 'TIMESTAMP WITH TIME ZONE marking the end of this SCD-2 version.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.is_current is 'BYTEINT flag: 1 = current version;
+ 0 = superseded.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Score_H.is_deleted is 'BYTEINT flag: 1 = logically deleted;
+ 0 = active.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Summary_H.call_summary_id is 'Surrogate integer key for this summary row, generated by the ETL.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Summary_H.call_id is 'Foreign key to Call_H.call_id. One summary row exists per call where a transcript-derived summary was generated by the AI pipeline.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Summary_H.conversation_summary is 'AI-generated call summary (CLOB). PII replaced with placeholders such as [PERSON_NAME], [LOCATION], [DATE_OF_BIRTH]. Input to Search module vector embeddings and RAG pipeline. Typically 1-4 sentences.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Summary_H.valid_from_dts is 'TIMESTAMP WITH TIME ZONE marking the start of this SCD-2 version.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Summary_H.valid_to_dts is 'TIMESTAMP WITH TIME ZONE marking the end of this SCD-2 version.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Summary_H.is_current is 'BYTEINT flag: 1 = current version;
+ 0 = superseded.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Summary_H.is_deleted is 'BYTEINT flag: 1 = logically deleted;
+ 0 = active.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Topic_H.call_topic_id is 'Surrogate integer key for this topic assignment row, generated by the ETL.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Topic_H.call_id is 'Foreign key to Call_H.call_id. One topic row exists per call where a topic was assigned. Approximately 72% of calls carry an explicit topic;
+ the remainder are classified as Other.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Topic_H.topic is 'Business area classification of the call. Six values: Other (30.9%), Vet & Pet (29.5%), Healthcare Scheduling (18.4%), Medical Insurance (11.8%), Automotive (5.6%), Home Services (3.8%).';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Topic_H.valid_from_dts is 'TIMESTAMP WITH TIME ZONE marking the start of this SCD-2 version.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Topic_H.valid_to_dts is 'TIMESTAMP WITH TIME ZONE marking the end of this SCD-2 version. 9999-12-31 00:00:00+00:00 for the current version.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Topic_H.is_current is 'BYTEINT flag: 1 = current version;
+ 0 = superseded.';
+
+comment on column {{CallCentre_DOM_STD_T}}.Call_Topic_H.is_deleted is 'BYTEINT flag: 1 = logically deleted;
+ 0 = active.';
+
+

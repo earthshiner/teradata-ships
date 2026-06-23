@@ -1,0 +1,44 @@
+REPLACE VIEW {{CallCentre_OBS_BUS_V}}.agent_outcome
+(
+      outcome_id
+    , agent_key
+    , session_key
+    , action_type
+    , action_dts
+    , tables_accessed
+    , outcome_status
+    , user_feedback
+    , execution_time_ms
+    , records_processed
+    , created_at
+)
+AS
+SELECT
+      outcome_id
+    , agent_key
+    , session_key
+    , action_type
+    , action_dts
+    , tables_accessed
+    , outcome_status
+    , user_feedback
+    , execution_time_ms
+    , records_processed
+    , created_at
+FROM {{CallCentre_OBS_STD_V}}.agent_outcome;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_OBS_BUS_V.agent_outcome.outcome_id|INTEGER
+--CallCentre_OBS_BUS_V.agent_outcome.agent_key|VARCHAR(100)
+--CallCentre_OBS_BUS_V.agent_outcome.session_key|VARCHAR(100)
+--CallCentre_OBS_BUS_V.agent_outcome.action_type|VARCHAR(50)
+--CallCentre_OBS_BUS_V.agent_outcome.action_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_OBS_BUS_V.agent_outcome.tables_accessed|VARCHAR(1000)
+--CallCentre_OBS_BUS_V.agent_outcome.outcome_status|VARCHAR(20)
+--CallCentre_OBS_BUS_V.agent_outcome.user_feedback|VARCHAR(20)
+--CallCentre_OBS_BUS_V.agent_outcome.execution_time_ms|INTEGER
+--CallCentre_OBS_BUS_V.agent_outcome.records_processed|INTEGER
+--CallCentre_OBS_BUS_V.agent_outcome.created_at|TIMESTAMP WITH TIME ZONE
+

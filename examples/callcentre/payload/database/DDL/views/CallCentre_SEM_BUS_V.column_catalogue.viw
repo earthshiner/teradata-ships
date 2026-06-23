@@ -1,0 +1,139 @@
+REPLACE VIEW {{CallCentre_SEM_BUS_V}}.column_catalogue
+(
+      catalogue_database         -- Database the column lives in
+    , catalogue_table            -- Table or view the column belongs to
+    , column_name                -- Physical column name
+    , ordinal_position           -- Column order within the table (DBC ColumnId)
+    , data_type                  -- Friendly type: view override when present, else live dictionary decode
+    , data_type_source           -- 'override' | 'dictionary'
+    , is_nullable                -- 1 if the column accepts NULL, else 0
+    , is_required                -- 1 if the column is NOT NULL, else 0
+    , business_description       -- Curated description, else deployed COMMENT, else NULL
+    , description_source         -- 'curated' | 'comment' | 'none'
+    , is_documented              -- 1 if a description exists from any source, else 0
+    , is_pii                     -- Curated PII flag (1/0); 0 when not yet curated
+    , is_sensitive               -- Curated sensitivity flag (1/0); 0 when not curated
+    , data_classification        -- Curated classification label (NULL when not curated)
+    , allowed_values_json        -- Curated allowed-value domain (NULL when not curated)
+)
+AS
+/* ===========================================================================
+ * Object : CallCentre_SEM_BUS_V.column_catalogue
+ * Module : Semantic (business view layer)
+ * Purpose: Live, self-describing column catalogue for the CallCentre AI-Native
+ *          Data Product. Joins the Teradata dictionary (DBC.ColumnsV) for
+ *          STRUCTURAL facts to the curated column_metadata for VALUE-ADDED
+ *          facts, with an additional view_column_type override that supplies
+ *          friendly data types for *_BUS_V view columns (which DBC cannot
+ *          report on directly).
+ *
+ * Design : Structural facts read LIVE from DBC; curated facts read from
+ *          column_metadata via its _STD_V locking view; view types overlaid
+ *          from view_column_type when present.
+ * ======================================================================== */
+SELECT
+      dcol.DatabaseName                                        AS catalogue_database
+    , dcol.TableName                                           AS catalogue_table
+    , dcol.ColumnName                                          AS column_name
+    , dcol.ColumnId                                            AS ordinal_position
+
+    /* ---- Friendly data type ------------------------------------------- *
+     * Prefer the curated view_column_type override (which already carries
+     * the full "VARCHAR(50)" / "DECIMAL(7,2)" string). Fall back to a live
+     * decode from the dictionary for table columns. Char length is halved
+     * for UNICODE columns (CharType = 2) where the dictionary stores bytes
+     * rather than characters.                                              */
+    , COALESCE(
+          {{vtype_V}}.data_type
+        , CASE TRIM(dcol.ColumnType)
+              WHEN 'I'  THEN 'INTEGER'
+              WHEN 'I1' THEN 'BYTEINT'
+              WHEN 'I2' THEN 'SMALLINT'
+              WHEN 'I8' THEN 'BIGINT'
+              WHEN 'F'  THEN 'FLOAT'
+              WHEN 'D'  THEN 'DECIMAL(' || TRIM(dcol.DecimalTotalDigits)
+                              || ',' || TRIM(dcol.DecimalFractionalDigits) || ')'
+              WHEN 'DA' THEN 'DATE'
+              WHEN 'AT' THEN 'TIME'
+              WHEN 'TS' THEN 'TIMESTAMP'
+              WHEN 'SZ' THEN 'TIMESTAMP WITH TIME ZONE'
+              WHEN 'CF' THEN 'CHAR(' || TRIM(CAST(
+                                  CASE WHEN dcol.CharType = 2
+                                       THEN dcol.ColumnLength / 2
+                                       ELSE dcol.ColumnLength END AS INTEGER)) || ')'
+              WHEN 'CV' THEN 'VARCHAR(' || TRIM(CAST(
+                                  CASE WHEN dcol.CharType = 2
+                                       THEN dcol.ColumnLength / 2
+                                       ELSE dcol.ColumnLength END AS INTEGER)) || ')'
+              WHEN 'CO' THEN 'CLOB'
+              WHEN 'JN' THEN 'JSON'
+              WHEN 'BO' THEN 'BLOB'
+              WHEN 'BV' THEN 'VARBYTE'
+              WHEN 'BF' THEN 'BYTE'
+              ELSE TRIM(dcol.ColumnType)
+          END
+      )                                                        AS data_type
+
+    , CASE WHEN {{vtype_V}}.data_type IS NOT NULL THEN 'override'
+           ELSE 'dictionary'
+      END                                                      AS data_type_source
+
+    , CASE WHEN dcol.Nullable = 'Y' THEN 1 ELSE 0 END          AS is_nullable
+    , CASE WHEN dcol.Nullable = 'N' THEN 1 ELSE 0 END          AS is_required
+
+    , COALESCE({{meta_V}}.business_description
+              , NULLIF(TRIM(dcol.CommentString), ''))          AS business_description
+
+    , CASE WHEN {{meta_V}}.business_description IS NOT NULL              THEN 'curated'
+           WHEN NULLIF(TRIM(dcol.CommentString), '') IS NOT NULL   THEN 'comment'
+           ELSE 'none'
+      END                                                      AS description_source
+
+    , CASE WHEN COALESCE({{meta_V}}.business_description
+                       , NULLIF(TRIM(dcol.CommentString), '')) IS NOT NULL
+           THEN 1 ELSE 0 END                                    AS is_documented
+
+    , COALESCE({{meta_V}}.is_pii, 0)                                  AS is_pii
+    , COALESCE({{meta_V}}.is_sensitive, 0)                            AS is_sensitive
+    , {{meta_V}}.data_classification                                  AS data_classification
+    , {{meta_V}}.allowed_values_json                                  AS allowed_values_json
+
+FROM DBC.ColumnsV AS dcol
+
+LEFT OUTER JOIN {{CallCentre_SEM_STD_V}}.column_metadata AS {{meta_V}}
+    ON  {{meta_V}}.database_name = dcol.DatabaseName
+    AND {{meta_V}}.table_name    = dcol.TableName
+    AND {{meta_V}}.column_name   = dcol.ColumnName
+    AND {{meta_V}}.is_active     = 1
+
+LEFT OUTER JOIN {{CallCentre_SEM_STD_V}}.view_column_type AS {{vtype_V}}
+    ON  {{vtype_V}}.database_name = dcol.DatabaseName
+    AND {{vtype_V}}.view_name     = dcol.TableName
+    AND {{vtype_V}}.column_name   = dcol.ColumnName
+    AND {{vtype_V}}.is_active     = 1
+
+WHERE ( dcol.DatabaseName LIKE 'CallCentre\_%\_STD\__' ESCAPE '\'   -- _STD_T tables + _STD_V locking views
+     OR dcol.DatabaseName LIKE 'CallCentre\_%\_BUS\_V' ESCAPE '\' ) -- _BUS_V consumer views
+  AND dcol.DatabaseName NOT LIKE '%\_STG\_STD\_T'    ESCAPE '\'     -- exclude staging
+  AND dcol.TableName    NOT LIKE '%\_bkp'            ESCAPE '\'     -- exclude backups
+  AND dcol.TableName    NOT LIKE '%\_BACKUP'         ESCAPE '\';
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_SEM_BUS_V.column_catalogue.catalogue_database|VARCHAR(128)
+--CallCentre_SEM_BUS_V.column_catalogue.catalogue_table|VARCHAR(128)
+--CallCentre_SEM_BUS_V.column_catalogue.column_name|VARCHAR(128)
+--CallCentre_SEM_BUS_V.column_catalogue.ordinal_position|SMALLINT
+--CallCentre_SEM_BUS_V.column_catalogue.data_type|VARCHAR(64)
+--CallCentre_SEM_BUS_V.column_catalogue.data_type_source|VARCHAR(10)
+--CallCentre_SEM_BUS_V.column_catalogue.is_nullable|BYTEINT
+--CallCentre_SEM_BUS_V.column_catalogue.is_required|BYTEINT
+--CallCentre_SEM_BUS_V.column_catalogue.business_description|VARCHAR(1000)
+--CallCentre_SEM_BUS_V.column_catalogue.description_source|VARCHAR(7)
+--CallCentre_SEM_BUS_V.column_catalogue.is_documented|BYTEINT
+--CallCentre_SEM_BUS_V.column_catalogue.is_pii|BYTEINT
+--CallCentre_SEM_BUS_V.column_catalogue.is_sensitive|BYTEINT
+--CallCentre_SEM_BUS_V.column_catalogue.data_classification|VARCHAR(50)
+--CallCentre_SEM_BUS_V.column_catalogue.allowed_values_json|JSON(16776192)
+

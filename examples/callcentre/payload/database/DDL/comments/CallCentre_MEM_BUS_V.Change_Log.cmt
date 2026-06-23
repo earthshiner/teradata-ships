@@ -1,0 +1,2 @@
+comment on view {{CallCentre_MEM_BUS_V}}.Change_Log is 'Canonical access view over CallCentre_MEM_STD_V.Change_Log. Full passthrough;
+ append-only change history, no row filter.';

@@ -1,0 +1,69 @@
+REPLACE VIEW {{CallCentre_MEM_STD_V}}.Module_Registry
+(
+      module_registry_key
+    , module_name
+    , database_name
+    , deployment_status
+    , module_version
+    , module_purpose
+    , module_scope
+    , {{key}}_entities
+    , dependencies
+    , dependents
+    , data_owner
+    , technical_owner
+    , refresh_frequency
+    , version_date
+    , is_current
+    , valid_from
+    , valid_to
+    , created_timestamp
+    , updated_timestamp
+)
+AS
+LOCKING ROW FOR ACCESS
+SELECT
+      module_registry_key
+    , module_name
+    , database_name
+    , deployment_status
+    , module_version
+    , module_purpose
+    , module_scope
+    , {{key}}_entities
+    , dependencies
+    , dependents
+    , data_owner
+    , technical_owner
+    , refresh_frequency
+    , version_date
+    , is_current
+    , valid_from
+    , valid_to
+    , created_timestamp
+    , updated_timestamp
+    FROM {{CallCentre_MEM_STD_T}}.Module_Registry;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_MEM_STD_V.Module_Registry.module_registry_key|BIGINT
+--CallCentre_MEM_STD_V.Module_Registry.module_name|VARCHAR(50)
+--CallCentre_MEM_STD_V.Module_Registry.database_name|VARCHAR(100)
+--CallCentre_MEM_STD_V.Module_Registry.deployment_status|VARCHAR(20)
+--CallCentre_MEM_STD_V.Module_Registry.module_version|VARCHAR(20)
+--CallCentre_MEM_STD_V.Module_Registry.module_purpose|CLOB(2097088000)
+--CallCentre_MEM_STD_V.Module_Registry.module_scope|CLOB(2097088000)
+--CallCentre_MEM_STD_V.Module_Registry.key_entities|VARCHAR(500)
+--CallCentre_MEM_STD_V.Module_Registry.dependencies|VARCHAR(500)
+--CallCentre_MEM_STD_V.Module_Registry.dependents|VARCHAR(500)
+--CallCentre_MEM_STD_V.Module_Registry.data_owner|VARCHAR(100)
+--CallCentre_MEM_STD_V.Module_Registry.technical_owner|VARCHAR(100)
+--CallCentre_MEM_STD_V.Module_Registry.refresh_frequency|VARCHAR(50)
+--CallCentre_MEM_STD_V.Module_Registry.version_date|DATE
+--CallCentre_MEM_STD_V.Module_Registry.is_current|BYTEINT
+--CallCentre_MEM_STD_V.Module_Registry.valid_from|DATE
+--CallCentre_MEM_STD_V.Module_Registry.valid_to|DATE
+--CallCentre_MEM_STD_V.Module_Registry.created_timestamp|TIMESTAMP WITH TIME ZONE
+--CallCentre_MEM_STD_V.Module_Registry.updated_timestamp|TIMESTAMP WITH TIME ZONE
+

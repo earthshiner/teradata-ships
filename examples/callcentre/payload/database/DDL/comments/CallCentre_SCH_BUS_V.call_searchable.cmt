@@ -1,0 +1,12 @@
+comment on view {{CallCentre_SCH_BUS_V}}.call_searchable is 'Primary search surface. Joins precomputed searchable text to Domain for full call context. Query with LIKE predicate on searchable_text or filter on topic, agent_name, overall_quality_score.';
+comment on column {{CallCentre_SCH_BUS_V}}.call_searchable.topic is 'Business area classification of the call. Six values: Other (30.9%), Vet & Pet (29.5%), Healthcare Scheduling (18.4%), Medical Insurance (11.8%), Automotive (5.6%), Home Services (3.8%).';
+
+comment on column {{CallCentre_SCH_BUS_V}}.call_searchable.conversation_summary is 'AI-generated call summary (CLOB). PII replaced with placeholders such as [PERSON_NAME], [LOCATION], [DATE_OF_BIRTH]. Input to Search module vector embeddings and RAG pipeline. Typically 1-4 sentences.';
+
+comment on column {{CallCentre_SCH_BUS_V}}.call_searchable.overall_quality_score is 'Weighted composite across all 5 group composites. Range 0-1. Primary ML target variable.';
+
+comment on column {{CallCentre_SCH_BUS_V}}.call_searchable.call_sentiment is 'Overall call sentiment score on a scale of -1.0 (very negative) to +1.0 (very positive), averaged across all speakers and the full duration.';
+
+comment on column {{CallCentre_SCH_BUS_V}}.call_searchable.searchable_text is 'Concatenated normalised text from embedded_columns (topic + conversation_summary). Used for LIKE predicate and CONTAINS search.';
+
+comment on column {{CallCentre_SCH_BUS_V}}.call_searchable.embedded_columns is 'Comma-separated list of Domain source columns concatenated to produce searchable_text.';

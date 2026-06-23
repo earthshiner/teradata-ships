@@ -1,0 +1,42 @@
+REPLACE VIEW {{CallCentre_SEM_STD_V}}.data_product_map_primary_objects
+(
+    module_id
+   ,database_name
+   ,object_name
+   ,object_type
+   ,object_role
+   ,usage_guidance
+   ,table_kind
+   ,is_active
+   ,created_at
+   ,updated_at
+)
+AS
+LOCKING ROW FOR ACCESS
+SELECT
+    module_id
+   ,database_name
+   ,object_name
+   ,object_type
+   ,object_role
+   ,usage_guidance
+   ,table_kind
+   ,is_active
+   ,created_at
+   ,updated_at
+FROM {{CallCentre_SEM_STD_T}}.data_product_map_primary_objects;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_SEM_STD_V.data_product_map_primary_objects.module_id|INTEGER
+--CallCentre_SEM_STD_V.data_product_map_primary_objects.database_name|VARCHAR(128)
+--CallCentre_SEM_STD_V.data_product_map_primary_objects.object_name|VARCHAR(128)
+--CallCentre_SEM_STD_V.data_product_map_primary_objects.object_type|VARCHAR(50)
+--CallCentre_SEM_STD_V.data_product_map_primary_objects.object_role|VARCHAR(50)
+--CallCentre_SEM_STD_V.data_product_map_primary_objects.usage_guidance|VARCHAR(500)
+--CallCentre_SEM_STD_V.data_product_map_primary_objects.table_kind|CHAR(1)
+--CallCentre_SEM_STD_V.data_product_map_primary_objects.is_active|BYTEINT
+--CallCentre_SEM_STD_V.data_product_map_primary_objects.created_at|TIMESTAMP WITH TIME ZONE
+--CallCentre_SEM_STD_V.data_product_map_primary_objects.updated_at|TIMESTAMP WITH TIME ZONE
+

@@ -1,0 +1,2 @@
+comment on view {{CallCentre_MEM_BUS_V}}.discovered_pattern is 'Canonical access view over CallCentre_MEM_STD_V.discovered_pattern. Full passthrough;
+ consumers filter WHERE is_active = 1.';

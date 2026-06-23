@@ -1,0 +1,54 @@
+CREATE VIEW {{CallCentre_SCH_STD_V}}.call_searchable_text
+(
+      searchable_text_id
+    , call_id
+    , embedded_columns
+    , searchable_text
+    , topic
+    , agent_name
+    , day_of_week
+    , overall_quality_score
+    , call_sentiment
+    , generated_dts
+    , valid_from_dts
+    , valid_to_dts
+    , is_current
+    , generated_by
+)
+AS
+LOCKING ROW FOR ACCESS
+SELECT
+      searchable_text_id
+    , call_id
+    , embedded_columns
+    , searchable_text
+    , topic
+    , agent_name
+    , day_of_week
+    , overall_quality_score
+    , call_sentiment
+    , generated_dts
+    , valid_from_dts
+    , valid_to_dts
+    , is_current
+    , generated_by
+FROM {{CallCentre_SCH_STD_T}}.call_searchable_text;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_SCH_STD_V.call_searchable_text.searchable_text_id|INTEGER
+--CallCentre_SCH_STD_V.call_searchable_text.call_id|INTEGER
+--CallCentre_SCH_STD_V.call_searchable_text.embedded_columns|VARCHAR(200)
+--CallCentre_SCH_STD_V.call_searchable_text.searchable_text|CLOB(2097088000)
+--CallCentre_SCH_STD_V.call_searchable_text.topic|VARCHAR(500)
+--CallCentre_SCH_STD_V.call_searchable_text.agent_name|VARCHAR(200)
+--CallCentre_SCH_STD_V.call_searchable_text.day_of_week|VARCHAR(10)
+--CallCentre_SCH_STD_V.call_searchable_text.overall_quality_score|DECIMAL(5,4)
+--CallCentre_SCH_STD_V.call_searchable_text.call_sentiment|DECIMAL(8,6)
+--CallCentre_SCH_STD_V.call_searchable_text.generated_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_SCH_STD_V.call_searchable_text.valid_from_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_SCH_STD_V.call_searchable_text.valid_to_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_SCH_STD_V.call_searchable_text.is_current|BYTEINT
+--CallCentre_SCH_STD_V.call_searchable_text.generated_by|VARCHAR(100)
+

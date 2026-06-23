@@ -1,0 +1,48 @@
+CREATE VIEW {{CallCentre_MEM_STD_V}}.agent_session
+(
+      session_id
+    , session_key
+    , agent_key
+    , user_key
+    , session_start_dts
+    , session_end_dts
+    , session_status
+    , session_goal
+    , session_context_json
+    , scope_level
+    , scope_identifier
+    , created_at
+)
+AS
+LOCKING ROW FOR ACCESS
+SELECT
+      session_id
+    , session_key
+    , agent_key
+    , user_key
+    , session_start_dts
+    , session_end_dts
+    , session_status
+    , session_goal
+    , session_context_json
+    , scope_level
+    , scope_identifier
+    , created_at
+FROM {{CallCentre_MEM_STD_T}}.agent_session;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_MEM_STD_V.agent_session.session_id|INTEGER
+--CallCentre_MEM_STD_V.agent_session.session_key|VARCHAR(100)
+--CallCentre_MEM_STD_V.agent_session.agent_key|VARCHAR(100)
+--CallCentre_MEM_STD_V.agent_session.user_key|VARCHAR(100)
+--CallCentre_MEM_STD_V.agent_session.session_start_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_MEM_STD_V.agent_session.session_end_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_MEM_STD_V.agent_session.session_status|VARCHAR(20)
+--CallCentre_MEM_STD_V.agent_session.session_goal|VARCHAR(500)
+--CallCentre_MEM_STD_V.agent_session.session_context_json|JSON(16776192)
+--CallCentre_MEM_STD_V.agent_session.scope_level|VARCHAR(20)
+--CallCentre_MEM_STD_V.agent_session.scope_identifier|VARCHAR(100)
+--CallCentre_MEM_STD_V.agent_session.created_at|TIMESTAMP WITH TIME ZONE
+

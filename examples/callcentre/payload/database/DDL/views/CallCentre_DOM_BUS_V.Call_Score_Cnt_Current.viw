@@ -1,0 +1,192 @@
+REPLACE VIEW {{CallCentre_DOM_BUS_V}}.Call_Score_Cnt_Current
+(
+      call_score_cnt_id
+    , call_id
+    , regulatory_obligations_cnt
+    , privacy_disclosure_cnt
+    , complaint_rights_cnt
+    , terms_and_conditions_explained_cnt
+    , consent_gathering_cnt
+    , identity_verification_cnt
+    , account_access_verification_cnt
+    , script_adherence_cnt
+    , fee_charge_disclosure_cnt
+    , avoidance_of_overpromise_cnt
+    , limitation_of_liability_cnt
+    , call_recording_disclosure_cnt
+    , customer_centric_language_cnt
+    , reassurance_and_support_cnt
+    , customer_appreciation_cnt
+    , empathetic_tone_cnt
+    , empathy_statements_cnt
+    , positive_framing_cnt
+    , avoiding_negativity_cnt
+    , avoidance_of_blame_or_deflection_cnt
+    , apology_or_regret_cnt
+    , respectful_language_cnt
+    , personalisation_contextualisation_cnt
+    , frustration_acknowledgement_cnt
+    , brand_aligned_tone_cnt
+    , active_listening_cnt
+    , avoiding_interruptions_cnt
+    , turn_taking_cnt
+    , clarification_questions_cnt
+    , appropriate_questioning_technique_cnt
+    , concise_explanations_cnt
+    , avoiding_jargon_cnt
+    , process_explanation_cnt
+    , structured_signposting_cnt
+    , repetition_for_emphasis_cnt
+    , confirmation_of_understanding_cnt
+    , reframing_or_simplification_cnt
+    , pacing_and_flow_control_cnt
+    , avoiding_filler_or_uncertainty_cnt
+    , resolution_confirmation_cnt
+    , action_commitment_next_steps_cnt
+    , wrap_up_summary_cnt
+    , case_logging_notetaking_cnt
+    , order_placement_modification_cnt
+    , ownership_and_accountability_cnt
+    , time_estimation_sla_mention_cnt
+    , status_update_progress_report_cnt
+    , time_awareness_cnt
+    , de_escalation_cnt
+    , calm_under_pressure_cnt
+    , confidence_and_reassurance_cnt
+    , confidence_building_cnt
+    , internal_handoff_transfer_cnt
+    , escalation_to_higher_tier_cnt
+    , billing_and_payment_discussion_cnt
+    , call_control_direction_cnt
+    , call_purpose_disclosure_cnt
+    , technical_troubleshooting_cnt
+)
+AS
+SELECT
+      src.call_score_cnt_id AS call_score_cnt_id
+    , src.call_id AS call_id
+    , src.regulatory_obligations_cnt AS regulatory_obligations_cnt
+    , src.privacy_disclosure_cnt AS privacy_disclosure_cnt
+    , src.complaint_rights_cnt AS complaint_rights_cnt
+    , src.terms_and_conditions_explained_cnt AS terms_and_conditions_explained_cnt
+    , src.consent_gathering_cnt AS consent_gathering_cnt
+    , src.identity_verification_cnt AS identity_verification_cnt
+    , src.account_access_verification_cnt AS account_access_verification_cnt
+    , src.script_adherence_cnt AS script_adherence_cnt
+    , src.fee_charge_disclosure_cnt AS fee_charge_disclosure_cnt
+    , src.avoidance_of_overpromise_cnt AS avoidance_of_overpromise_cnt
+    , src.limitation_of_liability_cnt AS limitation_of_liability_cnt
+    , src.call_recording_disclosure_cnt AS call_recording_disclosure_cnt
+    , src.customer_centric_language_cnt AS customer_centric_language_cnt
+    , src.reassurance_and_support_cnt AS reassurance_and_support_cnt
+    , src.customer_appreciation_cnt AS customer_appreciation_cnt
+    , src.empathetic_tone_cnt AS empathetic_tone_cnt
+    , src.empathy_statements_cnt AS empathy_statements_cnt
+    , src.positive_framing_cnt AS positive_framing_cnt
+    , src.avoiding_negativity_cnt AS avoiding_negativity_cnt
+    , src.avoidance_of_blame_or_deflection_cnt AS avoidance_of_blame_or_deflection_cnt
+    , src.apology_or_regret_cnt AS apology_or_regret_cnt
+    , src.respectful_language_cnt AS respectful_language_cnt
+    , src.personalisation_contextualisation_cnt AS personalisation_contextualisation_cnt
+    , src.frustration_acknowledgement_cnt AS frustration_acknowledgement_cnt
+    , src.brand_aligned_tone_cnt AS brand_aligned_tone_cnt
+    , src.active_listening_cnt AS active_listening_cnt
+    , src.avoiding_interruptions_cnt AS avoiding_interruptions_cnt
+    , src.turn_taking_cnt AS turn_taking_cnt
+    , src.clarification_questions_cnt AS clarification_questions_cnt
+    , src.appropriate_questioning_technique_cnt AS appropriate_questioning_technique_cnt
+    , src.concise_explanations_cnt AS concise_explanations_cnt
+    , src.avoiding_jargon_cnt AS avoiding_jargon_cnt
+    , src.process_explanation_cnt AS process_explanation_cnt
+    , src.structured_signposting_cnt AS structured_signposting_cnt
+    , src.repetition_for_emphasis_cnt AS repetition_for_emphasis_cnt
+    , src.confirmation_of_understanding_cnt AS confirmation_of_understanding_cnt
+    , src.reframing_or_simplification_cnt AS reframing_or_simplification_cnt
+    , src.pacing_and_flow_control_cnt AS pacing_and_flow_control_cnt
+    , src.avoiding_filler_or_uncertainty_cnt AS avoiding_filler_or_uncertainty_cnt
+    , src.resolution_confirmation_cnt AS resolution_confirmation_cnt
+    , src.action_commitment_next_steps_cnt AS action_commitment_next_steps_cnt
+    , src.wrap_up_summary_cnt AS wrap_up_summary_cnt
+    , src.case_logging_notetaking_cnt AS case_logging_notetaking_cnt
+    , src.order_placement_modification_cnt AS order_placement_modification_cnt
+    , src.ownership_and_accountability_cnt AS ownership_and_accountability_cnt
+    , src.time_estimation_sla_mention_cnt AS time_estimation_sla_mention_cnt
+    , src.status_update_progress_report_cnt AS status_update_progress_report_cnt
+    , src.time_awareness_cnt AS time_awareness_cnt
+    , src.de_escalation_cnt AS de_escalation_cnt
+    , src.calm_under_pressure_cnt AS calm_under_pressure_cnt
+    , src.confidence_and_reassurance_cnt AS confidence_and_reassurance_cnt
+    , src.confidence_building_cnt AS confidence_building_cnt
+    , src.internal_handoff_transfer_cnt AS internal_handoff_transfer_cnt
+    , src.escalation_to_higher_tier_cnt AS escalation_to_higher_tier_cnt
+    , src.billing_and_payment_discussion_cnt AS billing_and_payment_discussion_cnt
+    , src.call_control_direction_cnt AS call_control_direction_cnt
+    , src.call_purpose_disclosure_cnt AS call_purpose_disclosure_cnt
+    , src.technical_troubleshooting_cnt AS technical_troubleshooting_cnt
+FROM {{CallCentre_DOM_STD_V}}.Call_Score_Cnt_H AS src
+WHERE is_current = 1 AND is_deleted = 0;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.call_score_cnt_id|INTEGER
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.call_id|INTEGER
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.regulatory_obligations_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.privacy_disclosure_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.complaint_rights_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.terms_and_conditions_explained_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.consent_gathering_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.identity_verification_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.account_access_verification_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.script_adherence_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.fee_charge_disclosure_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.avoidance_of_overpromise_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.limitation_of_liability_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.call_recording_disclosure_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.customer_centric_language_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.reassurance_and_support_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.customer_appreciation_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.empathetic_tone_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.empathy_statements_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.positive_framing_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.avoiding_negativity_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.avoidance_of_blame_or_deflection_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.apology_or_regret_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.respectful_language_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.personalisation_contextualisation_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.frustration_acknowledgement_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.brand_aligned_tone_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.active_listening_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.avoiding_interruptions_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.turn_taking_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.clarification_questions_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.appropriate_questioning_technique_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.concise_explanations_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.avoiding_jargon_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.process_explanation_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.structured_signposting_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.repetition_for_emphasis_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.confirmation_of_understanding_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.reframing_or_simplification_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.pacing_and_flow_control_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.avoiding_filler_or_uncertainty_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.resolution_confirmation_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.action_commitment_next_steps_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.wrap_up_summary_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.case_logging_notetaking_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.order_placement_modification_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.ownership_and_accountability_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.time_estimation_sla_mention_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.status_update_progress_report_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.time_awareness_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.de_escalation_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.calm_under_pressure_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.confidence_and_reassurance_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.confidence_building_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.internal_handoff_transfer_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.escalation_to_higher_tier_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.billing_and_payment_discussion_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.call_control_direction_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.call_purpose_disclosure_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Score_Cnt_Current.technical_troubleshooting_cnt|SMALLINT
+

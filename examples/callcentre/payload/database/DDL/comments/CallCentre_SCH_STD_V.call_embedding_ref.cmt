@@ -1,0 +1,2 @@
+comment on column {{CallCentre_SCH_STD_V}}.call_embedding_ref.embedding_ref_key is 'Stable key to retrieve the embedding from the external store. Typically SHA-256 of (call_id + embedded_columns + model) or an external system primary key.';
+comment on column {{CallCentre_SCH_STD_V}}.call_embedding_ref.embedding_store is 'Identifies the external embedding store. E.g. python_cache, redis, pinecone, chroma, file_system.';

@@ -1,0 +1,27 @@
+REPLACE VIEW {{CallCentre_DOM_BUS_V}}.Call_Current
+(
+      call_id
+    , agent_id
+    , start_hour
+    , {{start_ts_V}}
+    , day_of_week
+)
+AS
+SELECT
+      src.call_id AS call_id
+    , src.agent_id AS agent_id
+    , src.start_hour AS start_hour
+    , src.{{start_ts_V}} AS {{start_ts_V}}
+    , src.day_of_week AS day_of_week
+FROM {{CallCentre_DOM_STD_V}}.Call_H AS src
+WHERE is_current = 1 AND is_deleted = 0;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_DOM_BUS_V.Call_Current.call_id|INTEGER
+--CallCentre_DOM_BUS_V.Call_Current.agent_id|INTEGER
+--CallCentre_DOM_BUS_V.Call_Current.start_hour|BYTEINT
+--CallCentre_DOM_BUS_V.Call_Current.start_ts|TIMESTAMP WITH TIME ZONE
+--CallCentre_DOM_BUS_V.Call_Current.day_of_week|VARCHAR(10)
+

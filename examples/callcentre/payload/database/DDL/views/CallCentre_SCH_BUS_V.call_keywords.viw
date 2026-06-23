@@ -1,0 +1,26 @@
+REPLACE VIEW {{CallCentre_SCH_BUS_V}}.call_keywords
+(
+      token_id
+    , call_id
+    , keyword
+    , token_source
+    , created_dts
+)
+AS
+SELECT
+      token_id
+    , call_id
+    , keyword
+    , token_source
+    , created_dts
+FROM {{CallCentre_SCH_STD_V}}.call_keyword_token;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_SCH_BUS_V.call_keywords.token_id|INTEGER
+--CallCentre_SCH_BUS_V.call_keywords.call_id|INTEGER
+--CallCentre_SCH_BUS_V.call_keywords.keyword|VARCHAR(100)
+--CallCentre_SCH_BUS_V.call_keywords.token_source|VARCHAR(50)
+--CallCentre_SCH_BUS_V.call_keywords.created_dts|TIMESTAMP WITH TIME ZONE
+

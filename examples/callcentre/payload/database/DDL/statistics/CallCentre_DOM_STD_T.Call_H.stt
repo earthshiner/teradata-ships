@@ -1,0 +1,13 @@
+COLLECT STATISTICS 
+                   -- default SYSTEM SAMPLE PERCENT 
+            COLUMN ( agent_id ) , 
+            COLUMN ( call_id ) , 
+            COLUMN ( is_current,is_deleted ) , 
+            COLUMN ( agent_id,is_current ) , 
+            COLUMN ( day_of_week,start_hour ) , 
+            COLUMN ( PARTITION ) , 
+            COLUMN ( day_of_week ) , 
+            COLUMN ( start_hour ) , 
+            COLUMN ( is_current ) , 
+            COLUMN ( is_deleted ) 
+                ON {{CallCentre_DOM_STD_T}}.Call_H ;

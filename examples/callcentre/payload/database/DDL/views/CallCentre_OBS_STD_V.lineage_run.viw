@@ -1,0 +1,29 @@
+CREATE VIEW {{CallCentre_OBS_STD_V}}.lineage_run (
+      lineage_run_id, lineage_id, run_dts, run_status, run_duration_ms,
+      records_read, records_written, records_rejected, batch_key, job_name,
+      openlineage_run_id, error_message, created_at
+) AS
+LOCKING ROW FOR ACCESS
+SELECT
+      lineage_run_id, lineage_id, run_dts, run_status, run_duration_ms,
+      records_read, records_written, records_rejected, batch_key, job_name,
+      openlineage_run_id, error_message, created_at
+FROM {{CallCentre_OBS_STD_T}}.lineage_run;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_OBS_STD_V.lineage_run.lineage_run_id|INTEGER
+--CallCentre_OBS_STD_V.lineage_run.lineage_id|INTEGER
+--CallCentre_OBS_STD_V.lineage_run.run_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_OBS_STD_V.lineage_run.run_status|VARCHAR(20)
+--CallCentre_OBS_STD_V.lineage_run.run_duration_ms|INTEGER
+--CallCentre_OBS_STD_V.lineage_run.records_read|INTEGER
+--CallCentre_OBS_STD_V.lineage_run.records_written|INTEGER
+--CallCentre_OBS_STD_V.lineage_run.records_rejected|INTEGER
+--CallCentre_OBS_STD_V.lineage_run.batch_key|VARCHAR(100)
+--CallCentre_OBS_STD_V.lineage_run.job_name|VARCHAR(200)
+--CallCentre_OBS_STD_V.lineage_run.openlineage_run_id|VARCHAR(200)
+--CallCentre_OBS_STD_V.lineage_run.error_message|VARCHAR(2000)
+--CallCentre_OBS_STD_V.lineage_run.created_at|TIMESTAMP WITH TIME ZONE
+

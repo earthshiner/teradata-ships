@@ -1,0 +1,34 @@
+CREATE MULTISET TABLE {{CallCentre_DOM_STD_T}}.Call_Category_Score_H ,FALLBACK ,
+     NO BEFORE JOURNAL,
+     NO AFTER JOURNAL,
+     CHECKSUM = DEFAULT,
+     DEFAULT MERGEBLOCKRATIO,
+     MAP = TD_MAP1
+     (
+      call_category_score_id INTEGER NOT NULL GENERATED ALWAYS AS IDENTITY
+           (START WITH 1
+            INCREMENT BY 1
+            MINVALUE -2147483647
+            MAXVALUE 2147483647
+            NO CYCLE),
+      call_id INTEGER NOT NULL,
+      communication_quality_avg_sim DECIMAL(7,6),
+      conduct_and_professionalism_avg_sim DECIMAL(7,6),
+      customer_experience_avg_sim DECIMAL(7,6),
+      compliance_avg_sim DECIMAL(7,6),
+      call_handling_avg_sim DECIMAL(7,6),
+      communication_quality_total_cnt SMALLINT,
+      conduct_and_professionalism_total_cnt SMALLINT,
+      customer_experience_total_cnt SMALLINT,
+      compliance_total_cnt SMALLINT,
+      call_handling_total_cnt SMALLINT,
+      communication_quality_all_hit BYTEINT,
+      conduct_and_professionalism_all_hit BYTEINT,
+      customer_experience_all_hit BYTEINT,
+      compliance_all_hit BYTEINT,
+      call_handling_all_hit BYTEINT,
+      valid_from_dts TIMESTAMP(6) WITH TIME ZONE NOT NULL,
+      valid_to_dts TIMESTAMP(6) WITH TIME ZONE NOT NULL DEFAULT TIMESTAMP '9999-12-31 23:59:59.999999+00:00',
+      is_current BYTEINT NOT NULL DEFAULT 1  COMPRESS 1 ,
+      is_deleted BYTEINT NOT NULL DEFAULT 0  COMPRESS 0 )
+PRIMARY INDEX ( call_id );

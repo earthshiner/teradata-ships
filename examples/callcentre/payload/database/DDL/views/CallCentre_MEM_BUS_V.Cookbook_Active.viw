@@ -1,0 +1,45 @@
+REPLACE VIEW {{CallCentre_MEM_BUS_V}}.Cookbook_Active
+(
+      recipe_id
+    , recipe_title
+    , recipe_description
+    , use_case
+    , target_module
+    , sql_template
+    , parameter_descriptions
+    , performance_notes
+    , complexity
+    , is_batch
+    , source_module
+)
+AS
+SELECT
+      recipe_id
+    , recipe_title
+    , recipe_description
+    , use_case
+    , target_module
+    , sql_template
+    , parameter_descriptions
+    , performance_notes
+    , complexity
+    , is_batch
+    , source_module
+FROM {{CallCentre_MEM_STD_V}}.Query_Cookbook
+WHERE is_active = 1;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_MEM_BUS_V.Cookbook_Active.recipe_id|VARCHAR(50)
+--CallCentre_MEM_BUS_V.Cookbook_Active.recipe_title|VARCHAR(200)
+--CallCentre_MEM_BUS_V.Cookbook_Active.recipe_description|CLOB(2097088000)
+--CallCentre_MEM_BUS_V.Cookbook_Active.use_case|VARCHAR(200)
+--CallCentre_MEM_BUS_V.Cookbook_Active.target_module|VARCHAR(50)
+--CallCentre_MEM_BUS_V.Cookbook_Active.sql_template|CLOB(2097088000)
+--CallCentre_MEM_BUS_V.Cookbook_Active.parameter_descriptions|CLOB(2097088000)
+--CallCentre_MEM_BUS_V.Cookbook_Active.performance_notes|CLOB(2097088000)
+--CallCentre_MEM_BUS_V.Cookbook_Active.complexity|VARCHAR(20)
+--CallCentre_MEM_BUS_V.Cookbook_Active.is_batch|BYTEINT
+--CallCentre_MEM_BUS_V.Cookbook_Active.source_module|VARCHAR(50)
+

@@ -1,0 +1,204 @@
+CREATE VIEW {{CallCentre_DOM_STD_V}}.Call_Score_H
+(
+      call_score_id
+    , call_id
+    , regulatory_obligations_avg_sim
+    , privacy_disclosure_avg_sim
+    , complaint_rights_avg_sim
+    , terms_and_conditions_explained_avg_sim
+    , consent_gathering_avg_sim
+    , identity_verification_avg_sim
+    , account_access_verification_avg_sim
+    , script_adherence_avg_sim
+    , fee_charge_disclosure_avg_sim
+    , avoidance_of_overpromise_avg_sim
+    , limitation_of_liability_avg_sim
+    , call_recording_disclosure_avg_sim
+    , customer_centric_language_avg_sim
+    , reassurance_and_support_avg_sim
+    , customer_appreciation_avg_sim
+    , empathetic_tone_avg_sim
+    , empathy_statements_avg_sim
+    , positive_framing_avg_sim
+    , avoiding_negativity_avg_sim
+    , avoidance_of_blame_or_deflection_avg_sim
+    , apology_or_regret_avg_sim
+    , respectful_language_avg_sim
+    , personalisation_contextualisation_avg_sim
+    , frustration_acknowledgement_avg_sim
+    , brand_aligned_tone_avg_sim
+    , active_listening_avg_sim
+    , avoiding_interruptions_avg_sim
+    , turn_taking_avg_sim
+    , clarification_questions_avg_sim
+    , appropriate_questioning_technique_avg_sim
+    , concise_explanations_avg_sim
+    , avoiding_jargon_avg_sim
+    , process_explanation_avg_sim
+    , structured_signposting_avg_sim
+    , repetition_for_emphasis_avg_sim
+    , confirmation_of_understanding_avg_sim
+    , reframing_or_simplification_avg_sim
+    , pacing_and_flow_control_avg_sim
+    , avoiding_filler_or_uncertainty_avg_sim
+    , resolution_confirmation_avg_sim
+    , action_commitment_next_steps_avg_sim
+    , wrap_up_summary_avg_sim
+    , case_logging_notetaking_avg_sim
+    , order_placement_modification_avg_sim
+    , ownership_and_accountability_avg_sim
+    , time_estimation_sla_mention_avg_sim
+    , status_update_progress_report_avg_sim
+    , time_awareness_avg_sim
+    , de_escalation_avg_sim
+    , calm_under_pressure_avg_sim
+    , confidence_and_reassurance_avg_sim
+    , confidence_building_avg_sim
+    , internal_handoff_transfer_avg_sim
+    , escalation_to_higher_tier_avg_sim
+    , billing_and_payment_discussion_avg_sim
+    , call_control_direction_avg_sim
+    , call_purpose_disclosure_avg_sim
+    , technical_troubleshooting_avg_sim
+    , valid_from_dts
+    , valid_to_dts
+    , is_current
+    , is_deleted
+)
+AS
+LOCKING ROW FOR ACCESS
+SELECT
+      call_score_id
+    , call_id
+    , regulatory_obligations_avg_sim
+    , privacy_disclosure_avg_sim
+    , complaint_rights_avg_sim
+    , terms_and_conditions_explained_avg_sim
+    , consent_gathering_avg_sim
+    , identity_verification_avg_sim
+    , account_access_verification_avg_sim
+    , script_adherence_avg_sim
+    , fee_charge_disclosure_avg_sim
+    , avoidance_of_overpromise_avg_sim
+    , limitation_of_liability_avg_sim
+    , call_recording_disclosure_avg_sim
+    , customer_centric_language_avg_sim
+    , reassurance_and_support_avg_sim
+    , customer_appreciation_avg_sim
+    , empathetic_tone_avg_sim
+    , empathy_statements_avg_sim
+    , positive_framing_avg_sim
+    , avoiding_negativity_avg_sim
+    , avoidance_of_blame_or_deflection_avg_sim
+    , apology_or_regret_avg_sim
+    , respectful_language_avg_sim
+    , personalisation_contextualisation_avg_sim
+    , frustration_acknowledgement_avg_sim
+    , brand_aligned_tone_avg_sim
+    , active_listening_avg_sim
+    , avoiding_interruptions_avg_sim
+    , turn_taking_avg_sim
+    , clarification_questions_avg_sim
+    , appropriate_questioning_technique_avg_sim
+    , concise_explanations_avg_sim
+    , avoiding_jargon_avg_sim
+    , process_explanation_avg_sim
+    , structured_signposting_avg_sim
+    , repetition_for_emphasis_avg_sim
+    , confirmation_of_understanding_avg_sim
+    , reframing_or_simplification_avg_sim
+    , pacing_and_flow_control_avg_sim
+    , avoiding_filler_or_uncertainty_avg_sim
+    , resolution_confirmation_avg_sim
+    , action_commitment_next_steps_avg_sim
+    , wrap_up_summary_avg_sim
+    , case_logging_notetaking_avg_sim
+    , order_placement_modification_avg_sim
+    , ownership_and_accountability_avg_sim
+    , time_estimation_sla_mention_avg_sim
+    , status_update_progress_report_avg_sim
+    , time_awareness_avg_sim
+    , de_escalation_avg_sim
+    , calm_under_pressure_avg_sim
+    , confidence_and_reassurance_avg_sim
+    , confidence_building_avg_sim
+    , internal_handoff_transfer_avg_sim
+    , escalation_to_higher_tier_avg_sim
+    , billing_and_payment_discussion_avg_sim
+    , call_control_direction_avg_sim
+    , call_purpose_disclosure_avg_sim
+    , technical_troubleshooting_avg_sim
+    , valid_from_dts
+    , valid_to_dts
+    , is_current
+    , is_deleted
+FROM {{CallCentre_DOM_STD_T}}.Call_Score_H;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_DOM_STD_V.Call_Score_H.call_score_id|INTEGER
+--CallCentre_DOM_STD_V.Call_Score_H.call_id|INTEGER
+--CallCentre_DOM_STD_V.Call_Score_H.regulatory_obligations_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.privacy_disclosure_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.complaint_rights_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.terms_and_conditions_explained_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.consent_gathering_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.identity_verification_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.account_access_verification_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.script_adherence_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.fee_charge_disclosure_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.avoidance_of_overpromise_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.limitation_of_liability_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.call_recording_disclosure_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.customer_centric_language_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.reassurance_and_support_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.customer_appreciation_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.empathetic_tone_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.empathy_statements_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.positive_framing_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.avoiding_negativity_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.avoidance_of_blame_or_deflection_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.apology_or_regret_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.respectful_language_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.personalisation_contextualisation_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.frustration_acknowledgement_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.brand_aligned_tone_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.active_listening_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.avoiding_interruptions_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.turn_taking_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.clarification_questions_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.appropriate_questioning_technique_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.concise_explanations_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.avoiding_jargon_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.process_explanation_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.structured_signposting_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.repetition_for_emphasis_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.confirmation_of_understanding_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.reframing_or_simplification_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.pacing_and_flow_control_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.avoiding_filler_or_uncertainty_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.resolution_confirmation_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.action_commitment_next_steps_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.wrap_up_summary_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.case_logging_notetaking_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.order_placement_modification_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.ownership_and_accountability_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.time_estimation_sla_mention_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.status_update_progress_report_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.time_awareness_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.de_escalation_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.calm_under_pressure_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.confidence_and_reassurance_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.confidence_building_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.internal_handoff_transfer_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.escalation_to_higher_tier_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.billing_and_payment_discussion_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.call_control_direction_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.call_purpose_disclosure_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.technical_troubleshooting_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Score_H.valid_from_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_DOM_STD_V.Call_Score_H.valid_to_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_DOM_STD_V.Call_Score_H.is_current|BYTEINT
+--CallCentre_DOM_STD_V.Call_Score_H.is_deleted|BYTEINT
+

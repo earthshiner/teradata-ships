@@ -1,0 +1,103 @@
+REPLACE VIEW {{CallCentre_SEM_BUS_V}}.relationship_paths
+(
+    source_table
+   ,target_table
+   ,path_tables
+   ,path_joins
+   ,hop_count
+   ,path_description
+)
+AS
+WITH RECURSIVE relationship_paths (
+    source_table
+   ,target_table
+   ,path_tables
+   ,path_joins
+   ,hop_count
+   ,path_description
+) AS (
+    -- Anchor: forward direction (1-hop)
+    SELECT
+        source_table
+       ,target_table
+       ,source_table || ' -> ' || target_table
+       ,'JOIN ' || target_table || ' ON '
+            || target_table || '.' || target_column || ' = '
+            || source_table || '.' || source_column
+       ,1
+       ,relationship_description
+    FROM {{CallCentre_SEM_STD_V}}.table_relationship
+    WHERE is_active = 1
+
+    UNION ALL
+
+    -- Anchor: reverse direction (1-hop backward)
+    SELECT
+        target_table
+       ,source_table
+       ,target_table || ' -> ' || source_table
+       ,'JOIN ' || source_table || ' ON '
+            || source_table || '.' || source_column || ' = '
+            || target_table || '.' || target_column
+       ,1
+       ,'REVERSE: ' || relationship_description
+    FROM {{CallCentre_SEM_STD_V}}.table_relationship
+    WHERE is_active = 1
+
+    UNION ALL
+
+    -- Recursive: forward multi-hop
+    SELECT
+        rp.source_table
+       ,{{tr_V}}.target_table
+       ,rp.path_tables || ' -> ' || {{tr_V}}.target_table
+       ,rp.path_joins || ' | JOIN ' || {{tr_V}}.target_table || ' ON '
+            || {{tr_V}}.target_table || '.' || {{tr_V}}.target_column || ' = '
+            || {{tr_V}}.source_table || '.' || {{tr_V}}.source_column
+       ,rp.hop_count + 1
+       ,rp.path_description || ' -> ' || {{tr_V}}.relationship_description
+    FROM relationship_paths rp
+    INNER JOIN {{CallCentre_SEM_STD_V}}.table_relationship {{tr_V}}
+        ON {{tr_V}}.source_table = rp.target_table
+       AND {{tr_V}}.is_active = 1
+    WHERE rp.hop_count < 5
+      AND rp.path_tables NOT LIKE '%' || {{tr_V}}.target_table || '%'
+
+    UNION ALL
+
+    -- Recursive: backward multi-hop
+    SELECT
+        rp.source_table
+       ,{{tr_V}}.source_table
+       ,rp.path_tables || ' -> ' || {{tr_V}}.source_table
+       ,rp.path_joins || ' | JOIN ' || {{tr_V}}.source_table || ' ON '
+            || {{tr_V}}.source_table || '.' || {{tr_V}}.source_column || ' = '
+            || {{tr_V}}.target_table || '.' || {{tr_V}}.target_column
+       ,rp.hop_count + 1
+       ,rp.path_description || ' -> REVERSE: ' || {{tr_V}}.relationship_description
+    FROM relationship_paths rp
+    INNER JOIN {{CallCentre_SEM_STD_V}}.table_relationship {{tr_V}}
+        ON {{tr_V}}.target_table = rp.target_table
+       AND {{tr_V}}.is_active = 1
+    WHERE rp.hop_count < 5
+      AND rp.path_tables NOT LIKE '%' || {{tr_V}}.source_table || '%'
+)
+SELECT
+    source_table
+   ,target_table
+   ,path_tables
+   ,path_joins
+   ,hop_count
+   ,path_description
+FROM relationship_paths;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_SEM_BUS_V.relationship_paths.source_table|VARCHAR(100)
+--CallCentre_SEM_BUS_V.relationship_paths.target_table|VARCHAR(100)
+--CallCentre_SEM_BUS_V.relationship_paths.path_tables|VARCHAR(204)
+--CallCentre_SEM_BUS_V.relationship_paths.path_joins|VARCHAR(514)
+--CallCentre_SEM_BUS_V.relationship_paths.hop_count|BYTEINT
+--CallCentre_SEM_BUS_V.relationship_paths.path_description|VARCHAR(1000)
+

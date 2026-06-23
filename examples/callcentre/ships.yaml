@@ -1,0 +1,27 @@
+# ships.yaml — SHIPS project master configuration
+#
+# This file is the single entry point for project-level pipeline
+# settings.  All omitted values fall back to built-in defaults.
+#
+# Reference: docs/SHIPS_MODULE_ARGS.md
+
+project: callcentre
+version: "1.0"
+environments: ["DEV"]
+
+# ---- Config file pointers ----
+# Defaults shown — only override if you move the files.
+#
+# config:
+#   inspect:   config/inspect.conf
+#   placement: config/object_placement.yaml
+#   tokens:    config/token_map.conf
+
+# ---- Inspect-stage options ----
+# Grant validation behaviour is configured in config/inspect.conf:
+#
+#   warn_extra_grants=ERROR     # ERROR blocks, WARNING/WARN reports, OFF suppresses
+#                               # extra-only manual grant drift
+#   warn_external_grants=INFO   # INFO surfaces (default), WARNING reports, ERROR
+#                               # blocks, OFF suppresses external-grantee .dcl files
+#                               # (grants to roles/databases outside the package)

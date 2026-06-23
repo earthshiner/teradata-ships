@@ -1,0 +1,47 @@
+REPLACE VIEW {{CallCentre_OBS_BUS_V}}.data_quality_metric
+(
+      quality_metric_id
+    , database_name
+    , table_name
+    , column_name
+    , metric_name
+    , metric_value
+    , metric_category
+    , measured_dts
+    , quality_threshold
+    , is_threshold_met
+    , sample_size
+    , created_at
+)
+AS
+SELECT
+      quality_metric_id
+    , database_name
+    , table_name
+    , column_name
+    , metric_name
+    , metric_value
+    , metric_category
+    , measured_dts
+    , quality_threshold
+    , is_threshold_met
+    , sample_size
+    , created_at
+FROM {{CallCentre_OBS_STD_V}}.data_quality_metric;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_OBS_BUS_V.data_quality_metric.quality_metric_id|INTEGER
+--CallCentre_OBS_BUS_V.data_quality_metric.database_name|VARCHAR(100)
+--CallCentre_OBS_BUS_V.data_quality_metric.table_name|VARCHAR(100)
+--CallCentre_OBS_BUS_V.data_quality_metric.column_name|VARCHAR(100)
+--CallCentre_OBS_BUS_V.data_quality_metric.metric_name|VARCHAR(100)
+--CallCentre_OBS_BUS_V.data_quality_metric.metric_value|DECIMAL(10,4)
+--CallCentre_OBS_BUS_V.data_quality_metric.metric_category|VARCHAR(50)
+--CallCentre_OBS_BUS_V.data_quality_metric.measured_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_OBS_BUS_V.data_quality_metric.quality_threshold|DECIMAL(5,4)
+--CallCentre_OBS_BUS_V.data_quality_metric.is_threshold_met|BYTEINT
+--CallCentre_OBS_BUS_V.data_quality_metric.sample_size|INTEGER
+--CallCentre_OBS_BUS_V.data_quality_metric.created_at|TIMESTAMP WITH TIME ZONE
+

@@ -1,0 +1,33 @@
+CREATE VIEW {{CallCentre_DOM_STD_V}}.Call_Summary_H
+(
+      call_summary_id
+    , call_id
+    , conversation_summary
+    , valid_from_dts
+    , valid_to_dts
+    , is_current
+    , is_deleted
+)
+AS
+LOCKING ROW FOR ACCESS
+SELECT
+      call_summary_id
+    , call_id
+    , conversation_summary
+    , valid_from_dts
+    , valid_to_dts
+    , is_current
+    , is_deleted
+FROM {{CallCentre_DOM_STD_T}}.Call_Summary_H;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_DOM_STD_V.Call_Summary_H.call_summary_id|INTEGER
+--CallCentre_DOM_STD_V.Call_Summary_H.call_id|INTEGER
+--CallCentre_DOM_STD_V.Call_Summary_H.conversation_summary|CLOB(2097088000)
+--CallCentre_DOM_STD_V.Call_Summary_H.valid_from_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_DOM_STD_V.Call_Summary_H.valid_to_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_DOM_STD_V.Call_Summary_H.is_current|BYTEINT
+--CallCentre_DOM_STD_V.Call_Summary_H.is_deleted|BYTEINT
+

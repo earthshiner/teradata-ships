@@ -1,0 +1,59 @@
+CREATE VIEW {{CallCentre_SEM_BUS_V}}.table_relationship
+(
+      relationship_id
+    , relationship_name
+    , relationship_description
+    , source_database
+    , source_table
+    , source_column
+    , target_database
+    , target_table
+    , target_column
+    , relationship_type
+    , cardinality
+    , relationship_meaning
+    , is_mandatory
+    , is_active
+    , created_at
+    , updated_at
+)
+AS
+SELECT
+      relationship_id
+    , relationship_name
+    , relationship_description
+    , source_database
+    , source_table
+    , source_column
+    , target_database
+    , target_table
+    , target_column
+    , relationship_type
+    , cardinality
+    , relationship_meaning
+    , is_mandatory
+    , is_active
+    , created_at
+    , updated_at
+FROM {{CallCentre_SEM_STD_V}}.table_relationship;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_SEM_BUS_V.table_relationship.relationship_id|INTEGER
+--CallCentre_SEM_BUS_V.table_relationship.relationship_name|VARCHAR(100)
+--CallCentre_SEM_BUS_V.table_relationship.relationship_description|VARCHAR(1000)
+--CallCentre_SEM_BUS_V.table_relationship.source_database|VARCHAR(100)
+--CallCentre_SEM_BUS_V.table_relationship.source_table|VARCHAR(100)
+--CallCentre_SEM_BUS_V.table_relationship.source_column|VARCHAR(100)
+--CallCentre_SEM_BUS_V.table_relationship.target_database|VARCHAR(100)
+--CallCentre_SEM_BUS_V.table_relationship.target_table|VARCHAR(100)
+--CallCentre_SEM_BUS_V.table_relationship.target_column|VARCHAR(100)
+--CallCentre_SEM_BUS_V.table_relationship.relationship_type|VARCHAR(50)
+--CallCentre_SEM_BUS_V.table_relationship.cardinality|VARCHAR(20)
+--CallCentre_SEM_BUS_V.table_relationship.relationship_meaning|VARCHAR(500)
+--CallCentre_SEM_BUS_V.table_relationship.is_mandatory|BYTEINT
+--CallCentre_SEM_BUS_V.table_relationship.is_active|BYTEINT
+--CallCentre_SEM_BUS_V.table_relationship.created_at|TIMESTAMP WITH TIME ZONE
+--CallCentre_SEM_BUS_V.table_relationship.updated_at|TIMESTAMP WITH TIME ZONE
+

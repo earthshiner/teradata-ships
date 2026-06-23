@@ -1,0 +1,66 @@
+REPLACE VIEW {{CallCentre_MEM_STD_V}}.Query_Cookbook
+(
+      recipe_key
+    , recipe_id
+    , recipe_title
+    , recipe_description
+    , use_case
+    , target_module
+    , sql_template
+    , parameter_descriptions
+    , performance_notes
+    , complexity
+    , source_module
+    , is_batch
+    , module_version
+    , is_active
+    , valid_from
+    , valid_to
+    , created_timestamp
+    , updated_timestamp
+)
+AS
+LOCKING ROW FOR ACCESS
+SELECT
+      recipe_key
+    , recipe_id
+    , recipe_title
+    , recipe_description
+    , use_case
+    , target_module
+    , sql_template
+    , parameter_descriptions
+    , performance_notes
+    , complexity
+    , source_module
+    , is_batch
+    , module_version
+    , is_active
+    , valid_from
+    , valid_to
+    , created_timestamp
+    , updated_timestamp
+    FROM {{CallCentre_MEM_STD_T}}.Query_Cookbook;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_MEM_STD_V.Query_Cookbook.recipe_key|BIGINT
+--CallCentre_MEM_STD_V.Query_Cookbook.recipe_id|VARCHAR(50)
+--CallCentre_MEM_STD_V.Query_Cookbook.recipe_title|VARCHAR(200)
+--CallCentre_MEM_STD_V.Query_Cookbook.recipe_description|CLOB(2097088000)
+--CallCentre_MEM_STD_V.Query_Cookbook.use_case|VARCHAR(200)
+--CallCentre_MEM_STD_V.Query_Cookbook.target_module|VARCHAR(50)
+--CallCentre_MEM_STD_V.Query_Cookbook.sql_template|CLOB(2097088000)
+--CallCentre_MEM_STD_V.Query_Cookbook.parameter_descriptions|CLOB(2097088000)
+--CallCentre_MEM_STD_V.Query_Cookbook.performance_notes|CLOB(2097088000)
+--CallCentre_MEM_STD_V.Query_Cookbook.complexity|VARCHAR(20)
+--CallCentre_MEM_STD_V.Query_Cookbook.source_module|VARCHAR(50)
+--CallCentre_MEM_STD_V.Query_Cookbook.is_batch|BYTEINT
+--CallCentre_MEM_STD_V.Query_Cookbook.module_version|VARCHAR(20)
+--CallCentre_MEM_STD_V.Query_Cookbook.is_active|BYTEINT
+--CallCentre_MEM_STD_V.Query_Cookbook.valid_from|DATE
+--CallCentre_MEM_STD_V.Query_Cookbook.valid_to|DATE
+--CallCentre_MEM_STD_V.Query_Cookbook.created_timestamp|TIMESTAMP WITH TIME ZONE
+--CallCentre_MEM_STD_V.Query_Cookbook.updated_timestamp|TIMESTAMP WITH TIME ZONE
+

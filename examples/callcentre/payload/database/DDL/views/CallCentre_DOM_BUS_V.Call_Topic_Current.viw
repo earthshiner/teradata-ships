@@ -1,0 +1,28 @@
+REPLACE VIEW {{CallCentre_DOM_BUS_V}}.Call_Topic_Current
+(
+    call_topic_id
+   ,call_id
+   ,topic
+   ,valid_from_dts
+   ,valid_to_dts
+)
+AS
+SELECT
+    call_topic_id
+   ,call_id
+   ,topic
+   ,valid_from_dts
+   ,valid_to_dts
+FROM {{CallCentre_DOM_STD_V}}.Call_Topic_H
+WHERE is_current = 1
+  AND is_deleted = 0;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_DOM_BUS_V.Call_Topic_Current.call_topic_id|INTEGER
+--CallCentre_DOM_BUS_V.Call_Topic_Current.call_id|INTEGER
+--CallCentre_DOM_BUS_V.Call_Topic_Current.topic|VARCHAR(500)
+--CallCentre_DOM_BUS_V.Call_Topic_Current.valid_from_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_DOM_BUS_V.Call_Topic_Current.valid_to_dts|TIMESTAMP WITH TIME ZONE
+

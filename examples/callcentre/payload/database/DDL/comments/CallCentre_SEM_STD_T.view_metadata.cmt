@@ -1,0 +1,1 @@
+comment on table {{CallCentre_SEM_STD_T}}.view_metadata is 'View catalogue - models the 1:M relationship of a base table to the views that expose it (locking, business, current, enriched, etc.) for agent discovery. Sibling of entity_metadata/column_metadata.';

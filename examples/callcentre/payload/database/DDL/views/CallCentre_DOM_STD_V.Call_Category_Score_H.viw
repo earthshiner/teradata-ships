@@ -1,0 +1,75 @@
+CREATE VIEW {{CallCentre_DOM_STD_V}}.Call_Category_Score_H
+(
+      call_category_score_id
+    , call_id
+    , communication_quality_avg_sim
+    , conduct_and_professionalism_avg_sim
+    , customer_experience_avg_sim
+    , compliance_avg_sim
+    , call_handling_avg_sim
+    , communication_quality_total_cnt
+    , conduct_and_professionalism_total_cnt
+    , customer_experience_total_cnt
+    , compliance_total_cnt
+    , call_handling_total_cnt
+    , communication_quality_all_hit
+    , conduct_and_professionalism_all_hit
+    , customer_experience_all_hit
+    , compliance_all_hit
+    , call_handling_all_hit
+    , valid_from_dts
+    , valid_to_dts
+    , is_current
+    , is_deleted
+)
+AS
+LOCKING ROW FOR ACCESS
+SELECT
+      call_category_score_id
+    , call_id
+    , communication_quality_avg_sim
+    , conduct_and_professionalism_avg_sim
+    , customer_experience_avg_sim
+    , compliance_avg_sim
+    , call_handling_avg_sim
+    , communication_quality_total_cnt
+    , conduct_and_professionalism_total_cnt
+    , customer_experience_total_cnt
+    , compliance_total_cnt
+    , call_handling_total_cnt
+    , communication_quality_all_hit
+    , conduct_and_professionalism_all_hit
+    , customer_experience_all_hit
+    , compliance_all_hit
+    , call_handling_all_hit
+    , valid_from_dts
+    , valid_to_dts
+    , is_current
+    , is_deleted
+FROM {{CallCentre_DOM_STD_T}}.Call_Category_Score_H;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_DOM_STD_V.Call_Category_Score_H.call_category_score_id|INTEGER
+--CallCentre_DOM_STD_V.Call_Category_Score_H.call_id|INTEGER
+--CallCentre_DOM_STD_V.Call_Category_Score_H.communication_quality_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Category_Score_H.conduct_and_professionalism_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Category_Score_H.customer_experience_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Category_Score_H.compliance_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Category_Score_H.call_handling_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_STD_V.Call_Category_Score_H.communication_quality_total_cnt|SMALLINT
+--CallCentre_DOM_STD_V.Call_Category_Score_H.conduct_and_professionalism_total_cnt|SMALLINT
+--CallCentre_DOM_STD_V.Call_Category_Score_H.customer_experience_total_cnt|SMALLINT
+--CallCentre_DOM_STD_V.Call_Category_Score_H.compliance_total_cnt|SMALLINT
+--CallCentre_DOM_STD_V.Call_Category_Score_H.call_handling_total_cnt|SMALLINT
+--CallCentre_DOM_STD_V.Call_Category_Score_H.communication_quality_all_hit|BYTEINT
+--CallCentre_DOM_STD_V.Call_Category_Score_H.conduct_and_professionalism_all_hit|BYTEINT
+--CallCentre_DOM_STD_V.Call_Category_Score_H.customer_experience_all_hit|BYTEINT
+--CallCentre_DOM_STD_V.Call_Category_Score_H.compliance_all_hit|BYTEINT
+--CallCentre_DOM_STD_V.Call_Category_Score_H.call_handling_all_hit|BYTEINT
+--CallCentre_DOM_STD_V.Call_Category_Score_H.valid_from_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_DOM_STD_V.Call_Category_Score_H.valid_to_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_DOM_STD_V.Call_Category_Score_H.is_current|BYTEINT
+--CallCentre_DOM_STD_V.Call_Category_Score_H.is_deleted|BYTEINT
+

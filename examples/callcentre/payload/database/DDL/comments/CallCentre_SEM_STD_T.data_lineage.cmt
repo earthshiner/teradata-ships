@@ -1,0 +1,2 @@
+comment on table {{CallCentre_SEM_STD_T}}.data_lineage is 'Definitional data lineage (catalog) - declares structural flows (source -> job -> target). One row per flow;
+ changes only when pipeline design changes. Executions tracked in CallCentre_OBS_*.lineage_run.';

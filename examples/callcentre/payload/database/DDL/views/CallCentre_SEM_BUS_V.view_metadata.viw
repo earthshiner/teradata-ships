@@ -1,0 +1,24 @@
+REPLACE VIEW {{CallCentre_SEM_BUS_V}}.view_metadata (
+      view_metadata_id, base_database, base_table, view_database, view_name,
+      view_type, view_purpose, is_primary, is_active, created_at, updated_at
+) AS
+SELECT
+      view_metadata_id, base_database, base_table, view_database, view_name,
+      view_type, view_purpose, is_primary, is_active, created_at, updated_at
+FROM {{CallCentre_SEM_STD_V}}.view_metadata;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_SEM_BUS_V.view_metadata.view_metadata_id|INTEGER
+--CallCentre_SEM_BUS_V.view_metadata.base_database|VARCHAR(128)
+--CallCentre_SEM_BUS_V.view_metadata.base_table|VARCHAR(128)
+--CallCentre_SEM_BUS_V.view_metadata.view_database|VARCHAR(128)
+--CallCentre_SEM_BUS_V.view_metadata.view_name|VARCHAR(128)
+--CallCentre_SEM_BUS_V.view_metadata.view_type|VARCHAR(30)
+--CallCentre_SEM_BUS_V.view_metadata.view_purpose|VARCHAR(500)
+--CallCentre_SEM_BUS_V.view_metadata.is_primary|BYTEINT
+--CallCentre_SEM_BUS_V.view_metadata.is_active|BYTEINT
+--CallCentre_SEM_BUS_V.view_metadata.created_at|TIMESTAMP WITH TIME ZONE
+--CallCentre_SEM_BUS_V.view_metadata.updated_at|TIMESTAMP WITH TIME ZONE
+

@@ -1,0 +1,4 @@
+comment on table {{CallCentre_SCH_STD_T}}.call_embedding_ref is 'External embedding reference per call. Stores a stable hash or external key (not the vector) to retrieve embeddings from an external store (Python cache, Redis, Pinecone, etc.). Upgrade path: add VECTOR column when TD 20.00.26.XX+ is available.';
+comment on column {{CallCentre_SCH_STD_T}}.call_embedding_ref.embedding_ref_key is 'Stable key to retrieve the embedding from the external store. Typically SHA-256 of (call_id + embedded_columns + model) or an external system primary key.';
+
+comment on column {{CallCentre_SCH_STD_T}}.call_embedding_ref.embedding_store is 'Identifies the external embedding store. E.g. python_cache, redis, pinecone, chroma, file_system.';

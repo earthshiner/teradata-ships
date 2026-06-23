@@ -1,0 +1,2 @@
+comment on view {{CallCentre_MEM_BUS_V}}.Design_Decision is 'Canonical access view over CallCentre_MEM_STD_V.Design_Decision. Full passthrough;
+ consumers filter WHERE is_current = 1 (and validity). Friendly pre-filtered alias: Current_Decisions.';

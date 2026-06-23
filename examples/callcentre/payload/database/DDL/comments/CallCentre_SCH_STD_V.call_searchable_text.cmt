@@ -1,0 +1,2 @@
+comment on column {{CallCentre_SCH_STD_V}}.call_searchable_text.embedded_columns is 'Comma-separated list of Domain source columns concatenated to produce searchable_text.';
+comment on column {{CallCentre_SCH_STD_V}}.call_searchable_text.searchable_text is 'Concatenated normalised text from embedded_columns (topic + conversation_summary). Used for LIKE predicate and CONTAINS search.';

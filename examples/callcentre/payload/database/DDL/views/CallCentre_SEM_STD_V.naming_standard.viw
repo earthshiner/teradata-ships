@@ -1,0 +1,39 @@
+CREATE VIEW {{CallCentre_SEM_STD_V}}.naming_standard
+(
+      naming_standard_id
+    , standard_type
+    , standard_value
+    , {{meaning_V}}
+    , usage_guidance
+    , applies_to
+    , examples
+    , is_active
+    , created_at
+)
+AS
+LOCKING ROW FOR ACCESS
+SELECT
+      naming_standard_id
+    , standard_type
+    , standard_value
+    , {{meaning_V}}
+    , usage_guidance
+    , applies_to
+    , examples
+    , is_active
+    , created_at
+FROM {{CallCentre_SEM_STD_T}}.naming_standard;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_SEM_STD_V.naming_standard.naming_standard_id|INTEGER
+--CallCentre_SEM_STD_V.naming_standard.standard_type|VARCHAR(50)
+--CallCentre_SEM_STD_V.naming_standard.standard_value|VARCHAR(100)
+--CallCentre_SEM_STD_V.naming_standard.meaning|VARCHAR(500)
+--CallCentre_SEM_STD_V.naming_standard.usage_guidance|VARCHAR(1000)
+--CallCentre_SEM_STD_V.naming_standard.applies_to|VARCHAR(50)
+--CallCentre_SEM_STD_V.naming_standard.examples|VARCHAR(1000)
+--CallCentre_SEM_STD_V.naming_standard.is_active|BYTEINT
+--CallCentre_SEM_STD_V.naming_standard.created_at|TIMESTAMP WITH TIME ZONE
+

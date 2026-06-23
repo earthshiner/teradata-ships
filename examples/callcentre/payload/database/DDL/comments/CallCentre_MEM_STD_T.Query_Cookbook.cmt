@@ -1,0 +1,4 @@
+comment on column {{CallCentre_MEM_STD_T}}.Query_Cookbook.is_batch is '1 = intentional batch/exhaustive recipe (no boundary predicate expected);
+ 0 = interactive recipe (must be bounded). Authoritative input to the Trust Engine bounds check.';
+
+

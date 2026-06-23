@@ -1,0 +1,2 @@
+comment on view {{CallCentre_SCH_BUS_V}}.call_keywords is 'Keyword token index for fast exact keyword search. Use IN-list on keyword column, then join to call_searchable on call_id for full context. Faster than LIKE on CLOB for common terms.';
+comment on column {{CallCentre_SCH_BUS_V}}.call_keywords.keyword is 'Lowercase, stop-word-filtered token. Enables fast IN-list keyword search without LIKE predicates over the CLOB searchable_text column.';

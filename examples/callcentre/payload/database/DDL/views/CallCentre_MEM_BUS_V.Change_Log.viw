@@ -1,0 +1,35 @@
+REPLACE VIEW {{CallCentre_MEM_BUS_V}}.Change_Log
+(
+      change_key, change_id, version_number, change_title
+    , change_description, change_type, change_category, source_module
+    , affects_table, migration_steps, rollback_steps, related_decision_id
+    , deployed_date, deployed_by, deployment_status, created_timestamp
+)
+AS
+SELECT
+      change_key, change_id, version_number, change_title
+    , change_description, change_type, change_category, source_module
+    , affects_table, migration_steps, rollback_steps, related_decision_id
+    , deployed_date, deployed_by, deployment_status, created_timestamp
+FROM {{CallCentre_MEM_STD_V}}.Change_Log;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_MEM_BUS_V.Change_Log.change_key|BIGINT
+--CallCentre_MEM_BUS_V.Change_Log.change_id|VARCHAR(50)
+--CallCentre_MEM_BUS_V.Change_Log.version_number|VARCHAR(20)
+--CallCentre_MEM_BUS_V.Change_Log.change_title|VARCHAR(200)
+--CallCentre_MEM_BUS_V.Change_Log.change_description|CLOB(2097088000)
+--CallCentre_MEM_BUS_V.Change_Log.change_type|VARCHAR(30)
+--CallCentre_MEM_BUS_V.Change_Log.change_category|VARCHAR(50)
+--CallCentre_MEM_BUS_V.Change_Log.source_module|VARCHAR(50)
+--CallCentre_MEM_BUS_V.Change_Log.affects_table|VARCHAR(200)
+--CallCentre_MEM_BUS_V.Change_Log.migration_steps|CLOB(2097088000)
+--CallCentre_MEM_BUS_V.Change_Log.rollback_steps|CLOB(2097088000)
+--CallCentre_MEM_BUS_V.Change_Log.related_decision_id|VARCHAR(50)
+--CallCentre_MEM_BUS_V.Change_Log.deployed_date|DATE
+--CallCentre_MEM_BUS_V.Change_Log.deployed_by|VARCHAR(100)
+--CallCentre_MEM_BUS_V.Change_Log.deployment_status|VARCHAR(20)
+--CallCentre_MEM_BUS_V.Change_Log.created_timestamp|TIMESTAMP WITH TIME ZONE
+

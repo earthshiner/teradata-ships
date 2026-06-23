@@ -1,0 +1,38 @@
+REPLACE VIEW {{CallCentre_SEM_BUS_V}}.lineage_run_latest (
+    lineage_id, source_database, source_table, job_name, target_database, target_table,
+    transformation_type, is_active, lineage_run_id, last_run_dts, last_run_status,
+    last_run_duration_ms, last_records_read, last_records_written, last_records_rejected,
+    last_error_message
+) AS
+SELECT dl.lineage_id, dl.source_database, dl.source_table, dl.job_name,
+       dl.target_database, dl.target_table, dl.transformation_type, dl.is_active,
+       {{lr_V}}.lineage_run_id, {{lr_V}}.run_dts, {{lr_V}}.run_status, {{lr_V}}.run_duration_ms,
+       {{lr_V}}.records_read, {{lr_V}}.records_written, {{lr_V}}.records_rejected, {{lr_V}}.error_message
+FROM {{CallCentre_SEM_STD_V}}.data_lineage AS dl
+LEFT OUTER JOIN {{CallCentre_OBS_STD_V}}.lineage_run AS {{lr_V}}
+  ON {{lr_V}}.lineage_id = dl.lineage_id
+ AND {{lr_V}}.run_dts = (SELECT MAX(lr2.run_dts)
+                   FROM {{CallCentre_OBS_STD_V}}.lineage_run AS lr2
+                   WHERE lr2.lineage_id = dl.lineage_id)
+WHERE dl.is_active = 1;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_SEM_BUS_V.lineage_run_latest.lineage_id|INTEGER
+--CallCentre_SEM_BUS_V.lineage_run_latest.source_database|VARCHAR(100)
+--CallCentre_SEM_BUS_V.lineage_run_latest.source_table|VARCHAR(100)
+--CallCentre_SEM_BUS_V.lineage_run_latest.job_name|VARCHAR(200)
+--CallCentre_SEM_BUS_V.lineage_run_latest.target_database|VARCHAR(100)
+--CallCentre_SEM_BUS_V.lineage_run_latest.target_table|VARCHAR(100)
+--CallCentre_SEM_BUS_V.lineage_run_latest.transformation_type|VARCHAR(50)
+--CallCentre_SEM_BUS_V.lineage_run_latest.is_active|BYTEINT
+--CallCentre_SEM_BUS_V.lineage_run_latest.lineage_run_id|INTEGER
+--CallCentre_SEM_BUS_V.lineage_run_latest.last_run_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_SEM_BUS_V.lineage_run_latest.last_run_status|VARCHAR(20)
+--CallCentre_SEM_BUS_V.lineage_run_latest.last_run_duration_ms|INTEGER
+--CallCentre_SEM_BUS_V.lineage_run_latest.last_records_read|INTEGER
+--CallCentre_SEM_BUS_V.lineage_run_latest.last_records_written|INTEGER
+--CallCentre_SEM_BUS_V.lineage_run_latest.last_records_rejected|INTEGER
+--CallCentre_SEM_BUS_V.lineage_run_latest.last_error_message|VARCHAR(2000)
+

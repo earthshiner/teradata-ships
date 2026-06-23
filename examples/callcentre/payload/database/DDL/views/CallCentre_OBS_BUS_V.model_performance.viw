@@ -1,0 +1,38 @@
+REPLACE VIEW {{CallCentre_OBS_BUS_V}}.model_performance
+(
+      performance_id
+    , model_key
+    , model_version
+    , metric_name
+    , metric_value
+    , evaluation_dts
+    , sample_size
+    , is_sla_met
+    , created_at
+)
+AS
+SELECT
+      performance_id
+    , model_key
+    , model_version
+    , metric_name
+    , metric_value
+    , evaluation_dts
+    , sample_size
+    , is_sla_met
+    , created_at
+FROM {{CallCentre_OBS_STD_V}}.model_performance;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_OBS_BUS_V.model_performance.performance_id|INTEGER
+--CallCentre_OBS_BUS_V.model_performance.model_key|VARCHAR(100)
+--CallCentre_OBS_BUS_V.model_performance.model_version|VARCHAR(20)
+--CallCentre_OBS_BUS_V.model_performance.metric_name|VARCHAR(100)
+--CallCentre_OBS_BUS_V.model_performance.metric_value|DECIMAL(10,6)
+--CallCentre_OBS_BUS_V.model_performance.evaluation_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_OBS_BUS_V.model_performance.sample_size|INTEGER
+--CallCentre_OBS_BUS_V.model_performance.is_sla_met|BYTEINT
+--CallCentre_OBS_BUS_V.model_performance.created_at|TIMESTAMP WITH TIME ZONE
+

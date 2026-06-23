@@ -1,0 +1,4 @@
+comment on view {{CallCentre_PRE_BUS_V}}.call_features_enriched is 'Current features enriched with Domain call context (agent, topic, sentiment, dynamics). Primary view for agent coaching and quality analytics.';
+comment on column {{CallCentre_PRE_BUS_V}}.call_features_enriched.topic is 'Business area classification of the call. Six values: Other (30.9%), Vet & Pet (29.5%), Healthcare Scheduling (18.4%), Medical Insurance (11.8%), Automotive (5.6%), Home Services (3.8%).';
+
+comment on column {{CallCentre_PRE_BUS_V}}.call_features_enriched.overall_quality_score is 'Weighted composite across all 5 group composites. Range 0-1. Primary ML target variable.';

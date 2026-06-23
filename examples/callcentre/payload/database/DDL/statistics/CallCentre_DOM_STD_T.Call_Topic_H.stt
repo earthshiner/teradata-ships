@@ -1,0 +1,9 @@
+COLLECT STATISTICS 
+                   -- default SYSTEM SAMPLE PERCENT 
+            COLUMN ( PARTITION ) , 
+            COLUMN ( call_topic_id ) , 
+            COLUMN ( call_id ) , 
+            COLUMN ( topic ) , 
+            COLUMN ( is_current ) , 
+            COLUMN ( is_deleted ) 
+                ON {{CallCentre_DOM_STD_T}}.Call_Topic_H ;

@@ -1,0 +1,39 @@
+REPLACE VIEW {{CallCentre_MEM_BUS_V}}.Glossary_Active
+(
+    term
+   ,term_category
+   ,definition
+   ,business_context
+   ,synonyms
+   ,related_terms
+   ,related_table
+   ,related_column
+   ,source_module
+)
+AS
+SELECT
+    term
+   ,term_category
+   ,definition
+   ,business_context
+   ,synonyms
+   ,related_terms
+   ,related_table
+   ,related_column
+   ,source_module
+FROM {{CallCentre_MEM_STD_V}}.Business_Glossary
+WHERE is_active = 1;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_MEM_BUS_V.Glossary_Active.term|VARCHAR(200)
+--CallCentre_MEM_BUS_V.Glossary_Active.term_category|VARCHAR(50)
+--CallCentre_MEM_BUS_V.Glossary_Active.definition|CLOB(2097088000)
+--CallCentre_MEM_BUS_V.Glossary_Active.business_context|CLOB(2097088000)
+--CallCentre_MEM_BUS_V.Glossary_Active.synonyms|VARCHAR(500)
+--CallCentre_MEM_BUS_V.Glossary_Active.related_terms|VARCHAR(500)
+--CallCentre_MEM_BUS_V.Glossary_Active.related_table|VARCHAR(200)
+--CallCentre_MEM_BUS_V.Glossary_Active.related_column|VARCHAR(200)
+--CallCentre_MEM_BUS_V.Glossary_Active.source_module|VARCHAR(50)
+

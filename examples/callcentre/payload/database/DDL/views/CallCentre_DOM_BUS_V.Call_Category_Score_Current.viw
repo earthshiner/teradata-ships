@@ -1,0 +1,64 @@
+REPLACE VIEW {{CallCentre_DOM_BUS_V}}.Call_Category_Score_Current
+(
+      call_category_score_id
+    , call_id
+    , communication_quality_avg_sim
+    , conduct_and_professionalism_avg_sim
+    , customer_experience_avg_sim
+    , compliance_avg_sim
+    , call_handling_avg_sim
+    , communication_quality_total_cnt
+    , conduct_and_professionalism_total_cnt
+    , customer_experience_total_cnt
+    , compliance_total_cnt
+    , call_handling_total_cnt
+    , communication_quality_all_hit
+    , conduct_and_professionalism_all_hit
+    , customer_experience_all_hit
+    , compliance_all_hit
+    , call_handling_all_hit
+)
+AS
+
+SELECT
+      src.call_category_score_id AS call_category_score_id
+    , src.call_id AS call_id
+    , src.communication_quality_avg_sim AS communication_quality_avg_sim
+    , src.conduct_and_professionalism_avg_sim AS conduct_and_professionalism_avg_sim
+    , src.customer_experience_avg_sim AS customer_experience_avg_sim
+    , src.compliance_avg_sim AS compliance_avg_sim
+    , src.call_handling_avg_sim AS call_handling_avg_sim
+    , src.communication_quality_total_cnt AS communication_quality_total_cnt
+    , src.conduct_and_professionalism_total_cnt AS conduct_and_professionalism_total_cnt
+    , src.customer_experience_total_cnt AS customer_experience_total_cnt
+    , src.compliance_total_cnt AS compliance_total_cnt
+    , src.call_handling_total_cnt AS call_handling_total_cnt
+    , src.communication_quality_all_hit AS communication_quality_all_hit
+    , src.conduct_and_professionalism_all_hit AS conduct_and_professionalism_all_hit
+    , src.customer_experience_all_hit AS customer_experience_all_hit
+    , src.compliance_all_hit AS compliance_all_hit
+    , src.call_handling_all_hit AS call_handling_all_hit
+FROM {{CallCentre_DOM_STD_V}}.Call_Category_Score_H AS src
+WHERE is_current = 1 AND is_deleted = 0;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_DOM_BUS_V.Call_Category_Score_Current.call_category_score_id|INTEGER
+--CallCentre_DOM_BUS_V.Call_Category_Score_Current.call_id|INTEGER
+--CallCentre_DOM_BUS_V.Call_Category_Score_Current.communication_quality_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_BUS_V.Call_Category_Score_Current.conduct_and_professionalism_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_BUS_V.Call_Category_Score_Current.customer_experience_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_BUS_V.Call_Category_Score_Current.compliance_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_BUS_V.Call_Category_Score_Current.call_handling_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_BUS_V.Call_Category_Score_Current.communication_quality_total_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Category_Score_Current.conduct_and_professionalism_total_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Category_Score_Current.customer_experience_total_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Category_Score_Current.compliance_total_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Category_Score_Current.call_handling_total_cnt|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Category_Score_Current.communication_quality_all_hit|BYTEINT
+--CallCentre_DOM_BUS_V.Call_Category_Score_Current.conduct_and_professionalism_all_hit|BYTEINT
+--CallCentre_DOM_BUS_V.Call_Category_Score_Current.customer_experience_all_hit|BYTEINT
+--CallCentre_DOM_BUS_V.Call_Category_Score_Current.compliance_all_hit|BYTEINT
+--CallCentre_DOM_BUS_V.Call_Category_Score_Current.call_handling_all_hit|BYTEINT
+

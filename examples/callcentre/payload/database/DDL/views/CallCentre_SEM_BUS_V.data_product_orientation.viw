@@ -1,0 +1,205 @@
+REPLACE VIEW {{CallCentre_SEM_BUS_V}}.data_product_orientation
+(
+    product_id
+   ,product_name
+   ,product_version
+   ,resource_role
+   ,database_name
+   ,object_name
+   ,fully_qualified_object_name
+   ,usage_guidance
+   ,is_required
+   ,discovery_order
+   ,metadata_updated_at
+)
+AS
+LOCKING ROW FOR ACCESS
+WITH resource_definitions AS
+(
+    SELECT
+        CAST('PRODUCT_MANIFEST' AS VARCHAR(50)) AS resource_role
+       ,CAST('CallCentre_SEM_BUS_V' AS VARCHAR(128)) AS database_name
+       ,CAST('data_product_manifest' AS VARCHAR(128)) AS object_name
+       ,CAST('Read the derived product contract and navigation endpoints.' AS VARCHAR(500))
+            AS usage_guidance
+       ,CAST(1 AS BYTEINT) AS is_required
+       ,CAST(1 AS INTEGER) AS discovery_order
+    FROM DBC.DBCInfoV
+    WHERE InfoKey = 'VERSION'
+
+    UNION ALL
+
+    SELECT
+        CAST('TRUST_STATUS' AS VARCHAR(50))
+       ,CAST('CallCentre_SEM_BUS_V' AS VARCHAR(128))
+       ,CAST('trust_engine_latest' AS VARCHAR(128))
+       ,CAST('Stop if agent_use_allowed is 0 or trust_status is UNTRUSTED.' AS VARCHAR(500))
+       ,CAST(1 AS BYTEINT)
+       ,CAST(2 AS INTEGER)
+    FROM DBC.DBCInfoV
+    WHERE InfoKey = 'VERSION'
+
+    UNION ALL
+
+    SELECT
+        CAST('OBJECT_CATALOG' AS VARCHAR(50))
+       ,CAST('CallCentre_SEM_BUS_V' AS VARCHAR(128))
+       ,CAST('data_product_object_catalog' AS VARCHAR(128))
+       ,CAST('Discover active fully qualified objects and their recommended roles.' AS VARCHAR(500))
+       ,CAST(1 AS BYTEINT)
+       ,CAST(3 AS INTEGER)
+    FROM DBC.DBCInfoV
+    WHERE InfoKey = 'VERSION'
+
+    UNION ALL
+
+    SELECT
+        CAST('ENTITY_CATALOG' AS VARCHAR(50))
+       ,CAST('CallCentre_SEM_BUS_V' AS VARCHAR(128))
+       ,CAST('entity_metadata' AS VARCHAR(128))
+       ,CAST('Discover business entities, governed views, keys, and temporal semantics.' AS VARCHAR(500))
+       ,CAST(1 AS BYTEINT)
+       ,CAST(4 AS INTEGER)
+    FROM DBC.DBCInfoV
+    WHERE InfoKey = 'VERSION'
+
+    UNION ALL
+
+    SELECT
+        CAST('COLUMN_CATALOG' AS VARCHAR(50))
+       ,CAST('CallCentre_SEM_BUS_V' AS VARCHAR(128))
+       ,CAST('column_metadata' AS VARCHAR(128))
+       ,CAST('Discover column meanings, datatypes, required fields, and sensitivity metadata.' AS VARCHAR(500))
+       ,CAST(1 AS BYTEINT)
+       ,CAST(5 AS INTEGER)
+    FROM DBC.DBCInfoV
+    WHERE InfoKey = 'VERSION'
+
+    UNION ALL
+
+    SELECT
+        CAST('RELATIONSHIP_CATALOG' AS VARCHAR(50))
+       ,CAST('CallCentre_SEM_BUS_V' AS VARCHAR(128))
+       ,CAST('table_relationship' AS VARCHAR(128))
+       ,CAST('Discover approved joins, cardinality, mandatory relationships, and join meaning.' AS VARCHAR(500))
+       ,CAST(1 AS BYTEINT)
+       ,CAST(6 AS INTEGER)
+    FROM DBC.DBCInfoV
+    WHERE InfoKey = 'VERSION'
+
+    UNION ALL
+
+    SELECT
+        CAST('RELATIONSHIP_PATHS' AS VARCHAR(50))
+       ,CAST('CallCentre_SEM_BUS_V' AS VARCHAR(128))
+       ,CAST('relationship_paths' AS VARCHAR(128))
+       ,CAST('Use precomputed multi-hop paths and path_joins instead of inventing joins.' AS VARCHAR(500))
+       ,CAST(1 AS BYTEINT)
+       ,CAST(7 AS INTEGER)
+    FROM DBC.DBCInfoV
+    WHERE InfoKey = 'VERSION'
+
+    UNION ALL
+
+    SELECT
+        CAST('QUERY_COOKBOOK' AS VARCHAR(50))
+       ,CAST('CallCentre_MEM_STD_V' AS VARCHAR(128))
+       ,CAST('Query_Cookbook' AS VARCHAR(128))
+       ,CAST('Prefer validated recipes for common analytical intentions.' AS VARCHAR(500))
+       ,CAST(1 AS BYTEINT)
+       ,CAST(8 AS INTEGER)
+    FROM DBC.DBCInfoV
+    WHERE InfoKey = 'VERSION'
+
+    UNION ALL
+
+    SELECT
+        CAST('GLOSSARY' AS VARCHAR(50))
+       ,CAST('CallCentre_MEM_STD_V' AS VARCHAR(128))
+       ,CAST('Business_Glossary' AS VARCHAR(128))
+       ,CAST('Resolve business terminology before interpreting entities or measures.' AS VARCHAR(500))
+       ,CAST(1 AS BYTEINT)
+       ,CAST(9 AS INTEGER)
+    FROM DBC.DBCInfoV
+    WHERE InfoKey = 'VERSION'
+
+    UNION ALL
+
+    SELECT
+        CAST('LINEAGE_CATALOG' AS VARCHAR(50))
+       ,CAST('CallCentre_SEM_BUS_V' AS VARCHAR(128))
+       ,CAST('data_lineage' AS VARCHAR(128))
+       ,CAST('Inspect governed source-to-target lineage for objects used in a query.' AS VARCHAR(500))
+       ,CAST(0 AS BYTEINT)
+       ,CAST(10 AS INTEGER)
+    FROM DBC.DBCInfoV
+    WHERE InfoKey = 'VERSION'
+
+    UNION ALL
+
+    SELECT
+        CAST('LINEAGE_GRAPH' AS VARCHAR(50))
+       ,CAST('CallCentre_SEM_BUS_V' AS VARCHAR(128))
+       ,CAST('lineage_graph' AS VARCHAR(128))
+       ,CAST('Use graph-ready lineage paths for impact and dependency analysis.' AS VARCHAR(500))
+       ,CAST(0 AS BYTEINT)
+       ,CAST(11 AS INTEGER)
+    FROM DBC.DBCInfoV
+    WHERE InfoKey = 'VERSION'
+
+    UNION ALL
+
+    SELECT
+        CAST('LINEAGE_RUN_STATUS' AS VARCHAR(50))
+       ,CAST('CallCentre_SEM_BUS_V' AS VARCHAR(128))
+       ,CAST('lineage_run_latest' AS VARCHAR(128))
+       ,CAST('Inspect the latest lineage collection status before relying on lineage evidence.' AS VARCHAR(500))
+       ,CAST(0 AS BYTEINT)
+       ,CAST(12 AS INTEGER)
+    FROM DBC.DBCInfoV
+    WHERE InfoKey = 'VERSION'
+
+    UNION ALL
+
+    SELECT
+        CAST('DESIGN_DECISIONS' AS VARCHAR(50))
+       ,CAST('CallCentre_MEM_STD_V' AS VARCHAR(128))
+       ,CAST('Design_Decision' AS VARCHAR(128))
+       ,CAST('Review architectural decisions when usage guidance or modelling choices need context.' AS VARCHAR(500))
+       ,CAST(0 AS BYTEINT)
+       ,CAST(13 AS INTEGER)
+    FROM DBC.DBCInfoV
+    WHERE InfoKey = 'VERSION'
+)
+SELECT
+    ar.product_id
+   ,ar.product_name
+   ,ar.product_version
+   ,rd.resource_role
+   ,rd.database_name
+   ,rd.object_name
+   ,TRIM(rd.database_name) || '.' || TRIM(rd.object_name)
+        AS fully_qualified_object_name
+   ,rd.usage_guidance
+   ,rd.is_required
+   ,rd.discovery_order
+   ,ar.updated_at AS metadata_updated_at
+FROM {{DataProductsMaster_GOV_BUS_V}}.active_data_product_registry ar
+CROSS JOIN resource_definitions rd
+WHERE ar.product_id = 'CALLCENTRE';
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_SEM_BUS_V.data_product_orientation.product_id|VARCHAR(128)
+--CallCentre_SEM_BUS_V.data_product_orientation.product_name|VARCHAR(256)
+--CallCentre_SEM_BUS_V.data_product_orientation.product_version|VARCHAR(32)
+--CallCentre_SEM_BUS_V.data_product_orientation.resource_role|VARCHAR(50)
+--CallCentre_SEM_BUS_V.data_product_orientation.database_name|VARCHAR(128)
+--CallCentre_SEM_BUS_V.data_product_orientation.object_name|VARCHAR(128)
+--CallCentre_SEM_BUS_V.data_product_orientation.fully_qualified_object_name|VARCHAR(257)
+--CallCentre_SEM_BUS_V.data_product_orientation.usage_guidance|VARCHAR(500)
+--CallCentre_SEM_BUS_V.data_product_orientation.is_required|BYTEINT
+--CallCentre_SEM_BUS_V.data_product_orientation.discovery_order|INTEGER
+--CallCentre_SEM_BUS_V.data_product_orientation.metadata_updated_at|TIMESTAMP WITH TIME ZONE
+

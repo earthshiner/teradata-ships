@@ -1,0 +1,240 @@
+CREATE VIEW {{CallCentre_PRE_STD_V}}.call_behaviour_features
+(
+      feature_group_id
+    ,call_id
+    ,entity_type
+    ,regulatory_obligations_norm
+    ,privacy_disclosure_norm
+    ,complaint_rights_norm
+    ,terms_and_conditions_explained_norm
+    ,consent_gathering_norm
+    ,identity_verification_norm
+    ,account_access_verification_norm
+    ,script_adherence_norm
+    ,fee_charge_disclosure_norm
+    ,avoidance_of_overpromise_norm
+    ,limitation_of_liability_norm
+    ,call_recording_disclosure_norm
+    ,customer_centric_language_norm
+    ,reassurance_and_support_norm
+    ,customer_appreciation_norm
+    ,empathetic_tone_norm
+    ,empathy_statements_norm
+    ,positive_framing_norm
+    ,avoiding_negativity_norm
+    ,avoidance_of_blame_or_deflection_norm
+    ,apology_or_regret_norm
+    ,respectful_language_norm
+    ,personalisation_contextualisation_norm
+    ,frustration_acknowledgement_norm
+    ,brand_aligned_tone_norm
+    ,active_listening_norm
+    ,avoiding_interruptions_norm
+    ,turn_taking_norm
+    ,clarification_questions_norm
+    ,appropriate_questioning_technique_norm
+    ,concise_explanations_norm
+    ,avoiding_jargon_norm
+    ,process_explanation_norm
+    ,structured_signposting_norm
+    ,repetition_for_emphasis_norm
+    ,confirmation_of_understanding_norm
+    ,reframing_or_simplification_norm
+    ,pacing_and_flow_control_norm
+    ,avoiding_filler_or_uncertainty_norm
+    ,resolution_confirmation_norm
+    ,action_commitment_next_steps_norm
+    ,wrap_up_summary_norm
+    ,case_logging_notetaking_norm
+    ,order_placement_modification_norm
+    ,ownership_and_accountability_norm
+    ,time_estimation_sla_mention_norm
+    ,status_update_progress_report_norm
+    ,time_awareness_norm
+    ,de_escalation_norm
+    ,calm_under_pressure_norm
+    ,confidence_and_reassurance_norm
+    ,confidence_building_norm
+    ,internal_handoff_transfer_norm
+    ,escalation_to_higher_tier_norm
+    ,billing_and_payment_discussion_norm
+    ,call_control_direction_norm
+    ,call_purpose_disclosure_norm
+    ,technical_troubleshooting_norm
+    ,compliance_composite_score
+    ,cx_composite_score
+    ,communication_composite_score
+    ,resolution_composite_score
+    ,difficult_situations_composite_score
+    ,overall_quality_score
+    ,feature_group_name
+    ,feature_group_version
+    ,observation_dts
+    ,valid_from_dts
+    ,valid_to_dts
+    ,is_current
+    ,computation_dts
+    ,source_system
+    ,created_by
+)
+AS
+LOCKING ROW FOR ACCESS
+SELECT
+      feature_group_id
+    ,call_id
+    ,entity_type
+    ,regulatory_obligations_norm
+    ,privacy_disclosure_norm
+    ,complaint_rights_norm
+    ,terms_and_conditions_explained_norm
+    ,consent_gathering_norm
+    ,identity_verification_norm
+    ,account_access_verification_norm
+    ,script_adherence_norm
+    ,fee_charge_disclosure_norm
+    ,avoidance_of_overpromise_norm
+    ,limitation_of_liability_norm
+    ,call_recording_disclosure_norm
+    ,customer_centric_language_norm
+    ,reassurance_and_support_norm
+    ,customer_appreciation_norm
+    ,empathetic_tone_norm
+    ,empathy_statements_norm
+    ,positive_framing_norm
+    ,avoiding_negativity_norm
+    ,avoidance_of_blame_or_deflection_norm
+    ,apology_or_regret_norm
+    ,respectful_language_norm
+    ,personalisation_contextualisation_norm
+    ,frustration_acknowledgement_norm
+    ,brand_aligned_tone_norm
+    ,active_listening_norm
+    ,avoiding_interruptions_norm
+    ,turn_taking_norm
+    ,clarification_questions_norm
+    ,appropriate_questioning_technique_norm
+    ,concise_explanations_norm
+    ,avoiding_jargon_norm
+    ,process_explanation_norm
+    ,structured_signposting_norm
+    ,repetition_for_emphasis_norm
+    ,confirmation_of_understanding_norm
+    ,reframing_or_simplification_norm
+    ,pacing_and_flow_control_norm
+    ,avoiding_filler_or_uncertainty_norm
+    ,resolution_confirmation_norm
+    ,action_commitment_next_steps_norm
+    ,wrap_up_summary_norm
+    ,case_logging_notetaking_norm
+    ,order_placement_modification_norm
+    ,ownership_and_accountability_norm
+    ,time_estimation_sla_mention_norm
+    ,status_update_progress_report_norm
+    ,time_awareness_norm
+    ,de_escalation_norm
+    ,calm_under_pressure_norm
+    ,confidence_and_reassurance_norm
+    ,confidence_building_norm
+    ,internal_handoff_transfer_norm
+    ,escalation_to_higher_tier_norm
+    ,billing_and_payment_discussion_norm
+    ,call_control_direction_norm
+    ,call_purpose_disclosure_norm
+    ,technical_troubleshooting_norm
+    ,compliance_composite_score
+    ,cx_composite_score
+    ,communication_composite_score
+    ,resolution_composite_score
+    ,difficult_situations_composite_score
+    ,overall_quality_score
+    ,feature_group_name
+    ,feature_group_version
+    ,observation_dts
+    ,valid_from_dts
+    ,valid_to_dts
+    ,is_current
+    ,computation_dts
+    ,source_system
+    ,created_by
+FROM {{CallCentre_PRE_STD_T}}.call_behaviour_features;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_PRE_STD_V.call_behaviour_features.feature_group_id|INTEGER
+--CallCentre_PRE_STD_V.call_behaviour_features.call_id|INTEGER
+--CallCentre_PRE_STD_V.call_behaviour_features.entity_type|VARCHAR(50)
+--CallCentre_PRE_STD_V.call_behaviour_features.regulatory_obligations_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.privacy_disclosure_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.complaint_rights_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.terms_and_conditions_explained_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.consent_gathering_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.identity_verification_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.account_access_verification_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.script_adherence_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.fee_charge_disclosure_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.avoidance_of_overpromise_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.limitation_of_liability_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.call_recording_disclosure_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.customer_centric_language_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.reassurance_and_support_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.customer_appreciation_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.empathetic_tone_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.empathy_statements_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.positive_framing_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.avoiding_negativity_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.avoidance_of_blame_or_deflection_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.apology_or_regret_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.respectful_language_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.personalisation_contextualisation_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.frustration_acknowledgement_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.brand_aligned_tone_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.active_listening_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.avoiding_interruptions_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.turn_taking_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.clarification_questions_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.appropriate_questioning_technique_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.concise_explanations_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.avoiding_jargon_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.process_explanation_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.structured_signposting_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.repetition_for_emphasis_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.confirmation_of_understanding_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.reframing_or_simplification_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.pacing_and_flow_control_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.avoiding_filler_or_uncertainty_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.resolution_confirmation_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.action_commitment_next_steps_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.wrap_up_summary_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.case_logging_notetaking_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.order_placement_modification_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.ownership_and_accountability_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.time_estimation_sla_mention_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.status_update_progress_report_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.time_awareness_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.de_escalation_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.calm_under_pressure_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.confidence_and_reassurance_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.confidence_building_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.internal_handoff_transfer_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.escalation_to_higher_tier_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.billing_and_payment_discussion_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.call_control_direction_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.call_purpose_disclosure_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.technical_troubleshooting_norm|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.compliance_composite_score|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.cx_composite_score|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.communication_composite_score|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.resolution_composite_score|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.difficult_situations_composite_score|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.overall_quality_score|DECIMAL(5,4)
+--CallCentre_PRE_STD_V.call_behaviour_features.feature_group_name|VARCHAR(100)
+--CallCentre_PRE_STD_V.call_behaviour_features.feature_group_version|VARCHAR(20)
+--CallCentre_PRE_STD_V.call_behaviour_features.observation_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_PRE_STD_V.call_behaviour_features.valid_from_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_PRE_STD_V.call_behaviour_features.valid_to_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_PRE_STD_V.call_behaviour_features.is_current|BYTEINT
+--CallCentre_PRE_STD_V.call_behaviour_features.computation_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_PRE_STD_V.call_behaviour_features.source_system|VARCHAR(50)
+--CallCentre_PRE_STD_V.call_behaviour_features.created_by|VARCHAR(100)
+

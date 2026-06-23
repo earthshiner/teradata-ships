@@ -1,0 +1,9 @@
+COLLECT STATISTICS 
+                   -- default SYSTEM SAMPLE PERCENT 
+            COLUMN ( is_current,is_deleted ) , 
+            COLUMN ( PARTITION ) , 
+            COLUMN ( call_dynamics_id ) , 
+            COLUMN ( call_id ) , 
+            COLUMN ( is_current ) , 
+            COLUMN ( is_deleted ) 
+                ON {{CallCentre_DOM_STD_T}}.Call_Dynamics_H ;

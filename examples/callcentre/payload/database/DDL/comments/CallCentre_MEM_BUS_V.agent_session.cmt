@@ -1,0 +1,2 @@
+comment on view {{CallCentre_MEM_BUS_V}}.agent_session is 'Canonical access view over CallCentre_MEM_STD_V.agent_session. Full passthrough;
+ filter by session_status as needed. Friendly pre-filtered alias: active_sessions.';

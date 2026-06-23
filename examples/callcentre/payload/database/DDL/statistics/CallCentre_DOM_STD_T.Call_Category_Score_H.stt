@@ -1,0 +1,7 @@
+COLLECT STATISTICS 
+                   -- default SYSTEM SAMPLE PERCENT 
+            COLUMN ( PARTITION ) , 
+            COLUMN ( call_id ) , 
+            COLUMN ( is_current ) , 
+            COLUMN ( is_deleted ) 
+                ON {{CallCentre_DOM_STD_T}}.Call_Category_Score_H ;

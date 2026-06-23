@@ -1,0 +1,45 @@
+REPLACE VIEW {{CallCentre_MEM_BUS_V}}.Design_Decision
+(
+      decision_key, decision_id, decision_version, decision_title
+    , decision_description, context, alternatives_considered, rationale
+    , consequences, decision_status, decision_category, source_module
+    , module_version, affects_table, decided_by, decided_date
+    , superseded_by, valid_from, valid_to, is_current
+    , created_timestamp, updated_timestamp
+)
+AS
+SELECT
+      decision_key, decision_id, decision_version, decision_title
+    , decision_description, context, alternatives_considered, rationale
+    , consequences, decision_status, decision_category, source_module
+    , module_version, affects_table, decided_by, decided_date
+    , superseded_by, valid_from, valid_to, is_current
+    , created_timestamp, updated_timestamp
+FROM {{CallCentre_MEM_STD_V}}.Design_Decision;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_MEM_BUS_V.Design_Decision.decision_key|BIGINT
+--CallCentre_MEM_BUS_V.Design_Decision.decision_id|VARCHAR(50)
+--CallCentre_MEM_BUS_V.Design_Decision.decision_version|INTEGER
+--CallCentre_MEM_BUS_V.Design_Decision.decision_title|VARCHAR(200)
+--CallCentre_MEM_BUS_V.Design_Decision.decision_description|CLOB(2097088000)
+--CallCentre_MEM_BUS_V.Design_Decision.context|CLOB(2097088000)
+--CallCentre_MEM_BUS_V.Design_Decision.alternatives_considered|CLOB(2097088000)
+--CallCentre_MEM_BUS_V.Design_Decision.rationale|CLOB(2097088000)
+--CallCentre_MEM_BUS_V.Design_Decision.consequences|CLOB(2097088000)
+--CallCentre_MEM_BUS_V.Design_Decision.decision_status|VARCHAR(20)
+--CallCentre_MEM_BUS_V.Design_Decision.decision_category|VARCHAR(50)
+--CallCentre_MEM_BUS_V.Design_Decision.source_module|VARCHAR(50)
+--CallCentre_MEM_BUS_V.Design_Decision.module_version|VARCHAR(20)
+--CallCentre_MEM_BUS_V.Design_Decision.affects_table|VARCHAR(200)
+--CallCentre_MEM_BUS_V.Design_Decision.decided_by|VARCHAR(100)
+--CallCentre_MEM_BUS_V.Design_Decision.decided_date|DATE
+--CallCentre_MEM_BUS_V.Design_Decision.superseded_by|VARCHAR(50)
+--CallCentre_MEM_BUS_V.Design_Decision.valid_from|DATE
+--CallCentre_MEM_BUS_V.Design_Decision.valid_to|DATE
+--CallCentre_MEM_BUS_V.Design_Decision.is_current|BYTEINT
+--CallCentre_MEM_BUS_V.Design_Decision.created_timestamp|TIMESTAMP WITH TIME ZONE
+--CallCentre_MEM_BUS_V.Design_Decision.updated_timestamp|TIMESTAMP WITH TIME ZONE
+
