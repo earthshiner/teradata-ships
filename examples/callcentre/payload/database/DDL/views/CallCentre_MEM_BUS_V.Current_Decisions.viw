@@ -1,0 +1,49 @@
+REPLACE VIEW {{CallCentre_MEM_BUS_V}}.Current_Decisions
+(
+    decision_id
+   ,decision_version
+   ,decision_title
+   ,decision_category
+   ,source_module
+   ,decision_status
+   ,decided_by
+   ,decided_date
+   ,affects_table
+   ,rationale
+   ,valid_from
+   ,valid_to
+)
+AS
+SELECT
+    decision_id
+   ,decision_version
+   ,decision_title
+   ,decision_category
+   ,source_module
+   ,decision_status
+   ,decided_by
+   ,decided_date
+   ,affects_table
+   ,rationale
+   ,valid_from
+   ,valid_to
+FROM {{CallCentre_MEM_STD_V}}.Design_Decision
+WHERE is_current = 1
+  AND decision_status =; 'ACCEPTED'
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_MEM_BUS_V.Current_Decisions.decision_id|VARCHAR(50)
+--CallCentre_MEM_BUS_V.Current_Decisions.decision_version|INTEGER
+--CallCentre_MEM_BUS_V.Current_Decisions.decision_title|VARCHAR(200)
+--CallCentre_MEM_BUS_V.Current_Decisions.decision_category|VARCHAR(50)
+--CallCentre_MEM_BUS_V.Current_Decisions.source_module|VARCHAR(50)
+--CallCentre_MEM_BUS_V.Current_Decisions.decision_status|VARCHAR(20)
+--CallCentre_MEM_BUS_V.Current_Decisions.decided_by|VARCHAR(100)
+--CallCentre_MEM_BUS_V.Current_Decisions.decided_date|DATE
+--CallCentre_MEM_BUS_V.Current_Decisions.affects_table|VARCHAR(200)
+--CallCentre_MEM_BUS_V.Current_Decisions.rationale|CLOB(2097088000)
+--CallCentre_MEM_BUS_V.Current_Decisions.valid_from|DATE
+--CallCentre_MEM_BUS_V.Current_Decisions.valid_to|DATE
+

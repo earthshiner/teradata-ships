@@ -1,0 +1,33 @@
+CREATE VIEW {{CallCentre_DOM_STD_V}}.Call_Topic_H
+(
+      call_topic_id
+    , call_id
+    , topic
+    , valid_from_dts
+    , valid_to_dts
+    , is_current
+    , is_deleted
+)
+AS
+LOCKING ROW FOR ACCESS
+SELECT
+      call_topic_id
+    , call_id
+    , topic
+    , valid_from_dts
+    , valid_to_dts
+    , is_current
+    , is_deleted
+FROM {{CallCentre_DOM_STD_T}}.Call_Topic_H;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_DOM_STD_V.Call_Topic_H.call_topic_id|INTEGER
+--CallCentre_DOM_STD_V.Call_Topic_H.call_id|INTEGER
+--CallCentre_DOM_STD_V.Call_Topic_H.topic|VARCHAR(500)
+--CallCentre_DOM_STD_V.Call_Topic_H.valid_from_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_DOM_STD_V.Call_Topic_H.valid_to_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_DOM_STD_V.Call_Topic_H.is_current|BYTEINT
+--CallCentre_DOM_STD_V.Call_Topic_H.is_deleted|BYTEINT
+

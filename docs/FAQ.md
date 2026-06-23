@@ -14,6 +14,7 @@ Answers to the most common questions. Organised by topic — jump to the section
 - [Schema drift detection](#schema-drift-detection)
 - [Audit trail and decisions.json](#audit-trail-and-decisionsjson)
 - [Security](#security)
+- [Clearscape demo notebooks](#clearscape-demo-notebooks)
 - [General](#general)
 
 ---
@@ -1197,3 +1198,50 @@ with zipfile.ZipFile("releases/DEV_OMR_BUILD_0042_20260510/DEV_OMR_BUILD_0042_20
 ```
 
 Or use the SHIPS Deployment Dashboard (`ships_dashboard.py`) which reads context/ships.build.json from every archive in your `releases/` directory without extracting.
+
+---
+
+## Clearscape demo notebooks
+
+### How do I produce a Jupyter notebook for a Clearscape Experience demo?
+
+Use `ships notebook`. It renders any SHIPS project into a self-contained `.ipynb` with inline DDL and one code cell per analysed wave:
+
+```bash
+python -m td_release_packager notebook \
+    --project my-project \
+    --env-config my-project/config/env/DEV.conf \
+    --name MyDemo
+```
+
+Output: `my-project/output/MyDemo.clearscape.ipynb`. Hand it to your Clearscape user — they upload it to Jupyter, enter their host/user/password in the connection cell, and run each wave cell in order. No SHIPS install required on the customer side.
+
+Full reference: [CLEARSCAPE_NOTEBOOK.md](./CLEARSCAPE_NOTEBOOK.md).
+
+---
+
+### Can I use the Clearscape notebook target for production deployment?
+
+No. The renderer is deliberately non-production: no preflight, no rollback, no trust report, no integrity fingerprint. It is for demos on Clearscape Experience sandboxes and similar short-lived show-and-tell environments.
+
+For real deployment use `ships package` + `ships deploy` (or the deploy launcher embedded in the package). Those keep the preflight check, atomic-wave execution, rollback, and trust scoring.
+
+---
+
+### Why is the produced notebook so large?
+
+The notebook inlines every CREATE statement as a triple-quoted Python string. For a full AI-Native Data Product (235 objects across 6 waves) that is around 700 KB. This is intentional — Clearscape sandboxes may have restricted network egress, and inlining the DDL makes it part of the demo narrative. If the cells feel long, collapse them in Jupyter (`View → Collapse All Code`) before presenting.
+
+---
+
+### Can the notebook prompt the user for an environment prefix at runtime?
+
+Not in the current renderer. Tokens are resolved at render time from the supplied `--env-config`, so the customer gets a notebook with concrete database names baked in. If you need per-customer naming, render once per customer:
+
+```bash
+python -m td_release_packager notebook \
+    --project my-project --env-config config/env/ACME.conf \
+    --name AcmeDemo --output renders/acme.ipynb
+```
+
+A future enhancement could add a prompt-driven prefix substitution cell — file an issue if you need it.

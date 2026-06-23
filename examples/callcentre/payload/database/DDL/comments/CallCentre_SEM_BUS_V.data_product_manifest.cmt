@@ -1,0 +1,38 @@
+comment on view {{CallCentre_SEM_BUS_V}}.data_product_manifest is 'Derived CallCentre data product contract and stable agent navigation manifest';
+comment on column {{CallCentre_SEM_BUS_V}}.data_product_manifest.product_id is 'Stable identifier of the registered data product';
+
+comment on column {{CallCentre_SEM_BUS_V}}.data_product_manifest.product_name is 'Human-readable name of the data product';
+
+comment on column {{CallCentre_SEM_BUS_V}}.data_product_manifest.product_version is 'Published version of the data product contract';
+
+comment on column {{CallCentre_SEM_BUS_V}}.data_product_manifest.product_description is 'Business description of the data product';
+
+comment on column {{CallCentre_SEM_BUS_V}}.data_product_manifest.product_status is 'Current registry lifecycle status of the data product';
+
+comment on column {{CallCentre_SEM_BUS_V}}.data_product_manifest.owner_team is 'Team accountable for the data product';
+
+comment on column {{CallCentre_SEM_BUS_V}}.data_product_manifest.approved_access_mode is 'Approved object access mode for agent consumption';
+
+comment on column {{CallCentre_SEM_BUS_V}}.data_product_manifest.orientation_entrypoint is 'Fully qualified view that starts agent discovery';
+
+comment on column {{CallCentre_SEM_BUS_V}}.data_product_manifest.object_catalog_entrypoint is 'Fully qualified view listing governed data product objects';
+
+comment on column {{CallCentre_SEM_BUS_V}}.data_product_manifest.trust_status_entrypoint is 'Fully qualified view exposing the latest trust decision';
+
+comment on column {{CallCentre_SEM_BUS_V}}.data_product_manifest.contract_uri is 'Registry URI for the published data contract';
+
+comment on column {{CallCentre_SEM_BUS_V}}.data_product_manifest.semantic_uri is 'Registry URI for semantic metadata';
+
+comment on column {{CallCentre_SEM_BUS_V}}.data_product_manifest.quality_uri is 'Registry URI for data quality metadata';
+
+comment on column {{CallCentre_SEM_BUS_V}}.data_product_manifest.lineage_uri is 'Registry URI for lineage metadata';
+
+comment on column {{CallCentre_SEM_BUS_V}}.data_product_manifest.policy_uri is 'Registry URI for policy metadata';
+
+comment on column {{CallCentre_SEM_BUS_V}}.data_product_manifest.glossary_uri is 'Registry URI for the business glossary';
+
+comment on column {{CallCentre_SEM_BUS_V}}.data_product_manifest.query_cookbook_uri is 'Registry URI for validated query recipes';
+
+comment on column {{CallCentre_SEM_BUS_V}}.data_product_manifest.metadata_updated_at is 'Timestamp of the registry metadata used to derive the manifest';
+
+comment on column {{CallCentre_SEM_BUS_V}}.data_product_manifest.manifest_json is 'Derived JSON representation of the current product contract and navigation endpoints';

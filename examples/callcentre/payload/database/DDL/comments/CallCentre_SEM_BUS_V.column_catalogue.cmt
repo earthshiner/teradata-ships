@@ -1,0 +1,1 @@
+comment on view {{CallCentre_SEM_BUS_V}}.column_catalogue is 'Live column catalogue: DBC structural facts (type, nullability, comment) joined to curated column_metadata (PII, classification, allowed values). business_description prefers curated, else COMMENT, else NULL.';

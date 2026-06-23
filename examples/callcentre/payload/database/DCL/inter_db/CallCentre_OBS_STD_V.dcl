@@ -1,0 +1,47 @@
+grant SELECT on {{CallCentre_OBS_STD_V}} to {{CallCentre_SEM_BUS_V}} with grant option;
+-- Granted by Dropped User
+grant CREATE AUTHORIZATION on {{CallCentre_SEM_BUS_V}} to {{CallCentre_SEM_BUS_V}};
+-- Granted by Dropped User
+grant CREATE TRIGGER on {{CallCentre_SEM_BUS_V}} to {{CallCentre_SEM_BUS_V}};
+-- Granted by Dropped User
+grant CREATE MACRO on {{CallCentre_SEM_BUS_V}} to {{CallCentre_SEM_BUS_V}};
+-- Granted by Dropped User
+grant CHECKPOINT on {{CallCentre_SEM_BUS_V}} to {{CallCentre_SEM_BUS_V}};
+-- Granted by Dropped User
+grant CREATE TABLE on {{CallCentre_SEM_BUS_V}} to {{CallCentre_SEM_BUS_V}};
+-- Granted by Dropped User
+grant CREATE VIEW on {{CallCentre_SEM_BUS_V}} to {{CallCentre_SEM_BUS_V}};
+-- Granted by Dropped User
+grant DELETE on {{CallCentre_SEM_BUS_V}} to {{CallCentre_SEM_BUS_V}};
+-- Granted by Dropped User
+grant DROP AUTHORIZATION on {{CallCentre_SEM_BUS_V}} to {{CallCentre_SEM_BUS_V}};
+-- Granted by Dropped User
+grant DROP FUNCTION on {{CallCentre_SEM_BUS_V}} to {{CallCentre_SEM_BUS_V}};
+-- Granted by Dropped User
+grant DROP TRIGGER on {{CallCentre_SEM_BUS_V}} to {{CallCentre_SEM_BUS_V}};
+-- Granted by Dropped User
+grant DROP MACRO on {{CallCentre_SEM_BUS_V}} to {{CallCentre_SEM_BUS_V}};
+-- Granted by Dropped User
+grant DUMP on {{CallCentre_SEM_BUS_V}} to {{CallCentre_SEM_BUS_V}};
+-- Granted by Dropped User
+grant DROP TABLE on {{CallCentre_SEM_BUS_V}} to {{CallCentre_SEM_BUS_V}};
+-- Granted by Dropped User
+grant DROP VIEW on {{CallCentre_SEM_BUS_V}} to {{CallCentre_SEM_BUS_V}};
+-- Granted by Dropped User
+grant EXECUTE on {{CallCentre_SEM_BUS_V}} to {{CallCentre_SEM_BUS_V}};
+-- Granted by Dropped User
+grant INSERT on {{CallCentre_SEM_BUS_V}} to {{CallCentre_SEM_BUS_V}};
+-- Granted by Dropped User
+grant DROP PROCEDURE on {{CallCentre_SEM_BUS_V}} to {{CallCentre_SEM_BUS_V}};
+-- Granted by Dropped User
+grant SELECT on {{CallCentre_SEM_BUS_V}} to {{CallCentre_SEM_BUS_V}};
+-- Granted by Dropped User
+grant RESTORE on {{CallCentre_SEM_BUS_V}} to {{CallCentre_SEM_BUS_V}};
+-- Granted by Dropped User
+grant STATISTICS on {{CallCentre_SEM_BUS_V}} to {{CallCentre_SEM_BUS_V}};
+-- Granted by Dropped User
+grant UPDATE on {{CallCentre_SEM_BUS_V}} to {{CallCentre_SEM_BUS_V}};
+-- Granted by DBC
+grant SELECT on {{CallCentre_SEM_STD_V}} to {{CallCentre_SEM_BUS_V}} with grant option;
+-- Granted by DBC
+grant SELECT on {{DataProductsMaster_GOV_BUS_V}} to {{CallCentre_SEM_BUS_V}} with grant option;

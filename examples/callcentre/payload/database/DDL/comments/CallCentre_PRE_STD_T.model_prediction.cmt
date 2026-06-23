@@ -1,0 +1,4 @@
+comment on table {{CallCentre_PRE_STD_T}}.model_prediction is 'ML model prediction outputs per call. Supports multiple models per call via model_key. JSON payload allows flexible multi-class prediction structures alongside scalar prediction_value.';
+comment on column {{CallCentre_PRE_STD_T}}.model_prediction.model_key is 'Model identifier, e.g. call_quality_v1, coaching_priority_v2. Separates predictions from different models.';
+
+comment on column {{CallCentre_PRE_STD_T}}.model_prediction.prediction_json is 'Flexible JSON payload for complex prediction outputs supplementing scalar prediction_value and prediction_class.';

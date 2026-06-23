@@ -1,0 +1,36 @@
+REPLACE VIEW {{CallCentre_DOM_BUS_V}}.Call_Summary_Current
+(
+    call_summary_id
+   ,call_id
+   ,conversation_summary
+   ,valid_from_dts
+   ,valid_to_dts
+)
+/* ----------------------------------------------------------------------------
+   Call_Summary_Current current-state business view over Call_Summary_H.
+   Hardened to guarantee exactly one row per call_id even if a duplicate
+   current row is ever (re)introduced upstream. The QUALIFY makes every
+   consumer of this view fan-out-proof, including DOM_BUS_V.Call_Enriched,
+   which previously multiplied calls that had duplicate current summaries.
+   ---------------------------------------------------------------------------- */
+AS
+SELECT
+    call_summary_id
+   ,call_id
+   ,conversation_summary
+   ,valid_from_dts
+   ,valid_to_dts
+FROM {{CallCentre_DOM_STD_V}}.Call_Summary_H
+WHERE is_current = 1
+  AND is_deleted = 0
+QUALIFY ROW_NUMBER() OVER (PARTITION BY call_id ORDER BY call_summary_id) = 1;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_DOM_BUS_V.Call_Summary_Current.call_summary_id|INTEGER
+--CallCentre_DOM_BUS_V.Call_Summary_Current.call_id|INTEGER
+--CallCentre_DOM_BUS_V.Call_Summary_Current.conversation_summary|CLOB(2097088000)
+--CallCentre_DOM_BUS_V.Call_Summary_Current.valid_from_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_DOM_BUS_V.Call_Summary_Current.valid_to_dts|TIMESTAMP WITH TIME ZONE
+

@@ -1,0 +1,2 @@
+comment on view {{CallCentre_PRE_BUS_V}}.call_features_pit is 'Point-in-time features joined to Domain Call_H. Includes temporal columns for historical analysis and model training datasets.';
+comment on column {{CallCentre_PRE_BUS_V}}.call_features_pit.overall_quality_score is 'Weighted composite across all 5 group composites. Range 0-1. Primary ML target variable.';

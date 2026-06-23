@@ -1,0 +1,6 @@
+comment on column {{CallCentre_PRE_STD_V}}.call_behaviour_features.call_id is 'FK to Domain Call_H. Primary join key.';
+comment on column {{CallCentre_PRE_STD_V}}.call_behaviour_features.entity_type is 'Entity type discriminator. Default CALL. Allows table to store features for other entity types in future.';
+
+comment on column {{CallCentre_PRE_STD_V}}.call_behaviour_features.overall_quality_score is 'Weighted composite across all 5 group composites. Range 0-1. Primary ML target variable.';
+
+comment on column {{CallCentre_PRE_STD_V}}.call_behaviour_features.is_current is '1 = current active feature row for this call_id. 0 = superseded by a later computation run.';

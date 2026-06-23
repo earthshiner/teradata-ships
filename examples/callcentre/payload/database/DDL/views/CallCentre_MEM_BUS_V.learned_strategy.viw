@@ -1,0 +1,39 @@
+REPLACE VIEW {{CallCentre_MEM_BUS_V}}.learned_strategy
+(
+      strategy_id, strategy_name, strategy_description, strategy_category
+    , applies_to_scenario, strategy_pattern, strategy_metadata_json, discovered_dts
+    , discovered_by_agent, times_used, success_rate, scope_level
+    , scope_identifier, is_active, is_validated, validation_dts
+    , created_at, updated_at
+)
+AS
+SELECT
+      strategy_id, strategy_name, strategy_description, strategy_category
+    , applies_to_scenario, strategy_pattern, strategy_metadata_json, discovered_dts
+    , discovered_by_agent, times_used, success_rate, scope_level
+    , scope_identifier, is_active, is_validated, validation_dts
+    , created_at, updated_at
+FROM {{CallCentre_MEM_STD_V}}.learned_strategy;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_MEM_BUS_V.learned_strategy.strategy_id|INTEGER
+--CallCentre_MEM_BUS_V.learned_strategy.strategy_name|VARCHAR(100)
+--CallCentre_MEM_BUS_V.learned_strategy.strategy_description|VARCHAR(1000)
+--CallCentre_MEM_BUS_V.learned_strategy.strategy_category|VARCHAR(50)
+--CallCentre_MEM_BUS_V.learned_strategy.applies_to_scenario|VARCHAR(500)
+--CallCentre_MEM_BUS_V.learned_strategy.strategy_pattern|VARCHAR(4000)
+--CallCentre_MEM_BUS_V.learned_strategy.strategy_metadata_json|JSON(16776192)
+--CallCentre_MEM_BUS_V.learned_strategy.discovered_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_MEM_BUS_V.learned_strategy.discovered_by_agent|VARCHAR(100)
+--CallCentre_MEM_BUS_V.learned_strategy.times_used|INTEGER
+--CallCentre_MEM_BUS_V.learned_strategy.success_rate|DECIMAL(5,4)
+--CallCentre_MEM_BUS_V.learned_strategy.scope_level|VARCHAR(20)
+--CallCentre_MEM_BUS_V.learned_strategy.scope_identifier|VARCHAR(100)
+--CallCentre_MEM_BUS_V.learned_strategy.is_active|BYTEINT
+--CallCentre_MEM_BUS_V.learned_strategy.is_validated|BYTEINT
+--CallCentre_MEM_BUS_V.learned_strategy.validation_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_MEM_BUS_V.learned_strategy.created_at|TIMESTAMP WITH TIME ZONE
+--CallCentre_MEM_BUS_V.learned_strategy.updated_at|TIMESTAMP WITH TIME ZONE
+

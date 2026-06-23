@@ -1,0 +1,53 @@
+REPLACE VIEW {{CallCentre_SCH_BUS_V}}.call_embedding_ref
+(
+      embedding_ref_id
+    , call_id
+    , agent_id
+    , agent_name
+    , topic
+    , embedding_model
+    , embedding_model_version
+    , embedding_dimensions
+    , embedding_ref_key
+    , embedding_store
+    , embedded_columns
+    , generated_dts
+    , is_current
+)
+AS
+SELECT
+      r.embedding_ref_id
+    , {{c_V}}.call_id
+    , {{c_V}}.agent_id
+    , {{c_V}}.agent_name
+    , {{c_V}}.topic
+    , r.embedding_model
+    , r.embedding_model_version
+    , r.embedding_dimensions
+    , r.embedding_ref_key
+    , r.embedding_store
+    , r.embedded_columns
+    , r.generated_dts
+    , r.is_current
+FROM {{CallCentre_SCH_STD_V}}.call_embedding_ref r
+INNER JOIN {{CallCentre_DOM_BUS_V}}.Call_Enriched {{c_V}}
+    ON {{c_V}}.call_id = r.call_id
+WHERE r.is_current = 1;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_SCH_BUS_V.call_embedding_ref.embedding_ref_id|INTEGER
+--CallCentre_SCH_BUS_V.call_embedding_ref.call_id|INTEGER
+--CallCentre_SCH_BUS_V.call_embedding_ref.agent_id|INTEGER
+--CallCentre_SCH_BUS_V.call_embedding_ref.agent_name|VARCHAR(200)
+--CallCentre_SCH_BUS_V.call_embedding_ref.topic|VARCHAR(500)
+--CallCentre_SCH_BUS_V.call_embedding_ref.embedding_model|VARCHAR(100)
+--CallCentre_SCH_BUS_V.call_embedding_ref.embedding_model_version|VARCHAR(20)
+--CallCentre_SCH_BUS_V.call_embedding_ref.embedding_dimensions|SMALLINT
+--CallCentre_SCH_BUS_V.call_embedding_ref.embedding_ref_key|VARCHAR(200)
+--CallCentre_SCH_BUS_V.call_embedding_ref.embedding_store|VARCHAR(100)
+--CallCentre_SCH_BUS_V.call_embedding_ref.embedded_columns|VARCHAR(200)
+--CallCentre_SCH_BUS_V.call_embedding_ref.generated_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_SCH_BUS_V.call_embedding_ref.is_current|BYTEINT
+

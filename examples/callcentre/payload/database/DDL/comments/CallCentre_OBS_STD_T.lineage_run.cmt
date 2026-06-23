@@ -1,0 +1,3 @@
+comment on table {{CallCentre_OBS_STD_T}}.lineage_run is 'Operational lineage execution log - one row per execution of a declared flow (data_lineage). Tracks status, volume, duration, errors. Event-scale volume.';
+
+

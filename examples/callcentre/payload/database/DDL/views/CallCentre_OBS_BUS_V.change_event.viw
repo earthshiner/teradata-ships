@@ -1,0 +1,50 @@
+REPLACE VIEW {{CallCentre_OBS_BUS_V}}.change_event
+(
+      change_event_id
+    , database_name
+    , table_name
+    , change_type
+    , change_dts
+    , changed_by
+    , change_reason
+    , change_source
+    , records_affected
+    , columns_changed
+    , batch_key
+    , job_name
+    , created_at
+)
+AS
+SELECT
+      change_event_id
+    , database_name
+    , table_name
+    , change_type
+    , change_dts
+    , changed_by
+    , change_reason
+    , change_source
+    , records_affected
+    , columns_changed
+    , batch_key
+    , job_name
+    , created_at
+FROM {{CallCentre_OBS_STD_V}}.change_event;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_OBS_BUS_V.change_event.change_event_id|INTEGER
+--CallCentre_OBS_BUS_V.change_event.database_name|VARCHAR(100)
+--CallCentre_OBS_BUS_V.change_event.table_name|VARCHAR(100)
+--CallCentre_OBS_BUS_V.change_event.change_type|VARCHAR(20)
+--CallCentre_OBS_BUS_V.change_event.change_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_OBS_BUS_V.change_event.changed_by|VARCHAR(100)
+--CallCentre_OBS_BUS_V.change_event.change_reason|VARCHAR(500)
+--CallCentre_OBS_BUS_V.change_event.change_source|VARCHAR(50)
+--CallCentre_OBS_BUS_V.change_event.records_affected|INTEGER
+--CallCentre_OBS_BUS_V.change_event.columns_changed|VARCHAR(1000)
+--CallCentre_OBS_BUS_V.change_event.batch_key|VARCHAR(100)
+--CallCentre_OBS_BUS_V.change_event.job_name|VARCHAR(200)
+--CallCentre_OBS_BUS_V.change_event.created_at|TIMESTAMP WITH TIME ZONE
+

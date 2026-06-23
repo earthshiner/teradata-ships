@@ -1,0 +1,1 @@
+comment on column {{CallCentre_SCH_STD_V}}.call_keyword_token.keyword is 'Lowercase, stop-word-filtered token. Enables fast IN-list keyword search without LIKE predicates over the CLOB searchable_text column.';

@@ -1,0 +1,2 @@
+comment on view {{CallCentre_MEM_BUS_V}}.Business_Glossary is 'Canonical access view over CallCentre_MEM_STD_V.Business_Glossary. Full passthrough;
+ consumers filter WHERE is_active = 1 (and validity). Friendly pre-filtered alias: Glossary_Active.';

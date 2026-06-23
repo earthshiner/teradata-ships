@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "evaluated_at": "2026-06-23T03:05:49+00:00",
+  "project_name": "callcentre",
+  "project_dir": "C:\\SCM\\teradata-ships\\examples\\callcentre",
+  "lifecycle_state": "inspected",
+  "next_recommended_actions": [
+    "Analyse dependencies and wave order — python -m td_release_packager analyze --source examples/callcentre --graph examples/callcentre/analysis",
+    "Or package directly — python -m td_release_packager package --source examples/callcentre --env DEV --name <pkg> --env-config config/env/DEV.conf"
+  ],
+  "references": {
+    "ships_yaml": "ships.yaml",
+    "decisions_log": ".ships/ships.decisions.json",
+    "env_configs": [
+      "config\\env\\DEV.conf"
+    ]
+  },
+  "actions_ref": "ships.project_actions.json",
+  "policy_ref": "ships.project_policy.json"
+}

@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.0",
+  "evaluated_at": "2026-06-23T03:05:49+00:00",
+  "project_state": "inspected",
+  "discovery_flags": {
+    "tokenise_config_present": false,
+    "env_configs_present": true,
+    "source_payload_present": true
+  },
+  "allowed_actions": [
+    "scaffold",
+    "harvest",
+    "inspect",
+    "analyse",
+    "scan",
+    "import_legacy",
+    "decompose_names",
+    "package"
+  ],
+  "blocked_actions": [],
+  "requires_human_approval": [
+    {
+      "action": "tokenise",
+      "reason": "rewrites_source_files",
+      "evidence_ref": "config/tokenise.conf",
+      "instruction": "Run `migrate-source --dry-run` first to preview the rewrite. Apply only after the operator reviews the diff."
+    }
+  ]
+}

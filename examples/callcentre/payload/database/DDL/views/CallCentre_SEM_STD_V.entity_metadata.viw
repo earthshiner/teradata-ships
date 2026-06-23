@@ -1,0 +1,60 @@
+CREATE VIEW {{CallCentre_SEM_STD_V}}.entity_metadata
+(
+      entity_metadata_id
+    , entity_name
+    , entity_description
+    , module_name
+    , database_name
+    , table_name
+    , view_name
+    , surrogate_key_column
+    , natural_key_column
+    , temporal_pattern
+    , current_flag_column
+    , deleted_flag_column
+    , industry_standard
+    , is_active
+    , created_at
+    , updated_at
+)
+AS
+LOCKING ROW FOR ACCESS
+SELECT
+      entity_metadata_id
+    , entity_name
+    , entity_description
+    , module_name
+    , database_name
+    , table_name
+    , view_name
+    , surrogate_key_column
+    , natural_key_column
+    , temporal_pattern
+    , current_flag_column
+    , deleted_flag_column
+    , industry_standard
+    , is_active
+    , created_at
+    , updated_at
+FROM {{CallCentre_SEM_STD_T}}.entity_metadata;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_SEM_STD_V.entity_metadata.entity_metadata_id|INTEGER
+--CallCentre_SEM_STD_V.entity_metadata.entity_name|VARCHAR(100)
+--CallCentre_SEM_STD_V.entity_metadata.entity_description|VARCHAR(1000)
+--CallCentre_SEM_STD_V.entity_metadata.module_name|VARCHAR(50)
+--CallCentre_SEM_STD_V.entity_metadata.database_name|VARCHAR(100)
+--CallCentre_SEM_STD_V.entity_metadata.table_name|VARCHAR(100)
+--CallCentre_SEM_STD_V.entity_metadata.view_name|VARCHAR(100)
+--CallCentre_SEM_STD_V.entity_metadata.surrogate_key_column|VARCHAR(100)
+--CallCentre_SEM_STD_V.entity_metadata.natural_key_column|VARCHAR(100)
+--CallCentre_SEM_STD_V.entity_metadata.temporal_pattern|VARCHAR(50)
+--CallCentre_SEM_STD_V.entity_metadata.current_flag_column|VARCHAR(100)
+--CallCentre_SEM_STD_V.entity_metadata.deleted_flag_column|VARCHAR(100)
+--CallCentre_SEM_STD_V.entity_metadata.industry_standard|VARCHAR(50)
+--CallCentre_SEM_STD_V.entity_metadata.is_active|BYTEINT
+--CallCentre_SEM_STD_V.entity_metadata.created_at|TIMESTAMP WITH TIME ZONE
+--CallCentre_SEM_STD_V.entity_metadata.updated_at|TIMESTAMP WITH TIME ZONE
+

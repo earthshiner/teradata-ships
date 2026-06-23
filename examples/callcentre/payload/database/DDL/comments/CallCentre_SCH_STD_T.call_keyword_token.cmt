@@ -1,0 +1,2 @@
+comment on table {{CallCentre_SCH_STD_T}}.call_keyword_token is 'Keyword token index over call searchable text. One row per (call, keyword). PI on keyword for efficient IN-list lookups. Populated by daily ETL tokenisation of call_searchable_text.';
+comment on column {{CallCentre_SCH_STD_T}}.call_keyword_token.keyword is 'Lowercase, stop-word-filtered token. Enables fast IN-list keyword search without LIKE predicates over the CLOB searchable_text column.';

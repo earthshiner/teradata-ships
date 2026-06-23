@@ -108,6 +108,29 @@ Those commands inject the concrete parent value into parentless prerequisite
 payload before packaging; `process` applies it before inspect and analyse.
 
 
+### Clearscape Demo Notebook
+
+For demos on Teradata **Clearscape Experience** (the free-trial sandbox),
+render any SHIPS project into a self-contained Jupyter notebook with inline
+DDL and one code cell per wave:
+
+```bash
+python -m td_release_packager notebook \
+    --project examples/callcentre \
+    --env-config examples/callcentre/config/env/DEV.conf \
+    --name CallCentre
+```
+
+The customer uploads the `.ipynb` to their Clearscape sandbox, enters their
+credentials in the connection cell, and runs each wave cell in order. No
+SHIPS install required on the customer side. **Demo target only — not for
+production**; the standard `ships package` + `ships deploy` flow keeps the
+preflight, trust report, and rollback story.
+
+Full reference: [docs/CLEARSCAPE_NOTEBOOK.md](docs/CLEARSCAPE_NOTEBOOK.md).
+Worked example: [examples/callcentre/](examples/callcentre/).
+
+
 ## Release group output layout
 
 Every SHIPS build writes its deliverables under a release-group directory named after the shared release identity. This is true even when the build produces only one package archive.
@@ -341,6 +364,7 @@ history or hidden agent state.
 - **[Agent Integration](docs/AGENT_INTEGRATION.md)** — Autonomous agent and MCP tool usage
 - **[Operations Guide](docs/OPERATIONS_GUIDE.md)** — DBA deployment reference, preflight checks, rollback
 - **[Security Prerequisites](docs/security_prerequisites.md)** — Network controls, signing, key management
+- **[Clearscape Notebook Target](docs/CLEARSCAPE_NOTEBOOK.md)** — Render any project as a self-contained Jupyter notebook for Clearscape Experience demos
 - **[FAQ](docs/FAQ.md)** — Answers to common questions by topic
 
 ## Testing

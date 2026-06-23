@@ -1,0 +1,54 @@
+CREATE VIEW {{CallCentre_SCH_STD_V}}.call_embedding_ref
+(
+      embedding_ref_id
+    , call_id
+    , embedded_columns
+    , embedding_model
+    , embedding_model_version
+    , embedding_dimensions
+    , embedding_ref_key
+    , embedding_store
+    , generated_dts
+    , valid_from_dts
+    , valid_to_dts
+    , is_current
+    , generated_by
+    , computation_method
+)
+AS
+LOCKING ROW FOR ACCESS
+SELECT
+      embedding_ref_id
+    , call_id
+    , embedded_columns
+    , embedding_model
+    , embedding_model_version
+    , embedding_dimensions
+    , embedding_ref_key
+    , embedding_store
+    , generated_dts
+    , valid_from_dts
+    , valid_to_dts
+    , is_current
+    , generated_by
+    , computation_method
+FROM {{CallCentre_SCH_STD_T}}.call_embedding_ref;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_SCH_STD_V.call_embedding_ref.embedding_ref_id|INTEGER
+--CallCentre_SCH_STD_V.call_embedding_ref.call_id|INTEGER
+--CallCentre_SCH_STD_V.call_embedding_ref.embedded_columns|VARCHAR(200)
+--CallCentre_SCH_STD_V.call_embedding_ref.embedding_model|VARCHAR(100)
+--CallCentre_SCH_STD_V.call_embedding_ref.embedding_model_version|VARCHAR(20)
+--CallCentre_SCH_STD_V.call_embedding_ref.embedding_dimensions|SMALLINT
+--CallCentre_SCH_STD_V.call_embedding_ref.embedding_ref_key|VARCHAR(200)
+--CallCentre_SCH_STD_V.call_embedding_ref.embedding_store|VARCHAR(100)
+--CallCentre_SCH_STD_V.call_embedding_ref.generated_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_SCH_STD_V.call_embedding_ref.valid_from_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_SCH_STD_V.call_embedding_ref.valid_to_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_SCH_STD_V.call_embedding_ref.is_current|BYTEINT
+--CallCentre_SCH_STD_V.call_embedding_ref.generated_by|VARCHAR(100)
+--CallCentre_SCH_STD_V.call_embedding_ref.computation_method|VARCHAR(50)
+

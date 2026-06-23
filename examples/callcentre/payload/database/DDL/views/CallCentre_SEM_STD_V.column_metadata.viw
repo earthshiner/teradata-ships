@@ -1,0 +1,54 @@
+CREATE VIEW {{CallCentre_SEM_STD_V}}.column_metadata
+(
+      column_metadata_id
+    , database_name
+    , table_name
+    , column_name
+    , business_description
+    , is_pii
+    , is_sensitive
+    , data_classification
+    , is_required
+    , data_type
+    , allowed_values_json
+    , is_active
+    , created_at
+    , updated_at
+)
+AS
+LOCKING ROW FOR ACCESS
+SELECT
+      column_metadata_id
+    , database_name
+    , table_name
+    , column_name
+    , business_description
+    , is_pii
+    , is_sensitive
+    , data_classification
+    , is_required
+    , data_type
+    , allowed_values_json
+    , is_active
+    , created_at
+    , updated_at
+FROM {{CallCentre_SEM_STD_T}}.column_metadata;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_SEM_STD_V.column_metadata.column_metadata_id|INTEGER
+--CallCentre_SEM_STD_V.column_metadata.database_name|VARCHAR(100)
+--CallCentre_SEM_STD_V.column_metadata.table_name|VARCHAR(100)
+--CallCentre_SEM_STD_V.column_metadata.column_name|VARCHAR(100)
+--CallCentre_SEM_STD_V.column_metadata.business_description|VARCHAR(1000)
+--CallCentre_SEM_STD_V.column_metadata.is_pii|BYTEINT
+--CallCentre_SEM_STD_V.column_metadata.is_sensitive|BYTEINT
+--CallCentre_SEM_STD_V.column_metadata.data_classification|VARCHAR(50)
+--CallCentre_SEM_STD_V.column_metadata.is_required|BYTEINT
+--CallCentre_SEM_STD_V.column_metadata.data_type|VARCHAR(100)
+--CallCentre_SEM_STD_V.column_metadata.allowed_values_json|JSON(16776192)
+--CallCentre_SEM_STD_V.column_metadata.is_active|BYTEINT
+--CallCentre_SEM_STD_V.column_metadata.created_at|TIMESTAMP WITH TIME ZONE
+--CallCentre_SEM_STD_V.column_metadata.updated_at|TIMESTAMP WITH TIME ZONE
+

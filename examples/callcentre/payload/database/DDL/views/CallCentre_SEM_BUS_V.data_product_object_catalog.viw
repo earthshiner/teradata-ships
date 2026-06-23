@@ -1,0 +1,71 @@
+REPLACE VIEW {{CallCentre_SEM_BUS_V}}.data_product_object_catalog
+(
+     module_id
+    ,module_name
+    ,module_description
+    ,module_purpose
+    ,naming_pattern
+    ,table_prefix
+    ,database_name
+    ,object_name
+    ,fully_qualified_object_name
+    ,object_type
+    ,object_role
+    ,usage_guidance
+    ,table_kind
+    ,module_version
+    ,deployment_status
+    ,deployed_dts
+    ,object_created_at
+    ,object_updated_at
+)
+AS
+LOCKING ROW FOR ACCESS
+SELECT
+     pmap.module_id
+    ,pmap.module_name
+    ,pmap.module_description
+    ,pmap.module_purpose
+    ,pmap.naming_pattern
+    ,pmap.table_prefix
+    ,{{pmo_V}}.database_name
+    ,{{pmo_V}}.object_name
+    ,TRIM({{pmo_V}}.database_name) || '.' || TRIM({{pmo_V}}.object_name)
+    ,{{pmo_V}}.object_type
+    ,{{pmo_V}}.object_role
+    ,{{pmo_V}}.usage_guidance
+    ,TRIM({{pmo_V}}.table_kind)
+    ,pmap.module_version
+    ,pmap.deployment_status
+    ,pmap.deployed_dts
+    ,{{pmo_V}}.created_at
+    ,{{pmo_V}}.updated_at
+FROM {{CallCentre_SEM_STD_V}}.data_product_map AS pmap
+INNER JOIN {{CallCentre_SEM_STD_V}}.data_product_map_primary_objects AS {{pmo_V}}
+    ON {{pmo_V}}.module_id = pmap.module_id
+WHERE pmap.is_active = 1
+  AND {{pmo_V}}.is_active = 1
+  AND UPPER(TRIM(pmap.deployment_status)) = 'DEPLOYED';
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_SEM_BUS_V.data_product_object_catalog.module_id|INTEGER
+--CallCentre_SEM_BUS_V.data_product_object_catalog.module_name|VARCHAR(50)
+--CallCentre_SEM_BUS_V.data_product_object_catalog.module_description|VARCHAR(1000)
+--CallCentre_SEM_BUS_V.data_product_object_catalog.module_purpose|VARCHAR(500)
+--CallCentre_SEM_BUS_V.data_product_object_catalog.naming_pattern|VARCHAR(20)
+--CallCentre_SEM_BUS_V.data_product_object_catalog.table_prefix|VARCHAR(10)
+--CallCentre_SEM_BUS_V.data_product_object_catalog.database_name|VARCHAR(128)
+--CallCentre_SEM_BUS_V.data_product_object_catalog.object_name|VARCHAR(128)
+--CallCentre_SEM_BUS_V.data_product_object_catalog.fully_qualified_object_name|VARCHAR(257)
+--CallCentre_SEM_BUS_V.data_product_object_catalog.object_type|VARCHAR(50)
+--CallCentre_SEM_BUS_V.data_product_object_catalog.object_role|VARCHAR(50)
+--CallCentre_SEM_BUS_V.data_product_object_catalog.usage_guidance|VARCHAR(500)
+--CallCentre_SEM_BUS_V.data_product_object_catalog.table_kind|VARCHAR(1)
+--CallCentre_SEM_BUS_V.data_product_object_catalog.module_version|VARCHAR(20)
+--CallCentre_SEM_BUS_V.data_product_object_catalog.deployment_status|VARCHAR(20)
+--CallCentre_SEM_BUS_V.data_product_object_catalog.deployed_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_SEM_BUS_V.data_product_object_catalog.object_created_at|TIMESTAMP WITH TIME ZONE
+--CallCentre_SEM_BUS_V.data_product_object_catalog.object_updated_at|TIMESTAMP WITH TIME ZONE
+

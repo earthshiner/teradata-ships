@@ -1,0 +1,38 @@
+REPLACE VIEW {{CallCentre_MEM_BUS_V}}.agent_interaction
+(
+      interaction_id, session_id, interaction_seq, interaction_type
+    , interaction_dts, user_input, agent_response, action_taken
+    , referenced_tables, sql_executed, query_result_count, execution_time_ms
+    , outcome_status, user_feedback, scope_level, scope_identifier
+    , created_at
+)
+AS
+SELECT
+      interaction_id, session_id, interaction_seq, interaction_type
+    , interaction_dts, user_input, agent_response, action_taken
+    , referenced_tables, sql_executed, query_result_count, execution_time_ms
+    , outcome_status, user_feedback, scope_level, scope_identifier
+    , created_at
+FROM {{CallCentre_MEM_STD_V}}.agent_interaction;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_MEM_BUS_V.agent_interaction.interaction_id|INTEGER
+--CallCentre_MEM_BUS_V.agent_interaction.session_id|INTEGER
+--CallCentre_MEM_BUS_V.agent_interaction.interaction_seq|INTEGER
+--CallCentre_MEM_BUS_V.agent_interaction.interaction_type|VARCHAR(50)
+--CallCentre_MEM_BUS_V.agent_interaction.interaction_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_MEM_BUS_V.agent_interaction.user_input|VARCHAR(4000)
+--CallCentre_MEM_BUS_V.agent_interaction.agent_response|VARCHAR(4000)
+--CallCentre_MEM_BUS_V.agent_interaction.action_taken|VARCHAR(500)
+--CallCentre_MEM_BUS_V.agent_interaction.referenced_tables|VARCHAR(1000)
+--CallCentre_MEM_BUS_V.agent_interaction.sql_executed|VARCHAR(4000)
+--CallCentre_MEM_BUS_V.agent_interaction.query_result_count|INTEGER
+--CallCentre_MEM_BUS_V.agent_interaction.execution_time_ms|INTEGER
+--CallCentre_MEM_BUS_V.agent_interaction.outcome_status|VARCHAR(20)
+--CallCentre_MEM_BUS_V.agent_interaction.user_feedback|VARCHAR(20)
+--CallCentre_MEM_BUS_V.agent_interaction.scope_level|VARCHAR(20)
+--CallCentre_MEM_BUS_V.agent_interaction.scope_identifier|VARCHAR(100)
+--CallCentre_MEM_BUS_V.agent_interaction.created_at|TIMESTAMP WITH TIME ZONE
+

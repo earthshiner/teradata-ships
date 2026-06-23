@@ -309,6 +309,8 @@ def _main():
         _cmd_keygen(args)
     elif args.command == "clean":
         _cmd_clean(args)
+    elif args.command == "notebook":
+        sys.exit(_cmd_notebook(args))
     else:
         parser.print_help()
         sys.exit(1)
@@ -370,6 +372,67 @@ def _cmd_deploy(args) -> int:
     except Exception as exc:  # noqa: BLE001
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
+
+
+def _cmd_notebook(args) -> int:
+    """Render a Clearscape Experience deployment notebook from a project.
+
+    Reads the project's analysis result (objects + wave ordering) and
+    its env config, then writes a self-contained .ipynb that deploys
+    every object via inline DDL. See
+    :mod:`td_release_packager.clearscape_notebook` for the notebook
+    shape and design rationale.
+    """
+    from pathlib import Path
+
+    from td_release_packager.analyser import analyse_project
+    from td_release_packager.clearscape_notebook import (
+        render_notebook,
+        write_notebook,
+    )
+    from td_release_packager.token_engine import read_env_config
+
+    project_dir = Path(args.project).expanduser().resolve()
+    if not project_dir.is_dir():
+        print(f"ERROR: Project directory not found: {project_dir}", file=sys.stderr)
+        return 1
+
+    env_config_path = Path(args.env_config).expanduser().resolve()
+    if not env_config_path.is_file():
+        print(
+            f"ERROR: Env config file not found: {env_config_path}",
+            file=sys.stderr,
+        )
+        return 1
+
+    package_name = args.name or project_dir.name
+    env_values = read_env_config(str(env_config_path))
+    analysis = analyse_project(str(project_dir))
+
+    if args.output:
+        output_path = Path(args.output).expanduser().resolve()
+    else:
+        output_path = project_dir / "output" / f"{package_name}.clearscape.ipynb"
+
+    notebook = render_notebook(
+        analysis,
+        package_name=package_name,
+        env_values=env_values,
+        env_name=args.env_name,
+    )
+    written = write_notebook(notebook, output_path)
+
+    print("=" * 64)
+    print("  SHIPS Clearscape Notebook")
+    print("=" * 64)
+    print(f"  Project:    {project_dir}")
+    print(f"  Env config: {env_config_path}")
+    print(f"  Notebook:   {written}")
+    print(f"  Waves:      {len(analysis.waves)}")
+    print(f"  Objects:    {len(analysis.objects)}")
+    print(f"  Cells:      {len(notebook['cells'])}")
+    print("=" * 64)
+    return 0
 
 
 def _cmd_demo(args) -> int:
@@ -6104,6 +6167,47 @@ def _build_parser():
             "Actually delete. Without this flag, runs as a dry-run "
             "and reports what would be removed."
         ),
+    )
+
+    # -- notebook --
+    nb = subs.add_parser(
+        "notebook",
+        help=(
+            "[N] Notebook — render a Clearscape Experience deployment "
+            "notebook (.ipynb) from a SHIPS project."
+        ),
+        description=(
+            "Produces a self-contained Jupyter notebook that deploys "
+            "every object in the project via inline DDL, with one code "
+            "cell per analysed wave. Intended for Teradata Clearscape "
+            "Experience demo sandboxes — non-production."
+        ),
+    )
+    nb.add_argument(
+        "--project",
+        required=True,
+        help="SHIPS project directory containing payload/ and ships.yaml.",
+    )
+    nb.add_argument(
+        "--env-config",
+        required=True,
+        help="Env config file (e.g. config/env/DEV.conf) used to resolve tokens.",
+    )
+    nb.add_argument(
+        "--output",
+        help=(
+            "Output path for the .ipynb. Default: "
+            "<project>/output/<name>.clearscape.ipynb."
+        ),
+    )
+    nb.add_argument(
+        "--name",
+        help="Package display name. Default: the project directory's basename.",
+    )
+    nb.add_argument(
+        "--env-name",
+        default="DEV",
+        help="Logical environment label stamped into the intro cell (default: DEV).",
     )
 
     for name, subparser in subs.choices.items():

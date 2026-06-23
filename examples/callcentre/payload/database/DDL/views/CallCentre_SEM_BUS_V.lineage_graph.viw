@@ -1,0 +1,74 @@
+REPLACE VIEW {{CallCentre_SEM_BUS_V}}.lineage_graph (
+    Src_Object_Name_FQ, Src_Container_Name, Src_Object_Name, Src_Kind, Src_Display_Name,
+    Edge_Relationship, Transformation_Type, Transformation_Logic, Lineage_ID,
+    Tgt_Object_Name_FQ, Tgt_Container_Name, Tgt_Object_Name, Tgt_Kind, Tgt_Display_Name
+) AS
+    -- Leg 1: source table -> job (ETL_INPUT)
+    SELECT
+         COALESCE(dl.source_database, '') || '.' || dl.source_table        AS Src_Object_Name_FQ,
+         CAST(COALESCE(dl.source_database, '') AS VARCHAR(128))             AS Src_Container_Name,
+         CAST(dl.source_table AS VARCHAR(128))                             AS Src_Object_Name,
+         CAST(CASE WHEN {{Src_Obj_V}}.TableKind = 'T' THEN 'Table'
+                   WHEN {{Src_Obj_V}}.TableKind = 'O' THEN 'No PI Table'
+                   WHEN {{Src_Obj_V}}.TableKind = 'V' THEN 'View'
+                   ELSE 'Unknown' END AS VARCHAR(30))                      AS Src_Kind,
+         COALESCE(dl.source_database, '') || '.' || dl.source_table
+           || '0A'xc || ' [' || Src_Kind || ']'                           AS Src_Display_Name,
+         CAST('ETL_INPUT' AS VARCHAR(12))                                  AS Edge_Relationship,
+         dl.transformation_type                                           AS Transformation_Type,
+         dl.transformation_logic                                          AS Transformation_Logic,
+         dl.lineage_id                                                    AS Lineage_ID,
+         CAST(dl.job_name AS VARCHAR(128))                                 AS Tgt_Object_Name_FQ,
+         CAST('' AS VARCHAR(128))                                          AS Tgt_Container_Name,
+         CAST(dl.job_name AS VARCHAR(128))                                 AS Tgt_Object_Name,
+         CAST('Job' AS VARCHAR(30))                                        AS Tgt_Kind,
+         dl.job_name || '0A'xc || ' [Job]'                                AS Tgt_Display_Name
+    FROM {{CallCentre_SEM_STD_V}}.data_lineage AS dl
+    LEFT OUTER JOIN DBC.TablesV AS {{Src_Obj_V}}
+      ON {{Src_Obj_V}}.DatabaseName = dl.source_database AND {{Src_Obj_V}}.TableName = dl.source_table
+    WHERE dl.is_active = 1
+
+    UNION ALL
+
+    -- Leg 2: job -> target table (ETL_OUTPUT)
+    SELECT
+         CAST(dl.job_name AS VARCHAR(128)),
+         CAST('' AS VARCHAR(128)),
+         CAST(dl.job_name AS VARCHAR(128)),
+         CAST('Job' AS VARCHAR(30)),
+         dl.job_name || '0A'xc || ' [Job]',
+         CAST('ETL_OUTPUT' AS VARCHAR(12)),
+         dl.transformation_type,
+         dl.transformation_logic,
+         dl.lineage_id,
+         COALESCE(dl.target_database, '') || '.' || dl.target_table,
+         CAST(COALESCE(dl.target_database, '') AS VARCHAR(128)),
+         CAST(dl.target_table AS VARCHAR(128)),
+         CAST(CASE WHEN {{Tgt_Obj_V}}.TableKind = 'T' THEN 'Table'
+                   WHEN {{Tgt_Obj_V}}.TableKind = 'O' THEN 'No PI Table'
+                   WHEN {{Tgt_Obj_V}}.TableKind = 'V' THEN 'View'
+                   ELSE 'Unknown' END AS VARCHAR(30)),
+         COALESCE(dl.target_database, '') || '.' || dl.target_table || '0A'xc || ' [Tgt]'
+    FROM {{CallCentre_SEM_STD_V}}.data_lineage AS dl
+    LEFT OUTER JOIN DBC.TablesV AS {{Tgt_Obj_V}}
+      ON {{Tgt_Obj_V}}.DatabaseName = dl.target_database AND {{Tgt_Obj_V}}.TableName = dl.target_table
+    WHERE dl.is_active = 1;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_SEM_BUS_V.lineage_graph.Src_Object_Name_FQ|VARCHAR(201)
+--CallCentre_SEM_BUS_V.lineage_graph.Src_Container_Name|VARCHAR(128)
+--CallCentre_SEM_BUS_V.lineage_graph.Src_Object_Name|VARCHAR(128)
+--CallCentre_SEM_BUS_V.lineage_graph.Src_Kind|VARCHAR(30)
+--CallCentre_SEM_BUS_V.lineage_graph.Src_Display_Name|VARCHAR(235)
+--CallCentre_SEM_BUS_V.lineage_graph.Edge_Relationship|VARCHAR(12)
+--CallCentre_SEM_BUS_V.lineage_graph.Transformation_Type|VARCHAR(50)
+--CallCentre_SEM_BUS_V.lineage_graph.Transformation_Logic|VARCHAR(4000)
+--CallCentre_SEM_BUS_V.lineage_graph.Lineage_ID|INTEGER
+--CallCentre_SEM_BUS_V.lineage_graph.Tgt_Object_Name_FQ|VARCHAR(128)
+--CallCentre_SEM_BUS_V.lineage_graph.Tgt_Container_Name|VARCHAR(128)
+--CallCentre_SEM_BUS_V.lineage_graph.Tgt_Object_Name|VARCHAR(128)
+--CallCentre_SEM_BUS_V.lineage_graph.Tgt_Kind|VARCHAR(30)
+--CallCentre_SEM_BUS_V.lineage_graph.Tgt_Display_Name|VARCHAR(207)
+

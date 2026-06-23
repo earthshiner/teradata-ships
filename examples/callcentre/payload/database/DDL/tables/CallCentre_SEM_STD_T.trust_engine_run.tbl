@@ -1,0 +1,26 @@
+CREATE MULTISET TABLE {{CallCentre_SEM_STD_T}}.trust_engine_run ,FALLBACK ,
+     NO BEFORE JOURNAL,
+     NO AFTER JOURNAL,
+     CHECKSUM = DEFAULT,
+     DEFAULT MERGEBLOCKRATIO,
+     MAP = TD_MAP1
+     (
+      product_prefix VARCHAR(128) CHARACTER SET LATIN NOT CASESPECIFIC NOT NULL,
+      run_id VARCHAR(64) CHARACTER SET LATIN NOT CASESPECIFIC NOT NULL,
+      started_at VARCHAR(40) CHARACTER SET LATIN NOT CASESPECIFIC NOT NULL,
+      completed_at VARCHAR(40) CHARACTER SET LATIN NOT CASESPECIFIC NOT NULL,
+      trust_status VARCHAR(16) CHARACTER SET LATIN NOT CASESPECIFIC NOT NULL,
+      agent_use_allowed BYTEINT NOT NULL,
+      total_checks INTEGER NOT NULL,
+      passed_count INTEGER NOT NULL,
+      failed_count INTEGER NOT NULL,
+      error_count INTEGER NOT NULL,
+      critical_failure_count INTEGER NOT NULL,
+      error_failure_count INTEGER NOT NULL,
+      data_product_trust_score INTEGER,
+      performance_readiness_score INTEGER,
+      operational_readiness_score INTEGER,
+      repair_candidate_count INTEGER NOT NULL,
+      failed_checks_json JSON(32000) CHARACTER SET UNICODE,
+      repair_candidates_json JSON(32000) CHARACTER SET UNICODE)
+PRIMARY INDEX ( product_prefix ,completed_at );

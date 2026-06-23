@@ -1,0 +1,4 @@
+COLLECT STATISTICS 
+                   -- default SYSTEM SAMPLE PERCENT 
+            COLUMN ( lineage_id ) 
+                ON {{CallCentre_SEM_STD_T}}.data_lineage ;

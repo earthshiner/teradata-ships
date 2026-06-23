@@ -1,0 +1,1 @@
+create database {{CallCentre_OBS_STD_T}} from {{CallCentre_T}} as perm = 0.0 spool = 2.0E9 fallback ;

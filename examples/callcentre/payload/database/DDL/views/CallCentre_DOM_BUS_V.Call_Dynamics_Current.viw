@@ -1,0 +1,228 @@
+REPLACE VIEW {{CallCentre_DOM_BUS_V}}.Call_Dynamics_Current
+(
+      call_dynamics_id
+    , call_id
+    , call_duration_sec
+    , total_word_count
+    , words_per_min
+    , first_response_latency_sec
+    , turn_count
+    , avg_turn_duration_ms
+    , median_turn_duration_ms
+    , longest_turn_duration_ms
+    , avg_turn_words
+    , agent_turn_count
+    , agent_avg_turn_duration_ms
+    , agent_median_turn_duration_ms
+    , agent_longest_turn_duration_ms
+    , agent_avg_turn_words
+    , caller_turn_count
+    , caller_avg_turn_duration_ms
+    , caller_median_turn_duration_ms
+    , caller_longest_turn_duration_ms
+    , caller_avg_turn_words
+    , agent_talk_ratio
+    , caller_talk_ratio
+    , agent_wpm
+    , caller_wpm
+    , agent_to_caller_wpm_ratio
+    , silence_incidents
+    , silence_ratio
+    , avg_pause_sec
+    , overall_lexical_density
+    , overall_type_token_ratio
+    , overall_avg_word_length_chars
+    , overall_disfluency_ratio
+    , agent_lexical_density
+    , agent_type_token_ratio
+    , agent_avg_word_length_chars
+    , agent_disfluency_ratio
+    , caller_lexical_density
+    , caller_type_token_ratio
+    , caller_avg_word_length_chars
+    , caller_disfluency_ratio
+    , agent_average_streak_sec
+    , agent_median_streak_sec
+    , agent_longest_streak_sec
+    , caller_average_streak_sec
+    , caller_median_streak_sec
+    , caller_longest_streak_sec
+    , overall_average_streak_sec
+    , overall_median_streak_sec
+    , overall_longest_streak_sec
+    , agent_wpm_change
+    , caller_wpm_change
+    , overtalk_incidents
+    , overtalk_ms
+    , overtalk_ratio
+    , agent_overtalk_incidents
+    , agent_overtalk_ms
+    , agent_overtalk_ratio
+    , caller_overtalk_incidents
+    , caller_overtalk_ms
+    , caller_overtalk_ratio
+    , call_sentiment
+    , end_sentiment
+    , call_change_in_sentiment
+    , agent_sentiment
+    , agent_start_sentiment
+    , agent_end_sentiment
+    , agent_intra_call_change_in_sentiment
+    , caller_sentiment
+    , caller_start_sentiment
+    , caller_end_sentiment
+    , caller_intra_call_change_in_sentiment
+)
+AS
+SELECT
+      src.call_dynamics_id AS call_dynamics_id
+    , src.call_id AS call_id
+    , src.call_duration_sec AS call_duration_sec
+    , src.total_word_count AS total_word_count
+    , src.words_per_min AS words_per_min
+    , src.first_response_latency_sec AS first_response_latency_sec
+    , src.turn_count AS turn_count
+    , src.avg_turn_duration_ms AS avg_turn_duration_ms
+    , src.median_turn_duration_ms AS median_turn_duration_ms
+    , src.longest_turn_duration_ms AS longest_turn_duration_ms
+    , src.avg_turn_words AS avg_turn_words
+    , src.agent_turn_count AS agent_turn_count
+    , src.agent_avg_turn_duration_ms AS agent_avg_turn_duration_ms
+    , src.agent_median_turn_duration_ms AS agent_median_turn_duration_ms
+    , src.agent_longest_turn_duration_ms AS agent_longest_turn_duration_ms
+    , src.agent_avg_turn_words AS agent_avg_turn_words
+    , src.caller_turn_count AS caller_turn_count
+    , src.caller_avg_turn_duration_ms AS caller_avg_turn_duration_ms
+    , src.caller_median_turn_duration_ms AS caller_median_turn_duration_ms
+    , src.caller_longest_turn_duration_ms AS caller_longest_turn_duration_ms
+    , src.caller_avg_turn_words AS caller_avg_turn_words
+    , src.agent_talk_ratio AS agent_talk_ratio
+    , src.caller_talk_ratio AS caller_talk_ratio
+    , src.agent_wpm AS agent_wpm
+    , src.caller_wpm AS caller_wpm
+    , src.agent_to_caller_wpm_ratio AS agent_to_caller_wpm_ratio
+    , src.silence_incidents AS silence_incidents
+    , src.silence_ratio AS silence_ratio
+    , src.avg_pause_sec AS avg_pause_sec
+    , src.overall_lexical_density AS overall_lexical_density
+    , src.overall_type_token_ratio AS overall_type_token_ratio
+    , src.overall_avg_word_length_chars AS overall_avg_word_length_chars
+    , src.overall_disfluency_ratio AS overall_disfluency_ratio
+    , src.agent_lexical_density AS agent_lexical_density
+    , src.agent_type_token_ratio AS agent_type_token_ratio
+    , src.agent_avg_word_length_chars AS agent_avg_word_length_chars
+    , src.agent_disfluency_ratio AS agent_disfluency_ratio
+    , src.caller_lexical_density AS caller_lexical_density
+    , src.caller_type_token_ratio AS caller_type_token_ratio
+    , src.caller_avg_word_length_chars AS caller_avg_word_length_chars
+    , src.caller_disfluency_ratio AS caller_disfluency_ratio
+    , src.agent_average_streak_sec AS agent_average_streak_sec
+    , src.agent_median_streak_sec AS agent_median_streak_sec
+    , src.agent_longest_streak_sec AS agent_longest_streak_sec
+    , src.caller_average_streak_sec AS caller_average_streak_sec
+    , src.caller_median_streak_sec AS caller_median_streak_sec
+    , src.caller_longest_streak_sec AS caller_longest_streak_sec
+    , src.overall_average_streak_sec AS overall_average_streak_sec
+    , src.overall_median_streak_sec AS overall_median_streak_sec
+    , src.overall_longest_streak_sec AS overall_longest_streak_sec
+    , src.agent_wpm_change AS agent_wpm_change
+    , src.caller_wpm_change AS caller_wpm_change
+    , src.overtalk_incidents AS overtalk_incidents
+    , src.overtalk_ms AS overtalk_ms
+    , src.overtalk_ratio AS overtalk_ratio
+    , src.agent_overtalk_incidents AS agent_overtalk_incidents
+    , src.agent_overtalk_ms AS agent_overtalk_ms
+    , src.agent_overtalk_ratio AS agent_overtalk_ratio
+    , src.caller_overtalk_incidents AS caller_overtalk_incidents
+    , src.caller_overtalk_ms AS caller_overtalk_ms
+    , src.caller_overtalk_ratio AS caller_overtalk_ratio
+    , src.call_sentiment AS call_sentiment
+    , src.end_sentiment AS end_sentiment
+    , src.call_change_in_sentiment AS call_change_in_sentiment
+    , src.agent_sentiment AS agent_sentiment
+    , src.agent_start_sentiment AS agent_start_sentiment
+    , src.agent_end_sentiment AS agent_end_sentiment
+    , src.agent_intra_call_change_in_sentiment AS agent_intra_call_change_in_sentiment
+    , src.caller_sentiment AS caller_sentiment
+    , src.caller_start_sentiment AS caller_start_sentiment
+    , src.caller_end_sentiment AS caller_end_sentiment
+    , src.caller_intra_call_change_in_sentiment AS caller_intra_call_change_in_sentiment
+FROM {{CallCentre_DOM_STD_V}}.Call_Dynamics_H AS src
+WHERE is_current = 1 AND is_deleted = 0;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.call_dynamics_id|INTEGER
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.call_id|INTEGER
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.call_duration_sec|DECIMAL(10,1)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.total_word_count|INTEGER
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.words_per_min|DECIMAL(7,1)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.first_response_latency_sec|DECIMAL(7,1)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.turn_count|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.avg_turn_duration_ms|INTEGER
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.median_turn_duration_ms|INTEGER
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.longest_turn_duration_ms|INTEGER
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.avg_turn_words|DECIMAL(7,2)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.agent_turn_count|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.agent_avg_turn_duration_ms|INTEGER
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.agent_median_turn_duration_ms|INTEGER
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.agent_longest_turn_duration_ms|INTEGER
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.agent_avg_turn_words|DECIMAL(7,2)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.caller_turn_count|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.caller_avg_turn_duration_ms|INTEGER
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.caller_median_turn_duration_ms|INTEGER
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.caller_longest_turn_duration_ms|INTEGER
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.caller_avg_turn_words|DECIMAL(7,2)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.agent_talk_ratio|DECIMAL(5,3)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.caller_talk_ratio|DECIMAL(5,3)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.agent_wpm|DECIMAL(7,1)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.caller_wpm|DECIMAL(7,1)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.agent_to_caller_wpm_ratio|DECIMAL(7,3)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.silence_incidents|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.silence_ratio|DECIMAL(5,3)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.avg_pause_sec|DECIMAL(7,1)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.overall_lexical_density|DECIMAL(5,3)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.overall_type_token_ratio|DECIMAL(5,3)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.overall_avg_word_length_chars|DECIMAL(5,1)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.overall_disfluency_ratio|DECIMAL(7,4)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.agent_lexical_density|DECIMAL(5,3)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.agent_type_token_ratio|DECIMAL(5,3)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.agent_avg_word_length_chars|DECIMAL(5,1)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.agent_disfluency_ratio|DECIMAL(7,4)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.caller_lexical_density|DECIMAL(5,3)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.caller_type_token_ratio|DECIMAL(5,3)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.caller_avg_word_length_chars|DECIMAL(5,1)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.caller_disfluency_ratio|DECIMAL(7,4)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.agent_average_streak_sec|DECIMAL(8,2)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.agent_median_streak_sec|DECIMAL(8,2)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.agent_longest_streak_sec|DECIMAL(8,2)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.caller_average_streak_sec|DECIMAL(8,2)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.caller_median_streak_sec|DECIMAL(8,2)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.caller_longest_streak_sec|DECIMAL(8,2)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.overall_average_streak_sec|DECIMAL(8,2)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.overall_median_streak_sec|DECIMAL(8,2)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.overall_longest_streak_sec|DECIMAL(8,2)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.agent_wpm_change|DECIMAL(7,3)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.caller_wpm_change|DECIMAL(7,3)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.overtalk_incidents|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.overtalk_ms|INTEGER
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.overtalk_ratio|DECIMAL(5,3)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.agent_overtalk_incidents|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.agent_overtalk_ms|INTEGER
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.agent_overtalk_ratio|DECIMAL(5,3)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.caller_overtalk_incidents|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.caller_overtalk_ms|INTEGER
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.caller_overtalk_ratio|DECIMAL(5,3)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.call_sentiment|DECIMAL(8,6)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.end_sentiment|DECIMAL(8,6)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.call_change_in_sentiment|DECIMAL(8,6)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.agent_sentiment|DECIMAL(8,6)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.agent_start_sentiment|DECIMAL(8,6)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.agent_end_sentiment|DECIMAL(8,6)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.agent_intra_call_change_in_sentiment|DECIMAL(8,6)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.caller_sentiment|DECIMAL(8,6)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.caller_start_sentiment|DECIMAL(8,6)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.caller_end_sentiment|DECIMAL(8,6)
+--CallCentre_DOM_BUS_V.Call_Dynamics_Current.caller_intra_call_change_in_sentiment|DECIMAL(8,6)
+

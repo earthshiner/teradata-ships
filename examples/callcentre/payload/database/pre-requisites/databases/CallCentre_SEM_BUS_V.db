@@ -1,0 +1,1 @@
+create database {{CallCentre_SEM_BUS_V}} from {{CallCentre_T}} as perm = 0.0 spool = 4.46581964E8 fallback ;

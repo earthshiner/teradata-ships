@@ -1,0 +1,51 @@
+REPLACE VIEW {{CallCentre_MEM_BUS_V}}.Module_Registry_Current
+(
+    module_name
+   ,database_name
+   ,module_version
+   ,module_purpose
+   ,{{key}}_entities
+   ,dependencies
+   ,dependents
+   ,data_owner
+   ,technical_owner
+   ,refresh_frequency
+   ,version_date
+   ,valid_from
+   ,valid_to
+)
+AS
+SELECT
+    module_name
+   ,database_name
+   ,module_version
+   ,module_purpose
+   ,{{key}}_entities
+   ,dependencies
+   ,dependents
+   ,data_owner
+   ,technical_owner
+   ,refresh_frequency
+   ,version_date
+   ,valid_from
+   ,valid_to
+FROM {{CallCentre_MEM_STD_V}}.Module_Registry
+WHERE is_current = 1;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_MEM_BUS_V.Module_Registry_Current.module_name|VARCHAR(50)
+--CallCentre_MEM_BUS_V.Module_Registry_Current.database_name|VARCHAR(100)
+--CallCentre_MEM_BUS_V.Module_Registry_Current.module_version|VARCHAR(20)
+--CallCentre_MEM_BUS_V.Module_Registry_Current.module_purpose|CLOB(2097088000)
+--CallCentre_MEM_BUS_V.Module_Registry_Current.key_entities|VARCHAR(500)
+--CallCentre_MEM_BUS_V.Module_Registry_Current.dependencies|VARCHAR(500)
+--CallCentre_MEM_BUS_V.Module_Registry_Current.dependents|VARCHAR(500)
+--CallCentre_MEM_BUS_V.Module_Registry_Current.data_owner|VARCHAR(100)
+--CallCentre_MEM_BUS_V.Module_Registry_Current.technical_owner|VARCHAR(100)
+--CallCentre_MEM_BUS_V.Module_Registry_Current.refresh_frequency|VARCHAR(50)
+--CallCentre_MEM_BUS_V.Module_Registry_Current.version_date|DATE
+--CallCentre_MEM_BUS_V.Module_Registry_Current.valid_from|DATE
+--CallCentre_MEM_BUS_V.Module_Registry_Current.valid_to|DATE
+

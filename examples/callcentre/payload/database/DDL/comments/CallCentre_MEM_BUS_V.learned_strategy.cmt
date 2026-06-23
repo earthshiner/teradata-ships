@@ -1,0 +1,2 @@
+comment on view {{CallCentre_MEM_BUS_V}}.learned_strategy is 'Canonical access view over CallCentre_MEM_STD_V.learned_strategy. Full passthrough;
+ consumers filter WHERE is_active = 1. Friendly pre-filtered alias: learned_strategies_org.';

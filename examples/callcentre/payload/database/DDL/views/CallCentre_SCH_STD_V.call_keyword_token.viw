@@ -1,0 +1,27 @@
+CREATE VIEW {{CallCentre_SCH_STD_V}}.call_keyword_token
+(
+      token_id
+    , call_id
+    , keyword
+    , token_source
+    , created_dts
+)
+AS
+LOCKING ROW FOR ACCESS
+SELECT
+      token_id
+    , call_id
+    , keyword
+    , token_source
+    , created_dts
+FROM {{CallCentre_SCH_STD_T}}.call_keyword_token;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_SCH_STD_V.call_keyword_token.token_id|INTEGER
+--CallCentre_SCH_STD_V.call_keyword_token.call_id|INTEGER
+--CallCentre_SCH_STD_V.call_keyword_token.keyword|VARCHAR(100)
+--CallCentre_SCH_STD_V.call_keyword_token.token_source|VARCHAR(50)
+--CallCentre_SCH_STD_V.call_keyword_token.created_dts|TIMESTAMP WITH TIME ZONE
+

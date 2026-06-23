@@ -1,0 +1,1 @@
+comment on view {{CallCentre_PRE_BUS_V}}.call_features_current is 'Current (is_current=1) normalised feature rows for all calls. Primary ML feature access point. Join to Domain via call_id for business context.';

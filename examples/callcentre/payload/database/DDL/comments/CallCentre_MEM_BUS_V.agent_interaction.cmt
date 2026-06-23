@@ -1,0 +1,2 @@
+comment on view {{CallCentre_MEM_BUS_V}}.agent_interaction is 'Canonical access view over CallCentre_MEM_STD_V.agent_interaction. Full passthrough;
+ append-only interaction log, no row filter.';

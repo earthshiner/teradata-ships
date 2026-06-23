@@ -1,0 +1,84 @@
+REPLACE VIEW {{CallCentre_SEM_BUS_V}}.data_product_manifest
+(
+    product_id
+   ,product_name
+   ,product_version
+   ,product_description
+   ,product_status
+   ,owner_team
+   ,approved_access_mode
+   ,orientation_entrypoint
+   ,object_catalog_entrypoint
+   ,trust_status_entrypoint
+   ,contract_uri
+   ,semantic_uri
+   ,quality_uri
+   ,lineage_uri
+   ,policy_uri
+   ,glossary_uri
+   ,query_cookbook_uri
+   ,metadata_updated_at
+   ,manifest_json
+)
+AS
+LOCKING ROW FOR ACCESS
+SELECT
+    ar.product_id
+   ,ar.product_name
+   ,ar.product_version
+   ,ar.product_description
+   ,ar.product_status
+   ,ar.owner_team
+   ,'VIEW' AS approved_access_mode
+   ,'CallCentre_SEM_BUS_V.data_product_orientation' AS orientation_entrypoint
+   ,'CallCentre_SEM_BUS_V.data_product_object_catalog' AS object_catalog_entrypoint
+   ,'CallCentre_SEM_BUS_V.trust_engine_latest' AS trust_status_entrypoint
+   ,ar.contract_uri
+   ,ar.semantic_uri
+   ,ar.quality_uri
+   ,ar.lineage_uri
+   ,ar.policy_uri
+   ,ar.glossary_uri
+   ,ar.query_cookbook_uri
+   ,ar.updated_at AS metadata_updated_at
+   ,CAST(
+        NEW JSON(
+            '{"product_id":"' || TRIM(ar.product_id)
+            || '","product_version":"' || TRIM(ar.product_version)
+            || '","product_status":"' || TRIM(ar.product_status)
+            || '","approved_access_mode":"VIEW"'
+            || ',"orientation_entrypoint":"CallCentre_SEM_BUS_V.data_product_orientation"'
+            || ',"object_catalog_entrypoint":"CallCentre_SEM_BUS_V.data_product_object_catalog"'
+            || ',"trust_status_entrypoint":"CallCentre_SEM_BUS_V.trust_engine_latest"'
+            || ',"metadata_updated_at":"'
+            || COALESCE(TRIM(CAST(ar.updated_at AS VARCHAR(40))), '')
+            || '"}'
+        )
+        AS CLOB
+    ) AS manifest_json
+FROM {{DataProductsMaster_GOV_BUS_V}}.active_data_product_registry ar
+WHERE ar.product_id = 'CALLCENTRE';
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_SEM_BUS_V.data_product_manifest.product_id|VARCHAR(128)
+--CallCentre_SEM_BUS_V.data_product_manifest.product_name|VARCHAR(256)
+--CallCentre_SEM_BUS_V.data_product_manifest.product_version|VARCHAR(32)
+--CallCentre_SEM_BUS_V.data_product_manifest.product_description|VARCHAR(1000)
+--CallCentre_SEM_BUS_V.data_product_manifest.product_status|VARCHAR(32)
+--CallCentre_SEM_BUS_V.data_product_manifest.owner_team|VARCHAR(256)
+--CallCentre_SEM_BUS_V.data_product_manifest.approved_access_mode|VARCHAR(4)
+--CallCentre_SEM_BUS_V.data_product_manifest.orientation_entrypoint|VARCHAR(45)
+--CallCentre_SEM_BUS_V.data_product_manifest.object_catalog_entrypoint|VARCHAR(48)
+--CallCentre_SEM_BUS_V.data_product_manifest.trust_status_entrypoint|VARCHAR(40)
+--CallCentre_SEM_BUS_V.data_product_manifest.contract_uri|VARCHAR(1000)
+--CallCentre_SEM_BUS_V.data_product_manifest.semantic_uri|VARCHAR(1000)
+--CallCentre_SEM_BUS_V.data_product_manifest.quality_uri|VARCHAR(1000)
+--CallCentre_SEM_BUS_V.data_product_manifest.lineage_uri|VARCHAR(1000)
+--CallCentre_SEM_BUS_V.data_product_manifest.policy_uri|VARCHAR(1000)
+--CallCentre_SEM_BUS_V.data_product_manifest.glossary_uri|VARCHAR(1000)
+--CallCentre_SEM_BUS_V.data_product_manifest.query_cookbook_uri|VARCHAR(1000)
+--CallCentre_SEM_BUS_V.data_product_manifest.metadata_updated_at|TIMESTAMP WITH TIME ZONE
+--CallCentre_SEM_BUS_V.data_product_manifest.manifest_json|CLOB(2097088000)
+

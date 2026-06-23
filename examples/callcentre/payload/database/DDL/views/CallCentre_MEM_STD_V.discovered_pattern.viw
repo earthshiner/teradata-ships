@@ -1,0 +1,63 @@
+CREATE VIEW {{CallCentre_MEM_STD_V}}.discovered_pattern
+(
+      pattern_id
+    , pattern_name
+    , pattern_description
+    , pattern_type
+    , pattern_definition_json
+    , sample_size
+    , occurrences
+    , confidence_score
+    , statistical_significance
+    , discovered_dts
+    , discovered_by_agent
+    , is_validated
+    , involved_tables
+    , scope_level
+    , scope_identifier
+    , is_active
+    , created_at
+)
+AS
+LOCKING ROW FOR ACCESS
+SELECT
+      pattern_id
+    , pattern_name
+    , pattern_description
+    , pattern_type
+    , pattern_definition_json
+    , sample_size
+    , occurrences
+    , confidence_score
+    , statistical_significance
+    , discovered_dts
+    , discovered_by_agent
+    , is_validated
+    , involved_tables
+    , scope_level
+    , scope_identifier
+    , is_active
+    , created_at
+FROM {{CallCentre_MEM_STD_T}}.discovered_pattern;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_MEM_STD_V.discovered_pattern.pattern_id|INTEGER
+--CallCentre_MEM_STD_V.discovered_pattern.pattern_name|VARCHAR(100)
+--CallCentre_MEM_STD_V.discovered_pattern.pattern_description|VARCHAR(1000)
+--CallCentre_MEM_STD_V.discovered_pattern.pattern_type|VARCHAR(50)
+--CallCentre_MEM_STD_V.discovered_pattern.pattern_definition_json|JSON(16776192)
+--CallCentre_MEM_STD_V.discovered_pattern.sample_size|INTEGER
+--CallCentre_MEM_STD_V.discovered_pattern.occurrences|INTEGER
+--CallCentre_MEM_STD_V.discovered_pattern.confidence_score|DECIMAL(5,4)
+--CallCentre_MEM_STD_V.discovered_pattern.statistical_significance|DECIMAL(5,4)
+--CallCentre_MEM_STD_V.discovered_pattern.discovered_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_MEM_STD_V.discovered_pattern.discovered_by_agent|VARCHAR(100)
+--CallCentre_MEM_STD_V.discovered_pattern.is_validated|BYTEINT
+--CallCentre_MEM_STD_V.discovered_pattern.involved_tables|VARCHAR(1000)
+--CallCentre_MEM_STD_V.discovered_pattern.scope_level|VARCHAR(20)
+--CallCentre_MEM_STD_V.discovered_pattern.scope_identifier|VARCHAR(100)
+--CallCentre_MEM_STD_V.discovered_pattern.is_active|BYTEINT
+--CallCentre_MEM_STD_V.discovered_pattern.created_at|TIMESTAMP WITH TIME ZONE
+

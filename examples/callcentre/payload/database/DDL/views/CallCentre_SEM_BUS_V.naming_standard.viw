@@ -1,0 +1,25 @@
+CREATE VIEW {{CallCentre_SEM_BUS_V}}.naming_standard
+(
+      naming_standard_id
+    , standard_type
+    , standard_value
+    , {{meaning_V}}
+    , usage_guidance
+    , applies_to
+    , examples
+    , is_active
+    , created_at
+)
+AS
+SELECT
+      naming_standard_id
+    , standard_type
+    , standard_value
+    , {{meaning_V}}
+    , usage_guidance
+    , applies_to
+    , examples
+    , is_active
+    , created_at
+FROM {{CallCentre_SEM_STD_V}}.naming_standard
+;

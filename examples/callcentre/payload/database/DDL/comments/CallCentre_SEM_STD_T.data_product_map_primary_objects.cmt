@@ -1,0 +1,21 @@
+comment on table {{CallCentre_SEM_STD_T}}.data_product_map_primary_objects is 'Normalised catalogue of primary data product objects assigned to metadata modules';
+comment on column {{CallCentre_SEM_STD_T}}.data_product_map_primary_objects.module_id is 'Logical parent identifier matching data_product_map.module_id;
+ no physical foreign key is declared';
+
+comment on column {{CallCentre_SEM_STD_T}}.data_product_map_primary_objects.database_name is 'Exact database containing the primary object';
+
+comment on column {{CallCentre_SEM_STD_T}}.data_product_map_primary_objects.object_name is 'Exact unqualified name of the primary object';
+
+comment on column {{CallCentre_SEM_STD_T}}.data_product_map_primary_objects.object_type is 'Human-readable object classification such as TABLE or VIEW';
+
+comment on column {{CallCentre_SEM_STD_T}}.data_product_map_primary_objects.object_role is 'Controlled role describing the recommended use of the object';
+
+comment on column {{CallCentre_SEM_STD_T}}.data_product_map_primary_objects.usage_guidance is 'Concise instructions and constraints for agent use of the object';
+
+comment on column {{CallCentre_SEM_STD_T}}.data_product_map_primary_objects.table_kind is 'Teradata DBC.TablesV TableKind code for the deployed object';
+
+comment on column {{CallCentre_SEM_STD_T}}.data_product_map_primary_objects.is_active is 'Lifecycle flag where 1 is actively discoverable and 0 is retained history';
+
+comment on column {{CallCentre_SEM_STD_T}}.data_product_map_primary_objects.created_at is 'Timestamp with source time zone when the metadata row was created';
+
+comment on column {{CallCentre_SEM_STD_T}}.data_product_map_primary_objects.updated_at is 'Timestamp with source time zone of the latest metadata change';

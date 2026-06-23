@@ -1,0 +1,35 @@
+REPLACE VIEW {{CallCentre_MEM_BUS_V}}.Implementation_Note
+(
+      note_key, note_id, note_title, note_content
+    , note_category, severity, affects_table, resolution_status
+    , resolution_notes, source_module, module_version, is_active
+    , valid_from, valid_to, created_timestamp, updated_timestamp
+)
+AS
+SELECT
+      note_key, note_id, note_title, note_content
+    , note_category, severity, affects_table, resolution_status
+    , resolution_notes, source_module, module_version, is_active
+    , valid_from, valid_to, created_timestamp, updated_timestamp
+FROM {{CallCentre_MEM_STD_V}}.Implementation_Note;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_MEM_BUS_V.Implementation_Note.note_key|BIGINT
+--CallCentre_MEM_BUS_V.Implementation_Note.note_id|VARCHAR(50)
+--CallCentre_MEM_BUS_V.Implementation_Note.note_title|VARCHAR(200)
+--CallCentre_MEM_BUS_V.Implementation_Note.note_content|CLOB(2097088000)
+--CallCentre_MEM_BUS_V.Implementation_Note.note_category|VARCHAR(50)
+--CallCentre_MEM_BUS_V.Implementation_Note.severity|VARCHAR(20)
+--CallCentre_MEM_BUS_V.Implementation_Note.affects_table|VARCHAR(200)
+--CallCentre_MEM_BUS_V.Implementation_Note.resolution_status|VARCHAR(20)
+--CallCentre_MEM_BUS_V.Implementation_Note.resolution_notes|CLOB(2097088000)
+--CallCentre_MEM_BUS_V.Implementation_Note.source_module|VARCHAR(50)
+--CallCentre_MEM_BUS_V.Implementation_Note.module_version|VARCHAR(20)
+--CallCentre_MEM_BUS_V.Implementation_Note.is_active|BYTEINT
+--CallCentre_MEM_BUS_V.Implementation_Note.valid_from|DATE
+--CallCentre_MEM_BUS_V.Implementation_Note.valid_to|DATE
+--CallCentre_MEM_BUS_V.Implementation_Note.created_timestamp|TIMESTAMP WITH TIME ZONE
+--CallCentre_MEM_BUS_V.Implementation_Note.updated_timestamp|TIMESTAMP WITH TIME ZONE
+

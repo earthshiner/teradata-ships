@@ -1,0 +1,2 @@
+comment on view {{CallCentre_MEM_BUS_V}}.Implementation_Note is 'Canonical access view over CallCentre_MEM_STD_V.Implementation_Note. Full passthrough;
+ consumers filter WHERE is_active = 1 (and validity).';

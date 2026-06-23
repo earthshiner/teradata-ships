@@ -1,0 +1,69 @@
+CREATE VIEW {{CallCentre_SEM_BUS_V}}.trust_engine_latest
+(
+    product_prefix,
+    run_id,
+    started_at,
+    completed_at,
+    trust_status,
+    agent_use_allowed,
+    total_checks,
+    passed_count,
+    failed_count,
+    error_count,
+    critical_failure_count,
+    error_failure_count,
+    data_product_trust_score,
+    performance_readiness_score,
+    operational_readiness_score,
+    repair_candidate_count,
+    failed_checks_json,
+    repair_candidates_json
+)
+AS
+SELECT
+    product_prefix,
+    run_id,
+    started_at,
+    completed_at,
+    trust_status,
+    agent_use_allowed,
+    total_checks,
+    passed_count,
+    failed_count,
+    error_count,
+    critical_failure_count,
+    error_failure_count,
+    data_product_trust_score,
+    performance_readiness_score,
+    operational_readiness_score,
+    repair_candidate_count,
+    failed_checks_json,
+    repair_candidates_json
+FROM {{CallCentre_SEM_STD_V}}.trust_engine_run
+QUALIFY ROW_NUMBER() OVER (
+    PARTITION BY product_prefix
+    ORDER BY completed_at DESC, run_id DESC
+) = 1;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_SEM_BUS_V.trust_engine_latest.product_prefix|VARCHAR(128)
+--CallCentre_SEM_BUS_V.trust_engine_latest.run_id|VARCHAR(64)
+--CallCentre_SEM_BUS_V.trust_engine_latest.started_at|VARCHAR(40)
+--CallCentre_SEM_BUS_V.trust_engine_latest.completed_at|VARCHAR(40)
+--CallCentre_SEM_BUS_V.trust_engine_latest.trust_status|VARCHAR(16)
+--CallCentre_SEM_BUS_V.trust_engine_latest.agent_use_allowed|BYTEINT
+--CallCentre_SEM_BUS_V.trust_engine_latest.total_checks|INTEGER
+--CallCentre_SEM_BUS_V.trust_engine_latest.passed_count|INTEGER
+--CallCentre_SEM_BUS_V.trust_engine_latest.failed_count|INTEGER
+--CallCentre_SEM_BUS_V.trust_engine_latest.error_count|INTEGER
+--CallCentre_SEM_BUS_V.trust_engine_latest.critical_failure_count|INTEGER
+--CallCentre_SEM_BUS_V.trust_engine_latest.error_failure_count|INTEGER
+--CallCentre_SEM_BUS_V.trust_engine_latest.data_product_trust_score|INTEGER
+--CallCentre_SEM_BUS_V.trust_engine_latest.performance_readiness_score|INTEGER
+--CallCentre_SEM_BUS_V.trust_engine_latest.operational_readiness_score|INTEGER
+--CallCentre_SEM_BUS_V.trust_engine_latest.repair_candidate_count|INTEGER
+--CallCentre_SEM_BUS_V.trust_engine_latest.failed_checks_json|JSON(32000)
+--CallCentre_SEM_BUS_V.trust_engine_latest.repair_candidates_json|JSON(32000)
+

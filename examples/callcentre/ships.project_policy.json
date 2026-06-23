@@ -1,0 +1,44 @@
+{
+  "schema_version": "1.0",
+  "evaluated_at": "2026-06-23T03:05:49+00:00",
+  "purpose": "Bound downstream agent behaviour on the project (pre-package) side and prevent unsafe inference or by-passing of SHIPS source-tree controls.",
+  "project_state": "inspected",
+  "do_not_modify_source_without_dry_run": true,
+  "do_not_skip_inspect_before_package": true,
+  "do_not_proceed_past_inspect_errors": true,
+  "stop_conditions": [
+    {
+      "condition": "ships_yaml_missing",
+      "detect_via": "<project_dir>/ships.yaml is absent.",
+      "evidence_ref": "ships.project.json",
+      "instruction": "Stop. The directory is not a SHIPS project. Run scaffold first or change directories."
+    },
+    {
+      "condition": "inspect_errors_present",
+      "detect_via": "ships.decisions.json shows the latest inspect stage status == 'error'.",
+      "evidence_ref": "ships.decisions.json",
+      "instruction": "Stop. Resolve all inspect ERROR findings before harvesting more or packaging — these are gating issues, not warnings."
+    },
+    {
+      "condition": "unknown_lifecycle_state",
+      "detect_via": "ships.project.json.lifecycle_state is outside the closed v1 vocabulary.",
+      "evidence_ref": "ships.project.json",
+      "instruction": "Stop. The project index reports a lifecycle state SHIPS does not recognise — refresh tooling or ask the operator before taking any project-mutating action."
+    }
+  ],
+  "ask_for_human_approval_when": [
+    {
+      "condition": "tokenise_without_dry_run",
+      "detect_via": "About to call migrate-source without --dry-run on a non-empty source tree.",
+      "evidence_ref": "config/tokenise.conf",
+      "instruction": "Pause. Run migrate-source --dry-run first; surface the diff to the operator before applying."
+    },
+    {
+      "condition": "package_empty_payload",
+      "detect_via": "ships.project.json.lifecycle_state == 'scaffolded' and ships.project_actions.json.discovery_flags.source_payload_present == false.",
+      "evidence_ref": "ships.project.json",
+      "instruction": "Pause. Confirm with the operator that packaging an unharvested project is intended."
+    }
+  ],
+  "instruction": "When any stop_conditions[*].condition is detected, follow that entry's instruction; do not proceed via inference or by bypassing SHIPS source-tree controls. When any ask_for_human_approval_when[*].condition is detected, follow that entry's instruction and resume only after explicit human approval."
+}

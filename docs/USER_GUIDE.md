@@ -601,6 +601,35 @@ The inspect rule `skip_grants` is `true` by default in the `process` command —
 
 ---
 
+## How to: render a Clearscape demo notebook
+
+For demos on Teradata **Clearscape Experience** sandboxes, render your project into a self-contained Jupyter notebook:
+
+```bash
+python -m td_release_packager notebook \
+    --project C:\Projects\MyDemo \
+    --env-config C:\Projects\MyDemo\config\env\DEV.conf \
+    --name MyDemo
+```
+
+Default output: `<project>/output/<name>.clearscape.ipynb`.
+
+What you hand to the customer is one `.ipynb` file with:
+
+- An intro cell (package summary, how-to-run)
+- A `%pip install teradatasql` cell
+- A connection cell that prompts for host / user / password
+- One markdown + one code cell per analysed wave (with inline DDL)
+- A verification cell that counts created objects per database
+
+The customer opens Jupyter in their Clearscape instance, uploads the notebook, runs the cells in order, and the data product appears in their sandbox. They do not need SHIPS installed — only `teradatasql`, which the first cell installs for them.
+
+**Use this for demos only.** It bypasses preflight, rollback, and the trust report. For real deployment use the normal `package` + `deploy` flow.
+
+Full reference: [CLEARSCAPE_NOTEBOOK.md](./CLEARSCAPE_NOTEBOOK.md).
+
+---
+
 ## The daily workflow
 
 Once a project is set up, your day-to-day is:

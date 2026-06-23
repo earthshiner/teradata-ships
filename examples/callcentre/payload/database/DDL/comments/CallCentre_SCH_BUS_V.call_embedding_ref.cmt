@@ -1,0 +1,8 @@
+comment on view {{CallCentre_SCH_BUS_V}}.call_embedding_ref is 'External embedding reference with Domain context. Agent retrieves embedding_ref_key, looks up vector in external store, ranks externally, then re-queries TD with the ranked call_id list.';
+comment on column {{CallCentre_SCH_BUS_V}}.call_embedding_ref.topic is 'Business area classification of the call. Six values: Other (30.9%), Vet & Pet (29.5%), Healthcare Scheduling (18.4%), Medical Insurance (11.8%), Automotive (5.6%), Home Services (3.8%).';
+
+comment on column {{CallCentre_SCH_BUS_V}}.call_embedding_ref.embedding_ref_key is 'Stable key to retrieve the embedding from the external store. Typically SHA-256 of (call_id + embedded_columns + model) or an external system primary key.';
+
+comment on column {{CallCentre_SCH_BUS_V}}.call_embedding_ref.embedding_store is 'Identifies the external embedding store. E.g. python_cache, redis, pinecone, chroma, file_system.';
+
+comment on column {{CallCentre_SCH_BUS_V}}.call_embedding_ref.embedded_columns is 'Comma-separated list of Domain source columns concatenated to produce searchable_text.';

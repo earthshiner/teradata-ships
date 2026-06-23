@@ -1,0 +1,29 @@
+REPLACE VIEW {{CallCentre_SEM_STD_V}}.view_column_type
+(
+       database_name
+      ,view_name
+      ,column_name
+      ,data_type
+      ,is_active
+      ,source_note
+)
+AS
+LOCKING ROW FOR ACCESS
+SELECT  database_name
+      , view_name
+      , column_name
+      , data_type
+      , is_active
+      , source_note
+FROM    {{CallCentre_SEM_STD_T}}.view_column_type;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_SEM_STD_V.view_column_type.database_name|VARCHAR(128)
+--CallCentre_SEM_STD_V.view_column_type.view_name|VARCHAR(128)
+--CallCentre_SEM_STD_V.view_column_type.column_name|VARCHAR(128)
+--CallCentre_SEM_STD_V.view_column_type.data_type|VARCHAR(64)
+--CallCentre_SEM_STD_V.view_column_type.is_active|BYTEINT
+--CallCentre_SEM_STD_V.view_column_type.source_note|VARCHAR(256)
+

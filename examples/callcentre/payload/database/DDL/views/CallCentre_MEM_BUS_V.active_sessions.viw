@@ -1,0 +1,36 @@
+REPLACE VIEW {{CallCentre_MEM_BUS_V}}.active_sessions
+(
+    session_id
+   ,session_key
+   ,agent_key
+   ,user_key
+   ,session_start_dts
+   ,session_goal
+   ,scope_level
+   ,scope_identifier
+)
+AS
+SELECT
+    session_id
+   ,session_key
+   ,agent_key
+   ,user_key
+   ,session_start_dts
+   ,session_goal
+   ,scope_level
+   ,scope_identifier
+FROM {{CallCentre_MEM_STD_V}}.agent_session
+WHERE session_status =; 'ACTIVE'
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_MEM_BUS_V.active_sessions.session_id|INTEGER
+--CallCentre_MEM_BUS_V.active_sessions.session_key|VARCHAR(100)
+--CallCentre_MEM_BUS_V.active_sessions.agent_key|VARCHAR(100)
+--CallCentre_MEM_BUS_V.active_sessions.user_key|VARCHAR(100)
+--CallCentre_MEM_BUS_V.active_sessions.session_start_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_MEM_BUS_V.active_sessions.session_goal|VARCHAR(500)
+--CallCentre_MEM_BUS_V.active_sessions.scope_level|VARCHAR(20)
+--CallCentre_MEM_BUS_V.active_sessions.scope_identifier|VARCHAR(100)
+

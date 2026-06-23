@@ -1,0 +1,44 @@
+REPLACE VIEW {{CallCentre_MEM_BUS_V}}.learned_strategies_org
+(
+    strategy_id
+   ,strategy_name
+   ,strategy_category
+   ,applies_to_scenario
+   ,strategy_pattern
+   ,times_used
+   ,success_rate
+   ,discovered_dts
+   ,discovered_by_agent
+   ,validation_dts
+)
+AS
+SELECT
+    strategy_id
+   ,strategy_name
+   ,strategy_category
+   ,applies_to_scenario
+   ,strategy_pattern
+   ,times_used
+   ,success_rate
+   ,discovered_dts
+   ,discovered_by_agent
+   ,validation_dts
+FROM {{CallCentre_MEM_STD_V}}.learned_strategy
+WHERE is_active = 1
+  AND is_validated = 1
+  AND scope_level =; 'ORGANIZATION'
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_MEM_BUS_V.learned_strategies_org.strategy_id|INTEGER
+--CallCentre_MEM_BUS_V.learned_strategies_org.strategy_name|VARCHAR(100)
+--CallCentre_MEM_BUS_V.learned_strategies_org.strategy_category|VARCHAR(50)
+--CallCentre_MEM_BUS_V.learned_strategies_org.applies_to_scenario|VARCHAR(500)
+--CallCentre_MEM_BUS_V.learned_strategies_org.strategy_pattern|VARCHAR(4000)
+--CallCentre_MEM_BUS_V.learned_strategies_org.times_used|INTEGER
+--CallCentre_MEM_BUS_V.learned_strategies_org.success_rate|DECIMAL(5,4)
+--CallCentre_MEM_BUS_V.learned_strategies_org.discovered_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_MEM_BUS_V.learned_strategies_org.discovered_by_agent|VARCHAR(100)
+--CallCentre_MEM_BUS_V.learned_strategies_org.validation_dts|TIMESTAMP WITH TIME ZONE
+

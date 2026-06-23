@@ -1,0 +1,240 @@
+CREATE VIEW {{CallCentre_DOM_STD_V}}.Call_Dynamics_H
+(
+      call_dynamics_id
+    , call_id
+    , call_duration_sec
+    , total_word_count
+    , words_per_min
+    , first_response_latency_sec
+    , turn_count
+    , avg_turn_duration_ms
+    , median_turn_duration_ms
+    , longest_turn_duration_ms
+    , avg_turn_words
+    , agent_turn_count
+    , agent_avg_turn_duration_ms
+    , agent_median_turn_duration_ms
+    , agent_longest_turn_duration_ms
+    , agent_avg_turn_words
+    , caller_turn_count
+    , caller_avg_turn_duration_ms
+    , caller_median_turn_duration_ms
+    , caller_longest_turn_duration_ms
+    , caller_avg_turn_words
+    , agent_talk_ratio
+    , caller_talk_ratio
+    , agent_wpm
+    , caller_wpm
+    , agent_to_caller_wpm_ratio
+    , silence_incidents
+    , silence_ratio
+    , avg_pause_sec
+    , overall_lexical_density
+    , overall_type_token_ratio
+    , overall_avg_word_length_chars
+    , overall_disfluency_ratio
+    , agent_lexical_density
+    , agent_type_token_ratio
+    , agent_avg_word_length_chars
+    , agent_disfluency_ratio
+    , caller_lexical_density
+    , caller_type_token_ratio
+    , caller_avg_word_length_chars
+    , caller_disfluency_ratio
+    , agent_average_streak_sec
+    , agent_median_streak_sec
+    , agent_longest_streak_sec
+    , caller_average_streak_sec
+    , caller_median_streak_sec
+    , caller_longest_streak_sec
+    , overall_average_streak_sec
+    , overall_median_streak_sec
+    , overall_longest_streak_sec
+    , agent_wpm_change
+    , caller_wpm_change
+    , overtalk_incidents
+    , overtalk_ms
+    , overtalk_ratio
+    , agent_overtalk_incidents
+    , agent_overtalk_ms
+    , agent_overtalk_ratio
+    , caller_overtalk_incidents
+    , caller_overtalk_ms
+    , caller_overtalk_ratio
+    , call_sentiment
+    , end_sentiment
+    , call_change_in_sentiment
+    , agent_sentiment
+    , agent_start_sentiment
+    , agent_end_sentiment
+    , agent_intra_call_change_in_sentiment
+    , caller_sentiment
+    , caller_start_sentiment
+    , caller_end_sentiment
+    , caller_intra_call_change_in_sentiment
+    , valid_from_dts
+    , valid_to_dts
+    , is_current
+    , is_deleted
+)
+AS
+LOCKING ROW FOR ACCESS
+SELECT
+      call_dynamics_id
+    , call_id
+    , call_duration_sec
+    , total_word_count
+    , words_per_min
+    , first_response_latency_sec
+    , turn_count
+    , avg_turn_duration_ms
+    , median_turn_duration_ms
+    , longest_turn_duration_ms
+    , avg_turn_words
+    , agent_turn_count
+    , agent_avg_turn_duration_ms
+    , agent_median_turn_duration_ms
+    , agent_longest_turn_duration_ms
+    , agent_avg_turn_words
+    , caller_turn_count
+    , caller_avg_turn_duration_ms
+    , caller_median_turn_duration_ms
+    , caller_longest_turn_duration_ms
+    , caller_avg_turn_words
+    , agent_talk_ratio
+    , caller_talk_ratio
+    , agent_wpm
+    , caller_wpm
+    , agent_to_caller_wpm_ratio
+    , silence_incidents
+    , silence_ratio
+    , avg_pause_sec
+    , overall_lexical_density
+    , overall_type_token_ratio
+    , overall_avg_word_length_chars
+    , overall_disfluency_ratio
+    , agent_lexical_density
+    , agent_type_token_ratio
+    , agent_avg_word_length_chars
+    , agent_disfluency_ratio
+    , caller_lexical_density
+    , caller_type_token_ratio
+    , caller_avg_word_length_chars
+    , caller_disfluency_ratio
+    , agent_average_streak_sec
+    , agent_median_streak_sec
+    , agent_longest_streak_sec
+    , caller_average_streak_sec
+    , caller_median_streak_sec
+    , caller_longest_streak_sec
+    , overall_average_streak_sec
+    , overall_median_streak_sec
+    , overall_longest_streak_sec
+    , agent_wpm_change
+    , caller_wpm_change
+    , overtalk_incidents
+    , overtalk_ms
+    , overtalk_ratio
+    , agent_overtalk_incidents
+    , agent_overtalk_ms
+    , agent_overtalk_ratio
+    , caller_overtalk_incidents
+    , caller_overtalk_ms
+    , caller_overtalk_ratio
+    , call_sentiment
+    , end_sentiment
+    , call_change_in_sentiment
+    , agent_sentiment
+    , agent_start_sentiment
+    , agent_end_sentiment
+    , agent_intra_call_change_in_sentiment
+    , caller_sentiment
+    , caller_start_sentiment
+    , caller_end_sentiment
+    , caller_intra_call_change_in_sentiment
+    , valid_from_dts
+    , valid_to_dts
+    , is_current
+    , is_deleted
+FROM {{CallCentre_DOM_STD_T}}.Call_Dynamics_H;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_DOM_STD_V.Call_Dynamics_H.call_dynamics_id|INTEGER
+--CallCentre_DOM_STD_V.Call_Dynamics_H.call_id|INTEGER
+--CallCentre_DOM_STD_V.Call_Dynamics_H.call_duration_sec|DECIMAL(10,1)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.total_word_count|INTEGER
+--CallCentre_DOM_STD_V.Call_Dynamics_H.words_per_min|DECIMAL(7,1)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.first_response_latency_sec|DECIMAL(7,1)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.turn_count|SMALLINT
+--CallCentre_DOM_STD_V.Call_Dynamics_H.avg_turn_duration_ms|INTEGER
+--CallCentre_DOM_STD_V.Call_Dynamics_H.median_turn_duration_ms|INTEGER
+--CallCentre_DOM_STD_V.Call_Dynamics_H.longest_turn_duration_ms|INTEGER
+--CallCentre_DOM_STD_V.Call_Dynamics_H.avg_turn_words|DECIMAL(7,2)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.agent_turn_count|SMALLINT
+--CallCentre_DOM_STD_V.Call_Dynamics_H.agent_avg_turn_duration_ms|INTEGER
+--CallCentre_DOM_STD_V.Call_Dynamics_H.agent_median_turn_duration_ms|INTEGER
+--CallCentre_DOM_STD_V.Call_Dynamics_H.agent_longest_turn_duration_ms|INTEGER
+--CallCentre_DOM_STD_V.Call_Dynamics_H.agent_avg_turn_words|DECIMAL(7,2)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.caller_turn_count|SMALLINT
+--CallCentre_DOM_STD_V.Call_Dynamics_H.caller_avg_turn_duration_ms|INTEGER
+--CallCentre_DOM_STD_V.Call_Dynamics_H.caller_median_turn_duration_ms|INTEGER
+--CallCentre_DOM_STD_V.Call_Dynamics_H.caller_longest_turn_duration_ms|INTEGER
+--CallCentre_DOM_STD_V.Call_Dynamics_H.caller_avg_turn_words|DECIMAL(7,2)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.agent_talk_ratio|DECIMAL(5,3)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.caller_talk_ratio|DECIMAL(5,3)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.agent_wpm|DECIMAL(7,1)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.caller_wpm|DECIMAL(7,1)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.agent_to_caller_wpm_ratio|DECIMAL(7,3)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.silence_incidents|SMALLINT
+--CallCentre_DOM_STD_V.Call_Dynamics_H.silence_ratio|DECIMAL(5,3)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.avg_pause_sec|DECIMAL(7,1)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.overall_lexical_density|DECIMAL(5,3)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.overall_type_token_ratio|DECIMAL(5,3)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.overall_avg_word_length_chars|DECIMAL(5,1)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.overall_disfluency_ratio|DECIMAL(7,4)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.agent_lexical_density|DECIMAL(5,3)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.agent_type_token_ratio|DECIMAL(5,3)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.agent_avg_word_length_chars|DECIMAL(5,1)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.agent_disfluency_ratio|DECIMAL(7,4)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.caller_lexical_density|DECIMAL(5,3)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.caller_type_token_ratio|DECIMAL(5,3)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.caller_avg_word_length_chars|DECIMAL(5,1)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.caller_disfluency_ratio|DECIMAL(7,4)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.agent_average_streak_sec|DECIMAL(8,2)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.agent_median_streak_sec|DECIMAL(8,2)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.agent_longest_streak_sec|DECIMAL(8,2)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.caller_average_streak_sec|DECIMAL(8,2)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.caller_median_streak_sec|DECIMAL(8,2)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.caller_longest_streak_sec|DECIMAL(8,2)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.overall_average_streak_sec|DECIMAL(8,2)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.overall_median_streak_sec|DECIMAL(8,2)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.overall_longest_streak_sec|DECIMAL(8,2)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.agent_wpm_change|DECIMAL(7,3)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.caller_wpm_change|DECIMAL(7,3)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.overtalk_incidents|SMALLINT
+--CallCentre_DOM_STD_V.Call_Dynamics_H.overtalk_ms|INTEGER
+--CallCentre_DOM_STD_V.Call_Dynamics_H.overtalk_ratio|DECIMAL(5,3)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.agent_overtalk_incidents|SMALLINT
+--CallCentre_DOM_STD_V.Call_Dynamics_H.agent_overtalk_ms|INTEGER
+--CallCentre_DOM_STD_V.Call_Dynamics_H.agent_overtalk_ratio|DECIMAL(5,3)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.caller_overtalk_incidents|SMALLINT
+--CallCentre_DOM_STD_V.Call_Dynamics_H.caller_overtalk_ms|INTEGER
+--CallCentre_DOM_STD_V.Call_Dynamics_H.caller_overtalk_ratio|DECIMAL(5,3)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.call_sentiment|DECIMAL(8,6)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.end_sentiment|DECIMAL(8,6)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.call_change_in_sentiment|DECIMAL(8,6)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.agent_sentiment|DECIMAL(8,6)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.agent_start_sentiment|DECIMAL(8,6)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.agent_end_sentiment|DECIMAL(8,6)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.agent_intra_call_change_in_sentiment|DECIMAL(8,6)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.caller_sentiment|DECIMAL(8,6)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.caller_start_sentiment|DECIMAL(8,6)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.caller_end_sentiment|DECIMAL(8,6)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.caller_intra_call_change_in_sentiment|DECIMAL(8,6)
+--CallCentre_DOM_STD_V.Call_Dynamics_H.valid_from_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_DOM_STD_V.Call_Dynamics_H.valid_to_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_DOM_STD_V.Call_Dynamics_H.is_current|BYTEINT
+--CallCentre_DOM_STD_V.Call_Dynamics_H.is_deleted|BYTEINT
+

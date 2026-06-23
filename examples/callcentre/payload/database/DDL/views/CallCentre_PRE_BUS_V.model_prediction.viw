@@ -1,0 +1,60 @@
+REPLACE VIEW {{CallCentre_PRE_BUS_V}}.model_prediction
+(
+    prediction_id,
+    call_id,
+    model_key,
+    model_version,
+    prediction_value,
+    prediction_class,
+    confidence_score,
+    prediction_dts,
+    feature_observation_dts,
+    valid_from_dts,
+    valid_to_dts,
+    is_current,
+    entity_type,
+    prediction_json,
+    created_by,
+    created_at
+)
+AS
+SELECT
+    prediction_id,
+    call_id,
+    model_key,
+    model_version,
+    prediction_value,
+    prediction_class,
+    confidence_score,
+    prediction_dts,
+    feature_observation_dts,
+    valid_from_dts,
+    valid_to_dts,
+    is_current,
+    entity_type,
+    prediction_json,
+    created_by,
+    created_at
+FROM {{CallCentre_PRE_STD_V}}.model_prediction
+WHERE is_current = 1;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_PRE_BUS_V.model_prediction.prediction_id|INTEGER
+--CallCentre_PRE_BUS_V.model_prediction.call_id|INTEGER
+--CallCentre_PRE_BUS_V.model_prediction.model_key|VARCHAR(100)
+--CallCentre_PRE_BUS_V.model_prediction.model_version|VARCHAR(20)
+--CallCentre_PRE_BUS_V.model_prediction.prediction_value|DECIMAL(10,6)
+--CallCentre_PRE_BUS_V.model_prediction.prediction_class|VARCHAR(100)
+--CallCentre_PRE_BUS_V.model_prediction.confidence_score|DECIMAL(5,4)
+--CallCentre_PRE_BUS_V.model_prediction.prediction_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_PRE_BUS_V.model_prediction.feature_observation_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_PRE_BUS_V.model_prediction.valid_from_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_PRE_BUS_V.model_prediction.valid_to_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_PRE_BUS_V.model_prediction.is_current|BYTEINT
+--CallCentre_PRE_BUS_V.model_prediction.entity_type|VARCHAR(50)
+--CallCentre_PRE_BUS_V.model_prediction.prediction_json|JSON(16776192)
+--CallCentre_PRE_BUS_V.model_prediction.created_by|VARCHAR(100)
+--CallCentre_PRE_BUS_V.model_prediction.created_at|TIMESTAMP WITH TIME ZONE
+

@@ -1,0 +1,1 @@
+create database {{CallCentre_T}} from DataProducts as perm = 0.0 spool = 4.46581964E8 fallback ;

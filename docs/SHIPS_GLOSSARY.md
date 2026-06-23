@@ -32,6 +32,8 @@ SHIPS is a structured packaging, validation, deployment, evidence, and context-e
 | Process | The meta-command that runs the SHIPS stages in sequence and records one coherent run in `ships.decisions.json`. |
 | Strict mode | A mode where errors stop the pipeline immediately, normally used for platform or controlled promotion workflows. |
 | Developer mode | A more permissive mode designed for fast iteration, where warnings are surfaced but do not necessarily stop the workflow. |
+| Clearscape Experience | Teradata's free-trial sandbox service. Customers and internal associates spin up a small Teradata instance, open Jupyter, and run demo notebooks against it. |
+| Clearscape notebook target | A non-production SHIPS render target (`ships notebook`) that turns a project into a self-contained Jupyter notebook for deployment to a Clearscape sandbox. Inlines all DDL, one code cell per wave. See [CLEARSCAPE_NOTEBOOK.md](./CLEARSCAPE_NOTEBOOK.md). |
 
 ## Artefacts
 

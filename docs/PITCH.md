@@ -33,6 +33,8 @@ That's it. SHIPS classifies every file, resolves token substitutions, sorts depl
 
 **No DBA runbook. No deployment guide. No "run these scripts in this order."**
 
+And when the demo is on a Teradata **Clearscape Experience** sandbox — where the audience has no DBA and no install rights — `ships notebook` renders the same project as a self-contained Jupyter notebook the customer runs cell-by-cell. The data product appears in their sandbox; you talk over it. See [CLEARSCAPE_NOTEBOOK.md](./CLEARSCAPE_NOTEBOOK.md).
+
 ### The autonomous agent deploying to production
 
 An AI agent has generated a set of database objects as part of a larger workflow. It needs to deploy them to a live Teradata environment — correctly ordered, idempotent, auditable, and recoverable if anything goes wrong.

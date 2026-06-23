@@ -1,0 +1,93 @@
+REPLACE VIEW {{CallCentre_DOM_BUS_V}}.Call_Enriched
+(
+    call_id
+   ,agent_id
+   ,agent_name
+   ,{{start_ts_V}}
+   ,day_of_week
+   ,topic
+   ,conversation_summary
+   ,communication_quality_avg_sim
+   ,conduct_and_professionalism_avg_sim
+   ,customer_experience_avg_sim
+   ,compliance_avg_sim
+   ,call_handling_avg_sim
+   ,compliance_all_hit
+   ,call_duration_sec
+   ,total_word_count
+   ,words_per_min
+   ,agent_talk_ratio
+   ,caller_talk_ratio
+   ,call_sentiment
+   ,call_change_in_sentiment
+   ,agent_sentiment
+   ,caller_sentiment
+   ,overtalk_incidents
+   ,silence_ratio
+)
+AS
+SELECT
+    {{c_V}}.call_id
+   ,{{c_V}}.agent_id
+   ,{{a_V}}.agent_name
+   ,{{c_V}}.{{start_ts_V}}
+   ,{{c_V}}.day_of_week
+   ,{{tp_V}}.topic
+   ,{{csc_V}}.conversation_summary
+   ,{{cat_V}}.communication_quality_avg_sim
+   ,{{cat_V}}.conduct_and_professionalism_avg_sim
+   ,{{cat_V}}.customer_experience_avg_sim
+   ,{{cat_V}}.compliance_avg_sim
+   ,{{cat_V}}.call_handling_avg_sim
+   ,{{cat_V}}.compliance_all_hit
+   ,{{dyn_V}}.call_duration_sec
+   ,{{dyn_V}}.total_word_count
+   ,{{dyn_V}}.words_per_min
+   ,{{dyn_V}}.agent_talk_ratio
+   ,{{dyn_V}}.caller_talk_ratio
+   ,{{dyn_V}}.call_sentiment
+   ,{{dyn_V}}.call_change_in_sentiment
+   ,{{dyn_V}}.agent_sentiment
+   ,{{dyn_V}}.caller_sentiment
+   ,{{dyn_V}}.overtalk_incidents
+   ,{{dyn_V}}.silence_ratio
+FROM {{CallCentre_DOM_BUS_V}}.Call_Current {{c_V}}
+INNER JOIN {{CallCentre_DOM_BUS_V}}.Agent_Current {{a_V}}
+    ON {{a_V}}.agent_id = {{c_V}}.agent_id
+LEFT JOIN {{CallCentre_DOM_BUS_V}}.Call_Topic_Current {{tp_V}}
+    ON {{tp_V}}.call_id = {{c_V}}.call_id
+LEFT JOIN {{CallCentre_DOM_BUS_V}}.Call_Summary_Current {{csc_V}}
+    ON {{csc_V}}.call_id = {{c_V}}.call_id
+LEFT JOIN {{CallCentre_DOM_BUS_V}}.Call_Category_Score_Current {{cat_V}}
+    ON {{cat_V}}.call_id = {{c_V}}.call_id
+LEFT JOIN {{CallCentre_DOM_BUS_V}}.Call_Dynamics_Current {{dyn_V}}
+    ON {{dyn_V}}.call_id = {{c_V}}.call_id;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_DOM_BUS_V.Call_Enriched.call_id|INTEGER
+--CallCentre_DOM_BUS_V.Call_Enriched.agent_id|INTEGER
+--CallCentre_DOM_BUS_V.Call_Enriched.agent_name|VARCHAR(200)
+--CallCentre_DOM_BUS_V.Call_Enriched.start_ts|TIMESTAMP WITH TIME ZONE
+--CallCentre_DOM_BUS_V.Call_Enriched.day_of_week|VARCHAR(10)
+--CallCentre_DOM_BUS_V.Call_Enriched.topic|VARCHAR(500)
+--CallCentre_DOM_BUS_V.Call_Enriched.conversation_summary|CLOB(2097088000)
+--CallCentre_DOM_BUS_V.Call_Enriched.communication_quality_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_BUS_V.Call_Enriched.conduct_and_professionalism_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_BUS_V.Call_Enriched.customer_experience_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_BUS_V.Call_Enriched.compliance_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_BUS_V.Call_Enriched.call_handling_avg_sim|DECIMAL(7,6)
+--CallCentre_DOM_BUS_V.Call_Enriched.compliance_all_hit|BYTEINT
+--CallCentre_DOM_BUS_V.Call_Enriched.call_duration_sec|DECIMAL(10,1)
+--CallCentre_DOM_BUS_V.Call_Enriched.total_word_count|INTEGER
+--CallCentre_DOM_BUS_V.Call_Enriched.words_per_min|DECIMAL(7,1)
+--CallCentre_DOM_BUS_V.Call_Enriched.agent_talk_ratio|DECIMAL(5,3)
+--CallCentre_DOM_BUS_V.Call_Enriched.caller_talk_ratio|DECIMAL(5,3)
+--CallCentre_DOM_BUS_V.Call_Enriched.call_sentiment|DECIMAL(8,6)
+--CallCentre_DOM_BUS_V.Call_Enriched.call_change_in_sentiment|DECIMAL(8,6)
+--CallCentre_DOM_BUS_V.Call_Enriched.agent_sentiment|DECIMAL(8,6)
+--CallCentre_DOM_BUS_V.Call_Enriched.caller_sentiment|DECIMAL(8,6)
+--CallCentre_DOM_BUS_V.Call_Enriched.overtalk_incidents|SMALLINT
+--CallCentre_DOM_BUS_V.Call_Enriched.silence_ratio|DECIMAL(5,3)
+

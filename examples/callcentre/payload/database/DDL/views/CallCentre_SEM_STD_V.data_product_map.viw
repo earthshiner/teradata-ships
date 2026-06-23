@@ -1,0 +1,51 @@
+REPLACE VIEW {{CallCentre_SEM_STD_V}}.data_product_map
+(
+      module_id
+    , module_name
+    , module_description
+    , module_purpose
+    , database_name
+    , naming_pattern
+    , table_prefix
+    , module_version
+    , deployment_status
+    , deployed_dts
+    , is_active
+    , created_at
+    , updated_at
+)
+AS
+LOCKING ROW FOR ACCESS
+SELECT
+      module_id
+    , module_name
+    , module_description
+    , module_purpose
+    , database_name
+    , naming_pattern
+    , table_prefix
+    , module_version
+    , deployment_status
+    , deployed_dts
+    , is_active
+    , created_at
+    , updated_at
+    FROM {{CallCentre_SEM_STD_T}}.data_product_map;
+--------------------------------------------------------------------------------
+-- View column metadata
+--------------------------------------------------------------------------------
+--Qualified Column|DataType
+--CallCentre_SEM_STD_V.data_product_map.module_id|INTEGER
+--CallCentre_SEM_STD_V.data_product_map.module_name|VARCHAR(50)
+--CallCentre_SEM_STD_V.data_product_map.module_description|VARCHAR(1000)
+--CallCentre_SEM_STD_V.data_product_map.module_purpose|VARCHAR(500)
+--CallCentre_SEM_STD_V.data_product_map.database_name|VARCHAR(100)
+--CallCentre_SEM_STD_V.data_product_map.naming_pattern|VARCHAR(20)
+--CallCentre_SEM_STD_V.data_product_map.table_prefix|VARCHAR(10)
+--CallCentre_SEM_STD_V.data_product_map.module_version|VARCHAR(20)
+--CallCentre_SEM_STD_V.data_product_map.deployment_status|VARCHAR(20)
+--CallCentre_SEM_STD_V.data_product_map.deployed_dts|TIMESTAMP WITH TIME ZONE
+--CallCentre_SEM_STD_V.data_product_map.is_active|BYTEINT
+--CallCentre_SEM_STD_V.data_product_map.created_at|TIMESTAMP WITH TIME ZONE
+--CallCentre_SEM_STD_V.data_product_map.updated_at|TIMESTAMP WITH TIME ZONE
+
