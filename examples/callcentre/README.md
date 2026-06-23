@@ -1,4 +1,59 @@
-# callcentre
+# CallCentre — Clearscape demo data product
+
+A reference AI-Native Data Product packaged for deployment to a Teradata
+**Clearscape Experience** sandbox via a generated Jupyter notebook.
+Built for customer-facing and internal demos; **not for production**.
+
+The payload covers the seven standard AI-Native Data Product modules
+(DOM, MEM, OBS, PRE, SCH, SEM, plus STG staging), each split into the
+three placement databases (`_STD_T` tables, `_STD_V` locking views,
+`_BUS_V` business views) — 235 objects across 6 deployment waves.
+
+## Render the Clearscape notebook
+
+```bash
+python -m td_release_packager notebook \
+    --project examples/callcentre \
+    --env-config examples/callcentre/config/env/DEV.conf \
+    --name CallCentre
+```
+
+Output: `examples/callcentre/output/CallCentre.clearscape.ipynb` —
+a self-contained notebook with inline DDL (no network egress beyond
+the Teradata connection), one code cell per wave, and a verification
+query at the end.
+
+## Run it on Clearscape
+
+1. Sign in to your Clearscape Experience instance and open Jupyter.
+2. Upload `CallCentre.clearscape.ipynb`.
+3. Run the first cell to `%pip install teradatasql`.
+4. Run the connection cell and enter your Clearscape host, username,
+   and password when prompted.
+5. Run each wave cell in order. Long object lists are collapsed
+   behind `<details>` blocks in the wave markdown — expand to see
+   what each wave creates.
+6. Run the verification cell — it counts objects per database via
+   `DBC.TablesV` and prints a summary.
+
+## Regenerating this scaffold from a fresh harvest
+
+This project was scaffolded with:
+
+```bash
+python -m td_release_packager demo --prepare-only \
+    --source <reflect-harvest>/CallCentre \
+    --name callcentre --work-dir examples \
+    --root-parent DataProducts --env DEV
+```
+
+Re-run with `--prepare-only` against an updated harvest to refresh
+the payload. The notebook is regenerated each time you run
+`ships notebook`, so it always matches the current payload + env.
+
+---
+
+# SHIPS project reference
 
 Teradata release project managed by SHIPS (`td_release_packager`).
 
