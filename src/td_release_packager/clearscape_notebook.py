@@ -80,7 +80,11 @@ def render_notebook(
     cells.append(_code_cell(_connect_source()))
 
     for wave_index, wave in enumerate(analysis.waves, start=1):
-        cells.append(_markdown_cell(_wave_markdown(wave_index, wave, analysis.objects)))
+        cells.append(
+            _markdown_cell(
+                _wave_markdown(wave_index, wave, analysis.objects, env_values)
+            )
+        )
         cells.append(
             _code_cell(_wave_code(wave_index, wave, analysis.objects, env_values))
         )
@@ -205,15 +209,61 @@ def _connect_source() -> str:
     )
 
 
+_BULLET_THRESHOLD = 12
+
+
 def _wave_markdown(
-    wave_index: int, wave: Sequence[str], objects: Dict[str, IndexedObject]
+    wave_index: int,
+    wave: Sequence[str],
+    objects: Dict[str, IndexedObject],
+    env_values: Dict[str, str],
 ) -> str:
-    lines = [f"## Wave {wave_index} — {len(wave)} object(s)\n", "\n"]
+    bullets: List[str] = []
     for qualified in wave:
         obj = objects.get(qualified)
         kind = obj.object_type if obj else "?"
-        lines.append(f"- `{qualified}` ({kind})\n")
-    return "".join(lines)
+        label = _display_label(qualified, env_values)
+        bullets.append(f"- `{label}` ({kind})\n")
+
+    header = f"## Wave {wave_index} — {len(wave)} object(s)\n\n"
+    if len(bullets) <= _BULLET_THRESHOLD:
+        return header + "".join(bullets)
+
+    # Long wave: keep the cell compact with a collapsible HTML details
+    # block (Jupyter renders <details>/<summary> natively in markdown).
+    summary = f"<details><summary>Show all {len(bullets)} objects</summary>\n\n"
+    return header + summary + "".join(bullets) + "\n</details>\n"
+
+
+def _display_label(qualified: str, env_values: Dict[str, str]) -> str:
+    """Translate an analyser-internal qualified name into something
+    presentable in a customer-facing notebook cell.
+
+    Three patterns the analyser emits leak ugliness into the demo if
+    surfaced raw:
+
+    * ``$DATABASE.X``  — synthetic prefix for parentless CREATE DATABASE
+      objects. Rendered as ``Database: X``.
+    * ``$FILE:path``   — opaque identifier for objects with no parseable
+      qualified name (mostly GRANT statements). Rendered as
+      ``GRANTs from <basename>``.
+    * ``{{TOKEN}}``    — unresolved SHIPS tokens. Resolved against
+      ``env_values`` when possible.
+    """
+    try:
+        resolved, _ = substitute_tokens(qualified, env_values)
+    except KeyError:
+        resolved = qualified
+
+    if resolved.startswith("$DATABASE."):
+        return f"Database: {resolved[len('$DATABASE.') :]}"
+
+    if resolved.startswith("$FILE:"):
+        raw = resolved[len("$FILE:") :]
+        basename = raw.replace("\\", "/").rsplit("/", 1)[-1]
+        return f"GRANTs from {basename}"
+
+    return resolved
 
 
 def _wave_code(
@@ -292,14 +342,13 @@ def _resolve_wave_statements(
         obj = objects.get(qualified)
         if obj is None or not obj.ddl_text:
             continue
+        label = _display_label(qualified, env_values)
         try:
             ddl, _ = substitute_tokens(obj.ddl_text, env_values)
-            label, _ = substitute_tokens(qualified, env_values)
         except KeyError as exc:
             # A token in the DDL is missing from env_values. Leave a
             # comment in the cell rather than aborting the whole render
             # — the customer can fix the env config and re-run.
-            label = qualified
             ddl = (
                 f"-- [SHIPS] Unresolved token {{{{ {exc.args[0]} }}}} in "
                 f"{qualified}. Add it to the env config and re-render.\n"

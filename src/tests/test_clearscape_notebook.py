@@ -195,6 +195,88 @@ def test_write_notebook_round_trips_through_disk(
     assert on_disk == notebook
 
 
+def test_markdown_labels_resolve_tokens_and_translate_synthetic_prefixes():
+    objects = {
+        "{{DEMO_DB}}.Customer_T": IndexedObject(
+            qualified_name="{{DEMO_DB}}.Customer_T",
+            object_type="TABLE",
+            file_path="t.tbl",
+            ddl_text="CREATE TABLE {{DEMO_DB}}.Customer_T (id INTEGER);",
+        ),
+        "$DATABASE.{{DEMO_DB}}": IndexedObject(
+            qualified_name="$DATABASE.{{DEMO_DB}}",
+            object_type="DATABASE",
+            file_path="d.db",
+            ddl_text="CREATE DATABASE {{DEMO_DB}} FROM DataProducts AS PERM = 0;",
+        ),
+        "$FILE:payload/database/DCL/inter_db/CallCentre.dcl": IndexedObject(
+            qualified_name="$FILE:payload/database/DCL/inter_db/CallCentre.dcl",
+            object_type="GRANT",
+            file_path="payload/database/DCL/inter_db/CallCentre.dcl",
+            ddl_text="GRANT SELECT ON {{DEMO_DB}} TO PUBLIC;",
+        ),
+    }
+    analysis = AnalysisResult(
+        objects=objects,
+        waves=[list(objects.keys())],
+    )
+    notebook = render_notebook(
+        analysis,
+        package_name="ClearscapeDemo",
+        env_values={"DEMO_DB": "ClearscapeDemo"},
+    )
+    wave_md = "".join(notebook["cells"][3]["source"])
+
+    assert "`ClearscapeDemo.Customer_T`" in wave_md
+    assert "`Database: ClearscapeDemo`" in wave_md
+    assert "`GRANTs from CallCentre.dcl`" in wave_md
+    # Internal markers must not survive into customer-facing markdown.
+    assert "$DATABASE." not in wave_md
+    assert "$FILE:" not in wave_md
+    assert "{{DEMO_DB}}" not in wave_md
+
+
+def test_long_wave_collapses_into_details_block():
+    objects = {
+        f"{{{{DEMO_DB}}}}.T_{i:02d}": IndexedObject(
+            qualified_name=f"{{{{DEMO_DB}}}}.T_{i:02d}",
+            object_type="TABLE",
+            file_path=f"t_{i}.tbl",
+            ddl_text=f"CREATE TABLE {{{{DEMO_DB}}}}.T_{i:02d} (id INTEGER);",
+        )
+        for i in range(20)
+    }
+    analysis = AnalysisResult(objects=objects, waves=[list(objects.keys())])
+    notebook = render_notebook(
+        analysis,
+        package_name="ClearscapeDemo",
+        env_values={"DEMO_DB": "ClearscapeDemo"},
+    )
+    wave_md = "".join(notebook["cells"][3]["source"])
+    assert "<details>" in wave_md
+    assert "<summary>Show all 20 objects</summary>" in wave_md
+    assert "</details>" in wave_md
+
+
+def test_short_wave_does_not_collapse():
+    objects = {
+        "{{DEMO_DB}}.T_01": IndexedObject(
+            qualified_name="{{DEMO_DB}}.T_01",
+            object_type="TABLE",
+            file_path="t.tbl",
+            ddl_text="CREATE TABLE {{DEMO_DB}}.T_01 (id INTEGER);",
+        ),
+    }
+    analysis = AnalysisResult(objects=objects, waves=[list(objects.keys())])
+    notebook = render_notebook(
+        analysis,
+        package_name="ClearscapeDemo",
+        env_values={"DEMO_DB": "ClearscapeDemo"},
+    )
+    wave_md = "".join(notebook["cells"][3]["source"])
+    assert "<details>" not in wave_md
+
+
 def test_empty_analysis_still_renders_skeleton(env_values, tmp_path: Path):
     notebook = render_notebook(
         AnalysisResult(),
