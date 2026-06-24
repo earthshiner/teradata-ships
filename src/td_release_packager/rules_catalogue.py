@@ -471,6 +471,42 @@ _RULES: dict[str, dict[str, object]] = {
         "risk": "low",
         "requires_human_review": True,
     },
+    # ---- Tokenised filename eponymy (issue #365, PR-5) -----------
+    "filename_token_format": {
+        "description": (
+            "Filename contains a malformed ``{{...}}`` marker (orphan brace "
+            "or invalid token contents). Package cannot substitute it; the "
+            "file would land on an unintended path."
+        ),
+        "default_severity": "ERROR",
+        "safe_fix_available": False,
+        "automation_level": "manual",
+        "recommended_action": (
+            "Rename the file so every ``{{TOKEN}}`` marker is well formed. "
+            "Token names are uppercase letters, digits, and underscores; "
+            "braces must be paired."
+        ),
+        "risk": "low",
+        "requires_human_review": True,
+    },
+    "object_level_grant": {
+        "description": (
+            "GRANT/REVOKE targets a specific object (``ON db.obj``) or column "
+            "(``GRANT SELECT (col) ON …``) rather than the containing database. "
+            "Teradata best practice is to grant at the database level so "
+            "privileges propagate and the access surface stays auditable."
+        ),
+        "default_severity": "WARNING",
+        "safe_fix_available": False,
+        "automation_level": "manual",
+        "recommended_action": (
+            "Move the grant to the containing database (``GRANT … ON db TO …``), "
+            "or — when the object-level grant is genuinely required — set "
+            "``object_level_grant=OFF`` in ``config/inspect.conf``."
+        ),
+        "risk": "medium",
+        "requires_human_review": True,
+    },
 }
 
 
