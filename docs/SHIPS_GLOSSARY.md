@@ -107,8 +107,13 @@ SHIPS is a structured packaging, validation, deployment, evidence, and context-e
 | Term | Meaning |
 |---|---|
 | Atomic script | A script containing one primary database object or deployment concern. |
-| Eponymous script | A script whose filename matches the object it defines or deploys. |
+| Eponymous script | A script whose filename matches the object it defines or deploys. Eponymy is **state-relative** (#365): a tokenised payload carries the `{{TOKEN}}` in the filename; a detokenised release carries the literal. The same canonical function (`derive_filename`) governs both. |
 | E&A | Short form for atomic and eponymous. |
+| Tokenised filename | A payload filename that carries `{{TOKEN}}` markers in its qualifier — e.g. `{{DB_PREFIX}}_T.Customer.tbl`. Resolved at Package time by the same env-config substitution that resolves the file body. |
+| Derived-filename clash | An error raised at Harvest when two distinct DDL identities derive the same payload filename. Distinct objects must never fold to one file (#365). |
+| Detokenisation bijection | The Package invariant that the payload → release filename map is injective. A non-injective token_map (two distinct tokens resolving to the same literal) is rejected at build time (#365). |
+| ON-object grouping | DCL files are grouped by the object the grant is `ON` (the protected database), not by grantee. One `.dcl` file per ON-object, named after that object (#365, ADR-0008 amendment). |
+| Privilege merge | Compatible `GRANT`/`REVOKE` statements within a DCL file fold into one comma-separated statement. Merge key: `(action, on_object, grantee, with_grant_option)`. Implemented in `grant_merger.py` (#365). |
 | Source dirty | A build stamped as coming from a Git working tree with uncommitted tracked changes. |
 | Source commit | The Git commit hash recorded for traceability when supplied. |
 | Legacy substitutions | Older variable formats such as `$VAR`, `${VAR}`, or `&&VAR&&` that SHIPS can migrate to `{{TOKEN}}` form. |
