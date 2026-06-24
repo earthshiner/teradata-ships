@@ -23,6 +23,11 @@ import re
 from pathlib import Path
 from typing import List, NamedTuple, Optional, Tuple
 
+from td_release_packager.atomic_filename import (
+    FilenameDerivationError,
+    derive_filename_from_text,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -171,8 +176,9 @@ def extract_eponymous_name(
     if ext is None:
         return None
 
-    # Extract the qualified name
-    # Try two-part names first (Database.Object)
+    # Extract the qualified name. Filename rendering routes through the
+    # canonical ``derive_filename`` so eponymous_rename and the rest of
+    # the pipeline cannot drift on naming rules (see issue #365).
     match = _QUALIFIED_DDL_RE.search(clean)
     if match:
         raw_name = match.group(1)
@@ -187,14 +193,26 @@ def extract_eponymous_name(
         else:
             part = parts[0] if parts[0].startswith("{{") else _strip_quotes(parts[0])
             qualified = part
-        return (f"{qualified}{ext}", qualified, obj_type_key)
+        try:
+            filename = derive_filename_from_text(qualified, ext)
+        except FilenameDerivationError:
+            # Object segment carries a token, or the qualifier is malformed.
+            # Treat as unparseable so compute_renames marks it ``skipped``;
+            # the underlying invariant violation is surfaced by Inspect
+            # (PR-5), not by the rename pass.
+            return None
+        return (filename, qualified, obj_type_key)
 
     # Try single-name patterns (DATABASE, USER, etc.)
     match = _SINGLE_NAME_DDL_RE.search(clean)
     if match:
         raw_name = match.group(1)
         name = raw_name if raw_name.startswith("{{") else _strip_quotes(raw_name)
-        return (f"{name}{ext}", name, obj_type_key)
+        try:
+            filename = derive_filename_from_text(name, ext)
+        except FilenameDerivationError:
+            return None
+        return (filename, name, obj_type_key)
 
     return None
 

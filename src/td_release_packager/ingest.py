@@ -29,6 +29,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from td_release_packager.atomic_filename import (
+    FilenameDerivationError,
+    derive_filename_from_text,
+)
 from td_release_packager.classifier import (
     TYPE_TO_EXTENSION as _TYPE_TO_EXT,
     TYPE_TO_SUBDIR as _TYPE_TO_SUBDIR,
@@ -475,6 +479,13 @@ def _ingest_directory_impl(
     # touches within the same run append normally.
     first_touch_aggregating: Set[str] = set()
 
+    # Intra-run collision guard for non-aggregating types (issue #365).
+    # Two distinct DDL identities deriving the same payload filename is
+    # the structural shape of Defect 1 — N source objects collapse onto
+    # 1 file with silent overwrite. Track ``dest_path → identity`` so
+    # the second writer is rejected with a clear error.
+    derived_path_to_identity: Dict[str, str] = {}
+
     for src_path in source_files:
         try:
             raw_content = _read_file(src_path)
@@ -757,13 +768,39 @@ def _ingest_directory_impl(
                     if jar_alias:
                         obj_name = jar_alias
 
-                # Build eponymous filename
+                # Build eponymous filename via the canonical derivation
+                # (issue #365). All filename-naming call sites route
+                # through ``derive_filename_from_text`` so a single
+                # contract — uniqueness keyed on ``(qualifier, object)``
+                # — governs every phase. Tokens in the database segment
+                # are preserved verbatim; the object segment is
+                # asserted to be pure literal.
+                identity_key: Optional[str] = None
                 if db_name and obj_name:
-                    dest_name = f"{db_name}.{obj_name}{ext}"
+                    identity_key = f"{db_name}.{obj_name}"
+                    try:
+                        dest_name = derive_filename_from_text(identity_key, ext)
+                    except FilenameDerivationError as exc:
+                        result.errors.append(
+                            f"Cannot derive payload filename for "
+                            f"{os.path.basename(src_path)}: {exc}"
+                        )
+                        continue
                 elif obj_name:
-                    dest_name = f"{obj_name}{ext}"
+                    identity_key = obj_name
+                    try:
+                        dest_name = derive_filename_from_text(obj_name, ext)
+                    except FilenameDerivationError as exc:
+                        result.errors.append(
+                            f"Cannot derive payload filename for "
+                            f"{os.path.basename(src_path)}: {exc}"
+                        )
+                        continue
                 else:
-                    # Fallback: use original filename with correct extension
+                    # Fallback: source basename + corrected extension.
+                    # No parsed identity means no collision-guard input;
+                    # this branch is for unclassifiable-but-recoverable
+                    # files and predates the eponymy invariant.
                     base = os.path.splitext(os.path.basename(src_path))[0]
                     dest_name = f"{base}{ext}"
 
@@ -781,6 +818,26 @@ def _ingest_directory_impl(
                 dest_path = os.path.join(dest_dir, dest_name)
 
                 aggregating_types = ("COMMENT", "STATISTICS", "DML", "GRANT", "REVOKE")
+
+                # -- Intra-run collision guard (Defect 1, issue #365) --
+                # If two distinct DDL identities derive the same payload
+                # filename within one harvest run, the second writer is
+                # rejected. Aggregating types (COMMENT/STATISTICS/DML/
+                # DCL) are exempt — they intentionally share a file per
+                # ON-object. The guard runs only when an identity was
+                # parsed; the source-basename fallback is unaffected.
+                if identity_key is not None and obj_type not in aggregating_types:
+                    prior_identity = derived_path_to_identity.get(dest_path)
+                    if prior_identity is not None and prior_identity != identity_key:
+                        result.errors.append(
+                            f"Derived filename clash: {dest_name} — "
+                            f"identity {identity_key!r} from "
+                            f"{os.path.basename(src_path)} would overwrite "
+                            f"prior identity {prior_identity!r}. Distinct "
+                            f"objects must never fold to one file."
+                        )
+                        continue
+                    derived_path_to_identity[dest_path] = identity_key
 
                 # -- Handle existing files --------------------------------
                 if os.path.exists(dest_path):
