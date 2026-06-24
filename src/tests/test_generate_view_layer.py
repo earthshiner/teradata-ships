@@ -605,34 +605,36 @@ class TestDatabaseAndGrants:
         assert "SPOOL" in ddl
         assert ddl.rstrip().endswith(";")
 
-    def test_grant_ddl_single_grantor(self):
+    def test_grant_ddl_single_grantee(self):
+        # PR-4 (issue #365): ON-object first, grantees second.
         ddl = generate_grant_ddl(
-            "{{DOM_DATABASE_V}}",
-            ["{{DOM_DATABASE_T}}"],
+            "{{DOM_DATABASE_T}}",
+            ["{{DOM_DATABASE_V}}"],
         )
         assert (
             "GRANT SELECT ON {{DOM_DATABASE_T}} TO {{DOM_DATABASE_V}} "
             "WITH GRANT OPTION;" in ddl
         )
 
-    def test_grant_ddl_multiple_grantors_sorted(self):
+    def test_grant_ddl_multiple_grantees_sorted(self):
+        # ON-object is fixed; grantees vary. Output sorted on grantee
+        # by the canonical grant_merger.
         ddl = generate_grant_ddl(
-            "{{SEM_DATABASE_V}}",
-            ["{{SEM_DATABASE_T}}", "{{DOM_DATABASE_V}}"],
+            "{{DOM_DATABASE_T}}",
+            ["{{SEM_DATABASE_V}}", "{{DOM_DATABASE_V}}"],
         )
-        # Output must be deterministic — alphabetical grantor order.
         lines = [ln for ln in ddl.splitlines() if ln.startswith("GRANT")]
         assert lines == [
-            "GRANT SELECT ON {{DOM_DATABASE_V}} TO {{SEM_DATABASE_V}} "
+            "GRANT SELECT ON {{DOM_DATABASE_T}} TO {{DOM_DATABASE_V}} "
             "WITH GRANT OPTION;",
-            "GRANT SELECT ON {{SEM_DATABASE_T}} TO {{SEM_DATABASE_V}} "
+            "GRANT SELECT ON {{DOM_DATABASE_T}} TO {{SEM_DATABASE_V}} "
             "WITH GRANT OPTION;",
         ]
 
     def test_grant_ddl_dedupes(self):
         ddl = generate_grant_ddl(
-            "{{X_DATABASE_V}}",
-            ["{{Y_DATABASE_T}}", "{{Y_DATABASE_T}}"],
+            "{{Y_DATABASE_T}}",
+            ["{{X_DATABASE_V}}", "{{X_DATABASE_V}}"],
         )
         grant_lines = [ln for ln in ddl.splitlines() if ln.startswith("GRANT")]
         assert len(grant_lines) == 1
@@ -808,8 +810,9 @@ class TestEndToEnd:
         assert "{{DB_DOMAIN_T}}" not in business_view
         assert "FROM {{DB_DOMAIN_V}}.Agent_H a" in business_view
 
+        # PR-4: DCL files now grouped by ON-object, extension is .dcl.
         grant = (
-            root / "payload/database/DCL/inter_db" / "{{DB_DOMAIN_V}}.grt"
+            root / "payload/database/DCL/inter_db" / "{{DB_DOMAIN_T}}.dcl"
         ).read_text()
         assert "GRANT SELECT ON {{DB_DOMAIN_T}} TO {{DB_DOMAIN_V}}" in grant
 
@@ -824,20 +827,22 @@ class TestEndToEnd:
         assert "CREATE DATABASE {{DOM_DATABASE_V}}" in db_path.read_text()
 
     def test_same_module_grant_generated(self, ships_project):
+        # PR-4 (issue #365): DCL grouped by ON-object. The same-module
+        # _T → _V access grant lives in the _T database's file.
         run(ships_project, requested_modules=None, dry_run=False)
         grant_path = (
-            ships_project / "payload/database/DCL/inter_db" / "{{DOM_DATABASE_V}}.grt"
+            ships_project / "payload/database/DCL/inter_db" / "{{DOM_DATABASE_T}}.dcl"
         )
         assert grant_path.exists()
         text = grant_path.read_text()
-        # Same-module DOM_T -> DOM_V grant
         assert "GRANT SELECT ON {{DOM_DATABASE_T}} TO {{DOM_DATABASE_V}}" in text
 
     def test_cross_module_grant_generated(self, ships_project):
+        # SEM_V reads from DOM_V — cross-module grant lives in
+        # DOM_DATABASE_V.dcl (the ON-object).
         run(ships_project, requested_modules=None, dry_run=False)
-        # SEM_V reads from DOM_V — needs a cross-module grant.
         grant_path = (
-            ships_project / "payload/database/DCL/inter_db" / "{{SEM_DATABASE_V}}.grt"
+            ships_project / "payload/database/DCL/inter_db" / "{{DOM_DATABASE_V}}.dcl"
         )
         assert grant_path.exists()
         text = grant_path.read_text()
