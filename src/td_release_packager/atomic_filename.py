@@ -186,8 +186,27 @@ def detokenise_filename(name: str, env: Mapping[str, str]) -> str:
 
     parts = name.rsplit(".", 2)
     if len(parts) == 2:
-        # Unqualified: <object>.<ext>. No tokens to resolve.
-        return name
+        # Unqualified: ``<object>.<ext>``. Under the SHIPS naming
+        # standard a tokenised qualifier produces a 3-part name
+        # (``{{TOKEN}}.<object>.<ext>``), but a *system-scope* object
+        # — CREATE DATABASE / USER / ROLE — IS the database, so its
+        # whole name may be a token (``{{BASE_NODE}}.db``). Resolve
+        # the object half so those unqualified tokenised names
+        # detokenise rather than passing through verbatim.
+        obj_text, ext = parts
+        try:
+            resolved_obj = parse_qualified_name(obj_text).object.resolve(
+                env, strict=True
+            )
+        except TokenisedNameError as exc:
+            raise FilenameDerivationError(
+                f"cannot parse object {obj_text!r} in {name!r}: {exc}"
+            ) from exc
+        except KeyError as exc:
+            raise FilenameDerivationError(
+                f"unresolved token {exc.args[0]!r} in {name!r}"
+            ) from exc
+        return f"{resolved_obj}.{ext}"
 
     qualifier, obj, ext = parts
     try:

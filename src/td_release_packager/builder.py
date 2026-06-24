@@ -2188,6 +2188,18 @@ def _copy_payload(
     filename_map = {}  # original → resolved (only changed names)
     provenance_doc = ProvenanceDocument()
 
+    # Bijection guard (issue #365, PR-3): two payload files must not
+    # detokenise onto the same release filename. The same env config
+    # that resolves bodies also resolves filenames (substitute_tokens
+    # is shared between line 2231 and the filename path below), but
+    # nothing today checks that the resulting payload→release map is
+    # injective. Without this guard, a token_map that maps two
+    # distinct tokens to the same literal silently overwrites — last
+    # writer wins. Track ``pkg_rel_path → original_src_rel_path`` so
+    # the second writer is rejected with both source paths in the
+    # error.
+    release_path_to_source: Dict[str, str] = {}
+
     # PR1 invariant: deterministic copy order. Sort both the directory
     # walk (in-place to influence os.walk's own descent) and the file
     # iteration so the order files are copied, tokens substituted, and
@@ -2327,6 +2339,25 @@ def _copy_payload(
                 pkg_rel_path = os.path.join(
                     phase.value, sub_dir, resolved_filename
                 ).replace("\\", "/")
+
+                # Bijection guard (issue #365, PR-3). If two payload
+                # files resolve to the same release path, fail loudly
+                # rather than silently overwrite. Same-source-twice
+                # cannot happen here (the os.walk loop visits each
+                # file once), so any collision means two distinct
+                # payload files detokenised onto one release path —
+                # almost certainly a token_map that is not a
+                # bijection across the involved tokens.
+                prior_source = release_path_to_source.get(pkg_rel_path)
+                if prior_source is not None and prior_source != src_rel_path:
+                    raise ValueError(
+                        f"Package detokenisation collision: {pkg_rel_path!r} "
+                        f"would be written by both {prior_source!r} and "
+                        f"{src_rel_path!r}. Two distinct payload files must "
+                        f"never detokenise onto the same release filename — "
+                        f"check the token_map for non-injective mappings."
+                    )
+                release_path_to_source[pkg_rel_path] = src_rel_path
 
                 # Stage: package. The file lands in its phase
                 # directory. This stage is always 'applied' because

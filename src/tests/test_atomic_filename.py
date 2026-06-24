@@ -150,9 +150,23 @@ def test_detok_literal_passes_through() -> None:
     assert out == "CallCentre_DOM_STD_T.Customer.tbl"
 
 
-def test_detok_unqualified_passes_through() -> None:
+def test_detok_unqualified_literal_passes_through() -> None:
     out = detokenise_filename("DOM_STD_T.db", {"DB_PREFIX": "DEV_03"})
     assert out == "DOM_STD_T.db"
+
+
+def test_detok_unqualified_tokenised_resolves() -> None:
+    """System-scope objects (CREATE DATABASE / USER / ROLE) carry the
+    whole name as a token. The unqualified single-dot form must still
+    resolve under the env map — passing through verbatim would leave
+    a tokenised release filename, defeating Package's job."""
+    out = detokenise_filename("{{BASE_NODE}}.db", {"BASE_NODE": "DEV_BASE"})
+    assert out == "DEV_BASE.db"
+
+
+def test_detok_unqualified_token_unresolved_raises() -> None:
+    with pytest.raises(FilenameDerivationError, match="unresolved token"):
+        detokenise_filename("{{BASE_NODE}}.db", {})
 
 
 def test_detok_dcl_extension() -> None:
