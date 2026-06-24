@@ -30,6 +30,10 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from td_release_packager.atomic_filename import (
+    FilenameDerivationError,
+    derive_filename_from_text,
+)
 from td_release_packager.classifier import (
     TYPE_TO_EXTENSION as _CANONICAL_EXT,
     _CLASSIFY_PATTERNS as _ALL_CLASSIFY_PATTERNS,
@@ -37,6 +41,7 @@ from td_release_packager.classifier import (
 from td_release_packager.sql_text import (
     strip_comments_and_string_literals as _strip_sql_comments,
 )
+from td_release_packager.token_engine import find_malformed_tokens
 
 
 logger = logging.getLogger(__name__)
@@ -160,6 +165,21 @@ DEFAULT_RULES: Dict[str, str] = {
     # rather than being a deficiency. Old configs using warn_orphan_grants
     # must be updated.
     "warn_external_grants": "INFO",
+    # -- Tokenised filename eponymy rules (issue #365, PR-5) --
+    # filename_token_format: every {{...}} marker in a filename must
+    # be a syntactically valid token. Orphan ``{{`` or ``}}`` pairs in
+    # the name are package-blocking: the build cannot substitute a
+    # malformed token and the file will land on an unintended path.
+    "filename_token_format": "ERROR",
+    # object_level_grant: warns when a GRANT or REVOKE targets a
+    # specific object (``db.obj``) or column (``GRANT SELECT (col)``)
+    # rather than the containing database. Teradata best practice is
+    # to grant at the database level so privileges propagate
+    # consistently and the access surface is small. Object- and
+    # column-level grants are valid SQL but produce sprawling, hard-
+    # to-audit privilege graphs. WARNING by default — projects with
+    # explicit object-level requirements can set this to OFF.
+    "object_level_grant": "WARNING",
 }
 
 # -- Valid severity values --
@@ -569,6 +589,20 @@ def generate_default_config() -> str:
         "# characters. Teradata rejects longer comment strings with Error 5550.",
         "# Defaults to ERROR because this is a deterministic deploy-time failure.",
         f"comment_length={DEFAULT_RULES['comment_length']}",
+        "",
+        "# Tokenised filename eponymy rules (issue #365, PR-5)",
+        "# filename_token_format: every {{...}} marker in a filename must be a",
+        "# syntactically valid token. Orphan {{ or }} pairs in the name are",
+        "# package-blocking: the build cannot substitute a malformed token and",
+        "# the file lands on an unintended path. Defaults to ERROR.",
+        f"filename_token_format={DEFAULT_RULES['filename_token_format']}",
+        "# object_level_grant: warns when a GRANT/REVOKE targets a specific",
+        "# object (ON db.obj) or column (GRANT SELECT (col) ON ...) rather",
+        "# than the containing database. Teradata best practice is to grant at",
+        "# the database level — privileges propagate to all objects in the",
+        "# container and the access surface stays auditable. WARNING by default;",
+        "# set to OFF for projects with explicit object-level requirements.",
+        f"object_level_grant={DEFAULT_RULES['object_level_grant']}",
     ]
     return "\n".join(lines) + "\n"
 
@@ -807,6 +841,30 @@ _TOKEN_RE = re.compile(r"\{\{([A-Za-z_][A-Za-z0-9_-]*)\}\}")
 
 # Identifier shape: bare ident, quoted ident, or {{TOKEN}}
 _PREREQ_IDENT_FRAG = r'(?:\{\{[A-Za-z_][A-Za-z0-9_-]*\}\}|"[^"]+"|[A-Za-z_]\w*)'
+
+# Permissive token-aware identifier — accepts prefix-token shapes
+# (``{{DB_PREFIX}}_T``), multi-token shapes (``{{ENV}}_{{SUFFIX}}``),
+# and bare identifiers. Used by the tokenised-payload eponymy check
+# (PR-5, issue #365) where the body's qualified name carries a token
+# concatenated with literal text.
+_TOKEN_AWARE_NAME_PART = (
+    r"(?:"
+    r"(?:\{\{[A-Z][A-Z0-9_]*\}\}|\"[^\"]+\"|[A-Za-z_]\w*)"
+    r"(?:\{\{[A-Z][A-Z0-9_]*\}\}|\w+)*"
+    r")"
+)
+_TOKEN_AWARE_QUALIFIED_NAME_RE = re.compile(
+    r"^\s*(?:CREATE|REPLACE)\s+(?:MULTISET\s+|SET\s+)?"
+    r"(?:VOLATILE\s+|GLOBAL\s+TEMPORARY\s+)?"
+    r"(?:TRACE\s+)?"
+    r"(?:SPECIFIC\s+)?"
+    r"(?:TABLE|VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER|"
+    r"JOIN\s+INDEX|HASH\s+INDEX)\s+"
+    rf"(?P<dbpart>{_TOKEN_AWARE_NAME_PART})"
+    r"\s*\.\s*"
+    rf"(?P<objpart>{_TOKEN_AWARE_NAME_PART})",
+    re.IGNORECASE | re.MULTILINE,
+)
 
 # CREATE DATABASE <name> | CREATE USER <name>
 # Anchored — without ``^\s*`` a GRANT statement listing ``CREATE
@@ -1247,6 +1305,9 @@ def _validate_directory_impl(
         file_issues.extend(_check_view_column_list(rel_path, clean))
         file_issues.extend(_check_comment_length(rel_path, content, rules_config))
         file_issues.extend(_check_non_ascii_literals(rel_path, content))
+        # PR-5 (issue #365): tokenised-filename eponymy + DCL hygiene.
+        file_issues.extend(_check_filename_token_format(rel_path, file_path))
+        file_issues.extend(_check_object_level_grant(rel_path, clean))
 
         # -- Apply rule config: remap severity or drop OFF rules --
         # INFO issues are informational and not configurable —
@@ -1882,17 +1943,56 @@ def _check_one_object(rel_path: str, content: str) -> List[ValidationIssue]:
 def _check_eponymous(
     rel_path: str, content: str, file_path: str
 ) -> List[ValidationIssue]:
-    """Check that filename matches the DDL's Database.ObjectName."""
+    """Check that filename matches the DDL's Database.ObjectName.
+
+    For tokenised payloads (issue #365, PR-5) the comparison runs
+    against the canonical ``derive_filename`` rendering of the
+    parsed identity — so ``{{DB_PREFIX}}_T.Customer.tbl`` agrees
+    with a body that declares ``CREATE TABLE {{DB_PREFIX}}_T.Customer``.
+    A drifted filename, or a body whose identity differs from what
+    the name encodes, surfaces as a clear ``eponymous`` finding.
+    """
+    filename = os.path.basename(file_path)
+    basename = os.path.splitext(filename)[0]
+    ext = os.path.splitext(filename)[1]
+
+    # Tokenised payload: ``_QUALIFIED_NAME_RE`` doesn't accept tokens
+    # in identifiers, so the token-aware ``_INTRA_QUALIFIED_NAME_RE``
+    # carries the identity match. The comparison runs via the
+    # canonical ``derive_filename`` so prefix-token shapes
+    # ({{DB_PREFIX}}_T.X) and whole-name tokens ({{TOK}}.X) work
+    # identically. Returning early on parse errors avoids piggy-
+    # backing this rule on derivation defects the
+    # filename_token_format rule reports separately.
+    if "{{" in basename:
+        token_match = _TOKEN_AWARE_QUALIFIED_NAME_RE.search(content)
+        if token_match is None:
+            return []
+        qualified = f"{token_match.group('dbpart')}.{token_match.group('objpart')}"
+        try:
+            expected_filename = derive_filename_from_text(qualified, ext)
+        except FilenameDerivationError:
+            return []
+        if filename != expected_filename:
+            return [
+                ValidationIssue(
+                    file=rel_path,
+                    rule="eponymous",
+                    severity="WARNING",
+                    message=(
+                        f"Filename {filename!r} does not match the "
+                        f"identity declared in the body "
+                        f"({qualified!r} → expected {expected_filename!r})."
+                    ),
+                )
+            ]
+        return []
+
     match = _QUALIFIED_NAME_RE.search(content)
     if not match:
         return []
 
     qualified = match.group(1).replace('"', "")
-    basename = os.path.splitext(os.path.basename(file_path))[0]
-
-    # Allow {{TOKENS}} in names — they'll be resolved at build time
-    if "{{" in basename or "{{" in qualified:
-        return []
 
     if basename.upper() != qualified.upper():
         return [
@@ -1905,6 +2005,125 @@ def _check_eponymous(
             )
         ]
     return []
+
+
+def _check_filename_token_format(
+    rel_path: str, file_path: str
+) -> List[ValidationIssue]:
+    """Reject malformed ``{{...}}`` markers in atomic-file filenames.
+
+    Step-0 token-format scanning has always run on file *contents*;
+    issue #365 extends it to filenames so a typo like
+    ``{DB_PREFIX}}_T.X.tbl`` is caught before Package tries to
+    substitute it and produces a path no operator expects.
+
+    Returns one issue per malformed marker so a multi-defect filename
+    surfaces every defect in a single inspect run.
+    """
+    filename = os.path.basename(file_path)
+    bad = find_malformed_tokens(filename)
+    if not bad:
+        return []
+    issues: List[ValidationIssue] = []
+    for marker in bad:
+        issues.append(
+            ValidationIssue(
+                file=rel_path,
+                rule="filename_token_format",
+                severity="ERROR",
+                message=(
+                    f"Malformed {marker['marker']!r} marker in filename "
+                    f"{filename!r} at column {marker['column']}. "
+                    "Filenames must contain only well-formed "
+                    "``{{TOKEN}}`` substitutions."
+                ),
+            )
+        )
+    return issues
+
+
+# DCL statement detector — uses the canonical grant_merger parser.
+# Kept lazy-imported so validate stays loadable in environments
+# (e.g. minimal CLI) where the merger module is not on the path.
+_GRANT_REVOKE_LINE_RE = re.compile(
+    r"^\s*(?:GRANT|REVOKE)\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+# Column-list grants: ``GRANT SELECT (col1, col2) ON db.tbl TO user``.
+# The privilege portion carries a parenthesised column list — distinct
+# from the standard ``GRANT SELECT ON ...`` shape.
+_COLUMN_GRANT_RE = re.compile(
+    r"^\s*(?:GRANT|REVOKE)\s+[A-Z_, ]+?\([^)]*\)\s+ON\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _check_object_level_grant(rel_path: str, content: str) -> List[ValidationIssue]:
+    """Warn on GRANT/REVOKE that targets a specific object or column.
+
+    Teradata best practice (per coding standards on this codebase):
+    grant at the database level so privileges propagate through the
+    container and the access surface stays small. Object-level
+    (``ON db.obj``) and column-level (``GRANT SELECT (col) ON …``)
+    grants are valid SQL but produce sprawling privilege graphs
+    that are hard to audit and easy to drift on.
+
+    Only inspects ``.dcl`` and ``.grt`` files — the rule does not
+    apply to DDL bodies that happen to contain GRANT statements
+    (e.g. inside a procedure body, where the discipline differs).
+    """
+    ext = os.path.splitext(rel_path)[1].lower()
+    if ext not in {".dcl", ".grt"}:
+        return []
+
+    # Lazy import keeps the merger optional at load time.
+    from td_release_packager.grant_merger import (
+        PrivilegeGrant,
+        _split_statements,
+        parse_statement,
+    )
+
+    issues: List[ValidationIssue] = []
+
+    # Column-list grants are detected on the raw text — the canonical
+    # parser does not preserve the parenthesised privilege column
+    # list (it treats it as part of the privilege string).
+    if _COLUMN_GRANT_RE.search(content):
+        issues.append(
+            ValidationIssue(
+                file=rel_path,
+                rule="object_level_grant",
+                severity="WARNING",
+                message=(
+                    "Column-level GRANT/REVOKE detected. Teradata best "
+                    "practice is to grant at the database level — column "
+                    "grants produce sprawling privilege graphs that drift."
+                ),
+            )
+        )
+
+    # Object-level grants: ON target carries a ``.``.
+    for raw in _split_statements(content):
+        stmt = parse_statement(raw)
+        if not isinstance(stmt, PrivilegeGrant):
+            continue
+        if "." in stmt.on_object:
+            issues.append(
+                ValidationIssue(
+                    file=rel_path,
+                    rule="object_level_grant",
+                    severity="WARNING",
+                    message=(
+                        f"Object-level grant detected: "
+                        f"{stmt.action} ON {stmt.on_object} TO {stmt.grantee}. "
+                        "Prefer database-level grants — privileges "
+                        "propagate to all objects in the container and "
+                        "the access surface stays auditable."
+                    ),
+                )
+            )
+
+    return issues
 
 
 def _check_extension(
