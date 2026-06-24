@@ -84,6 +84,7 @@ from typing import Dict, List, Optional, Set, Tuple
 # Logging
 # ---------------------------------------------------------------------------
 
+from td_release_packager.atomic_filename import derive_filename_from_text
 from td_release_packager.version_args import add_version_argument
 
 logger = logging.getLogger("generate_view_layer")
@@ -1441,9 +1442,15 @@ def run(
             continue
         ddl = generate_locking_view_ddl(table)
         views_token = companion_token(table.database_token)
-        out_path = (
-            project_root / _PATH_VIEWS / f"{views_token}.{table.object_name}{_EXT_VIEW}"
+        # Tokenised-eponymous from first write (issue #365): the
+        # generated view is born into a tokenised payload, so its
+        # filename carries the same {{TOKEN}} as its body. Routing
+        # through the canonical derive_filename keeps Generate
+        # consistent with Harvest and Package.
+        view_filename = derive_filename_from_text(
+            f"{views_token}.{table.object_name}", _EXT_VIEW
         )
+        out_path = project_root / _PATH_VIEWS / view_filename
         if write_if_different(out_path, ddl, dry_run):
             result.locking_views_written += 1
         else:
@@ -1491,7 +1498,10 @@ def run(
             continue
         seen_dbs.add(views_token)
         ddl = generate_database_ddl(views_token)
-        out_path = project_root / _PATH_DATABASES / f"{views_token}{_EXT_DB}"
+        # Unqualified system-scope object (CREATE DATABASE {{TOKEN}})
+        # — the whole name may legitimately be a token (issue #365).
+        db_filename = derive_filename_from_text(views_token, _EXT_DB)
+        out_path = project_root / _PATH_DATABASES / db_filename
         if not out_path.exists():
             if write_if_different(out_path, ddl, dry_run):
                 result.databases_written += 1
@@ -1515,7 +1525,13 @@ def run(
         if not grantor_set:
             continue
         ddl = generate_grant_ddl(grantee, list(grantor_set))
-        out_path = project_root / _PATH_GRANTS / f"{grantee}{_EXT_GRANT}"
+        # Grant file is keyed on its grantee (the views database
+        # receiving the privilege). Whole-name token in an
+        # unqualified slot — same shape as the database file above.
+        # ``.grt`` extension preserved for PR-2; ``.grt`` → ``.dcl``
+        # normalisation is PR-4 scope (handover §7).
+        grant_filename = derive_filename_from_text(grantee, _EXT_GRANT)
+        out_path = project_root / _PATH_GRANTS / grant_filename
         if write_if_different(out_path, ddl, dry_run):
             result.grants_written += 1
         else:
