@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted | 2026-02-05
+Accepted | 2026-02-05 · Amended 2026-06-24 (issue #365 — tokenised
+filename eponymy).
 
 ## Context
 
@@ -200,3 +201,87 @@ both the token engine and the deployer.
 - ADR 0006: Deployer owns idempotency — per-object intent is
   derivable from the file extension via `STRATEGY_MAP`, which
   depends on the atomic-one-object-per-file property.
+
+---
+
+## Amendment 2026-06-24 — Tokenised filename eponymy (#365)
+
+The original ADR specified eponymous filenames as the *literal*
+`Database.Object.ext`. Issue #365 redefines eponymy to be
+**state-relative**: the filename carries the object's qualified
+identity *in the payload's current tokenisation state*. Tokenise the
+identity → the filename carries the `{{TOKEN}}`. Detokenise → the
+filename carries the literal. Filename and the object identity
+inside the file are never permitted to diverge.
+
+### The canonical derivation
+
+A single function — `td_release_packager.atomic_filename.derive_filename`
+— is the only code in SHIPS that names atomic payload files. Every
+phase (Harvest, Generate, Inspect, Package) routes through it.
+
+```
+derive_filename(identity, ext) -> "<qualifier>.<object><ext>"
+
+  qualifier : literal DB  OR  tokenised DB expression
+                              ({{DB_PREFIX}}_DOM_STD_T or {{DOM_STD_T}})
+  object    : ALWAYS literal (for qualified identities)
+  ext       : object-class extension (.tbl / .viw / .dcl / ...)
+
+  uniqueness key = (qualifier_rendered, object_rendered)
+                   # the FULL tuple — never the qualifier alone
+```
+
+The literal-object invariant is what guarantees uniqueness: under the
+SHIPS naming standard, objects never carry tokens. Two distinct
+objects in one tokenised database produce two distinct filenames
+because their object segments differ.
+
+### Edge case — system-scope unqualified objects
+
+`CREATE DATABASE`, `CREATE USER`, `CREATE ROLE` have no qualifier
+half; the "object" *is* the database/user/role. Their whole name
+may legitimately be a token (`{{BASE_NODE}}.db`). The literal-object
+invariant applies only to qualified identities.
+
+### Defect 1 fix
+
+Before #365, Harvest's filename derivation had paths that keyed on
+the qualifier alone (or merely the `{{...}}` head of the qualifier),
+so *N* objects in one tokenised database could collapse onto a
+single filename — silent overwrite, lost objects. Routing every
+emit site through `derive_filename` makes the collapse structurally
+impossible. An intra-run collision guard in Harvest catches the
+case directly: two distinct DDL identities deriving the same payload
+filename in one harvest run is now a hard error.
+
+### Package detokenisation + bijection
+
+Package computes the release path by detokenising the payload path
+using the same env-config substitution that resolves the body — one
+substitution surface for both name and content (see
+`atomic_filename.detokenise_filename`). After collecting all
+`(payload_path → release_path)` pairs, a bijection guard asserts
+the map is injective. A token_map that resolves two distinct tokens
+to the same literal would collapse two payload files onto one
+release filename; the guard surfaces both source paths in a clear
+error rather than silently overwriting.
+
+### Inspect rules added
+
+- `filename_token_format` (ERROR) — every `{{…}}` marker in a
+  filename must be a well-formed token. Orphan braces are
+  package-blocking.
+- `eponymous` (extended) — works on tokenised payloads via
+  `derive_filename`. A drifted filename
+  (`{{DB_PREFIX}}_T.Account.tbl` whose body declares
+  `CREATE TABLE {{DB_PREFIX}}_T.Customer`) now surfaces a clear
+  finding.
+
+### Modules
+
+- `td_release_packager.atomic_filename` — canonical `derive_filename`,
+  `derive_filename_from_text`, `detokenise_filename`,
+  `FilenameDerivationError`, `DerivedFilenameClash`.
+- `td_release_packager.tokenised_name` — token-aware identifier
+  parser the canonical function builds on.

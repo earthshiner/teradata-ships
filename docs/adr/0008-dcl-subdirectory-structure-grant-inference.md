@@ -2,7 +2,9 @@
 
 ## Status
 
-Revised | 2026-05-08 (supersedes Accepted | 2026-04-02)
+Revised | 2026-05-08 (supersedes Accepted | 2026-04-02) · Amended
+2026-06-24 (issue #365 — DCL discipline: ON-object grouping,
+privilege merge, `.grt` retirement).
 
 ### Revision summary
 
@@ -379,3 +381,86 @@ simpler and more reliable than parsing grant statements.
 - ADR 0009: Configurable deploy intent — Trust Score dimensions
   (Isolation, Safety) affected by `DCL_DIRECT_TABLE_ACCESS` and
   `DCL_NO_OPS_SEPARATION` findings.
+
+---
+
+## Amendment 2026-06-24 — DCL discipline (#365)
+
+The handover for issue #365 specifies a unified DCL discipline that
+the v2 inference engine and the view-layer generator now both
+honour. Three sub-changes:
+
+### 1. Grouping by ON-object
+
+DCL files under `DCL/inter_db/` are now grouped by **the object the
+grant is ON** — i.e. the protected database. The previous convention
+grouped by grantee; PR-4 (#370) inverts that for the view-layer
+generator and confirms Harvest's eponymous-filename mechanism
+already keys on the ON-object via `_GRANT_REVOKE_NAME_RE`.
+
+Rationale: grants are an attribute of the protected object and
+should redeploy in that object's wave. ON-object grouping aligns
+DCL output with deployment-wave ordering and makes the per-database
+access surface easy to audit from the file system.
+
+**Filename shape change.** The view-layer generator's output renames:
+
+| Before | After |
+| --- | --- |
+| `{{DOM_DATABASE_V}}.grt` | `{{DOM_DATABASE_T}}.dcl` |
+| `{{SEM_DATABASE_V}}.grt` | `{{DOM_DATABASE_V}}.dcl` |
+
+Downstream tooling that discovered grant files by the old naming
+pattern needs to update its glob.
+
+### 2. Privilege merge
+
+A new module `td_release_packager.grant_merger` is the single
+canonical merger. Compatible privilege grants fold into one
+comma-separated statement:
+
+```
+GRANT SELECT ON X TO Y WITH GRANT OPTION;
+GRANT INSERT ON X TO Y WITH GRANT OPTION;
+        -- merge to -->
+GRANT SELECT, INSERT ON X TO Y WITH GRANT OPTION;
+```
+
+Merge key: `(action, on_object, grantee, with_grant_option)`. All
+four must match. Strict separations:
+
+- `GRANT` and `REVOKE` never merge.
+- Privilege-grants and role-grants never merge (different statement
+  shape).
+
+Emission is deterministic — statements sort by
+`(action, on_object, grantee, with_grant_option, privileges)` so
+two runs over the same input produce byte-identical output.
+
+### 3. `.grt` → `.dcl` normalisation
+
+There is now **one canonical DCL extension: `.dcl`**. The
+view-layer generator's `_EXT_GRANT` is `.dcl`. Harvest already
+normalised via `classifier.TYPE_TO_EXTENSION`. No `.grt` file
+survives anywhere under `payload/` — removing the
+`{{X}}.dcl` + `{{X}}.grt` collision vector entirely.
+
+`.grt` is still recognised in *source* files (Harvest accepts both
+extensions) but is normalised on the way into the payload.
+
+### Inspect rule added
+
+- `object_level_grant` (WARNING) — warns when a `GRANT`/`REVOKE`
+  targets a specific object (`ON db.obj`) or column
+  (`GRANT SELECT (col) ON …`) rather than the containing database.
+  Teradata best practice is to grant at the database level so
+  privileges propagate through the container and the access
+  surface stays auditable. Scoped to `.dcl`/`.grt` files.
+
+### Modules
+
+- `td_release_packager.grant_merger` — canonical merger:
+  `PrivilegeGrant`, `RoleGrant`, `parse_statement`,
+  `merge_statements`, `emit_statement`, `merge_and_emit`.
+- `td_release_packager.view_layer_generator` — Phase 5 emits
+  ON-object-grouped `.dcl` files through the merger.

@@ -13,7 +13,8 @@ Rules are configured via `inspect.conf` in the project root.
 | `set_multiset`             | WARNING          | `CREATE TABLE` must specify `SET` or `MULTISET`.                             |
 | `deploy_intent`            | OFF              | Retired compatibility rule. `REPLACE` and `CREATE` are both supported for replaceable Teradata objects; the deployer records the source verb and captures rollback snapshots before executing either path. |
 | `one_object`               | WARNING          | Each file must contain exactly one DDL statement.                            |
-| `eponymous`                | WARNING          | Filename must match the DDL object name.                                     |
+| `eponymous`                | WARNING          | Filename must match the DDL object name. Works on tokenised payloads via the canonical `derive_filename` — a body declaring `CREATE TABLE {{DB_PREFIX}}_T.Customer` must live in `{{DB_PREFIX}}_T.Customer.tbl`. (#365) |
+| `filename_token_format`    | ERROR            | Every `{{…}}` marker in a filename must be a well-formed token. Orphan `{{` or `}}` pairs in the name are package-blocking: the build cannot substitute a malformed token and the file would land on an unintended path. One finding per malformed marker. (#365) |
 | `extension`                | ERROR            | File extension must match the object type.                                   |
 | `type_suffix`              | ERROR            | Object names must not carry type suffixes (`_V`, `_T`, `VW_`, `SP_`, etc.). |
 | `ddl_terminator`           | ERROR            | Every DDL statement must terminate with a semi-colon (`;`). Missing terminators make statement boundaries ambiguous for deployment scripting and downstream agents. |
@@ -55,6 +56,7 @@ Rules are configured via `inspect.conf` in the project root.
 |----------------------------|------------------|------------------------------------------------------------------------------|
 | `public_grant_on_tables`   | WARNING          | `GRANT … TO PUBLIC` on a tables database bypasses the placement architecture.|
 | `review_unmapped_grants`   | WARNING          | GRANT targets a database not in the placement map.                           |
+| `object_level_grant`       | WARNING          | `GRANT`/`REVOKE` targets a specific object (`ON db.obj`) or column (`GRANT SELECT (col) ON …`) rather than the containing database. Teradata best practice is to grant at the database level — privileges propagate to all objects in the container and the access surface stays auditable. Scoped to `.dcl`/`.grt` files only; embedded `GRANT` statements inside procedure bodies are not inspected. (#365) |
 
 ### Cross-file grant validation (Step 2 of Inspect)
 

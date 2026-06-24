@@ -520,6 +520,39 @@ You do not need to fix everything before you can package.
 
 ---
 
+### My DCL files have a `.dcl` extension now — I had `.grt` before. What changed?
+
+Issue #365 normalised the DCL extension across SHIPS. There is now **one canonical extension: `.dcl`**. The Generate step (view-layer generator) emits `.dcl` directly; Harvest already normalised source `.grt` files to `.dcl` via the classifier. No `.grt` file survives anywhere under `payload/`.
+
+`.grt` is still recognised in *source* files — you can keep your existing source on disk — but it is normalised on the way into the payload. Any downstream tooling that discovered grant files by globbing `*.grt` under `payload/` needs to update to `*.dcl`.
+
+---
+
+### My generated DCL filenames changed shape after upgrading. Why?
+
+Issue #365 (PR-4) switched the view-layer generator from grantee-grouping to **ON-object grouping**. Each DCL file is now named after the protected database the grants are `ON`, not the grantee receiving the privilege.
+
+| Before | After |
+| --- | --- |
+| `{{DOM_DATABASE_V}}.grt` | `{{DOM_DATABASE_T}}.dcl` |
+| `{{SEM_DATABASE_V}}.grt` | `{{DOM_DATABASE_V}}.dcl` |
+
+The grants are the same — only the file they live in and the file's name changed. Rationale: grants are an attribute of the protected object and should redeploy in that object's deployment wave. ON-object grouping aligns the on-disk structure with deployment-wave ordering.
+
+If your CI/CD or downstream tooling assumes the old `{{grantee}}.grt` shape, update the glob.
+
+---
+
+### What is `object_level_grant` warning me about?
+
+A new Inspect rule (issue #365) that warns when a `.dcl` file contains a `GRANT`/`REVOKE` whose target is a specific object (`ON db.obj`) or column (`GRANT SELECT (col1) ON db.obj`) rather than the containing database (`ON db`).
+
+Teradata best practice is to grant at the database level — privileges propagate to all objects in the container and the access surface stays auditable. Object- and column-level grants produce sprawling privilege graphs that drift.
+
+If the object-level grant is genuinely required, set `object_level_grant=OFF` in `config/inspect.conf`. The rule defaults to WARNING (advisory) and does not block packaging.
+
+---
+
 ## Packaging and trust
 
 ### Why is my package inside a release-group directory?
