@@ -452,6 +452,7 @@ def fresh_ships_mcp_for_auth():
     try:
         _install_fake_mcp_for_auth()
         import ships_mcp  # noqa: F401
+
         yield
     finally:
         # Teardown: drop ships_mcp and restore every mcp.* entry.
