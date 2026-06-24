@@ -150,16 +150,18 @@ def test_generate_database_files_are_tokenised_eponymous(
 def test_generate_grant_files_route_through_derive_filename(
     generate_fixture: Path,
 ) -> None:
-    """Consolidated grant files are keyed on the grantee (the views
-    database). The filename uses derive_filename — whole-name token,
-    unqualified slot. ``.grt`` extension preserved at this PR; PR-4
-    normalises to ``.dcl``."""
+    """Consolidated grant files are keyed on the ON-object (the
+    protected database). Filename routes through derive_filename;
+    canonical extension is ``.dcl`` after PR-4 (handover §7)."""
     generate_run(generate_fixture, requested_modules=None, dry_run=False)
 
     grants_dir = generate_fixture / "payload/database/DCL/inter_db"
-    grant_files = sorted(grants_dir.glob("*.grt"))
-    # At least the same-module grant for DOM_DATABASE_V.
-    expected_dom = derive_filename_from_text("{{DOM_DATABASE_V}}", ".grt")
+    grant_files = sorted(grants_dir.glob("*.dcl"))
+    # Same-module grant ON DOM_DATABASE_T to DOM_DATABASE_V lands in
+    # DOM_DATABASE_T's DCL file.
+    expected_dom = derive_filename_from_text("{{DOM_DATABASE_T}}", ".dcl")
     assert expected_dom in {p.name for p in grant_files}, (
         f"Expected {expected_dom!r} in {[p.name for p in grant_files]}"
     )
+    # And no .grt file survives Generate.
+    assert not list(grants_dir.glob("*.grt"))
