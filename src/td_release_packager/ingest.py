@@ -616,6 +616,7 @@ def _ingest_directory_impl(
                     kind_index=kind_index,
                     result=result,
                     prefix_mode_literals=prefix_mode_literals,
+                    prefix_tokens=prefix_tokens,
                 )
                 continue  # next source file
 
@@ -637,6 +638,7 @@ def _ingest_directory_impl(
                     dml_targets=dml_targets,
                     result=result,
                     prefix_mode_literals=prefix_mode_literals,
+                    prefix_tokens=prefix_tokens,
                 )
                 continue  # next source file
 
@@ -1139,6 +1141,54 @@ def _find_payload_base(project_dir: str) -> str:
     )
 
 
+def _tokenise_source_basename(
+    source_basename: str,
+    *,
+    prefix_tokens: Optional[Dict[str, str]],
+    apply_tokens: Optional[Dict[str, str]],
+) -> str:
+    """Apply the same token substitutions to a source-file basename
+    that the main loop applies to the body.
+
+    Multi-target DML and ordered-SQL helpers compose their destination
+    filename from the literal source basename rather than from a
+    parsed object identity (statement order is the artefact's
+    identity). PR-1 / PR P1 only fixed the parsed-identity path, so
+    these two helpers historically left the basename literal in every
+    mode — issue #374 P2. Threading the same ``prefix_tokens`` /
+    ``apply_tokens`` map through here keeps the on-disk filename and
+    the on-disk body in the same tokenisation state.
+
+    Order:
+      1. ``prefix_tokens`` first — mirrors the main loop, where
+         ``tokenise_prefixes`` substitutes into ``raw_content``
+         BEFORE name derivation.
+      2. ``apply_tokens`` second — longest-key-first so a map
+         containing both ``Call`` and ``CallCentre_DOM_T`` does not
+         leave the longer literal partially shadowed by the shorter
+         prefix's substitution.
+
+    Returns the basename unchanged when neither map is supplied or
+    when nothing matched.
+    """
+    out = source_basename
+    if prefix_tokens:
+        from td_release_packager.token_engine import tokenise_prefixes
+
+        out, _total, _per = tokenise_prefixes(out, prefix_tokens)
+    if apply_tokens:
+        # Plain literal->token replacement on the basename. Statement
+        # parsing (``_apply_kind_aware_tokens``) is the wrong tool
+        # here — there are no statements to parse, and the basename
+        # may legitimately mix the db-name segment with descriptive
+        # text (e.g. ``CustomerDNA_OBS_load`` → ``{{...}}_load``).
+        for literal, token in sorted(
+            apply_tokens.items(), key=lambda kv: len(kv[0]), reverse=True
+        ):
+            out = out.replace(literal, token)
+    return out
+
+
 def _place_multi_table_dml(
     *,
     raw_content: str,
@@ -1151,6 +1201,7 @@ def _place_multi_table_dml(
     dml_targets: Set[Tuple[Optional[str], Optional[str]]],
     result: "IngestResult",
     prefix_mode_literals: Optional[Set[str]] = None,
+    prefix_tokens: Optional[Dict[str, str]] = None,
 ) -> None:
     """Place a multi-target DML source file as a single
     ``<source_basename>.multi_table.dml`` artefact.
@@ -1173,7 +1224,15 @@ def _place_multi_table_dml(
     the manifest and harvest banner can surface them.
     """
     source_basename = os.path.splitext(os.path.basename(src_path))[0]
-    dest_name = f"{source_basename}.multi_table.dml"
+    # Tokenise the basename with the SAME maps that drive the body
+    # substitution below, so the on-disk filename and body land in
+    # the same tokenisation state (issue #374 P2).
+    tokenised_basename = _tokenise_source_basename(
+        source_basename,
+        prefix_tokens=prefix_tokens,
+        apply_tokens=apply_tokens,
+    )
+    dest_name = f"{tokenised_basename}.multi_table.dml"
     dest_dir = os.path.join(payload_base, "DML")
     os.makedirs(dest_dir, exist_ok=True)
 
@@ -1231,6 +1290,7 @@ def _place_ordered_sql(
     kind_index: Optional[Dict[str, str]],
     result: IngestResult,
     prefix_mode_literals: Optional[Set[str]] = None,
+    prefix_tokens: Optional[Dict[str, str]] = None,
 ) -> None:
     """Place a mixed DCL/non-DCL source as one ordered SQL artefact.
 
@@ -1239,7 +1299,13 @@ def _place_ordered_sql(
     SHIPS keeps the whole source together and deploys it via DIRECT_EXECUTE.
     """
     source_basename = os.path.splitext(os.path.basename(src_path))[0]
-    dest_name = f"{source_basename}.ordered.osql"
+    # See _place_multi_table_dml — same eponymy fix (issue #374 P2).
+    tokenised_basename = _tokenise_source_basename(
+        source_basename,
+        prefix_tokens=prefix_tokens,
+        apply_tokens=apply_tokens,
+    )
+    dest_name = f"{tokenised_basename}.ordered.osql"
     dest_dir = os.path.join(payload_base, "DML")
     os.makedirs(dest_dir, exist_ok=True)
 
