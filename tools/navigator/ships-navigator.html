@@ -771,12 +771,26 @@ function generatePlan() {
 // ---------------------------------------------------------------------------
 function renderScript(script, shell) {
   const out = [];
-  // For cmd: rewrite $VAR → %VAR% AND rewrite the leading `ships ` to `%SHIPS% `
-  // so the invocation goes through the user-configurable SHIPS variable.
-  // bash + PowerShell wrap `ships` in a function instead (see header block).
-  const xform = s => shell === "cmd"
-    ? s.replace(/\$([A-Z_][A-Z0-9_]*)/g, "%$1%").replace(/^ships(\b)/, "%SHIPS%$1")
-    : s;
+  // Rewrite each canonical command line per shell:
+  //   - $VAR_NAME → %VAR_NAME% (cmd only)
+  //   - leading `ships ` → the shell-specific invocation of $SHIPS_CMD
+  // We do NOT define a `ships` function in PS or bash because the lookup
+  // resolves to that function first, recursing infinitely when $SHIPS_CMD
+  // is "ships" (the user hit this as a CallDepthOverflow). Inlining the
+  // call operator is unambiguous and works in every shell.
+  const xform = (s) => {
+    if (shell === "cmd") {
+      return s.replace(/\$([A-Z_][A-Z0-9_]*)/g, (_m, n) => "%" + n + "%")
+              .replace(/^ships(\b)/, (_m, b) => "%SHIPS%" + b);
+    }
+    if (shell === "powershell") {
+      return s.replace(/^ships(\b)/, (_m, b) => "& $SHIPS_CMD @SHIPS_ARGS" + b);
+    }
+    if (shell === "bash") {
+      return s.replace(/^ships(\b)/, (_m, b) => '"$SHIPS_CMD" "${SHIPS_ARGS[@]}"' + b);
+    }
+    return s;
+  };
   const cont  = shell === "cmd" ? " ^" : shell === "powershell" ? " `" : " \\";
   const cmnt  = shell === "cmd" ? "::" : "#";
 
@@ -832,26 +846,25 @@ function renderScript(script, shell) {
   // Default to the bare `ships`; commented alternatives sit beside it.
   if (shell === "bash") {
     out.push("# === ships invocation — edit if 'ships' is not on PATH ===");
+    out.push("# Each command below is rewritten to: \"$SHIPS_CMD\" \"${SHIPS_ARGS[@]}\" <verb> ...");
     out.push('SHIPS_CMD="ships"            # default: pip/uv-installed console script');
     out.push('SHIPS_ARGS=()                # extra arg tokens (e.g. for python -m)');
     out.push("# Alternatives — uncomment ONE pair to override the default above:");
     out.push('#   SHIPS_CMD="python"; SHIPS_ARGS=(-m td_release_packager.cli)');
     out.push('#   SHIPS_CMD="uv";     SHIPS_ARGS=(run python -m td_release_packager.cli)');
-    out.push('ships() { "$SHIPS_CMD" "${SHIPS_ARGS[@]}" "$@"; }');
     out.push("");
   } else if (shell === "powershell") {
     out.push("# === ships invocation — edit if 'ships' is not on PATH ===");
+    out.push("# Each command below is rewritten to: & $SHIPS_CMD @SHIPS_ARGS <verb> ...");
     out.push('$SHIPS_CMD  = "ships"        # default: pip/uv-installed console script');
     out.push('$SHIPS_ARGS = @()            # extra arg tokens (e.g. for python -m)');
     out.push("# Alternatives — uncomment ONE pair to override the default above:");
     out.push('#   $SHIPS_CMD = "python"; $SHIPS_ARGS = @("-m", "td_release_packager.cli")');
     out.push('#   $SHIPS_CMD = "uv";     $SHIPS_ARGS = @("run", "python", "-m", "td_release_packager.cli")');
-    out.push('function ships { & $SHIPS_CMD @SHIPS_ARGS @args }');
     out.push("");
   } else {
     out.push(':: === ships invocation — edit if "ships" is not on PATH ===');
-    out.push(':: All `ships` calls below are rewritten to %SHIPS% so editing this line');
-    out.push(":: retargets the whole script.");
+    out.push(":: Each command below is rewritten to: %SHIPS% <verb> ...");
     out.push('set "SHIPS=ships"');
     out.push(":: Alternatives — pick ONE:");
     out.push('::   set "SHIPS=python -m td_release_packager.cli"');
