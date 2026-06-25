@@ -1,0 +1,881 @@
+<!doctype html>
+<!--
+  SHIPS Navigator — offline guided-packaging wizard
+  Issue #380 / milestone "Guided Packaging (SHIPS Navigator)"
+
+  Hard constraints (handover Part B §2):
+    - Single self-contained .html file. No network, no CDN, no AI.
+    - Pure client-side, deterministic.
+    - Output is copy-pasteable AND downloadable.
+
+  v1 caveats:
+    - Logo is a styled placeholder. Final brand compliance requires embedding
+      teradata_sym_rgb_pos.png as base64 from the teradata-brand skill's
+      assets/logo-base64-reference.md. See LOGO_PLACEHOLDER below.
+    - Font stack is the system fallback. Final brand compliance wants Inter
+      embedded as base64 woff2. Acceptable for v1 (handover §5).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SHIPS Navigator</title>
+<style>
+  :root {
+    --td-orange: #FF5F02;
+    --td-navy:   #00233C;
+    --td-white:  #FFFFFF;
+    --td-navy-2: #0b3450;
+    --td-grey-1: #f4f6f8;
+    --td-grey-2: #d8dde2;
+    --td-grey-3: #6b7a86;
+    --td-warn-bg:#fff4e6;
+    --td-warn-bd:#FF5F02;
+    --td-mono:   ui-monospace, 'Cascadia Mono', 'Consolas', 'Menlo', monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    font-family: 'Inter', -apple-system, 'Segoe UI', Roboto, sans-serif;
+    color: var(--td-navy);
+    background: var(--td-grey-1);
+    line-height: 1.45;
+  }
+  header.app {
+    background: var(--td-navy);
+    color: var(--td-white);
+    padding: 18px 28px;
+    display: flex; align-items: center; gap: 16px;
+    border-bottom: 4px solid var(--td-orange);
+  }
+  header.app .logo {
+    /* Embedded teradata_sym_rgb_pos.png (base64) from the teradata-brand skill's
+       assets/logo-base64-reference.md. Per brand guidelines we use the provided
+       asset rather than recreating the mark. Native size 64x85 (aspect ~0.75). */
+    height: 40px;
+    width: auto;
+    display: block;
+  }
+  header.app h1 {
+    margin: 0; font-size: 20px; font-weight: 600; letter-spacing: 0.2px;
+  }
+  header.app .sub { opacity: 0.75; font-size: 13px; margin-left: auto; }
+
+  main {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    min-height: calc(100vh - 80px);
+  }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+
+  section.questions, section.outputs {
+    padding: 24px 28px;
+    overflow-y: auto;
+  }
+  section.questions {
+    background: var(--td-white);
+    border-right: 1px solid var(--td-grey-2);
+  }
+  section.outputs { background: var(--td-grey-1); }
+
+  h2 {
+    font-size: 14px; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--td-grey-3); margin: 0 0 18px;
+  }
+  .question {
+    margin-bottom: 18px;
+    padding: 14px 16px;
+    background: var(--td-white);
+    border: 1px solid var(--td-grey-2);
+    border-left: 3px solid var(--td-orange);
+    border-radius: 4px;
+  }
+  .question .qlabel {
+    font-weight: 600; margin-bottom: 8px; display: block;
+  }
+  .question .qhint {
+    font-size: 12px; color: var(--td-grey-3); margin-bottom: 10px;
+  }
+  .question input[type=text], .question input[type=url], .question select, .question textarea {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--td-grey-2);
+    border-radius: 3px;
+    font: inherit;
+    color: var(--td-navy);
+    background: var(--td-white);
+  }
+  .question input:focus, .question select:focus, .question textarea:focus {
+    outline: 2px solid var(--td-orange); outline-offset: 0;
+  }
+  .question textarea { resize: vertical; min-height: 60px; }
+  .radios { display: flex; flex-wrap: wrap; gap: 8px; }
+  .radios label {
+    flex: 1 1 auto;
+    padding: 8px 12px;
+    border: 1px solid var(--td-grey-2);
+    border-radius: 3px;
+    cursor: pointer;
+    background: var(--td-white);
+    text-align: center;
+    font-size: 14px;
+  }
+  .radios label.active {
+    background: var(--td-navy);
+    color: var(--td-white);
+    border-color: var(--td-navy);
+  }
+  .radios input { display: none; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+
+  .warn {
+    margin: 6px 0 0;
+    padding: 8px 10px;
+    background: var(--td-warn-bg);
+    border-left: 3px solid var(--td-warn-bd);
+    font-size: 12px;
+  }
+
+  .tabs { display: flex; gap: 0; border-bottom: 2px solid var(--td-navy); }
+  .tabs button {
+    background: var(--td-grey-1);
+    color: var(--td-navy);
+    border: 1px solid var(--td-grey-2);
+    border-bottom: none;
+    padding: 10px 14px;
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+    border-radius: 3px 3px 0 0;
+    margin-right: 4px;
+  }
+  .tabs button.active {
+    background: var(--td-navy);
+    color: var(--td-white);
+    border-color: var(--td-navy);
+  }
+  .panel {
+    display: none;
+    background: var(--td-white);
+    border: 1px solid var(--td-grey-2);
+    border-top: none;
+    padding: 16px;
+  }
+  .panel.active { display: block; }
+  .panel pre {
+    margin: 0; padding: 12px;
+    background: var(--td-navy);
+    color: var(--td-white);
+    font-family: var(--td-mono);
+    font-size: 12.5px;
+    line-height: 1.55;
+    overflow-x: auto;
+    border-radius: 3px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .panel .actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn {
+    background: var(--td-orange);
+    color: var(--td-navy);
+    border: none;
+    padding: 8px 14px;
+    font: inherit;
+    font-weight: 600;
+    font-size: 13px;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  .btn.secondary {
+    background: var(--td-white);
+    color: var(--td-navy);
+    border: 1px solid var(--td-navy);
+  }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .file-block { margin-bottom: 18px; }
+  .file-block h3 {
+    margin: 0 0 6px; font-size: 13px; color: var(--td-navy);
+    font-family: var(--td-mono);
+  }
+  .rationale ol { padding-left: 20px; }
+  .rationale li { margin-bottom: 10px; }
+  .rationale strong { color: var(--td-orange); }
+  .empty {
+    color: var(--td-grey-3); font-style: italic; padding: 20px 0; text-align: center;
+  }
+  .plan-import {
+    margin-bottom: 18px; padding: 12px; background: var(--td-grey-1);
+    border: 1px dashed var(--td-grey-2); border-radius: 3px;
+  }
+  .plan-import summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+  .plan-import textarea { margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<header class="app">
+  <img class="logo" alt="Teradata" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABVCAMAAADOrBLEAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAGbUExURf9fAgAAAP9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv///3jJeXQAAACHdFJOUwAA4/Lx9HV8gggMBOHDxL0090PNnJ6YKgGB7pTktAfU3SD8YJ3GGf4QSfOtNgYDHk50g39kIdnqrlFBPT48I4na+u+4Uqr79vXtQNKTFGegDyfRd4jeMDkd2JBL+M4ib+nwUwJK0CbimQXoLna8ax8KK1iGyutCwS0sOkRMTRXnjBwW5ciKNyCa7VMAAAABYktHRIhrZhZaAAAACXBIWXMAAC4jAAAuIwF4pT92AAAAB3RJTUUH6gIDDSMcsQ7WtwAAAeNJREFUWMPt1tlbElEYBvCXMEhGssVwynIBCxBEMXQKynBDMAoqSElt0bKgXFpt07LM+bcdRpiGc0jOuaini/Nezjfze76zAo5Ym2py1AYLT9CkErELQAAC+E+AY80OOhLYgRYnleOtJziAejl5SgACEMC/B063naHiaucA7JDrhAuw8EQAAhCAAAQggL8MnAWXgHMk0MEJnCeBC518QBcJdPfwAa0k4PZwjQG9JKBevMQF2Lwk4HX5OHqAv49qwR0I9v+ZQGhgMDx0ORJ06O9geESlo1wJX43Grhm57qt6wOiN+Fi5z/GJyWbtKfqn1LpJTCd/JzVTASD7bxqvJNO3oOW22jjVv3mA37xvvJmsBtxp4QBG79bO1j0ZCLmYAcg5opC/r7UwqzADcwWykoO2LA+YgfkFsrJYXoiHi2wA8IiqWKFP7WNGwE5VvHpBjjxhA8JUZfpgbFJEYQAsWEqQlUJlfZefPmMBVp6TlRcwtnhHqjEgkYdfiRqHDsVYptQIQJC4AdNF06lF8eWr1ZL7EECb7rWk+blzvfbYAxuv37wNvMu/71sYS5hi/VAdaqfNtGCbH0HfG5Cl7MCnz1++bpkyv23cB9Kgs7Idv33f0T7n+xnSu/zhCcSVn7u/9vTx7wNeLG/Yd2GbHAAAAABJRU5ErkJggg==" />
+  <h1 id="app-title">SHIPS Navigator</h1>
+  <span class="sub">Offline guided packaging</span>
+</header>
+
+<main>
+  <section class="questions">
+    <h2>Questions</h2>
+
+    <details class="plan-import">
+      <summary>Paste a plan.json (skips matching questions)</summary>
+      <textarea id="plan-import" rows="4" placeholder='{"source":{"type":"filesystem","path":"..."}, "tokens":{"model":"prefix","prefix":"CustomerDNA"}, ...}'></textarea>
+      <div style="margin-top:8px; display:flex; gap:8px;">
+        <button class="btn secondary" id="plan-apply">Apply</button>
+        <button class="btn secondary" id="plan-clear">Clear</button>
+      </div>
+    </details>
+
+    <div id="questions"></div>
+  </section>
+
+  <section class="outputs">
+    <h2>Generated artefacts</h2>
+    <div class="tabs" id="tabs">
+      <button data-tab="commands" class="active">Commands</button>
+      <button data-tab="tokenise">tokenise.conf</button>
+      <button data-tab="envs">env skeletons</button>
+      <button data-tab="rationale">Why each step</button>
+    </div>
+
+    <div id="panel-commands" class="panel active"></div>
+    <div id="panel-tokenise" class="panel"></div>
+    <div id="panel-envs" class="panel"></div>
+    <div id="panel-rationale" class="panel rationale"></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+// Single source of truth for the app name (handover §1).
+const APP_NAME = "SHIPS Navigator";
+document.getElementById("app-title").textContent = APP_NAME;
+document.title = APP_NAME;
+
+// ---------------------------------------------------------------------------
+// Decision model (handover Part B §3). v1 inlines the model; once
+// decision-tree.yaml lands (issue #1) the wizard can load that instead.
+// ---------------------------------------------------------------------------
+const QUESTIONS = [
+  {
+    id: "source.type",
+    label: "Q1. Where does your source come from?",
+    hint: "GitHub means SHIPS clones into a temp work dir; filesystem reads from disk.",
+    kind: "radio",
+    options: [
+      { value: "github",     label: "GitHub" },
+      { value: "filesystem", label: "Filesystem" },
+    ],
+  },
+  { id: "source.owner_repo", label: "GitHub owner/repo", hint: "e.g. acme/customer-dna", kind: "text",
+    show: (a) => a["source.type"] === "github" },
+  { id: "source.ref",        label: "GitHub ref (branch/tag/sha)", hint: "Defaults to main if blank.", kind: "text",
+    show: (a) => a["source.type"] === "github" },
+  { id: "source.path",       label: "Absolute path to source", hint: "e.g. C:\\src\\customer-dna or /home/me/customer-dna", kind: "text",
+    show: (a) => a["source.type"] === "filesystem" },
+
+  {
+    id: "tokens.already",
+    label: "Q2. Does the source already use {{TOKEN}} placeholders?",
+    hint: "Yes = harvest as-is. No / unsure = wizard configures tokenisation.",
+    kind: "radio",
+    options: [
+      { value: "yes",    label: "Yes" },
+      { value: "no",     label: "No" },
+      { value: "unsure", label: "Unsure" },
+    ],
+  },
+
+  {
+    id: "tokens.model",
+    label: "Q3. Token shape",
+    hint: "Prefix: one product token (one env binding). Per-database: one binding per db.",
+    kind: "radio",
+    options: [
+      { value: "prefix",       label: "Prefix (one DB_PREFIX)" },
+      { value: "per_database", label: "Per-database (one token per db)" },
+    ],
+    show: (a) => a["tokens.already"] && a["tokens.already"] !== "yes",
+  },
+
+  {
+    id: "tokens.prefix",
+    label: "Q4. Product prefix",
+    hint: "Bare prefix without trailing underscore. e.g. CustomerDNA.",
+    kind: "text",
+    show: (a) => a["tokens.already"] && a["tokens.already"] !== "yes",
+  },
+
+  {
+    id: "atomic.eponymous",
+    label: "Q5. Is DDL already atomic & eponymous?",
+    hint: "Atomic = one object per file. Eponymous = filename matches DB.Object.ext.",
+    kind: "radio",
+    options: [
+      { value: "yes",    label: "Yes" },
+      { value: "no",     label: "No — let SHIPS split + rename" },
+      { value: "unsure", label: "Unsure" },
+    ],
+    warnOn: (v) => (v === "no" || v === "unsure")
+      ? "Heads-up: multi-object files containing a procedure/macro or a BEGIN…END body are not auto-split. SHIPS will flag them — keep them whole or split by hand."
+      : null,
+  },
+
+  {
+    id: "envs",
+    label: "Q6. Target environments",
+    hint: "Comma- or space-separated list. e.g. DEV, TST, PRD.",
+    kind: "text",
+  },
+
+  {
+    id: "project.path",
+    label: "Q7. Absolute path to your (scaffolded) SHIPS project",
+    hint: "e.g. C:\\projects\\customer-dna-ships. Drive letter implies Windows .bat output.",
+    kind: "text",
+  },
+
+  {
+    id: "project.scaffolded",
+    label: "Project already scaffolded?",
+    hint: "Tick if the project layout already exists. If unticked, scaffold is added to the command sequence.",
+    kind: "checkbox",
+  },
+];
+
+// ---------------------------------------------------------------------------
+// State.
+// ---------------------------------------------------------------------------
+const answers = {};
+
+function applyPlan(plan) {
+  // Map a plan.json shape onto our answer keys. Best-effort, ignores unknowns.
+  if (plan.source) {
+    if (plan.source.type) answers["source.type"] = plan.source.type;
+    if (plan.source.owner_repo) answers["source.owner_repo"] = plan.source.owner_repo;
+    if (plan.source.ref) answers["source.ref"] = plan.source.ref;
+    if (plan.source.path) answers["source.path"] = plan.source.path;
+  }
+  if (plan.tokens) {
+    if (plan.tokens.already) answers["tokens.already"] = plan.tokens.already;
+    if (plan.tokens.model) answers["tokens.model"] = plan.tokens.model;
+    if (plan.tokens.prefix) answers["tokens.prefix"] = plan.tokens.prefix;
+  }
+  if (plan.atomic && plan.atomic.eponymous) answers["atomic.eponymous"] = plan.atomic.eponymous;
+  if (Array.isArray(plan.envs)) answers["envs"] = plan.envs.join(", ");
+  else if (typeof plan.envs === "string") answers["envs"] = plan.envs;
+  if (plan.project) {
+    if (plan.project.path) answers["project.path"] = plan.project.path;
+    if (typeof plan.project.scaffolded === "boolean") answers["project.scaffolded"] = plan.project.scaffolded;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Question rendering.
+// ---------------------------------------------------------------------------
+function renderQuestions() {
+  const root = document.getElementById("questions");
+  root.innerHTML = "";
+  for (const q of QUESTIONS) {
+    if (q.show && !q.show(answers)) {
+      delete answers[q.id]; // clear stale answers on a hidden branch
+      continue;
+    }
+    const wrap = document.createElement("div");
+    wrap.className = "question";
+
+    const lbl = document.createElement("label");
+    lbl.className = "qlabel";
+    lbl.textContent = q.label;
+    wrap.appendChild(lbl);
+
+    if (q.hint) {
+      const h = document.createElement("div");
+      h.className = "qhint";
+      h.textContent = q.hint;
+      wrap.appendChild(h);
+    }
+
+    if (q.kind === "radio") {
+      const grp = document.createElement("div");
+      grp.className = "radios";
+      for (const opt of q.options) {
+        const id = `${q.id}__${opt.value}`;
+        const oLbl = document.createElement("label");
+        oLbl.setAttribute("for", id);
+        if (answers[q.id] === opt.value) oLbl.classList.add("active");
+        oLbl.textContent = opt.label;
+        const inp = document.createElement("input");
+        inp.type = "radio"; inp.name = q.id; inp.id = id; inp.value = opt.value;
+        if (answers[q.id] === opt.value) inp.checked = true;
+        inp.addEventListener("change", () => {
+          answers[q.id] = opt.value;
+          renderAll();
+        });
+        oLbl.prepend(inp);
+        grp.appendChild(oLbl);
+      }
+      wrap.appendChild(grp);
+
+      if (q.warnOn) {
+        const w = q.warnOn(answers[q.id]);
+        if (w) {
+          const div = document.createElement("div");
+          div.className = "warn";
+          div.textContent = w;
+          wrap.appendChild(div);
+        }
+      }
+    } else if (q.kind === "text") {
+      const inp = document.createElement("input");
+      inp.type = "text";
+      inp.value = answers[q.id] || "";
+      inp.addEventListener("input", () => {
+        answers[q.id] = inp.value;
+        renderOutputs();
+      });
+      wrap.appendChild(inp);
+    } else if (q.kind === "checkbox") {
+      const lbl2 = document.createElement("label");
+      lbl2.className = "check";
+      const inp = document.createElement("input");
+      inp.type = "checkbox";
+      inp.checked = !!answers[q.id];
+      inp.addEventListener("change", () => {
+        answers[q.id] = inp.checked;
+        renderOutputs();
+      });
+      lbl2.appendChild(inp);
+      lbl2.appendChild(document.createTextNode(" yes, project already scaffolded"));
+      wrap.appendChild(lbl2);
+    }
+    root.appendChild(wrap);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers.
+// ---------------------------------------------------------------------------
+function isWindowsPath(p) {
+  return !!p && /^[A-Za-z]:[\\/]/.test(p);
+}
+function targetOs() {
+  // Drive-letter on project path implies Windows (handover §4).
+  return isWindowsPath(answers["project.path"]) ? "windows" : "posix";
+}
+function parseEnvs(raw) {
+  if (!raw) return [];
+  return raw.split(/[\s,;]+/).map(s => s.trim()).filter(Boolean);
+}
+function escShell(s) {
+  // Simple quoting: wrap in double quotes if any whitespace.
+  if (s == null || s === "") return '""';
+  return /\s/.test(s) ? `"${s}"` : s;
+}
+
+// ---------------------------------------------------------------------------
+// Generators (handover §4 + guardrails §6).
+// ---------------------------------------------------------------------------
+function generatePlan() {
+  const a = answers;
+  const os = targetOs();
+  const cont = os === "windows" ? " ^" : " \\"; // line-continuation
+  const projPath = a["project.path"] || "<project-path>";
+  const projQ = escShell(projPath);
+
+  const envs = parseEnvs(a["envs"]);
+  const needsScaffold = !a["project.scaffolded"];
+  const tokensAlready = a["tokens.already"] === "yes";
+  const tokenModel = tokensAlready ? null : (a["tokens.model"] || null);
+  const prefix = (a["tokens.prefix"] || "").trim();
+  const sourceType = a["source.type"];
+
+  // ------- Command sequence -------
+  const lines = [];
+  const rationale = [];
+
+  if (needsScaffold) {
+    lines.push(`ships scaffold --path ${projQ}`);
+    rationale.push({
+      step: "scaffold",
+      why: "Creates the SHIPS project layout (config/, payload/, db/) at your chosen path. Skip this if the project already exists.",
+    });
+  }
+
+  // Harvest line: assemble pieces then format with continuations.
+  const harvestArgs = [];
+  if (sourceType === "github") {
+    const ownerRepo = (a["source.owner_repo"] || "<owner/repo>").trim();
+    const ref = (a["source.ref"] || "main").trim();
+    harvestArgs.push(`--source-github ${escShell(ownerRepo)}`);
+    harvestArgs.push(`--source-ref ${escShell(ref)}`);
+  } else if (sourceType === "filesystem") {
+    const srcPath = a["source.path"] || "<source-path>";
+    harvestArgs.push(`--source ${escShell(srcPath)}`);
+  } else {
+    harvestArgs.push(`--source <source-path-or-github>`);
+  }
+  if (tokensAlready) {
+    // already tokenised — plain harvest
+  } else if (tokenModel === "prefix") {
+    // Bless --prefix-token (handover §6 guardrail).
+    harvestArgs.push(`--prefix-token ${prefix || "<PREFIX>"}=DB_PREFIX`);
+  } else if (tokenModel === "per_database") {
+    // Rely on config/tokenise.conf — no flag (handover §4).
+    // (Nothing to add; the tokenise.conf panel emits the rules.)
+  }
+  // Build harvest block.
+  const harvestLine = ["ships harvest --path " + projQ, ...harvestArgs];
+  lines.push(joinContinued(harvestLine, cont));
+  rationale.push({
+    step: "harvest",
+    why: tokensAlready
+      ? "Harvest copies the already-tokenised source into payload/ and cleans the working area. No tokenisation flags needed."
+      : tokenModel === "prefix"
+        ? `Harvest applies the prefix-token rule: every '${prefix || "<PREFIX>"}_' becomes '{{DB_PREFIX}}_' in BOTH file contents and filenames (eponymy). One token, one env binding per environment.`
+        : tokenModel === "per_database"
+          ? "Harvest reads config/tokenise.conf and produces per-database tokens like {{DOM_STD_T}}. One binding per database, applied to both content and filenames."
+          : "Harvest cleans payload/ and copies the source in. Decide a tokenisation mode in Q2/Q3 before running.",
+  });
+
+  lines.push(`ships inspect --path ${projQ}`);
+  rationale.push({
+    step: "inspect",
+    why: "Runs Step 0 lint + Step 0b token-coverage. Omit --config so SHIPS auto-loads config/inspect.conf. NEVER pass an env file (config/env/<ENV>.conf) here — it parses as token bindings and breaks rule severities.",
+  });
+
+  lines.push(`ships package --path ${projQ}`);
+  rationale.push({
+    step: "package",
+    why: "Builds the deployable release artefact from the inspected payload.",
+  });
+
+  // ------- tokenise.conf -------
+  let tokeniseConf = null;
+  if (!tokensAlready && tokenModel) {
+    tokeniseConf = makeTokeniseConf(tokenModel, prefix || "<PREFIX>");
+  }
+
+  // ------- env skeletons -------
+  const envFiles = [];
+  for (const e of envs) {
+    envFiles.push({
+      name: `config/env/${e}.conf`,
+      body: makeEnvConf(e, tokenModel, prefix),
+    });
+  }
+
+  // ------- General rationale (guardrails §6) -------
+  const guardrails = [
+    "Step 0b coverage requires EVERY token referenced by the payload (content AND filenames) to be bound in EVERY env file. A missing binding fails coverage.",
+    "config/inspect.conf is rule=SEVERITY; config/env/<ENV>.conf is TOKEN=value. They are NOT interchangeable — never pass an env file behind --config.",
+    "Harvest cleans payload/ by default. Use --keep-existing only when overlaying onto an existing payload.",
+    "Atomic + eponymous applies to DDL only. DCL is grouped per granted-ON database; DML is kept whole.",
+  ];
+
+  return { lines, rationale, tokeniseConf, envFiles, os, guardrails };
+}
+
+function joinContinued(parts, cont) {
+  // First part is the command head; subsequent parts are args, each on its own line.
+  if (parts.length === 1) return parts[0];
+  const indent = "  ";
+  return parts[0] + cont + "\n"
+    + parts.slice(1).map((p, i, arr) =>
+        indent + p + (i < arr.length - 1 ? cont : "")
+      ).join("\n");
+}
+
+function makeTokeniseConf(model, prefix) {
+  // Rules from handover §4 — proven in this engagement.
+  const header = [
+    "# config/tokenise.conf",
+    "# Generated by SHIPS Navigator.",
+    "# Each rule has the shape: <kind>::<pattern>:=<replacement>",
+    "",
+  ].join("\n");
+  if (model === "prefix") {
+    return header + [
+      `# Prefix model: '${prefix}_' -> '{{DB_PREFIX}}_' anywhere it is not already`,
+      `# inside an existing token (the (?<!\\{) guard avoids re-tokenising).`,
+      `regex::(?<!\\{)\\b${prefix}_:={{DB_PREFIX}}_`,
+      "",
+    ].join("\n");
+  }
+  // per_database
+  return header + [
+    `# Per-database model: capture each database suffix after '${prefix}_' and`,
+    `# turn it into its own token. e.g. '${prefix}_DOM_STD_T' -> '{{DOM_STD_T}}'.`,
+    `regex::(?<!\\{)\\b${prefix}_([A-Za-z0-9]+(?:_[A-Za-z0-9]+)*):={{$1}}`,
+    "",
+  ].join("\n");
+}
+
+function makeEnvConf(envName, tokenModel, prefix) {
+  // Env file is TOKEN=value. Never put rule severities here.
+  const header = [
+    `# config/env/${envName}.conf`,
+    `# Token bindings for environment: ${envName}`,
+    `# Generated by SHIPS Navigator. Replace <fill-me> values before running inspect.`,
+    "",
+  ];
+  if (!tokenModel) {
+    // Already-tokenised source: we can't know the token list. Leave a hint.
+    header.push(`# Bind every {{TOKEN}} your payload references. Run 'ships inspect' to see`);
+    header.push(`# the coverage list; every missing binding will fail Step 0b.`);
+    header.push("");
+    return header.join("\n");
+  }
+  if (tokenModel === "prefix") {
+    header.push(`DB_PREFIX=<fill-me>`);
+    header.push("");
+    return header.join("\n");
+  }
+  // per_database — we don't know the db list at design time. Provide examples.
+  const sample = prefix && prefix !== "<PREFIX>" ? prefix : "Product";
+  header.push(`# One binding per database. Examples (replace with your real list):`);
+  header.push(`DOM_STD_T=<fill-me>          # was ${sample}_DOM_STD_T`);
+  header.push(`DOM_STD_V=<fill-me>          # was ${sample}_DOM_STD_V`);
+  header.push(`SEM_BUS_V=<fill-me>          # was ${sample}_SEM_BUS_V`);
+  header.push("");
+  return header.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Output rendering.
+// ---------------------------------------------------------------------------
+function renderOutputs() {
+  const plan = generatePlan();
+  renderCommandsPanel(plan);
+  renderTokenisePanel(plan);
+  renderEnvsPanel(plan);
+  renderRationalePanel(plan);
+}
+
+function renderCommandsPanel(plan) {
+  const panel = document.getElementById("panel-commands");
+  panel.innerHTML = "";
+
+  // Both .bat and .sh — default to the one implied by the project path.
+  const winText = plan.lines.join("\n\n");
+  const shText  = plan.lines.join("\n\n").replace(/ \^\n/g, " \\\n");
+
+  function block(title, fname, body) {
+    const fb = document.createElement("div");
+    fb.className = "file-block";
+    const h = document.createElement("h3");
+    h.textContent = title;
+    fb.appendChild(h);
+    const pre = document.createElement("pre");
+    pre.textContent = body;
+    fb.appendChild(pre);
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    actions.appendChild(makeCopyBtn(body));
+    actions.appendChild(makeDownloadBtn(fname, body));
+    fb.appendChild(actions);
+    panel.appendChild(fb);
+  }
+
+  if (plan.os === "windows") {
+    block("Windows (.bat)", "ships-run.bat", winText);
+    block("POSIX (.sh)",    "ships-run.sh",  shText);
+  } else {
+    block("POSIX (.sh)",    "ships-run.sh",  shText);
+    block("Windows (.bat)", "ships-run.bat", winText);
+  }
+}
+
+function renderTokenisePanel(plan) {
+  const panel = document.getElementById("panel-tokenise");
+  panel.innerHTML = "";
+  if (!plan.tokeniseConf) {
+    const e = document.createElement("div");
+    e.className = "empty";
+    e.textContent = answers["tokens.already"] === "yes"
+      ? "Source is already tokenised — no tokenise.conf needed."
+      : "Answer Q2 (already tokenised?) and Q3 (token shape) to generate tokenise.conf.";
+    panel.appendChild(e);
+    return;
+  }
+  const fb = document.createElement("div");
+  fb.className = "file-block";
+  const h = document.createElement("h3");
+  h.textContent = "config/tokenise.conf";
+  fb.appendChild(h);
+  const pre = document.createElement("pre");
+  pre.textContent = plan.tokeniseConf;
+  fb.appendChild(pre);
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  actions.appendChild(makeCopyBtn(plan.tokeniseConf));
+  actions.appendChild(makeDownloadBtn("tokenise.conf", plan.tokeniseConf));
+  fb.appendChild(actions);
+  panel.appendChild(fb);
+}
+
+function renderEnvsPanel(plan) {
+  const panel = document.getElementById("panel-envs");
+  panel.innerHTML = "";
+  if (!plan.envFiles.length) {
+    const e = document.createElement("div");
+    e.className = "empty";
+    e.textContent = "List your target environments in Q6 (e.g. DEV, TST, PRD) to generate env skeletons.";
+    panel.appendChild(e);
+    return;
+  }
+  for (const f of plan.envFiles) {
+    const fb = document.createElement("div");
+    fb.className = "file-block";
+    const h = document.createElement("h3");
+    h.textContent = f.name;
+    fb.appendChild(h);
+    const pre = document.createElement("pre");
+    pre.textContent = f.body;
+    fb.appendChild(pre);
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    actions.appendChild(makeCopyBtn(f.body));
+    actions.appendChild(makeDownloadBtn(f.name.split("/").pop(), f.body));
+    fb.appendChild(actions);
+    panel.appendChild(fb);
+  }
+}
+
+function renderRationalePanel(plan) {
+  const panel = document.getElementById("panel-rationale");
+  panel.innerHTML = "";
+
+  const ol = document.createElement("ol");
+  for (const r of plan.rationale) {
+    const li = document.createElement("li");
+    const s = document.createElement("strong");
+    s.textContent = r.step + ": ";
+    li.appendChild(s);
+    li.appendChild(document.createTextNode(r.why));
+    ol.appendChild(li);
+  }
+  panel.appendChild(ol);
+
+  const guards = document.createElement("div");
+  guards.innerHTML = "<h3 style='margin-top:18px; color:var(--td-navy);'>Guardrails to keep in mind</h3>";
+  const ul = document.createElement("ul");
+  for (const g of plan.guardrails) {
+    const li = document.createElement("li");
+    li.textContent = g;
+    li.style.marginBottom = "8px";
+    ul.appendChild(li);
+  }
+  guards.appendChild(ul);
+  panel.appendChild(guards);
+
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  const planJson = {
+    source: answers["source.type"] === "github"
+      ? { type: "github", owner_repo: answers["source.owner_repo"], ref: answers["source.ref"] || "main" }
+      : { type: "filesystem", path: answers["source.path"] },
+    tokens: {
+      already: answers["tokens.already"],
+      model: answers["tokens.model"] || null,
+      prefix: answers["tokens.prefix"] || null,
+    },
+    atomic: { eponymous: answers["atomic.eponymous"] },
+    envs: parseEnvs(answers["envs"]),
+    project: { path: answers["project.path"], scaffolded: !!answers["project.scaffolded"] },
+  };
+  const text = JSON.stringify(planJson, null, 2);
+  actions.appendChild(makeCopyBtn(text, "Copy plan.json"));
+  actions.appendChild(makeDownloadBtn("plan.json", text));
+  panel.appendChild(actions);
+}
+
+// ---------------------------------------------------------------------------
+// Copy + Download buttons (offline — uses Blob URLs, no network).
+// ---------------------------------------------------------------------------
+function makeCopyBtn(text, label) {
+  const b = document.createElement("button");
+  b.className = "btn";
+  b.textContent = label || "Copy";
+  b.addEventListener("click", () => {
+    // Fallback path for file:// where navigator.clipboard may be blocked.
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      b.textContent = "Copied!";
+      setTimeout(() => { b.textContent = label || "Copy"; }, 1200);
+    } catch (e) {
+      b.textContent = "Copy failed";
+    }
+  });
+  return b;
+}
+function makeDownloadBtn(filename, text) {
+  const b = document.createElement("button");
+  b.className = "btn secondary";
+  b.textContent = "Download " + filename;
+  b.addEventListener("click", () => {
+    const blob = new Blob([text], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+  return b;
+}
+
+// ---------------------------------------------------------------------------
+// Tabs + plan import wiring.
+// ---------------------------------------------------------------------------
+document.getElementById("tabs").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-tab]");
+  if (!btn) return;
+  for (const b of document.querySelectorAll("#tabs button")) b.classList.toggle("active", b === btn);
+  const id = btn.dataset.tab;
+  for (const p of document.querySelectorAll(".panel")) {
+    p.classList.toggle("active", p.id === "panel-" + id);
+  }
+});
+
+document.getElementById("plan-apply").addEventListener("click", () => {
+  const raw = document.getElementById("plan-import").value.trim();
+  if (!raw) return;
+  try {
+    const plan = JSON.parse(raw);
+    applyPlan(plan);
+    renderAll();
+  } catch (err) {
+    alert("Could not parse plan.json: " + err.message);
+  }
+});
+document.getElementById("plan-clear").addEventListener("click", () => {
+  for (const k of Object.keys(answers)) delete answers[k];
+  document.getElementById("plan-import").value = "";
+  renderAll();
+});
+
+function renderAll() {
+  renderQuestions();
+  renderOutputs();
+}
+
+renderAll();
+</script>
+</body>
+</html>
