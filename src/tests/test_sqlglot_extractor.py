@@ -41,20 +41,48 @@ sqlglot_required = pytest.mark.skipif(
 class TestTokenSentinels:
     def test_simple_token_replaced(self):
         assert _to_sentinels("SELECT * FROM {{DOM_T}}.X") == (
-            "SELECT * FROM __SHIPS_TKN_DOM_T.X"
+            "SELECT * FROM __SHIPS_TKB__DOM_T__SHIPS_TKE__.X"
         )
 
     def test_multiple_tokens(self):
         out = _to_sentinels("INSERT INTO {{TGT}}.Y SELECT * FROM {{SRC}}.X")
         assert "{{" not in out
-        assert "__SHIPS_TKN_TGT" in out
-        assert "__SHIPS_TKN_SRC" in out
+        assert "__SHIPS_TKB__TGT__SHIPS_TKE__" in out
+        assert "__SHIPS_TKB__SRC__SHIPS_TKE__" in out
 
     def test_round_trip_identifier(self):
-        assert _from_sentinel("__SHIPS_TKN_DOM_T") == "{{DOM_T}}"
+        assert _from_sentinel("__SHIPS_TKB__DOM_T__SHIPS_TKE__") == "{{DOM_T}}"
 
     def test_round_trip_passthrough_for_literal(self):
         assert _from_sentinel("MyDatabase") == "MyDatabase"
+
+    def test_round_trip_compound_identifier(self):
+        """Issue #390 regression: prefix-tokenised identifier round-trip.
+
+        ``{{DB_PREFIX}}_SEM_STD_V`` is the shape ``--prefix-token`` produces
+        in DDL — a token followed by a literal suffix. The encoder must
+        preserve the boundary, and the decoder must reconstruct the
+        compound form (not collapse it into ``{{DB_PREFIX_SEM_STD_V}}``)."""
+        sql = "CREATE VIEW {{DB_PREFIX}}_SEM_STD_V.MyView AS SELECT 1"
+        encoded = _to_sentinels(sql)
+        # Sentinel boundary preserved — the literal suffix sits *outside*
+        # the end-marker, not folded into the token name.
+        assert "__SHIPS_TKB__DB_PREFIX__SHIPS_TKE__" in encoded
+        assert "_SEM_STD_V" in encoded
+        # Decoding the compound identifier must reconstruct the original.
+        assert (
+            _from_sentinel("__SHIPS_TKB__DB_PREFIX__SHIPS_TKE___SEM_STD_V")
+            == "{{DB_PREFIX}}_SEM_STD_V"
+        )
+
+    def test_round_trip_two_tokens_in_one_identifier(self):
+        """Adversarial: two tokens separated by a literal segment in a
+        single identifier — must decode every sentinel in place, not the
+        first one only."""
+        assert (
+            _from_sentinel("__SHIPS_TKB__A__SHIPS_TKE___X___SHIPS_TKB__B__SHIPS_TKE__")
+            == "{{A}}_X_{{B}}"
+        )
 
 
 # ---------------------------------------------------------------

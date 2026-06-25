@@ -176,23 +176,36 @@ def clear_parse_cache() -> None:
 # emitting :class:`ReferencedObject`.
 
 _TOKEN_RE = re.compile(r"\{\{([A-Z][A-Z0-9_]*)\}\}", re.IGNORECASE)
-_SENTINEL_PREFIX = "__SHIPS_TKN_"
+
+# Sentinel encoding for ``{{TOKEN}}`` — bracketed on both sides so the
+# boundary is unambiguous even when the token is followed by literal
+# characters. Earlier versions used an open-ended ``__SHIPS_TKN_TOKEN``
+# form, which collapsed a compound identifier such as
+# ``{{DB_PREFIX}}_SEM_STD_V`` into ``__SHIPS_TKN_DB_PREFIX_SEM_STD_V``
+# during encoding — SQLGlot could not tell where the token ended, and
+# decoding wrapped the whole compound as a single token
+# (``{{DB_PREFIX_SEM_STD_V}}``). See issue #390.
+_SENTINEL_PREFIX = "__SHIPS_TKB__"  # token-begin marker
+_SENTINEL_SUFFIX = "__SHIPS_TKE__"  # token-end marker
 _SENTINEL_RE = re.compile(
-    rf"^{re.escape(_SENTINEL_PREFIX)}([A-Z][A-Z0-9_]*)$", re.IGNORECASE
+    rf"{re.escape(_SENTINEL_PREFIX)}([A-Z][A-Z0-9_]*?){re.escape(_SENTINEL_SUFFIX)}",
+    re.IGNORECASE,
 )
 
 
 def _to_sentinels(sql: str) -> str:
-    return _TOKEN_RE.sub(lambda m: f"{_SENTINEL_PREFIX}{m.group(1)}", sql)
+    return _TOKEN_RE.sub(
+        lambda m: f"{_SENTINEL_PREFIX}{m.group(1)}{_SENTINEL_SUFFIX}", sql
+    )
 
 
 def _from_sentinel(identifier: str) -> str:
-    """Reverse :func:`_to_sentinels` on a single identifier; pass-through
-    when the identifier is not a token sentinel."""
-    match = _SENTINEL_RE.match(identifier)
-    if match is None:
-        return identifier
-    return f"{{{{{match.group(1)}}}}}"
+    """Reverse :func:`_to_sentinels` on an identifier, including compound
+    forms — a ``{{TOKEN}}`` followed by a literal suffix encodes as
+    ``__SHIPS_TKB__TOKEN__SHIPS_TKE___SUFFIX`` and must decode back to
+    ``{{TOKEN}}_SUFFIX`` (the prefix-tokenisation shape). Non-sentinel
+    text is passed through unchanged."""
+    return _SENTINEL_RE.sub(lambda m: f"{{{{{m.group(1)}}}}}", identifier)
 
 
 # ---------------------------------------------------------------
