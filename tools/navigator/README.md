@@ -113,18 +113,6 @@ A `decision-tree.yaml` will join this directory under [#378](https://github.com/
 
 ## Troubleshooting
 
-### `ships: command not found` / `The term 'ships' is not recognized`
-
-The emitted scripts call `ships` by default, on the assumption it's installed as a console script (pip / uv with `[project.scripts]`). If it isn't, the script will fail with `ships: command not found` (bash) or `The term 'ships' is not recognized as a name of a cmdlet, function, script file, or executable program` (PowerShell / cmd).
-
-The fix is a one-line edit at the top of the script. Each shell has its own variable to retarget:
-
-- **PowerShell:** set `$SHIPS_CMD` and `$SHIPS_ARGS`. The commented alternatives include `python -m td_release_packager.cli` and `uv run python -m td_release_packager.cli`.
-- **bash:** set `SHIPS_CMD` and `SHIPS_ARGS`. Same alternatives.
-- **cmd:** set `%SHIPS%`. Same alternatives.
-
-The scripts can be run from any directory — every path inside them is absolute (built from `$OUTPUT_ROOT` / `$NAME` / `$PROJECT` / `$SOURCE` etc.). No need to `cd` first.
-
 ### Windows: "These files can't be opened"
 
 Windows tags browser-downloaded files with Mark-of-the-Web (a hidden `Zone.Identifier` alternate data stream), and SmartScreen blocks `.ps1` / `.bat` from running. The wizard's outputs are subject to this. Two ways round it:
