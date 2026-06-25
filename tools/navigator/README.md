@@ -9,10 +9,12 @@ Milestone: [Guided Packaging (SHIPS Navigator)](https://github.com/earthshiner/t
 
 Walks a user through the SHIPS packaging decisions without an AI present and emits:
 
-1. An ordered command sequence (`.bat` for Windows, `.sh` for POSIX) — `scaffold` (if needed) → `harvest` → `inspect` → `package`.
+1. An ordered command sequence (`.bat` for Windows, `.sh` for POSIX). Two modes:
+   - **Quick** — one `ships process` call per environment (the full SHIPS pipeline behind one verb).
+   - **Detailed** — each pipeline step (`scaffold` / `harvest` / `generate` / `inspect` / `scan` / `analyse` / `package`) shown separately for transparency, CI scripting, or selective re-runs.
 2. A `config/tokenise.conf` matching the chosen token model (prefix or per-database).
-3. One `config/env/<ENV>.conf` skeleton per target environment, with the bindings the chosen token model needs.
-4. A "Why each step" panel with the correctness guardrails baked in.
+3. One `config/env/<ENV>.conf` skeleton per target environment. If the source is already tokenised, the wizard instead emits `ships bootstrap-env-config` calls so SHIPS scaffolds the real env files from the payload's actual token usage.
+4. A "Why each step" rationale + a glossary of the vocabulary.
 
 The wizard is deterministic — the same answers always produce the same output.
 
@@ -20,37 +22,70 @@ The wizard is deterministic — the same answers always produce the same output.
 
 Double-click `ships-navigator.html` from any file share, or open it from your browser's `File → Open` menu. No server, no network, no install.
 
-1. Answer Q1–Q7 in the left pane. Hidden questions auto-clear when their parent answer rules them out.
-2. Read the four tabs in the right pane. Each artefact has a **Copy** button and a **Download** button.
-3. (Optional) Export a `plan.json` from the rationale tab so the next run can paste it in and skip the questionnaire.
+1. Answer the questions in the left pane. Hidden questions auto-clear when their parent answer rules them out. Heads-up messages surface above the output for things like a trailing-underscore prefix or a non-absolute project path.
+2. Read the five tabs in the right pane (Commands, tokenise.conf, env files, Why each step, Glossary). Each artefact has Copy + Download buttons.
+3. Click **Download all (.zip)** at the top of the outputs to get every generated file plus a `plan.json` and a small `README.md` in one bundle. The ZIP encoder is vanilla JS — no CDN.
+4. Answers persist to `localStorage`, so refreshing the page doesn't wipe a 13-question fill. Use **Reset** in the questions header to clear.
+5. (Optional) Export `plan.json` from the rationale tab so the next run can paste it in and skip the questionnaire.
 
 ## Decision model
 
-v1 inlines the decision tree directly in the HTML for portability. Once
+v1.1 inlines the decision tree directly in the HTML for portability. Once
 [#378 — declarative decision model `decision-tree.yaml`](https://github.com/earthshiner/teradata-ships/issues/378)
 lands, the wizard will be regenerated from that shared model so the CLI, HTML, and AI front ends stay lock-step.
 
-The question set encoded here is Part B §3 of `HANDOVER-ships-navigator-guided-packaging.md`:
+The questions encoded here, in order:
 
 | # | Question | Notes |
 |---|----------|-------|
+| Mode | Quick vs Detailed | One `ships process` call per env, or each pipeline step explicit |
 | Q1 | Source location | `github` (owner/repo + ref) or `filesystem` (path) |
-| Q2 | Already tokenised? | `yes` skips Q3 and Q4 |
+| Q2 | Already tokenised? | `yes` skips Q3/Q4 and triggers `bootstrap-env-config` for each env |
 | Q3 | Token shape | `prefix` (one `DB_PREFIX`) or `per_database` (one binding per db) |
 | Q4 | Product prefix | e.g. `CustomerDNA` |
 | Q5 | Atomic & eponymous? | Surfaces the BEGIN…END / macro caveat on `no` / `unsure` |
-| Q6 | Target environments | Free list — e.g. `DEV, TST, PRD` |
-| Q7 | Project path | Drive-letter selects Windows `.bat` output |
+| Q6 | Generate view layer? | Maps to `ships generate` (or `--skip-generate` on Quick) — locking/access/business views |
+| Q7 | Dependency analysis (waves)? | Maps to `ships analyse` — emits `_waves.txt` |
+| Q8 | Export dependency graph? | Adds `--graph` to `analyse` (incl. OpenLineage JSON) + namespace / project name |
+| Q9 | Orphan-token scan? | Adds `ships scan --all-envs --fail-on-orphan` as a CI gate |
+| Q10 | Target environments | Free list — e.g. `DEV, TST, PRD` |
+| Q11 | Project path | Drive-letter selects Windows `.bat` output; checkbox controls whether `scaffold` runs |
+| Q12 | Package name | Build artefact name — e.g. `create_objects` |
+| Strict | Abort on first stage error | Maps to `--strict` on `process` |
+
+## SHIPS features the wizard surfaces
+
+Beyond the four-step harvest/inspect/package path, this wizard makes the rest of the pipeline visible to new users:
+
+- **`ships scaffold`** — runs automatically when "project already scaffolded?" is unticked.
+- **`ships generate`** — view-layer DDL generation per the object-placement standard.
+- **`ships scan --all-envs --fail-on-orphan`** — orphan-token CI gate.
+- **`ships analyse`** — wave ordering, with optional dependency graph export (`--graph`, `--namespace`, `--project-name`) for OpenLineage / impact analysis.
+- **`ships process`** — the single front-door verb that orchestrates the pipeline and records every stage decision into `ships.decisions.json`.
+- **`ships bootstrap-env-config`** — scaffolds env files from an already-tokenised source so the user never has to guess the token list.
+- **`ships deploy`** is mentioned in the rationale panel as the next step after `package`; the wizard deliberately stops at `package` because deployment needs a live Teradata connection.
 
 ## Guardrails encoded
 
-These are the empirically-verified rules the wizard refuses to violate (Part B §6):
+These are the empirically-verified rules the wizard refuses to violate (handover Part B §6):
 
-- Only `--prefix-token` and `config/tokenise.conf` are offered — `--auto-tokenise` / `--token-map` are kept out of the wizard until [#383 — consolidate tokenisation paths](https://github.com/earthshiner/teradata-ships/issues/383) lands, because those modes tokenise content but leave filenames literal.
-- `config/inspect.conf` (`rule=SEVERITY`) and `config/env/<ENV>.conf` (`TOKEN=value`) are clearly distinguished. The generated commands never put an env file behind `--config`.
+- Only `--prefix-token` and `config/tokenise.conf` are offered for tokenisation — `--auto-tokenise` / `--token-map` are kept out of the wizard until [#383 — consolidate tokenisation paths](https://github.com/earthshiner/teradata-ships/issues/383) lands, because those modes tokenise content but leave filenames literal.
+- `config/inspect.conf` (`rule=SEVERITY`) and `config/env/<ENV>.conf` (`TOKEN=value`) are clearly distinguished. The generated `inspect` command never carries `--config`, so an env file can never accidentally end up there.
 - `inspect` has no `--env` flag — coverage auto-discovers `config/env/*.conf`. The rationale panel states the "bind every token in every env file" requirement.
 - `harvest` cleans the payload by default. `--keep-existing` is only mentioned as the overlay opt-out.
 - Atomic + eponymous applies to DDL only; DCL is grouped per granted-ON database, DML is kept whole.
+- Detailed mode + GitHub source raises a warning, because `ships harvest` does NOT accept `--source-github` (only `process` and `package` do).
+
+## Inline validation
+
+The wizard flags common-mistake patterns above the output panel without blocking generation:
+
+- Prefix with a trailing underscore (the tokenise rule already adds it).
+- Prefix with illegal characters.
+- Non-absolute project path.
+- Package name with spaces.
+- Empty / unparseable env list.
+- Detailed mode + GitHub source (suggests switching to Quick mode).
 
 ## Branding
 
@@ -78,4 +113,4 @@ A `decision-tree.yaml` will join this directory under [#378](https://github.com/
 
 ## Verifying offline-ness
 
-Open the file in a browser, open DevTools → Network, then reload. There should be zero network requests (the embedded logo loads via a `data:` URI, not over the wire).
+Open the file in a browser, open DevTools → Network, then reload. There should be zero network requests (the logo loads via a `data:` URI, not over the wire; the ZIP encoder is inline; no fonts are fetched).
