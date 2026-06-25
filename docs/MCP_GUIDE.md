@@ -314,7 +314,7 @@ Harvest raw DDL files from a source directory into a SHIPS project. Classifies e
 |---|---|---|---|
 | `source` | string | yes | Directory containing raw DDL files |
 | `project` | string | yes | Target SHIPS project directory |
-| `token_map` | string | no | Path to `token_map.conf` for substitution |
+| `token_map` | string | no | **[DEPRECATED — prefer `config/tokenise.conf`]** Path to `token_map.conf` for substitution. Still works; see [#388](https://github.com/earthshiner/teradata-ships/issues/388). |
 | `auto_tokenise` | bool | no | Detect and apply tokens in one pass |
 | `env_prefix` | string | no | Env prefix to strip (e.g. `A_D01`) |
 | `remove_view_type_affixes` | bool | no | Remove redundant view object affixes (`v_` prefix and `_v` suffix) and update qualified references |

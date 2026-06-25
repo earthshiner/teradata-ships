@@ -67,8 +67,10 @@ python -m td_release_packager scaffold \
 
 One environment is enough for demo mode — you are not promoting across a
 DEV/TST/PRD ladder. Scaffold lays down `config/env/DEMO.conf`,
-`payload/database/`, `ships.yaml`, `config/token_map.conf`, and
-`config/inspect.conf`.
+`payload/database/`, `ships.yaml`, `config/token_map.conf` (legacy — see
+deprecation note below), and `config/inspect.conf`.
+
+> ⚠️ **Deprecation note (closes [#388](https://github.com/earthshiner/teradata-ships/issues/388)):** `token_map.conf` and the `--token-map` flag used throughout this walkthrough are kept for back-compatibility. **Prefer `config/tokenise.conf`** for new projects — regex-based, strictly more powerful. Authored via the SHIPS Navigator wizard (`tools/navigator/ships-navigator.html`) or by hand. The walkthrough below still works as written.
 
 ## 1. Author the explicit token map (one token per database)
 

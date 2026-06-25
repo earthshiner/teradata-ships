@@ -89,6 +89,8 @@ If your SQL says `FROM A_D01_OMR_STD.Customer`, that is a hardcoded DEV database
 
 SHIPS detects this and can replace it automatically with `{{OMR_STD}}` — a token that each environment resolves to its own value. You write SQL once; SHIPS handles environment promotion.
 
+> ⚠️ **Deprecation note (closes [#388](https://github.com/earthshiner/teradata-ships/issues/388)):** `token_map.conf` and the `--token-map` / `--generate-token-map` flags are kept for back-compatibility. **Prefer `config/tokenise.conf`** for new projects — regex-based with capture groups, strictly more powerful. Authored via the SHIPS Navigator wizard (`tools/navigator/ships-navigator.html`), the `ships_author_token_map` MCP tool, or by hand. See `examples/callcentre/config/tokenise.conf`. The walkthrough below still works.
+
 **The token map** (`config/token_map.conf`) declares the mapping:
 ```
 A_D01_OMR_STD={{OMR_STD}}

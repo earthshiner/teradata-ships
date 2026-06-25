@@ -2,6 +2,8 @@
 
 This document describes the command-line surfaces and major Python modules in `teradata-ships`. It is intended for developers, operators, and autonomous agents that need to understand which component owns each part of the SHIPS workflow.
 
+> ⚠️ **Deprecation note (closes [#388](https://github.com/earthshiner/teradata-ships/issues/388)):** Help text in this reference for `--token-map`, `--generate-token-map`, and the `token_map.conf` file pre-dates the deprecation. These flags still work but should not be used in new projects. **Prefer `config/tokenise.conf`** (regex-based, strictly more powerful), authored via the SHIPS Navigator wizard, the `ships_author_token_map` MCP tool, or by hand.
+
 ## Entry-point argument reference
 
 ## `td_release_packager` / `ships` packaging CLI

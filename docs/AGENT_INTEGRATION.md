@@ -664,7 +664,8 @@ Draft202012Validator(schema).validate(document)
 | `context/ships.manifest.json` | Inside the package `.zip` | Compact agent-safe inventory: file counts, phase breakdown, dependency contract, token-name summary (values redacted — see `context/ships.build.json`), governance summary, warnings |
 | `context/ships.handoff.json` | Inside the package `.zip` | Next-actor instructions: required actions, preconditions, blocking conditions, and evidence to return after deployment |
 | `_waves.txt` | `<project>/_waves.txt` | Topologically sorted deployment order |
-| `config/token_map.conf` | `<project>/config/token_map.conf` | Literal → `{{TOKEN}}` mapping |
+| `config/tokenise.conf` | `<project>/config/tokenise.conf` | Regex rewrite rules (prefer this for new projects) |
+| `config/token_map.conf` | `<project>/config/token_map.conf` | **[DEPRECATED]** Literal → `{{TOKEN}}` mapping. Still works; see [#388](https://github.com/earthshiner/teradata-ships/issues/388). |
 | `config/env/*.conf` | `<project>/config/env/` | Token → resolved value per environment |
 | Deploy manifest | `<package>/logs/.deploy_manifest_*.json` | Per-object deployment outcomes, wave timing, drift flags |
 | Drift baselines | `<baseline_dir>/<DB>.<OBJ>.baseline` | Last-deployed SHOW output per object — basis for drift detection |

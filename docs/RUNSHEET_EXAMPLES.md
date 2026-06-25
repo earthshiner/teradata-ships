@@ -19,7 +19,7 @@ Use these argument meanings throughout the runsheets:
 | `--source-github OWNER/REPO` | `process`, `package` | Fetch source from GitHub by repository name. Mutually exclusive with `--source` or `--project`, depending on the command. |
 | `--source-ref REF` | `process`, `package` with `--source-github` | Branch, tag, or commit SHA to fetch. Defaults to `main`. |
 | `--github-token TOKEN` | `process`, `package` with `--source-github` | Token for private GitHub repositories. If omitted, SHIPS uses `GITHUB_TOKEN`. |
-| `--token-map` | `harvest`, `process` | File mapping literal database names to SHIPS tokens, for example `A_D01_OMR_STD={{OMR_STD}}`. |
+| `--token-map` | `harvest`, `process` | **[DEPRECATED — prefer `config/tokenise.conf`]** File mapping literal database names to SHIPS tokens, for example `A_D01_OMR_STD={{OMR_STD}}`. Still works; see [#388](https://github.com/earthshiner/teradata-ships/issues/388). |
 | `--auto-tokenise` | `harvest`, `process` | Detect hardcoded database names and apply tokens in one pass. Faster, but skips manual token map review. |
 | `--env-prefix` | `harvest`, `process` | Prefix to strip when deriving token names, for example `A_D01_OMR_STD` becomes `{{OMR_STD}}` when `--env-prefix A_D01` is used. |
 | `--env` | `process`, `package`, `rollback` | Target environment label stamped into the package, for example `DEV`, `TST`, or `PRD`. |
@@ -1082,7 +1082,7 @@ Checklist:
 |---|---|---|
 | `--source and --source-github are mutually exclusive` | Both local and GitHub source were supplied. | Choose one source input. |
 | Token appears unchanged in deployed DDL | Missing `--env-config` value or mismatched token name. | Run `scan --project <project> --env-config <conf> --show-map`. |
-| Hardcoded database names remain after harvest | Missing or incomplete `token_map.conf`. | Re-run harvest with `--generate-token-map`, review, then re-harvest with `--token-map`. |
+| Hardcoded database names remain after harvest | Missing or incomplete `config/tokenise.conf`. | Author `config/tokenise.conf` via the SHIPS Navigator wizard (`tools/navigator/ships-navigator.html`) or by hand (see `examples/callcentre/config/tokenise.conf`), then re-harvest. (Legacy: `--generate-token-map` + `--token-map` still works — see [#388](https://github.com/earthshiner/teradata-ships/issues/388).) |
 | Package deploys to wrong environment | Wrong package or wrong `--env-config` at build time. | Check `context/ships.build.json` inside the package and rebuild for the target environment. |
 | Privilege preflight fails | Deploying user lacks required CREATE/DROP/GRANT rights. | Use the generated grant script in the deployment report, then resume. |
 | DML needs rollback | SHIPS does not capture row-level undo for DML. | Use application recovery scripts or restore from backup; avoid irreversible DML in high-risk deploys. |

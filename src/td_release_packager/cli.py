@@ -5095,17 +5095,26 @@ def _build_parser():
     )
     ig.add_argument(
         "--token-map",
-        help="Path to token_map.conf — applies literal → {{TOKEN}} "
-        "substitutions during harvest. Generate one with "
-        "--generate-token-map first, review it, then pass "
-        "it here.",
+        help="[DEPRECATED — prefer config/tokenise.conf] "
+        "Path to token_map.conf — applies literal → {{TOKEN}} "
+        "substitutions during harvest. Still works; new projects "
+        "should use config/tokenise.conf (regex-based, more "
+        "powerful) authored via the SHIPS Navigator wizard, "
+        "the ships_author_token_map MCP tool, or by hand. "
+        "Generate one with --generate-token-map first, "
+        "review it, then pass it here.",
     )
     ig.add_argument(
         "--generate-token-map",
         action="store_true",
-        help="Scan for hardcoded database names and write a "
+        help="[DEPRECATED — prefer config/tokenise.conf] "
+        "Scan for hardcoded database names and write a "
         "token_map.conf to the project's config/ directory. "
-        "Requires --env-prefix to derive token names.",
+        "Requires --env-prefix to derive token names. "
+        "There is no equivalent auto-generator for tokenise.conf "
+        "yet — until there is, this flag remains the only "
+        "auto-discovery path; new projects should still prefer "
+        "hand-authored tokenise.conf where the token set is known.",
     )
     ig.add_argument(
         "--env-prefix",
@@ -5811,7 +5820,9 @@ def _build_parser():
     pr.add_argument(
         "--token-map",
         default=None,
-        help="Path to token_map.conf for harvest token substitution.",
+        help="[DEPRECATED — prefer config/tokenise.conf] "
+        "Path to token_map.conf for harvest token substitution. "
+        "Still works; prefer config/tokenise.conf for new projects.",
     )
     pr.add_argument(
         "--auto-tokenise",

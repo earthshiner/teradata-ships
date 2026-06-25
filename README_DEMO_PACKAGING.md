@@ -4,6 +4,8 @@ This guide is for teams who want a low-friction way to turn a demo SQL
 repository into a SHIPS package without first learning the full SHIPS project
 workflow.
 
+> ⚠️ **Deprecation note (closes [#388](https://github.com/earthshiner/teradata-ships/issues/388)):** Demo mode currently generates a `token_map.conf` for auto-detected database names. This file format and the `--token-map` flag are kept for back-compatibility but should not be used in new non-demo projects. **Prefer `config/tokenise.conf`** authored via the SHIPS Navigator wizard (`tools/navigator/ships-navigator.html`) for production work.
+
 Demo mode is designed for repositories that contain ordinary SQL scripts,
 especially numbered demo scripts such as:
 
