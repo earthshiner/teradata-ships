@@ -27,6 +27,7 @@ network requests.  It opens directly from the filesystem (file: URL).
 from __future__ import annotations
 
 import html
+import json
 import logging
 import os
 import re
@@ -38,6 +39,7 @@ from td_release_packager.report_viewer import (
     source_viewer_html as _source_viewer_html,
     SIGNAL_EXPLANATIONS as _SIGNAL_EXPLANATIONS,
     signal_name_cell as _signal_name_cell_shared,
+    VIEWER_INDEX_FILENAME as _VIEWER_INDEX_FILENAME,
 )
 from td_release_packager.reporting import common as _common, waves as _waves
 
@@ -427,6 +429,7 @@ def _write_package_viewers(
     viewer_dir = os.path.join(pkg_dir, viewer_dir_name)
     links: Dict[str, str] = {}
 
+    sidecar_index: Dict[str, str] = {}
     for index, record in enumerate(records, 1):
         raw_path = record.get("path", "")
         if not raw_path:
@@ -457,6 +460,19 @@ def _write_package_viewers(
             continue
 
         links[norm_path] = f"{viewer_dir_name}/{viewer_name}"
+        sidecar_index[viewer_name] = norm_path
+
+    # Sidecar: viewer_filename -> payload_path. Lets humans (and any
+    # external tool) map the hashed filenames back to source paths
+    # without scanning the HTML report. See #392.
+    if sidecar_index:
+        try:
+            sidecar_path = os.path.join(viewer_dir, _VIEWER_INDEX_FILENAME)
+            with open(sidecar_path, "w", encoding="utf-8") as fh:
+                json.dump(sidecar_index, fh, indent=2, sort_keys=True)
+                fh.write("\n")
+        except OSError as exc:
+            logger.warning("Could not write viewer index sidecar: %s", exc)
 
     return links
 
