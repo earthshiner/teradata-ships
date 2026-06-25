@@ -252,30 +252,70 @@ pre {{
 </html>"""
 
 
-def safe_viewer_filename(final_path: str, index: int) -> str:
-    """Create a filesystem-safe viewer filename for a payload path.
+#: Sidecar JSON filename that records ``viewer_filename -> payload_path``
+#: alongside the hashed viewer pages so a human can map a hash back to the
+#: original payload file without scanning the HTML report. Written by
+#: package_report and database_package_deployer.report at the end of their
+#: viewer-page loops; intentionally a constant here so both writers and any
+#: future reader pick up the same name. See ``viewer_index_entry``.
+VIEWER_INDEX_FILENAME = "index.json"
 
-    Replaces every character that is not alphanumeric, an underscore,
-    a hyphen, or a period with an underscore, then prefixes with a
-    zero-padded index so files sort in the order they were written.
-    Long stems are capped and hash-suffixed to keep extracted SHIPS
-    packages below Windows path-length limits.
+
+def safe_viewer_filename(final_path: str, index: int) -> str:
+    """Return a length-bounded, collision-safe viewer filename.
+
+    Permanent fix for issue #392 (Windows MAX_PATH overruns when extracted
+    SHIPS packages live in deeply-nested ``.ships-work`` directories).
+
+    The earlier scheme embedded the payload path into the filename
+    (``0018_payload_03_ddl_comments_CustomerDNA_DOM_ACL_V.customer_dna_snapshot.cmt.html``,
+    up to 82 chars) which combined with the nested staging directories
+    pushed the total path past Windows MAX_PATH = 260 for any project
+    whose root was more than ~40 chars deep. The new scheme is fixed at
+    22 chars regardless of payload path:
+
+        {index:04d}_{sha1(final_path)[:12]}.html
+        ────┬─── ──────────┬───────────── ─┬───
+            │              │               └ .html
+            │              └ 12 hex chars of SHA-1 digest (~ 2^48 keyspace
+            │                — collision-resistant for any sane corpus)
+            └ zero-padded index so files sort in the order they were written
+
+    The mapping from filename back to payload path is recorded in an
+    ``index.json`` sidecar (see :data:`VIEWER_INDEX_FILENAME`) so a human
+    can resolve hashes when debugging. The HTML report navigator's
+    ``links`` dict (payload path → viewer URL) already preserves human
+    readability in the user-facing surface.
 
     Args:
         final_path: Payload-relative path, e.g.
-                    ``03_ddl/tables/DB.Customer.tbl``.
+                    ``03_ddl/tables/DB.Customer.tbl``. Empty / whitespace
+                    falls back to ``source_{index}`` deterministically.
         index:      Monotonically increasing integer used as a sort prefix.
 
     Returns:
-        A filename such as ``0001_03_ddl_tables_DB.Customer.tbl.html``.
+        A 22-char filename such as ``0001_a3f8b2c19e4d.html``.
     """
-    stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", final_path.replace("\\", "/")).strip("_")
-    if not stem:
-        stem = f"source_{index}"
-    if len(stem) > 72:
-        digest = hashlib.sha1(final_path.encode("utf-8")).hexdigest()[:10]
-        stem = f"{stem[:57].rstrip('_.-')}_{digest}"
-    return f"{index:04d}_{stem}.html"
+    key = (final_path or "").replace("\\", "/").strip().lstrip("./")
+    if not key:
+        # Deterministic fallback so an empty / unreadable path still gets a
+        # stable hash; the sidecar records this as ``source_{index}``.
+        key = f"source_{index}"
+    digest = hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
+    return f"{index:04d}_{digest}.html"
+
+
+def viewer_index_entry(final_path: str, index: int) -> tuple[str, str]:
+    """Return the ``(viewer_filename, sidecar_key)`` pair for ``final_path``.
+
+    The sidecar key is the same normalised string used to compute the hash,
+    so a sidecar reader can verify a viewer filename by recomputing the
+    digest of the recorded key.
+    """
+    key = (final_path or "").replace("\\", "/").strip().lstrip("./")
+    if not key:
+        key = f"source_{index}"
+    return safe_viewer_filename(final_path, index), key
 
 
 # ---------------------------------------------------------------------------

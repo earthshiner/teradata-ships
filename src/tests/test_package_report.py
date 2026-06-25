@@ -875,8 +875,9 @@ class TestReportViewer:
         name = safe_viewer_filename("03_ddl/tables/DB.Customer.tbl", 1)
         assert name.startswith("0001_")
         assert name.endswith(".html")
-        # Path separators replaced with underscores
+        # Path separators must not leak into the filename.
         assert "/" not in name
+        assert "\\" not in name
 
     def test_safe_viewer_filename_zero_padded(self):
         from td_release_packager.report_viewer import safe_viewer_filename
@@ -884,11 +885,68 @@ class TestReportViewer:
         assert safe_viewer_filename("x.tbl", 42).startswith("0042_")
 
     def test_safe_viewer_filename_empty_path_uses_fallback(self):
+        """Empty / whitespace input still gets a stable, length-bounded name."""
         from td_release_packager.report_viewer import safe_viewer_filename
 
         name = safe_viewer_filename("", 7)
-        assert "source_7" in name
+        # New (#392) scheme: 22 chars exactly — `{idx:04}_{sha1[:12]}.html`.
+        # The fallback hashes the deterministic key ``source_{index}`` so
+        # an empty path still produces a stable filename — but no longer
+        # embeds the literal "source_7" since that's what blew past
+        # MAX_PATH for legitimate inputs.
+        assert name.startswith("0007_")
         assert name.endswith(".html")
+        assert len(name) == 22, (
+            f"22-char bound is the whole point of #392; got {len(name)}: {name!r}"
+        )
+
+    def test_safe_viewer_filename_length_bounded_under_max_path(self):
+        """Issue #392 regression: filename length must be fixed at 22 chars
+        regardless of payload-path length, because the writer is invoked
+        deep under ``.ships-work/<long-build-id>_<role>/.package_report_code/``
+        and the previous scheme could push the total past Windows MAX_PATH."""
+        from td_release_packager.report_viewer import safe_viewer_filename
+
+        # An extreme-but-realistic prefix-tokenised payload path, longer
+        # than the old 72-char stem cap let through.
+        long_path = (
+            "payload/03_ddl/comments/"
+            "{{DB_PREFIX}}_DOM_ACL_V.customer_dna_snapshot_with_a_very_long_business_name.cmt"
+        )
+        name = safe_viewer_filename(long_path, 18)
+        assert len(name) == 22, (
+            f"#392 regression — viewer filename must be bounded at 22 chars "
+            f"to keep total path under Windows MAX_PATH; got {len(name)}: {name!r}"
+        )
+        # Determinism: same input → same output (the sidecar relies on this).
+        assert safe_viewer_filename(long_path, 18) == name
+
+    def test_safe_viewer_filename_collision_resistance(self):
+        """Different inputs with the same index must produce different names —
+        the per-payload-path hash discriminator is the whole point."""
+        from td_release_packager.report_viewer import safe_viewer_filename
+
+        a = safe_viewer_filename("03_ddl/tables/DB.Customer.tbl", 1)
+        b = safe_viewer_filename("03_ddl/tables/DB.Order.tbl", 1)
+        assert a != b, "distinct payload paths at the same index must hash differently"
+
+    def test_viewer_index_entry_keys_match_safe_viewer_filename(self):
+        """The sidecar key path must reproduce the same viewer filename."""
+        from td_release_packager.report_viewer import (
+            safe_viewer_filename,
+            viewer_index_entry,
+        )
+        import hashlib
+
+        viewer_name, sidecar_key = viewer_index_entry(
+            "03_ddl/tables/DB.Customer.tbl", 1
+        )
+        assert viewer_name == safe_viewer_filename("03_ddl/tables/DB.Customer.tbl", 1)
+        # The sidecar key is the normalised string whose SHA-1 prefix forms
+        # the hash portion of the filename — a sidecar reader can verify a
+        # viewer filename by recomputing the digest.
+        digest = hashlib.sha1(sidecar_key.encode("utf-8")).hexdigest()[:12]
+        assert digest in viewer_name
 
 
 # ---------------------------------------------------------------

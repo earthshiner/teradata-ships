@@ -261,13 +261,66 @@ def _top_level_dirs(archive: zipfile.ZipFile) -> list[str]:
     return sorted(dirs)
 
 
+# Cosmetic-artefact directories — extraction failures on members under
+# these prefixes are non-fatal (the user-visible deploy should never
+# abort on a missing HTML viewer page). Anything else is a real payload
+# and an extraction failure must surface. See #392.
+_COSMETIC_EXTRACT_PREFIXES: tuple[str, ...] = (
+    ".package_report_code/",
+    ".deploy_report_",  # ``.deploy_report_<id>_code/`` and friends
+)
+
+
+def _is_cosmetic_member(member_name: str) -> bool:
+    """True when ``member_name`` is under a cosmetic-artefact subtree
+    whose extraction failure is safe to skip (#392)."""
+    normalised = member_name.replace("\\", "/")
+    for part in normalised.split("/"):
+        for prefix in _COSMETIC_EXTRACT_PREFIXES:
+            if part.startswith(prefix.rstrip("/")):
+                return True
+    return False
+
+
 def _safe_extractall(archive: zipfile.ZipFile, dest_root: Path) -> None:
+    """Extract every member into ``dest_root`` with the Zip-Slip guard.
+
+    Iterates members so that a filesystem error on a cosmetic artefact
+    (HTML viewer pages under ``.package_report_code/`` / ``.deploy_report_*_code/``)
+    doesn't abort the whole extraction. A failure on any real payload
+    file still raises — silently dropping a ``.sql`` would let deploy
+    run with a broken package, which is strictly worse than failing
+    fast. See #392.
+    """
     dest = dest_root.resolve()
+    # Pre-validate every member against Zip-Slip BEFORE writing anything.
     for member in archive.infolist():
         member_target = (dest / member.filename).resolve()
         if dest != member_target and dest not in member_target.parents:
             raise ValueError(f"Unsafe ZIP member path: {member.filename}")
-    archive.extractall(dest)
+
+    skipped_cosmetic = 0
+    for member in archive.infolist():
+        try:
+            archive.extract(member, dest)
+        except OSError as exc:
+            if _is_cosmetic_member(member.filename):
+                skipped_cosmetic += 1
+                continue
+            raise
+    if skipped_cosmetic:
+        # Single summary line — the per-member detail (and the path
+        # length / disk-full / etc. root cause) is in the OSError that
+        # would have aborted us. Operators can re-run the report with
+        # a shorter staging directory if they want the cosmetic pages.
+        import logging as _logging
+
+        _logging.getLogger(__name__).warning(
+            "Package report incomplete: %d viewer page(s) could not be "
+            "extracted (likely Windows MAX_PATH on a deeply-nested "
+            "staging dir). Deploy continues — cosmetic artefacts only.",
+            skipped_cosmetic,
+        )
 
 
 def _normalise_package_dir(path: Path) -> Path:
