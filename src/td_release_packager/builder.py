@@ -628,7 +628,7 @@ def _build_package_impl(
 
             _target = config.env_config_file or "config/env/<ENV>.conf"
             print(f"  Action: add these tokens to {_target},")
-            print( "  or update config/tokenise.conf and re-harvest.")
+            print("  or update config/tokenise.conf and re-harvest.")
 
         if unreferenced:
             print()
