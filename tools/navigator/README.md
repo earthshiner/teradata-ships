@@ -111,6 +111,25 @@ tools/navigator/
 
 A `decision-tree.yaml` will join this directory under [#378](https://github.com/earthshiner/teradata-ships/issues/378).
 
+## Troubleshooting
+
+### Windows: "These files can't be opened"
+
+Windows tags browser-downloaded files with Mark-of-the-Web (a hidden `Zone.Identifier` alternate data stream), and SmartScreen blocks `.ps1` / `.bat` from running. The wizard's outputs are subject to this. Two ways round it:
+
+1. **Copy, don't download.** Use the Copy button on the script block and paste straight into your terminal. No file is created, so MOTW never applies.
+2. **`Unblock-File`.** After downloading, run in PowerShell:
+   ```powershell
+   Unblock-File -Path .\ships-run.ps1
+   # or .\ships-run.bat
+   ```
+   To unblock everything in a downloaded bundle in one go:
+   ```powershell
+   Get-ChildItem -Recurse -Include *.ps1,*.bat,*.sh | Unblock-File
+   ```
+
+The wizard already includes this hint as a comment at the top of every `.ps1` and `.bat` it emits.
+
 ## Verifying offline-ness
 
 Open the file in a browser, open DevTools → Network, then reload. There should be zero network requests (the logo loads via a `data:` URI, not over the wire; the ZIP encoder is inline; no fonts are fetched).

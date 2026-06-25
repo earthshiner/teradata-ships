@@ -773,15 +773,23 @@ function renderScript(script, shell) {
     }
   };
 
-  // Shebang / shell header.
+  // Shebang / shell header. PS and cmd headers include a Mark-of-the-Web (MOTW)
+  // unblock hint, because Windows SmartScreen blocks browser-downloaded .ps1
+  // and .bat files with "These files can't be opened".
   if (shell === "bash") {
     out.push("#!/usr/bin/env bash");
     out.push("set -euo pipefail");
   } else if (shell === "powershell") {
     out.push("# PowerShell — SHIPS Navigator generated script");
+    out.push("# If Windows blocks this with 'These files can't be opened' (Mark-of-the-Web),");
+    out.push("# either copy the commands below and paste into your shell, or run first:");
+    out.push("#   Unblock-File -Path .\\ships-run.ps1");
     out.push('$ErrorActionPreference = "Stop"');
   } else {
     out.push("@echo off");
+    out.push(":: If Windows blocks this with 'These files can't be opened' (Mark-of-the-Web),");
+    out.push(":: either copy the commands below and paste into your shell, or in PowerShell run:");
+    out.push("::   Unblock-File -Path .\\ships-run.bat");
     out.push("setlocal");
   }
   out.push("");
@@ -989,6 +997,17 @@ function renderCommandsPanel(plan) {
     : "<b>Detailed mode</b> — each pipeline step shown separately for transparency, CI scripting, or selective re-runs.")
     + " Long paths bind to shell variables (<code>$PROJECT</code>, <code>$SOURCE</code>, <code>$ENV_CONFIG</code> …) so retargeting is a one-line edit at the top.";
   panel.appendChild(modeBanner);
+
+  // Windows MOTW warning — SmartScreen blocks downloaded .ps1 / .bat files.
+  const motwBanner = document.createElement("div");
+  motwBanner.className = "warn";
+  motwBanner.style.marginBottom = "12px";
+  motwBanner.innerHTML =
+    "<b>Windows note:</b> If you download the <code>.ps1</code> or <code>.bat</code>, Windows may block it " +
+    "(\"These files can't be opened\" — Mark-of-the-Web). Two ways round it: " +
+    "<b>(a)</b> use the <b>Copy</b> button and paste the commands into your terminal — no file, no block; or " +
+    "<b>(b)</b> in PowerShell run <code>Unblock-File -Path .\\ships-run.ps1</code> after download.";
+  panel.appendChild(motwBanner);
 
   const psText  = renderScript(plan.script, "powershell");
   const shText  = renderScript(plan.script, "bash");
