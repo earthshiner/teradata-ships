@@ -1,0 +1,1680 @@
+<!doctype html>
+<!--
+  SHIPS Navigator — offline guided-packaging wizard
+  Issue #380 / milestone "Guided Packaging (SHIPS Navigator)"
+
+  Hard constraints (handover Part B §2):
+    - Single self-contained .html file. No network, no CDN, no AI.
+    - Pure client-side, deterministic.
+    - Output is copy-pasteable AND downloadable.
+
+  v1.1 changes vs v1:
+    - Fixed CLI flags to match the real ships CLI (--project not --path,
+      --env / --env-config / --name on package, etc.).
+    - New questions for generate, analyse, dependency-graph (OpenLineage),
+      scan, strict mode, package name.
+    - Mode toggle: Quick (one `ships process` call) vs Detailed (each step).
+    - bootstrap-env-config offered when source is already tokenised.
+    - Answers persist to localStorage; Download-all bundle (vanilla JS ZIP);
+      inline validation; glossary tab + abbr tooltips.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SHIPS Navigator</title>
+<style>
+  :root {
+    --td-orange: #FF5F02;
+    --td-navy:   #00233C;
+    --td-white:  #FFFFFF;
+    --td-grey-1: #f4f6f8;
+    --td-grey-2: #d8dde2;
+    --td-grey-3: #6b7a86;
+    --td-warn-bg:#fff4e6;
+    --td-warn-bd:#FF5F02;
+    --td-info-bg:#eef4fa;
+    --td-info-bd:#00233C;
+    --td-mono:   ui-monospace, 'Cascadia Mono', 'Consolas', 'Menlo', monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    font-family: 'Inter', -apple-system, 'Segoe UI', Roboto, sans-serif;
+    color: var(--td-navy);
+    background: var(--td-grey-1);
+    line-height: 1.45;
+  }
+  header.app {
+    background: var(--td-navy);
+    color: var(--td-white);
+    padding: 18px 28px;
+    display: flex; align-items: center; gap: 16px;
+    border-bottom: 4px solid var(--td-orange);
+  }
+  header.app .logo {
+    /* Embedded teradata_sym_rgb_pos.png (base64) from the teradata-brand skill's
+       assets/logo-base64-reference.md. Per brand guidelines we use the provided
+       asset rather than recreating the mark. Native size 64x85 (aspect ~0.75). */
+    height: 40px;
+    width: auto;
+    display: block;
+  }
+  header.app h1 { margin: 0; font-size: 20px; font-weight: 600; }
+  header.app .sub { opacity: 0.75; font-size: 13px; margin-left: auto; }
+
+  main {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    min-height: calc(100vh - 80px);
+  }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+
+  section.questions, section.outputs {
+    padding: 24px 28px;
+    overflow-y: auto;
+  }
+  section.questions { background: var(--td-white); border-right: 1px solid var(--td-grey-2); }
+  section.outputs { background: var(--td-grey-1); }
+
+  h2 {
+    font-size: 14px; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--td-grey-3); margin: 0 0 14px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+
+  .question {
+    margin-bottom: 16px;
+    padding: 14px 16px;
+    background: var(--td-white);
+    border: 1px solid var(--td-grey-2);
+    border-left: 3px solid var(--td-orange);
+    border-radius: 4px;
+  }
+  .question .qlabel { font-weight: 600; margin-bottom: 6px; display: block; }
+  .question .qhint { font-size: 12px; color: var(--td-grey-3); margin-bottom: 10px; }
+  .question .qhint abbr { border-bottom: 1px dotted var(--td-grey-3); cursor: help; text-decoration: none; }
+  .question input[type=text], .question input[type=url], .question select, .question textarea {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--td-grey-2);
+    border-radius: 3px;
+    font: inherit;
+    color: var(--td-navy);
+    background: var(--td-white);
+  }
+  .question input:focus, .question select:focus, .question textarea:focus {
+    outline: 2px solid var(--td-orange); outline-offset: 0;
+  }
+  .radios { display: flex; flex-wrap: wrap; gap: 8px; }
+  .radios label {
+    flex: 1 1 auto;
+    padding: 8px 12px;
+    border: 1px solid var(--td-grey-2);
+    border-radius: 3px;
+    cursor: pointer;
+    background: var(--td-white);
+    text-align: center;
+    font-size: 13px;
+  }
+  .radios label.active {
+    background: var(--td-navy);
+    color: var(--td-white);
+    border-color: var(--td-navy);
+  }
+  .radios input { display: none; }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+
+  .warn, .info {
+    margin: 6px 0 0;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+  .warn { background: var(--td-warn-bg); border-left: 3px solid var(--td-warn-bd); }
+  .info { background: var(--td-info-bg); border-left: 3px solid var(--td-info-bd); }
+
+  .issues {
+    margin-bottom: 14px;
+    padding: 10px 12px;
+    background: var(--td-warn-bg);
+    border-left: 3px solid var(--td-warn-bd);
+    border-radius: 3px;
+    font-size: 12px;
+  }
+  .issues ul { margin: 6px 0 0 18px; padding: 0; }
+  .issues li { margin-bottom: 4px; }
+  .issues.empty { display: none; }
+
+  .tabs { display: flex; gap: 0; border-bottom: 2px solid var(--td-navy); flex-wrap: wrap; }
+  .tabs button {
+    background: var(--td-grey-1);
+    color: var(--td-navy);
+    border: 1px solid var(--td-grey-2);
+    border-bottom: none;
+    padding: 9px 13px;
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+    border-radius: 3px 3px 0 0;
+    margin-right: 4px;
+  }
+  .tabs button.active { background: var(--td-navy); color: var(--td-white); border-color: var(--td-navy); }
+  .panel {
+    display: none;
+    background: var(--td-white);
+    border: 1px solid var(--td-grey-2);
+    border-top: none;
+    padding: 16px;
+  }
+  .panel.active { display: block; }
+  .panel pre {
+    margin: 0; padding: 12px;
+    background: var(--td-navy); color: var(--td-white);
+    font-family: var(--td-mono); font-size: 12.5px; line-height: 1.55;
+    overflow-x: auto; border-radius: 3px;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .panel .actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn {
+    background: var(--td-orange); color: var(--td-navy);
+    border: none; padding: 8px 14px; font: inherit;
+    font-weight: 600; font-size: 13px; border-radius: 3px; cursor: pointer;
+  }
+  .btn.secondary { background: var(--td-white); color: var(--td-navy); border: 1px solid var(--td-navy); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn.small { padding: 6px 10px; font-size: 12px; }
+
+  .file-block { margin-bottom: 18px; }
+  .file-block h3 {
+    margin: 0 0 6px; font-size: 13px; color: var(--td-navy);
+    font-family: var(--td-mono);
+  }
+  .rationale ol { padding-left: 20px; }
+  .rationale li { margin-bottom: 10px; }
+  .rationale strong { color: var(--td-orange); }
+  .empty { color: var(--td-grey-3); font-style: italic; padding: 20px 0; text-align: center; }
+  .plan-import {
+    margin-bottom: 14px; padding: 10px; background: var(--td-grey-1);
+    border: 1px dashed var(--td-grey-2); border-radius: 3px;
+  }
+  .plan-import summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+  .plan-import textarea { margin-top: 8px; width: 100%; min-height: 60px; font: inherit; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
+  .glossary dt { font-weight: 600; color: var(--td-orange); margin-top: 10px; }
+  .glossary dd { margin: 4px 0 8px 0; font-size: 13px; }
+  .anatomy details { margin-left: 0; }
+  .anatomy details details { margin-left: 18px; border-left: 1px dotted var(--td-grey-2); padding-left: 10px; }
+  .anatomy summary {
+    cursor: pointer; padding: 4px 0;
+    font-family: var(--td-mono); font-size: 13px; color: var(--td-navy);
+  }
+  .anatomy summary:hover { color: var(--td-orange); }
+  .anatomy .leaf {
+    padding: 4px 0 4px 18px;
+    font-family: var(--td-mono); font-size: 13px; color: var(--td-navy);
+  }
+  .anatomy .leaf::before { content: "▫ "; color: var(--td-orange); }
+  .anatomy .desc {
+    font-family: inherit; color: var(--td-grey-3); font-size: 12px;
+    margin: 2px 0 8px 22px; line-height: 1.4;
+  }
+</style>
+</head>
+<body>
+
+<header class="app">
+  <img class="logo" alt="Teradata" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABVCAMAAADOrBLEAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAGbUExURf9fAgAAAP9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv9fAv///3jJeXQAAACHdFJOUwAA4/Lx9HV8gggMBOHDxL0090PNnJ6YKgGB7pTktAfU3SD8YJ3GGf4QSfOtNgYDHk50g39kIdnqrlFBPT48I4na+u+4Uqr79vXtQNKTFGegDyfRd4jeMDkd2JBL+M4ib+nwUwJK0CbimQXoLna8ax8KK1iGyutCwS0sOkRMTRXnjBwW5ciKNyCa7VMAAAABYktHRIhrZhZaAAAACXBIWXMAAC4jAAAuIwF4pT92AAAAB3RJTUUH6gIDDSMcsQ7WtwAAAeNJREFUWMPt1tlbElEYBvCXMEhGssVwynIBCxBEMXQKynBDMAoqSElt0bKgXFpt07LM+bcdRpiGc0jOuaini/Nezjfze76zAo5Ym2py1AYLT9CkErELQAAC+E+AY80OOhLYgRYnleOtJziAejl5SgACEMC/B063naHiaucA7JDrhAuw8EQAAhCAAAQggL8MnAWXgHMk0MEJnCeBC518QBcJdPfwAa0k4PZwjQG9JKBevMQF2Lwk4HX5OHqAv49qwR0I9v+ZQGhgMDx0ORJ06O9geESlo1wJX43Grhm57qt6wOiN+Fi5z/GJyWbtKfqn1LpJTCd/JzVTASD7bxqvJNO3oOW22jjVv3mA37xvvJmsBtxp4QBG79bO1j0ZCLmYAcg5opC/r7UwqzADcwWykoO2LA+YgfkFsrJYXoiHi2wA8IiqWKFP7WNGwE5VvHpBjjxhA8JUZfpgbFJEYQAsWEqQlUJlfZefPmMBVp6TlRcwtnhHqjEgkYdfiRqHDsVYptQIQJC4AdNF06lF8eWr1ZL7EECb7rWk+blzvfbYAxuv37wNvMu/71sYS5hi/VAdaqfNtGCbH0HfG5Cl7MCnz1++bpkyv23cB9Kgs7Idv33f0T7n+xnSu/zhCcSVn7u/9vTx7wNeLG/Yd2GbHAAAAABJRU5ErkJggg==" />
+  <h1 id="app-title">SHIPS Navigator</h1>
+  <span class="sub">Offline guided packaging</span>
+</header>
+
+<main>
+  <section class="questions">
+    <h2>
+      Questions
+      <button class="btn small secondary" id="reset-all" title="Clear all answers (cannot be undone)">Reset</button>
+    </h2>
+
+    <details class="plan-import">
+      <summary>Paste a plan.json (skips matching questions)</summary>
+      <textarea id="plan-import" rows="4" placeholder='{"source":{"type":"filesystem","dir":"..."}, "tokens":{"model":"prefix","prefix":"CustomerDNA"}, ...}'></textarea>
+      <div style="margin-top:8px; display:flex; gap:8px;">
+        <button class="btn secondary small" id="plan-apply">Apply</button>
+        <button class="btn secondary small" id="plan-clear">Clear textarea</button>
+      </div>
+    </details>
+
+    <div id="issues" class="issues empty"></div>
+    <div id="questions"></div>
+  </section>
+
+  <section class="outputs">
+    <h2>
+      Generated artefacts
+      <span class="toolbar">
+        <button class="btn small" id="download-all">Download all (.zip)</button>
+      </span>
+    </h2>
+    <div class="tabs" id="tabs">
+      <button data-tab="commands" class="active">Commands</button>
+      <button data-tab="anatomy">Anatomy</button>
+      <button data-tab="tokenise">tokenise.conf</button>
+      <button data-tab="envs">env files</button>
+      <button data-tab="inspect">inspect.conf</button>
+      <button data-tab="rationale">Why each step</button>
+      <button data-tab="glossary">Glossary</button>
+    </div>
+
+    <div id="panel-commands" class="panel active"></div>
+    <div id="panel-anatomy" class="panel anatomy"></div>
+    <div id="panel-tokenise" class="panel"></div>
+    <div id="panel-envs" class="panel"></div>
+    <div id="panel-inspect" class="panel"></div>
+    <div id="panel-rationale" class="panel rationale"></div>
+    <div id="panel-glossary" class="panel glossary"></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+// Single source of truth for the app name (handover §1).
+const APP_NAME = "SHIPS Navigator";
+document.getElementById("app-title").textContent = APP_NAME;
+document.title = APP_NAME;
+
+const STORAGE_KEY = "ships-navigator-v1";
+
+// ---------------------------------------------------------------------------
+// Decision model (handover Part B §3, extended). v1.1 inlines the model; once
+// decision-tree.yaml lands (issue #378) the wizard can load that instead.
+// ---------------------------------------------------------------------------
+const QUESTIONS = [
+  // Mode toggle — first so the user picks which command shape they want.
+  {
+    id: "mode.style",
+    label: "How should I show the SHIPS commands?",
+    hint: "<b>Quick</b> emits one <code>ships process</code> call per env (recommended for first-timers). <b>Detailed</b> shows each step (scaffold/harvest/generate/inspect/scan/analyse/package) for transparency or CI scripts.",
+    kind: "radio",
+    options: [
+      { value: "quick",    label: "Quick (process)" },
+      { value: "detailed", label: "Detailed (each step)" },
+    ],
+  },
+
+  // --- Q1 source ---
+  {
+    id: "source.type",
+    label: "Q1. Where does your source come from?",
+    hint: "GitHub means SHIPS clones into a temp work dir; filesystem reads from disk.",
+    kind: "radio",
+    options: [
+      { value: "github",     label: "GitHub" },
+      { value: "filesystem", label: "Filesystem" },
+    ],
+  },
+  { id: "source.owner_repo", label: "GitHub owner/repo", hint: "e.g. acme/customer-dna", kind: "text",
+    show: a => a["source.type"] === "github" },
+  { id: "source.ref", label: "GitHub ref (branch/tag/sha)", hint: "Defaults to <code>main</code> if blank.", kind: "text",
+    show: a => a["source.type"] === "github" },
+  { id: "source.dir", label: "Absolute path to source DDL", hint: "e.g. C:\\src\\customer-dna or /home/me/customer-dna", kind: "text",
+    show: a => a["source.type"] === "filesystem" },
+
+  // --- Q2 already tokenised ---
+  {
+    id: "tokens.already",
+    label: "Q2. Does the source already use <code>{{TOKEN}}</code> placeholders?",
+    hint: "Yes = harvest as-is; the wizard will run <code>bootstrap-env-config</code> to seed env files from the tokens already in the source. No / unsure = wizard configures tokenisation.",
+    kind: "radio",
+    options: [
+      { value: "yes",    label: "Yes" },
+      { value: "no",     label: "No" },
+      { value: "unsure", label: "Unsure" },
+    ],
+  },
+
+  // --- Q3 token shape ---
+  {
+    id: "tokens.model",
+    label: "Q3. Token shape",
+    hint: "<b>Prefix</b>: one product token (one env binding). <b>Per-database</b>: one binding per database.",
+    kind: "radio",
+    options: [
+      { value: "prefix",       label: "Prefix (one DB_PREFIX)" },
+      { value: "per_database", label: "Per-database (one token per db)" },
+    ],
+    show: a => a["tokens.already"] && a["tokens.already"] !== "yes",
+  },
+
+  // --- Q4 prefix ---
+  {
+    id: "tokens.prefix",
+    label: "Q4. Product prefix",
+    hint: "Bare prefix without trailing underscore. e.g. <code>CustomerDNA</code>.",
+    kind: "text",
+    show: a => a["tokens.already"] && a["tokens.already"] !== "yes",
+  },
+
+  // --- Q5 atomic + eponymous ---
+  {
+    id: "atomic.eponymous",
+    label: "Q5. Is DDL already <abbr title='one object per file'>atomic</abbr> &amp; <abbr title='filename matches DB.Object.ext'>eponymous</abbr>?",
+    hint: "Atomic = one object per file. Eponymous = filename matches <code>DB.Object.ext</code>.",
+    kind: "radio",
+    options: [
+      { value: "yes",    label: "Yes" },
+      { value: "no",     label: "No — let SHIPS split + rename" },
+      { value: "unsure", label: "Unsure" },
+    ],
+    warnOn: v => (v === "no" || v === "unsure")
+      ? "Heads-up: multi-object files containing a procedure/macro or a BEGIN…END body are NOT auto-split. SHIPS will flag them — keep them whole or split by hand."
+      : null,
+  },
+
+  // --- NEW Q6 generate (view-layer) ---
+  {
+    id: "generate.enabled",
+    label: "Q6. Generate a <abbr title='locking views, access views, business views (STD_V / ACL_V / BUS_V)'>view layer</abbr>?",
+    hint: "If your tables have companion views per the object-placement standard, SHIPS can auto-generate them. Skip if you author all views by hand or your source already includes them.",
+    kind: "radio",
+    options: [
+      { value: "yes",    label: "Yes — auto-generate" },
+      { value: "no",     label: "No — base tables only" },
+      { value: "unsure", label: "Unsure (defaults to Yes)" },
+    ],
+  },
+
+  // --- NEW Q7 analyse (waves) ---
+  {
+    id: "analyse.enabled",
+    label: "Q7. Compute deploy <abbr title='ordered batches of objects with no intra-batch dependencies'>waves</abbr> (dependency analysis)?",
+    hint: "SHIPS reads cross-object dependencies and emits <code>_waves.txt</code> so DDL deploys in the right order. Recommended unless you maintain your own ordering.",
+    kind: "radio",
+    options: [
+      { value: "yes", label: "Yes (recommended)" },
+      { value: "no",  label: "No" },
+    ],
+  },
+
+  // --- NEW Q8 dependency graph ---
+  {
+    id: "analyse.graph",
+    label: "Q8. Export a dependency graph (incl. <abbr title='OpenLineage is an open standard for data lineage events'>OpenLineage</abbr>)?",
+    hint: "Emits dependency graph files (incl. OpenLineage JSON) under <code>&lt;project&gt;/graphs/</code>. Useful for impact analysis or feeding a lineage tool. Off by default.",
+    kind: "radio",
+    options: [
+      { value: "no",  label: "No" },
+      { value: "yes", label: "Yes — export graph files" },
+    ],
+    show: a => a["analyse.enabled"] !== "no",
+  },
+  { id: "analyse.namespace", label: "OpenLineage namespace",
+    hint: "Defaults to <code>teradata://ships-analysis</code>. For a live system use <code>teradata://hostname:1025</code>.",
+    kind: "text", show: a => a["analyse.graph"] === "yes" },
+  { id: "analyse.projectName", label: "OpenLineage project name",
+    hint: "Defaults to <code>ships-project</code>.",
+    kind: "text", show: a => a["analyse.graph"] === "yes" },
+
+  // --- NEW Q9 scan ---
+  {
+    id: "scan.enabled",
+    label: "Q9. Add an orphan-token scan?",
+    hint: "Catches tokens defined in env files but never used in the payload (CI gate for clean env configs). <code>inspect</code> already validates coverage the other way.",
+    kind: "radio",
+    options: [
+      { value: "no",  label: "No" },
+      { value: "yes", label: "Yes — fail on orphan tokens" },
+    ],
+  },
+
+  // --- Q10 envs ---
+  { id: "envs", label: "Q10. Target environments",
+    hint: "Comma- or space-separated. e.g. <code>DEV, TST, PRD</code>.",
+    kind: "text" },
+
+  // --- Q11 project path + scaffold flag ---
+  { id: "project.dir", label: "Q11. Absolute path to your SHIPS project",
+    hint: "e.g. <code>C:\\projects\\customer-dna-ships</code>. Drive letter implies Windows <code>.bat</code> output.",
+    kind: "text" },
+  { id: "project.scaffolded", label: "Project already scaffolded?",
+    hint: "Tick if the project layout already exists. If unticked, <code>scaffold</code> runs first using the basename as the project name.",
+    kind: "checkbox" },
+
+  // --- Q12 package name ---
+  { id: "package.name", label: "Q12. Package name",
+    hint: "Build artefact name. e.g. <code>create_objects</code>. No spaces; underscores OK.",
+    kind: "text" },
+
+  // --- Strict mode toggle ---
+  { id: "process.strict", label: "Strict mode (abort on first stage error)?",
+    hint: "Off by default — developer mode runs all stages and summarises errors at the end. Tick for CI / platform mode.",
+    kind: "checkbox" },
+];
+
+// ---------------------------------------------------------------------------
+// State + persistence.
+// ---------------------------------------------------------------------------
+const answers = {};
+let activeTab = "commands";
+
+function persist() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ answers, activeTab })); }
+  catch (e) { /* file:// may block localStorage in some browsers — silently no-op */ }
+}
+function hydrate() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    if (s && s.answers && typeof s.answers === "object") Object.assign(answers, s.answers);
+    if (s && typeof s.activeTab === "string") activeTab = s.activeTab;
+  } catch (e) { /* ignore */ }
+}
+
+function applyPlan(plan) {
+  // Best-effort plan.json → answers mapping. Unknown keys ignored.
+  if (plan.mode) answers["mode.style"] = plan.mode;
+  if (plan.source) {
+    if (plan.source.type) answers["source.type"] = plan.source.type;
+    if (plan.source.owner_repo) answers["source.owner_repo"] = plan.source.owner_repo;
+    if (plan.source.ref) answers["source.ref"] = plan.source.ref;
+    if (plan.source.dir || plan.source.path) answers["source.dir"] = plan.source.dir || plan.source.path;
+  }
+  if (plan.tokens) {
+    if (plan.tokens.already) answers["tokens.already"] = plan.tokens.already;
+    if (plan.tokens.model) answers["tokens.model"] = plan.tokens.model;
+    if (plan.tokens.prefix) answers["tokens.prefix"] = plan.tokens.prefix;
+  }
+  if (plan.atomic && plan.atomic.eponymous) answers["atomic.eponymous"] = plan.atomic.eponymous;
+  if (plan.generate && plan.generate.enabled) answers["generate.enabled"] = plan.generate.enabled;
+  if (plan.analyse) {
+    if (plan.analyse.enabled) answers["analyse.enabled"] = plan.analyse.enabled;
+    if (typeof plan.analyse.graph === "string") answers["analyse.graph"] = plan.analyse.graph;
+    if (plan.analyse.namespace) answers["analyse.namespace"] = plan.analyse.namespace;
+    if (plan.analyse.projectName) answers["analyse.projectName"] = plan.analyse.projectName;
+  }
+  if (plan.scan && plan.scan.enabled) answers["scan.enabled"] = plan.scan.enabled;
+  if (Array.isArray(plan.envs)) answers["envs"] = plan.envs.join(", ");
+  else if (typeof plan.envs === "string") answers["envs"] = plan.envs;
+  if (plan.project) {
+    if (plan.project.dir || plan.project.path) answers["project.dir"] = plan.project.dir || plan.project.path;
+    if (typeof plan.project.scaffolded === "boolean") answers["project.scaffolded"] = plan.project.scaffolded;
+  }
+  if (plan.package && plan.package.name) answers["package.name"] = plan.package.name;
+  if (typeof plan.strict === "boolean") answers["process.strict"] = plan.strict;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers — paths, quoting, env parsing.
+// ---------------------------------------------------------------------------
+function isWindowsPath(p) { return !!p && /^[A-Za-z]:[\\/]/.test(p); }
+function targetOs() { return isWindowsPath(answers["project.dir"]) ? "windows" : "posix"; }
+function parentDir(p) {
+  if (!p) return ".";
+  const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
+  return i > 0 ? p.slice(0, i) : ".";
+}
+function baseName(p) {
+  if (!p) return "ships-project";
+  const trimmed = p.replace(/[\\/]+$/, "");
+  const i = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  return i >= 0 ? trimmed.slice(i + 1) : trimmed;
+}
+function parseEnvs(raw) {
+  if (!raw) return [];
+  return raw.split(/[\s,;]+/).map(s => s.trim()).filter(Boolean);
+}
+function q(s) {
+  if (s == null || s === "") return '""';
+  return /\s/.test(s) ? `"${s}"` : s;
+}
+
+// ---------------------------------------------------------------------------
+// Validation — surfaced as a banner above the outputs.
+// ---------------------------------------------------------------------------
+function validate(a) {
+  const issues = [];
+  if (a["source.type"] === "github" && !a["source.owner_repo"])
+    issues.push("GitHub owner/repo is empty.");
+  if (a["source.type"] === "filesystem" && !a["source.dir"])
+    issues.push("Source directory is empty.");
+  if (a["tokens.prefix"] && /_$/.test(a["tokens.prefix"]))
+    issues.push("Prefix has a trailing underscore — strip it. The tokenise rule adds the underscore.");
+  if (a["tokens.prefix"] && !/^[A-Za-z][A-Za-z0-9]*$/.test(a["tokens.prefix"]))
+    issues.push("Prefix should be alphanumeric and start with a letter.");
+  if (a["project.dir"] && !/^([A-Za-z]:[\\/]|\/)/.test(a["project.dir"]))
+    issues.push("Project path doesn't look absolute (expected a drive letter or leading /).");
+  if (a["envs"] && parseEnvs(a["envs"]).length === 0)
+    issues.push("Could not parse any environment names from the env list.");
+  if (a["package.name"] && /\s/.test(a["package.name"]))
+    issues.push("Package name should have no spaces — use underscores.");
+  if (a["mode.style"] === "detailed" && a["source.type"] === "github")
+    issues.push("Detailed mode emits `ships harvest`, which does NOT accept --source-github. Switch to Quick mode, or git-clone the repo first and use a filesystem path.");
+  return issues;
+}
+
+// ---------------------------------------------------------------------------
+// Plan generator.
+// ---------------------------------------------------------------------------
+function generatePlan() {
+  const a = answers;
+  const os = targetOs();
+
+  const projDir   = a["project.dir"] || "<project-dir>";
+  const parent    = parentDir(projDir);
+  const projName  = baseName(projDir);
+
+  const envs      = parseEnvs(a["envs"]);
+  const envList   = envs.length ? envs : ["DEV"];
+  const needsScaffold = !a["project.scaffolded"];
+  const tokensAlready = a["tokens.already"] === "yes";
+  const tokenModel    = tokensAlready ? null : (a["tokens.model"] || null);
+  const prefix        = (a["tokens.prefix"] || "").trim();
+  const sourceType    = a["source.type"];
+  const sourceDir     = a["source.dir"] || "<source-dir>";
+  const ownerRepo     = (a["source.owner_repo"] || "<owner/repo>").trim();
+  const ref           = (a["source.ref"] || "main").trim();
+  const pkgName       = (a["package.name"] || "create_objects").trim();
+  const mode          = a["mode.style"] || "quick";
+  const wantGenerate  = a["generate.enabled"] !== "no";
+  const wantAnalyse   = a["analyse.enabled"] !== "no";
+  const wantGraph     = a["analyse.graph"] === "yes" && wantAnalyse;
+  const namespace     = (a["analyse.namespace"] || "teradata://ships-analysis").trim();
+  const projectName   = (a["analyse.projectName"] || "ships-project").trim();
+  const wantScan      = a["scan.enabled"] === "yes";
+  const wantStrict    = !!a["process.strict"];
+
+  // ============ Build a shell-agnostic script model ============
+  // Long paths are bound to vars once and reused across commands. Each per-env
+  // block resets ENV + ENV_CONFIG so users can run the per-env section
+  // standalone in a fresh terminal (Option A — simple over clever).
+  const sep = os === "windows" ? "\\" : "/";
+  const sourceLit = sourceType === "filesystem" ? sourceDir
+                  : sourceType === "github"     ? "<cloned-source-dir>"
+                  : "<source-dir>";
+
+  const sharedVars = [["SOURCE", sourceLit]];
+  if (sourceType === "github") {
+    sharedVars.push(["OWNER_REPO", ownerRepo]);
+    sharedVars.push(["REF",        ref]);
+  }
+  sharedVars.push(["OUTPUT_ROOT", parent]);
+  sharedVars.push(["NAME",        projName]);
+  sharedVars.push(["PROJECT",     `$OUTPUT_ROOT${sep}$NAME`]);
+  sharedVars.push(["PKG_NAME",    pkgName]);
+  if (wantGraph) sharedVars.push(["GRAPHS_DIR", `$PROJECT${sep}graphs`]);
+  sharedVars.push(["AUTHOR",      ""]);
+  sharedVars.push(["DESCRIPTION", "SHIPS Packaged release"]);
+
+  const deployVars = [
+    ["DB_HOST", "<your-teradata-host>"],
+    ["DB_USER", "<your-teradata-user>"],
+  ];
+
+  const prelude = [];
+  const rationale = [];
+  if (needsScaffold) {
+    const sc = [`ships scaffold --name "$NAME" --output "$OUTPUT_ROOT"`];
+    if (envs.length) sc.push(`--environments ${envs.join(",")}`);
+    prelude.push(sc);
+    rationale.push({ step: "scaffold", why: "Creates the SHIPS project layout (config/, payload/, db/) at $PROJECT with starter env files." });
+  }
+
+  const headNotes = [];
+  if (mode === "detailed" && sourceType === "github") {
+    headNotes.push("`ships harvest` does NOT accept --source-github.");
+    headNotes.push("Either git-clone the repo first and point $SOURCE at the clone,");
+    headNotes.push("OR switch to Quick mode (`ships process` accepts --source-github).");
+  }
+
+  const perEnv = envList.map((env, idx) => {
+    const vars = [
+      ["ENV",        env],
+      ["ENV_CONFIG", `$PROJECT${sep}config${sep}env${sep}$ENV.conf`],
+    ];
+    const commands = [];
+
+    if (tokensAlready) {
+      commands.push([`ships bootstrap-env-config --source "$PROJECT" --env "$ENV"`]);
+    }
+
+    if (mode === "quick") {
+      const pr = [`ships process --project "$PROJECT"`];
+      if (sourceType === "github") {
+        pr.push(`--source-github "$OWNER_REPO"`);
+        pr.push(`--source-ref "$REF"`);
+      } else {
+        pr.push(`--source "$SOURCE"`);
+      }
+      if (!tokensAlready && tokenModel === "prefix") {
+        pr.push(`--prefix-token ${prefix || "<PREFIX>"}=DB_PREFIX`);
+      }
+      if (!wantGenerate) pr.push(`--skip-generate`);
+      pr.push(`--env "$ENV"`);
+      pr.push(`--env-config "$ENV_CONFIG"`);
+      pr.push(`--name "$PKG_NAME"`);
+      if (wantStrict) pr.push(`--strict`);
+      commands.push(pr);
+    } else {
+      // Detailed: harvest/generate/inspect/scan/analyse are env-agnostic so
+      // they only appear in the FIRST env block; package runs in every env block.
+      if (idx === 0) {
+        const h = [`ships harvest --source "$SOURCE" --project "$PROJECT"`];
+        if (!tokensAlready && tokenModel === "prefix") {
+          h.push(`--prefix-token ${prefix || "<PREFIX>"}=DB_PREFIX`);
+        }
+        commands.push(h);
+        if (wantGenerate) commands.push([`ships generate --project "$PROJECT"`]);
+        commands.push([`ships inspect --project "$PROJECT"`]);
+        if (wantScan) commands.push([`ships scan --project "$PROJECT" --all-envs --fail-on-orphan`]);
+        if (wantAnalyse) {
+          const az = [`ships analyse --project "$PROJECT"`];
+          if (wantGraph) {
+            az.push(`--graph "$GRAPHS_DIR"`);
+            az.push(`--namespace "${namespace}"`);
+            az.push(`--project-name "${projectName}"`);
+          }
+          commands.push(az);
+        }
+      }
+      commands.push([
+        `ships package --project "$PROJECT"`,
+        `--env "$ENV"`,
+        `--name "$PKG_NAME"`,
+        `--env-config "$ENV_CONFIG"`,
+      ]);
+    }
+
+    return { env, vars, commands };
+  });
+
+  const postlude = [];
+  if (mode === "quick") {
+    if (wantScan)  postlude.push([`ships scan --project "$PROJECT" --all-envs --fail-on-orphan`]);
+    if (wantGraph) postlude.push([
+      `ships analyse --project "$PROJECT"`,
+      `--graph "$GRAPHS_DIR"`,
+      `--namespace "${namespace}"`,
+      `--project-name "${projectName}"`,
+    ]);
+  }
+
+  // Rationale lines in the order steps appear in the script.
+  if (tokensAlready) {
+    rationale.push({ step: "bootstrap-env-config", why: "Source already uses {{TOKEN}}. Scans the payload for every token reference and seeds a per-env .conf with placeholders for you to fill in — safer than guessing the token list." });
+  }
+  if (mode === "quick") {
+    rationale.push({
+      step: "process",
+      why: `Runs harvest → ${wantGenerate ? "generate → " : ""}inspect → ${wantAnalyse ? "analyse → " : ""}package as one orchestrated call per environment, with every stage decision recorded in ships.decisions.json. ${wantStrict ? "Strict mode aborts on the first failing stage." : "Developer mode (default) continues past warnings and summarises errors at the end."}`,
+    });
+    if (postlude.length) {
+      rationale.push({ step: "follow-ups", why: "Orphan-token scanning and graph export sit outside `process` — run them on demand after the pipeline succeeds." });
+    }
+  } else {
+    rationale.push({
+      step: "harvest",
+      why: tokensAlready
+        ? "Source is already tokenised; harvest copies into payload/ as-is."
+        : tokenModel === "prefix"
+          ? `Applies the prefix-token rule: '${prefix || "<PREFIX>"}_' becomes '{{DB_PREFIX}}_' in both file contents and filenames (eponymy preserved).`
+          : tokenModel === "per_database"
+            ? "Reads config/tokenise.conf and produces per-database tokens like {{DOM_STD_T}}, applied to content and filenames."
+            : "Cleans payload/ and copies the source in. Pick a tokenisation mode in Q2/Q3 before running.",
+    });
+    if (wantGenerate) rationale.push({ step: "generate", why: "Builds view-layer DDL from the harvested base tables, following the object-placement standard." });
+    rationale.push({ step: "inspect", why: "Runs Step 0 lint + Step 0b token-coverage. Auto-loads config/inspect.conf. NEVER pass an env file behind --config." });
+    if (wantScan) rationale.push({ step: "scan", why: "Validates every {{TOKEN}} reference against every env .conf, and fails if a defined token is never referenced (orphan)." });
+    if (wantAnalyse) rationale.push({
+      step: "analyse",
+      why: wantGraph
+        ? "Computes deploy waves AND exports dependency graph files (incl. OpenLineage JSON) under $GRAPHS_DIR."
+        : "Computes deploy waves from cross-object dependencies and emits _waves.txt so DDL deploys in the right order.",
+    });
+    rationale.push({ step: "package", why: "Builds the deployable release artefact per environment, resolving every {{TOKEN}} from that env's .conf file." });
+  }
+
+  const script = { sharedVars, deployVars, prelude, perEnv, postlude, headNotes, mode };
+
+  // ---- tokenise.conf ----
+  let tokeniseConf = null;
+  if (!tokensAlready && tokenModel) {
+    tokeniseConf = makeTokeniseConf(tokenModel, prefix || "<PREFIX>");
+  }
+
+  // ---- env skeletons (only when NOT already tokenised) ----
+  const envFiles = [];
+  if (!tokensAlready) {
+    for (const e of envList) {
+      envFiles.push({ name: `config/env/${e}.conf`, body: makeEnvConf(e, tokenModel, prefix) });
+    }
+  }
+
+  // ---- Guardrails (handover §6 + var-reuse note) ----
+  const guardrails = [
+    "Step 0b coverage requires every token referenced by the payload (content AND filenames) to be bound in every env file.",
+    "config/inspect.conf is rule=SEVERITY; config/env/<ENV>.conf is TOKEN=value. Never pass an env file behind inspect --config.",
+    "inspect has no --env flag — coverage auto-discovers config/env/*.conf.",
+    "harvest cleans payload/ by default. Use --keep-existing only for an overlay re-harvest.",
+    "Atomic + eponymous applies to DDL only. DCL is grouped per granted-ON database; DML is kept whole (order preserved).",
+    "ships process is the single front-door for a full pipeline run; scan and graph export sit alongside, not inside it.",
+    "Long paths live in shell variables ($PROJECT, $SOURCE, $ENV_CONFIG) — retargeting is a one-line edit at the top of the script.",
+  ];
+
+  const issues = validate(a);
+  return { script, rationale, tokeniseConf, envFiles, os, guardrails, issues, mode, tokensAlready, envList, projDir, pkgName };
+}
+
+// ---------------------------------------------------------------------------
+// Render the script model in a chosen shell.
+// shell ∈ { "bash", "powershell", "cmd" }.
+// ---------------------------------------------------------------------------
+function renderScript(script, shell) {
+  const out = [];
+  // For cmd, rewrite $VAR_NAME → %VAR_NAME%. bash and PowerShell both use $VAR.
+  const xform = s => shell === "cmd" ? s.replace(/\$([A-Z_][A-Z0-9_]*)/g, "%$1%") : s;
+  const cont  = shell === "cmd" ? " ^" : shell === "powershell" ? " `" : " \\";
+  const cmnt  = shell === "cmd" ? "::" : "#";
+
+  const setVar = (name, value, commented) => {
+    const v = xform(value);
+    const pfx = commented ? (cmnt + " ") : "";
+    if (shell === "bash")            out.push(`${pfx}${name}="${v}"`);
+    else if (shell === "powershell") out.push(`${pfx}$${name} = "${v}"`);
+    else                             out.push(`${pfx}set "${name}=${v}"`);
+  };
+
+  const emitCmd = (parts) => {
+    if (parts.length === 1) { out.push(xform(parts[0])); return; }
+    const indent = "  ";
+    out.push(xform(parts[0]) + cont);
+    for (let i = 1; i < parts.length; i++) {
+      out.push(indent + xform(parts[i]) + (i < parts.length - 1 ? cont : ""));
+    }
+  };
+
+  // Shebang / shell header. PS and cmd headers include a Mark-of-the-Web (MOTW)
+  // unblock hint, because Windows SmartScreen blocks browser-downloaded .ps1
+  // and .bat files with "These files can't be opened".
+  if (shell === "bash") {
+    out.push("#!/usr/bin/env bash");
+    out.push("set -euo pipefail");
+  } else if (shell === "powershell") {
+    out.push("# PowerShell — SHIPS Navigator generated script");
+    out.push("# If Windows blocks this with 'These files can't be opened' (Mark-of-the-Web),");
+    out.push("# either copy the commands below and paste into your shell, or run first:");
+    out.push("#   Unblock-File -Path .\\ships-run.ps1");
+    out.push('$ErrorActionPreference = "Stop"');
+  } else {
+    out.push("@echo off");
+    out.push(":: If Windows blocks this with 'These files can't be opened' (Mark-of-the-Web),");
+    out.push(":: either copy the commands below and paste into your shell, or in PowerShell run:");
+    out.push("::   Unblock-File -Path .\\ships-run.bat");
+    out.push("setlocal");
+  }
+  out.push("");
+
+  if (script.headNotes && script.headNotes.length) {
+    for (const n of script.headNotes) out.push(`${cmnt} ${n}`);
+    out.push("");
+  }
+
+  out.push(`${cmnt} === Shared variables — edit these to retarget the whole script ===`);
+  for (const [n, v] of script.sharedVars) setVar(n, v, false);
+  out.push("");
+  out.push(`${cmnt} Deploy-time placeholders — uncomment + fill before running 'ships deploy'`);
+  for (const [n, v] of script.deployVars) setVar(n, v, true);
+  out.push("");
+
+  if (script.prelude.length) {
+    for (const parts of script.prelude) emitCmd(parts);
+    out.push("");
+  }
+
+  for (let i = 0; i < script.perEnv.length; i++) {
+    const b = script.perEnv[i];
+    out.push(`${cmnt} --- Environment: ${b.env} ---`);
+    for (const [n, v] of b.vars) setVar(n, v, false);
+    out.push("");
+    for (const parts of b.commands) emitCmd(parts);
+    if (i < script.perEnv.length - 1) out.push("");
+  }
+
+  if (script.postlude && script.postlude.length) {
+    out.push("");
+    out.push(`${cmnt} Optional follow-ups — 'ships process' doesn't run these`);
+    for (const parts of script.postlude) emitCmd(parts);
+  }
+
+  return out.join("\n");
+}
+
+function makeTokeniseConf(model, prefix) {
+  const header = [
+    "# config/tokenise.conf",
+    "# Generated by SHIPS Navigator.",
+    "# Each rule has the shape: <kind>::<pattern>:=<replacement>",
+    "",
+  ].join("\n");
+  if (model === "prefix") {
+    return header + [
+      `# Prefix model: '${prefix}_' -> '{{DB_PREFIX}}_' anywhere it is not already`,
+      `# inside an existing token (the (?<!\\{) guard avoids re-tokenising).`,
+      `regex::(?<!\\{)\\b${prefix}_:={{DB_PREFIX}}_`,
+      "",
+    ].join("\n");
+  }
+  return header + [
+    `# Per-database model: capture each database suffix after '${prefix}_' and`,
+    `# turn it into its own token. e.g. '${prefix}_DOM_STD_T' -> '{{DOM_STD_T}}'.`,
+    `regex::(?<!\\{)\\b${prefix}_([A-Za-z0-9]+(?:_[A-Za-z0-9]+)*):={{$1}}`,
+    "",
+  ].join("\n");
+}
+
+function makeEnvConf(envName, tokenModel, prefix) {
+  const out = [
+    `# config/env/${envName}.conf`,
+    `# Token bindings for environment: ${envName}`,
+    `# Generated by SHIPS Navigator. Replace <fill-me> values before running inspect.`,
+    "",
+  ];
+  if (!tokenModel) {
+    out.push("# Source is already tokenised — use `ships bootstrap-env-config` to seed the");
+    out.push("# real list from the payload's actual token usage. This skeleton is a fallback.");
+    out.push("");
+    return out.join("\n");
+  }
+  if (tokenModel === "prefix") {
+    out.push(`DB_PREFIX=<fill-me>`);
+    out.push("");
+    return out.join("\n");
+  }
+  const sample = prefix && prefix !== "<PREFIX>" ? prefix : "Product";
+  out.push("# One binding per database. Examples below — replace with your real list.");
+  out.push("# Run `ships scan --project <PROJ> --all-envs --show-map` after harvest to see");
+  out.push("# the exact token list the payload references.");
+  out.push(`DOM_STD_T=<fill-me>          # was ${sample}_DOM_STD_T`);
+  out.push(`DOM_STD_V=<fill-me>          # was ${sample}_DOM_STD_V`);
+  out.push(`SEM_BUS_V=<fill-me>          # was ${sample}_SEM_BUS_V`);
+  out.push("");
+  return out.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Question rendering.
+// ---------------------------------------------------------------------------
+function renderQuestions() {
+  const root = document.getElementById("questions");
+  root.innerHTML = "";
+  for (const qDef of QUESTIONS) {
+    if (qDef.show && !qDef.show(answers)) {
+      delete answers[qDef.id];
+      continue;
+    }
+    const wrap = document.createElement("div");
+    wrap.className = "question";
+
+    const lbl = document.createElement("label");
+    lbl.className = "qlabel";
+    lbl.innerHTML = qDef.label;
+    wrap.appendChild(lbl);
+
+    if (qDef.hint) {
+      const h = document.createElement("div");
+      h.className = "qhint";
+      h.innerHTML = qDef.hint;
+      wrap.appendChild(h);
+    }
+
+    if (qDef.kind === "radio") {
+      const grp = document.createElement("div");
+      grp.className = "radios";
+      for (const opt of qDef.options) {
+        const id = `${qDef.id}__${opt.value}`;
+        const oLbl = document.createElement("label");
+        oLbl.setAttribute("for", id);
+        if (answers[qDef.id] === opt.value) oLbl.classList.add("active");
+        oLbl.textContent = opt.label;
+        const inp = document.createElement("input");
+        inp.type = "radio"; inp.name = qDef.id; inp.id = id; inp.value = opt.value;
+        if (answers[qDef.id] === opt.value) inp.checked = true;
+        inp.addEventListener("change", () => {
+          answers[qDef.id] = opt.value;
+          persist(); renderAll();
+        });
+        oLbl.prepend(inp);
+        grp.appendChild(oLbl);
+      }
+      wrap.appendChild(grp);
+
+      if (qDef.warnOn) {
+        const w = qDef.warnOn(answers[qDef.id]);
+        if (w) {
+          const div = document.createElement("div");
+          div.className = "warn";
+          div.textContent = w;
+          wrap.appendChild(div);
+        }
+      }
+    } else if (qDef.kind === "text") {
+      const inp = document.createElement("input");
+      inp.type = "text";
+      inp.value = answers[qDef.id] || "";
+      inp.addEventListener("input", () => {
+        answers[qDef.id] = inp.value;
+        persist(); renderOutputs();
+      });
+      wrap.appendChild(inp);
+    } else if (qDef.kind === "checkbox") {
+      const lbl2 = document.createElement("label");
+      lbl2.className = "check";
+      const inp = document.createElement("input");
+      inp.type = "checkbox";
+      inp.checked = !!answers[qDef.id];
+      inp.addEventListener("change", () => {
+        answers[qDef.id] = inp.checked;
+        persist(); renderOutputs();
+      });
+      lbl2.appendChild(inp);
+      lbl2.appendChild(document.createTextNode(" yes"));
+      wrap.appendChild(lbl2);
+    }
+    root.appendChild(wrap);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Output rendering.
+// ---------------------------------------------------------------------------
+function renderOutputs() {
+  const plan = generatePlan();
+  renderIssues(plan.issues);
+  renderCommandsPanel(plan);
+  renderAnatomyPanel();
+  renderTokenisePanel(plan);
+  renderEnvsPanel(plan);
+  renderInspectPanel();
+  renderRationalePanel(plan);
+  renderGlossaryPanel();
+  window.__lastPlan = plan; // for Download-all
+}
+
+function renderIssues(issues) {
+  const el = document.getElementById("issues");
+  if (!issues || issues.length === 0) { el.className = "issues empty"; el.innerHTML = ""; return; }
+  el.className = "issues";
+  el.innerHTML = "<b>Heads-up:</b><ul>" + issues.map(i => `<li>${escapeHtml(i)}</li>`).join("") + "</ul>";
+}
+
+function renderCommandsPanel(plan) {
+  const panel = document.getElementById("panel-commands");
+  panel.innerHTML = "";
+
+  const modeBanner = document.createElement("div");
+  modeBanner.className = "info";
+  modeBanner.style.marginBottom = "12px";
+  modeBanner.innerHTML = (plan.mode === "quick"
+    ? "<b>Quick mode</b> — one <code>ships process</code> call per environment, runs harvest → generate → inspect → analyse → package end-to-end."
+    : "<b>Detailed mode</b> — each pipeline step shown separately for transparency, CI scripting, or selective re-runs.")
+    + " Long paths bind to shell variables (<code>$PROJECT</code>, <code>$SOURCE</code>, <code>$ENV_CONFIG</code> …) so retargeting is a one-line edit at the top.";
+  panel.appendChild(modeBanner);
+
+  // Windows MOTW warning — SmartScreen blocks downloaded .ps1 / .bat files.
+  const motwBanner = document.createElement("div");
+  motwBanner.className = "warn";
+  motwBanner.style.marginBottom = "12px";
+  motwBanner.innerHTML =
+    "<b>Windows note:</b> If you download the <code>.ps1</code> or <code>.bat</code>, Windows may block it " +
+    "(\"These files can't be opened\" — Mark-of-the-Web). Two ways round it: " +
+    "<b>(a)</b> use the <b>Copy</b> button and paste the commands into your terminal — no file, no block; or " +
+    "<b>(b)</b> in PowerShell run <code>Unblock-File -Path .\\ships-run.ps1</code> after download.";
+  panel.appendChild(motwBanner);
+
+  const psText  = renderScript(plan.script, "powershell");
+  const shText  = renderScript(plan.script, "bash");
+  const batText = renderScript(plan.script, "cmd");
+
+  // The default shell (first in the OS-based order) renders expanded; the other
+  // two collapse into <details> so users don't scroll past them but still see
+  // they exist and can compare on demand.
+  function block(title, fname, body, expanded) {
+    const wrap = expanded ? document.createElement("div") : document.createElement("details");
+    if (!expanded) wrap.style.marginBottom = "14px";
+    wrap.className = "file-block";
+
+    if (expanded) {
+      const h = document.createElement("h3");
+      h.textContent = title;
+      wrap.appendChild(h);
+    } else {
+      const sum = document.createElement("summary");
+      sum.style.cursor = "pointer";
+      sum.style.fontWeight = "600";
+      sum.style.color = "var(--td-navy)";
+      sum.style.fontFamily = "var(--td-mono)";
+      sum.style.fontSize = "13px";
+      sum.style.padding = "8px 10px";
+      sum.style.background = "var(--td-grey-1)";
+      sum.style.border = "1px solid var(--td-grey-2)";
+      sum.style.borderRadius = "3px";
+      sum.textContent = "▸ " + title + " — click to expand";
+      wrap.appendChild(sum);
+    }
+
+    const pre = document.createElement("pre");
+    pre.textContent = body;
+    wrap.appendChild(pre);
+
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    actions.appendChild(makeCopyBtn(body));
+    actions.appendChild(makeDownloadBtn(fname, body));
+    wrap.appendChild(actions);
+
+    panel.appendChild(wrap);
+  }
+
+  if (plan.os === "windows") {
+    block("PowerShell (.ps1) — default for Windows paths", "ships-run.ps1", psText,  true);
+    block("Windows cmd (.bat)",                            "ships-run.bat", batText, false);
+    block("POSIX bash (.sh)",                              "ships-run.sh",  shText,  false);
+  } else {
+    block("POSIX bash (.sh) — default for POSIX paths",    "ships-run.sh",  shText,  true);
+    block("PowerShell (.ps1)",                             "ships-run.ps1", psText,  false);
+    block("Windows cmd (.bat)",                            "ships-run.bat", batText, false);
+  }
+}
+
+function renderTokenisePanel(plan) {
+  const panel = document.getElementById("panel-tokenise");
+  panel.innerHTML = "";
+
+  const intro = document.createElement("div");
+  intro.className = "info";
+  intro.style.marginBottom = "12px";
+  intro.innerHTML =
+    "<b>What it is.</b> SHIPS' tokenisation rule file — regex substitutions that rewrite literal database names " +
+    "(e.g. <code>CustomerDNA_DOM_STD_T</code>) into <code>{{TOKEN}}</code> placeholders so the same payload can be packaged for any environment." +
+    "<br><br><b>Where it lives.</b> <code>&lt;project&gt;/config/tokenise.conf</code>." +
+    "<br><br><b>Used by.</b> <code>ships harvest</code> (and therefore <code>ships process</code>) reads it and applies every rule " +
+    "to BOTH file contents AND filenames — that's how eponymy is preserved (a tokenised payload still has files named after the tokens they hold).";
+  panel.appendChild(intro);
+
+  if (!plan.tokeniseConf) {
+    const e = document.createElement("div");
+    e.className = "empty";
+    e.textContent = plan.tokensAlready
+      ? "Source is already tokenised — no tokenise.conf needed for this run."
+      : "Answer Q2 (already tokenised?) and Q3 (token shape) to generate tokenise.conf.";
+    panel.appendChild(e);
+    return;
+  }
+  const fb = document.createElement("div");
+  fb.className = "file-block";
+  const h = document.createElement("h3");
+  h.textContent = "config/tokenise.conf";
+  fb.appendChild(h);
+  const pre = document.createElement("pre");
+  pre.textContent = plan.tokeniseConf;
+  fb.appendChild(pre);
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  actions.appendChild(makeCopyBtn(plan.tokeniseConf));
+  actions.appendChild(makeDownloadBtn("tokenise.conf", plan.tokeniseConf));
+  fb.appendChild(actions);
+  panel.appendChild(fb);
+}
+
+function renderEnvsPanel(plan) {
+  const panel = document.getElementById("panel-envs");
+  panel.innerHTML = "";
+
+  const intro = document.createElement("div");
+  intro.className = "info";
+  intro.style.marginBottom = "12px";
+  intro.innerHTML =
+    "<b>What they are.</b> One file per target environment, binding every <code>{{TOKEN}}</code> the payload references to a concrete value for that environment " +
+    "(e.g. <code>DB_PREFIX=CustomerDNA_DEV</code> in DEV, <code>DB_PREFIX=CustomerDNA_PRD</code> in PRD)." +
+    "<br><br><b>Where they live.</b> <code>&lt;project&gt;/config/env/&lt;ENV&gt;.conf</code> — one per environment." +
+    "<br><br><b>Used by.</b> <code>ships inspect</code> (Step 0b auto-discovers every <code>config/env/*.conf</code> and fails if any token is unbound), " +
+    "<code>ships scan</code> with <code>--all-envs</code>, and <code>ships package</code> via <code>--env-config</code> " +
+    "(resolves the tokens into the concrete values baked into the per-env package)." +
+    "<br><br><b>Hard rule.</b> Every token referenced by the payload (content AND filenames) must be bound in every env file. " +
+    "Never put rule severities here — that's <code>config/inspect.conf</code>, a different file with a different format.";
+  panel.appendChild(intro);
+
+  if (plan.tokensAlready) {
+    const note = document.createElement("div");
+    note.className = "warn";
+    note.innerHTML = "<b>Source is already tokenised.</b> The wizard emits <code>ships bootstrap-env-config</code> calls (see the Commands tab) so SHIPS will scaffold the real env files from the payload's actual token usage. No static env skeleton needed.";
+    panel.appendChild(note);
+    return;
+  }
+  if (!plan.envFiles.length) {
+    const e = document.createElement("div");
+    e.className = "empty";
+    e.textContent = "List your target environments in Q10 (e.g. DEV, TST, PRD) to generate env skeletons.";
+    panel.appendChild(e);
+    return;
+  }
+  for (const f of plan.envFiles) {
+    const fb = document.createElement("div");
+    fb.className = "file-block";
+    const h = document.createElement("h3");
+    h.textContent = f.name;
+    fb.appendChild(h);
+    const pre = document.createElement("pre");
+    pre.textContent = f.body;
+    fb.appendChild(pre);
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    actions.appendChild(makeCopyBtn(f.body));
+    actions.appendChild(makeDownloadBtn(f.name.split("/").pop(), f.body));
+    fb.appendChild(actions);
+    panel.appendChild(fb);
+  }
+}
+
+function renderRationalePanel(plan) {
+  const panel = document.getElementById("panel-rationale");
+  panel.innerHTML = "";
+
+  const ol = document.createElement("ol");
+  for (const r of plan.rationale) {
+    const li = document.createElement("li");
+    const s = document.createElement("strong");
+    s.textContent = r.step + ": ";
+    li.appendChild(s);
+    li.appendChild(document.createTextNode(r.why));
+    ol.appendChild(li);
+  }
+  panel.appendChild(ol);
+
+  const guards = document.createElement("div");
+  const gh = document.createElement("h3");
+  gh.style.marginTop = "18px"; gh.style.color = "var(--td-navy)";
+  gh.textContent = "Guardrails to keep in mind";
+  guards.appendChild(gh);
+  const ul = document.createElement("ul");
+  for (const g of plan.guardrails) {
+    const li = document.createElement("li");
+    li.textContent = g;
+    li.style.marginBottom = "8px";
+    ul.appendChild(li);
+  }
+  guards.appendChild(ul);
+  panel.appendChild(guards);
+
+  const deploy = document.createElement("div");
+  deploy.className = "info";
+  deploy.style.marginTop = "14px";
+  deploy.innerHTML = "<b>When you're ready to ship</b>, hand the built package to <code>ships deploy &lt;pkg.zip&gt; --host &lt;host&gt; --user &lt;user&gt;</code>. The wizard stops at <code>package</code>; deployment needs a live Teradata connection.";
+  panel.appendChild(deploy);
+
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  const text = JSON.stringify(buildPlanJson(), null, 2);
+  actions.appendChild(makeCopyBtn(text, "Copy plan.json"));
+  actions.appendChild(makeDownloadBtn("plan.json", text));
+  panel.appendChild(actions);
+}
+
+// ---------------------------------------------------------------------------
+// Anatomy of a SHIPS project (the scaffolded layout — what `ships scaffold`
+// creates on disk). Source of truth: src/td_release_packager/scaffolder.py
+// `_create_directories` + the `_generate_*` helpers. If SHIPS reorganises the
+// layout, regenerate this from that file rather than chase symptoms here.
+// ---------------------------------------------------------------------------
+const ANATOMY = {
+  name: "<project>/",
+  desc: "Created by <code>ships scaffold --name &lt;NAME&gt; --output &lt;PARENT&gt;</code>. Everything below is relative to this root.",
+  children: [
+    { name: ".gitignore",      desc: "Standard ignores — excludes <code>releases/</code>, work directories, and IDE noise so the repo stays clean." },
+    { name: "README.md",       desc: "Placeholder written by scaffold. Describe your project here for the next human." },
+    { name: "ships.yaml",      desc: "Project master config. References <code>config/inspect.conf</code> and <code>config/object_placement.yaml</code>; where you wire up signing keys, change-management requirements, and wave-ordering policy." },
+    { name: ".build_counter",  desc: "Auto-incremented by every <code>ships package</code> so each build gets a unique number. SHIPS reads this to stamp <code>build_number</code> into the package manifest." },
+    { name: "config/", desc: "All project configuration. Three flavours of file with three different formats — each has its own tab in this wizard.",
+      children: [
+        { name: "env/&lt;ENV&gt;.conf  <span style='opacity:.6'>(one per env)</span>", desc: "<b>TOKEN=value</b> bindings. Every <code>{{TOKEN}}</code> the payload references must be bound here, for every env. See the <b>env files</b> tab." },
+        { name: "inspect.conf",         desc: "<b>rule=SEVERITY</b> lint config. See the <b>inspect.conf</b> tab. Don't confuse with env files — they are not interchangeable." },
+        { name: "tokenise.conf",        desc: "<b>Regex rewrite rules</b> applied during harvest to turn literal database names into <code>{{TOKEN}}</code> placeholders (content AND filenames). See the <b>tokenise.conf</b> tab. Not written by scaffold — created via this wizard or by hand." },
+        { name: "object_placement.yaml", desc: "Maps tables databases to view databases for the <code>object_placement</code> lint rule (per the Teradata object-placement standard). Optional — leave at defaults if you're not enforcing placement." },
+      ],
+    },
+    { name: "payload/", desc: "All deployable artefacts. <code>ships harvest</code> writes here; <code>ships package</code> reads from here. The subtree mirrors the deploy phase order (00 → 05).",
+      children: [
+        { name: "database/", desc: "Per-phase, per-object-kind directories.",
+          children: [
+            { name: "system/   <span style='opacity:.6'>(phase 00)</span>",        desc: "Cluster-scope objects that must exist before anything else: <code>maps/</code>, <code>roles/</code>, <code>profiles/</code>, <code>authorizations/</code>, <code>foreign_servers/</code>." },
+            { name: "pre-requisites/   <span style='opacity:.6'>(phase 01)</span>", desc: "<code>databases/</code> and <code>users/</code> — the CREATE statements that DDL in later phases depends on." },
+            { name: "DCL/   <span style='opacity:.6'>(phase 02)</span>",            desc: "Data Control Language — grants. Subfolders: <code>roles/</code>, <code>users/</code>, <code>inter_db/</code>. SHIPS groups DCL per granted-ON database; files are never auto-split." },
+            { name: "DDL/   <span style='opacity:.6'>(phase 03)</span>",            desc: "Atomic, eponymous DDL files — one object per file, filename matches <code>DB.Object.&lt;ext&gt;</code> where the extension is type-specific (NOT <code>.sql</code>): <code>.tbl</code> tables, <code>.viw</code> views, <code>.mcr</code> macros, <code>.spl</code> procedures, <code>.fnc</code> functions, <code>.trg</code> triggers, <code>.jix</code> join indexes, <code>.sjr</code> SQLJ install scripts, <code>.sto</code> script table operators. Subfolders by kind: <code>tables/</code>, <code>views/</code>, <code>macros/</code>, <code>procedures/</code>, <code>functions/</code>, <code>triggers/</code>, <code>join_indexes/</code>, <code>jar_install/</code>, <code>script_table_operators/</code>." },
+            { name: "DML/   <span style='opacity:.6'>(phase 04)</span>",            desc: "Data Manipulation. Files kept whole; order preserved. Pin execution order with a curated <code>_order.txt</code>." },
+            { name: "post-install/   <span style='opacity:.6'>(phase 05)</span>",   desc: "Anything that has to run AFTER object creation — <code>COLLECT STATISTICS</code>, <code>REPLACE PROCEDURE COMPILE</code>, materialisation seeds." },
+          ],
+        },
+      ],
+    },
+    { name: "releases/", desc: "Where <code>ships package</code> drops the built <code>.zip</code> artefacts and their sidecars (<code>.hmac</code> for symmetric signing, <code>.sig</code> for asymmetric Ed25519). This directory is git-ignored by default." },
+  ],
+};
+
+function renderAnatomyPanel() {
+  const panel = document.getElementById("panel-anatomy");
+  if (panel.dataset.rendered === "1") return;
+  panel.dataset.rendered = "1";
+
+  const intro = document.createElement("div");
+  intro.className = "info";
+  intro.style.marginBottom = "12px";
+  intro.innerHTML =
+    "<b>What this is.</b> The layout <code>ships scaffold</code> creates on disk — the project a user interacts with daily while authoring DDL." +
+    "<br><br><b>Phase numbers matter.</b> The <code>00 → 05</code> ordering under <code>payload/database/</code> is the deploy phase order: system → pre-requisites → DCL → DDL → DML → post-install. <code>ships analyse</code> computes the intra-phase waves on top of this; <code>ships package</code> bakes both into the deployable archive." +
+    "<br><br><b>Click any folder to expand it.</b> Leaf items are files; the description below each row explains its role.";
+  panel.appendChild(intro);
+
+  panel.appendChild(renderAnatomyNode(ANATOMY, /* expanded */ true));
+}
+
+function renderAnatomyNode(node, expanded) {
+  const hasChildren = !!(node.children && node.children.length);
+  if (!hasChildren) {
+    const wrap = document.createElement("div");
+    const row = document.createElement("div");
+    row.className = "leaf";
+    row.innerHTML = node.name;
+    wrap.appendChild(row);
+    if (node.desc) {
+      const d = document.createElement("div");
+      d.className = "desc";
+      d.innerHTML = node.desc;
+      wrap.appendChild(d);
+    }
+    return wrap;
+  }
+
+  const det = document.createElement("details");
+  if (expanded) det.open = true;
+  const sum = document.createElement("summary");
+  sum.innerHTML = "<b>" + node.name + "</b>";
+  det.appendChild(sum);
+  if (node.desc) {
+    const d = document.createElement("div");
+    d.className = "desc";
+    d.innerHTML = node.desc;
+    det.appendChild(d);
+  }
+  for (const child of node.children) det.appendChild(renderAnatomyNode(child, false));
+  return det;
+}
+
+function renderInspectPanel() {
+  const panel = document.getElementById("panel-inspect");
+  if (panel.dataset.rendered === "1") return;
+  panel.dataset.rendered = "1";
+
+  const intro = document.createElement("div");
+  intro.className = "info";
+  intro.style.marginBottom = "12px";
+  intro.innerHTML =
+    "<b>What it is.</b> SHIPS' validation rule config. Controls which lint rules <code>ships inspect</code> runs and at what severity." +
+    "<br><br><b>Where it lives.</b> <code>&lt;project&gt;/config/inspect.conf</code>." +
+    "<br><br><b>How it's created.</b> <code>ships scaffold</code> writes a sensible default the first time you scaffold a project. You then hand-edit to tighten or relax specific rules; the MCP tool <code>ships_author_inspect_config</code> can author/edit it programmatically via an apply-diff flow." +
+    "<br><br><b>Used by.</b> <code>ships inspect</code> auto-loads it when <code>--config</code> is omitted; <code>ships process</code> inherits the same defaulting through its inspect stage. There is no per-environment variant — one inspect.conf governs all envs.";
+  panel.appendChild(intro);
+
+  const danger = document.createElement("div");
+  danger.className = "warn";
+  danger.style.marginBottom = "12px";
+  danger.innerHTML =
+    "<b>Critical: do not confuse with env files.</b> <code>inspect.conf</code> is <code>rule=SEVERITY</code>; " +
+    "<code>config/env/&lt;ENV&gt;.conf</code> is <code>TOKEN=value</code>. " +
+    "Never pass an env file behind <code>inspect --config</code> — SHIPS will try to parse <code>NAME=value</code> token lines as rule severities and fail with messages like " +
+    "<code>invalid severity 'DEV' for rule 'ships_env'</code>. The wizard's emitted <code>inspect</code> command never carries <code>--config</code> for exactly this reason.";
+  panel.appendChild(danger);
+
+  const format = document.createElement("div");
+  const fh = document.createElement("h3");
+  fh.style.marginTop = "8px"; fh.style.color = "var(--td-navy)"; fh.textContent = "Format";
+  format.appendChild(fh);
+  const fp = document.createElement("p");
+  fp.style.fontSize = "13px"; fp.style.margin = "4px 0 8px 0";
+  fp.innerHTML = "One rule per line: <code>rule_name=SEVERITY</code>. Lines beginning with <code>#</code> are comments. Severity vocabulary:";
+  format.appendChild(fp);
+  const ul = document.createElement("ul");
+  ul.style.fontSize = "13px";
+  const sevs = [
+    ["ERROR",   "Must fix before deployment. Blocks the build."],
+    ["WARNING", "Advisory. Doesn't block — but <code>--strict</code> on <code>process</code> promotes every WARNING to ERROR."],
+    ["INFO",    "Recorded in the report and <code>ships.decisions.json</code> for audit, doesn't count as a failure. Useful for deliberate policy choices."],
+    ["OFF",     "Rule is disabled and silent. Stays off even in <code>--strict</code> mode."],
+  ];
+  for (const [sev, desc] of sevs) {
+    const li = document.createElement("li");
+    li.style.marginBottom = "4px";
+    li.innerHTML = "<code>" + sev + "</code> — " + desc;
+    ul.appendChild(li);
+  }
+  format.appendChild(ul);
+  panel.appendChild(format);
+
+  const sample = document.createElement("div");
+  const sh = document.createElement("h3");
+  sh.style.marginTop = "12px"; sh.style.color = "var(--td-navy)"; sh.textContent = "Sample (excerpt)";
+  sample.appendChild(sh);
+  const sp = document.createElement("pre");
+  sp.textContent = [
+    "# Structural",
+    "db_qualifier=ERROR",
+    "eponymous=WARNING",
+    "one_object=WARNING",
+    "",
+    "# Statement boundary",
+    "ddl_terminator=ERROR",
+    "",
+    "# Token coverage",
+    "zero_tokens=ERROR",
+    "",
+    "# Security",
+    "secret_scan=ERROR",
+    "vault_ref=ERROR",
+  ].join("\n");
+  sample.appendChild(sp);
+  const note = document.createElement("p");
+  note.style.fontSize = "12px"; note.style.color = "var(--td-grey-3)"; note.style.marginTop = "6px";
+  note.innerHTML = "Illustrative only — the file <code>scaffold</code> writes is longer and the defaults can shift. Look at <code>examples/callcentre/config/inspect.conf</code> in this repo for a current full file.";
+  sample.appendChild(note);
+  panel.appendChild(sample);
+
+  const fixable = document.createElement("div");
+  const fxh = document.createElement("h3");
+  fxh.style.marginTop = "12px"; fxh.style.color = "var(--td-navy)"; fxh.textContent = "Auto-fixable rules";
+  fixable.appendChild(fxh);
+  const fxp = document.createElement("p");
+  fxp.style.fontSize = "13px"; fxp.style.margin = "4px 0";
+  fxp.innerHTML = "Some rules can be auto-fixed by <code>ships inspect</code> directly (e.g. <code>--fix-grants</code> appends missing <code>.grt</code> entries, <code>--fix-ddl-terminators</code> appends missing semi-colons, <code>--fix-non-ascii</code> rewrites em-dashes / arrows / bullets to ASCII). Run <code>ships list-fixable-rules</code> to see what's automatable in your version, and <code>ships fix</code> to apply them where safe.";
+  fixable.appendChild(fxp);
+  panel.appendChild(fixable);
+}
+
+function renderGlossaryPanel() {
+  const panel = document.getElementById("panel-glossary");
+  if (panel.dataset.rendered === "1") return;
+  panel.dataset.rendered = "1";
+  const terms = [
+    ["atomic", "One database object per file. SHIPS enforces this so dependency analysis can reason about each object independently."],
+    ["eponymous", "Filename matches the object inside it (<code>DB.Object.ext</code>). Required for deterministic packaging."],
+    ["coverage (Step 0b)", "Every <code>{{TOKEN}}</code> the payload references (content AND filenames) must be bound in every <code>config/env/*.conf</code>. Missing bindings fail inspect."],
+    ["view layer", "Companion views generated alongside base tables per the object-placement standard: <code>STD_V</code> (locking views), <code>ACL_V</code> (access views), <code>BUS_V</code> (business views)."],
+    ["wave", "An ordered batch of objects with no intra-batch dependencies. <code>ships analyse</code> emits <code>_waves.txt</code> so deploy proceeds wave-by-wave."],
+    ["token candidate", "A literal database name that <em>could</em> become a token. Discoverable with <code>ships analyse_token_candidates</code> (MCP) or implicitly during harvest."],
+    ["OpenLineage", "Open standard for data-lineage events. <code>ships analyse --graph</code> emits OpenLineage JSON among the graph exports."],
+    ["DDL", "Data Definition Language — the statements that create database objects (<code>CREATE TABLE</code>, <code>CREATE VIEW</code>, etc.). SHIPS enforces one object per DDL file (atomic) with a filename that matches the object (eponymous), and uses a type-specific extension per kind — <code>.tbl</code> tables, <code>.viw</code> views, <code>.mcr</code> macros, <code>.spl</code> procedures, <code>.fnc</code> functions, <code>.trg</code> triggers, etc. — NOT <code>.sql</code>."],
+    ["DCL", "Data Control Language — grants (<code>.dcl</code> files). SHIPS groups DCL per granted-ON database; it is not subject to atomic/eponymous splitting."],
+    ["DML", "Data Manipulation Language (<code>.dml</code> files). SHIPS keeps DML files whole, preserves order, and does not split them."],
+  ];
+  const dl = document.createElement("dl");
+  for (const [t, d] of terms) {
+    const dt = document.createElement("dt"); dt.textContent = t;
+    const dd = document.createElement("dd"); dd.innerHTML = d;
+    dl.appendChild(dt); dl.appendChild(dd);
+  }
+  panel.appendChild(dl);
+}
+
+function buildPlanJson() {
+  return {
+    mode: answers["mode.style"] || "quick",
+    source: answers["source.type"] === "github"
+      ? { type: "github", owner_repo: answers["source.owner_repo"], ref: answers["source.ref"] || "main" }
+      : { type: "filesystem", dir: answers["source.dir"] },
+    tokens: {
+      already: answers["tokens.already"],
+      model: answers["tokens.model"] || null,
+      prefix: answers["tokens.prefix"] || null,
+    },
+    atomic: { eponymous: answers["atomic.eponymous"] },
+    generate: { enabled: answers["generate.enabled"] || "unsure" },
+    analyse: {
+      enabled: answers["analyse.enabled"] || "yes",
+      graph: answers["analyse.graph"] || "no",
+      namespace: answers["analyse.namespace"] || "teradata://ships-analysis",
+      projectName: answers["analyse.projectName"] || "ships-project",
+    },
+    scan: { enabled: answers["scan.enabled"] || "no" },
+    envs: parseEnvs(answers["envs"]),
+    project: { dir: answers["project.dir"], scaffolded: !!answers["project.scaffolded"] },
+    package: { name: answers["package.name"] || "create_objects" },
+    strict: !!answers["process.strict"],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Copy + Download buttons (offline — no network, no clipboard API dep).
+// ---------------------------------------------------------------------------
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+}
+function makeCopyBtn(text, label) {
+  const b = document.createElement("button");
+  b.className = "btn";
+  b.textContent = label || "Copy";
+  b.addEventListener("click", () => {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      b.textContent = "Copied!";
+      setTimeout(() => { b.textContent = label || "Copy"; }, 1200);
+    } catch (e) {
+      b.textContent = "Copy failed";
+    }
+  });
+  return b;
+}
+function makeDownloadBtn(filename, text) {
+  const b = document.createElement("button");
+  b.className = "btn secondary";
+  b.textContent = "Download " + filename;
+  b.addEventListener("click", () => downloadBlob(filename, new Blob([text], { type: "text/plain" })));
+  return b;
+}
+function downloadBlob(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ---------------------------------------------------------------------------
+// Vanilla-JS ZIP encoder (STORE only, no deflate). ~80 lines.
+// Lets the wizard ship a single .zip of every generated file without a CDN.
+// ---------------------------------------------------------------------------
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(bytes) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) c = (c >>> 8) ^ CRC_TABLE[(c ^ bytes[i]) & 0xFF];
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function encUtf8(s) { return new TextEncoder().encode(s); }
+
+function buildZip(files /* [{name, body}] */) {
+  const dosTime = 0;
+  const dosDate = ((2026 - 1980) << 9) | (1 << 5) | 1; // 2026-01-01 — fixed for determinism
+  const local = [];
+  const central = [];
+  let offset = 0;
+  for (const f of files) {
+    const name = encUtf8(f.name);
+    const data = encUtf8(f.body);
+    const crc = crc32(data);
+    const size = data.length;
+
+    const lh = new Uint8Array(30 + name.length);
+    const lv = new DataView(lh.buffer);
+    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint16(4, 20, true);
+    lv.setUint16(6, 0x0800, true); // UTF-8 flag
+    lv.setUint16(8, 0, true);      // store
+    lv.setUint16(10, dosTime, true);
+    lv.setUint16(12, dosDate, true);
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, size, true);
+    lv.setUint32(22, size, true);
+    lv.setUint16(26, name.length, true);
+    lv.setUint16(28, 0, true);
+    lh.set(name, 30);
+    const blk = new Uint8Array(lh.length + data.length);
+    blk.set(lh, 0); blk.set(data, lh.length);
+    local.push(blk);
+
+    const cd = new Uint8Array(46 + name.length);
+    const cv = new DataView(cd.buffer);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true);
+    cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0x0800, true);
+    cv.setUint16(10, 0, true);
+    cv.setUint16(12, dosTime, true);
+    cv.setUint16(14, dosDate, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, size, true);
+    cv.setUint32(24, size, true);
+    cv.setUint16(28, name.length, true);
+    cv.setUint16(30, 0, true);
+    cv.setUint16(32, 0, true);
+    cv.setUint16(34, 0, true);
+    cv.setUint16(36, 0, true);
+    cv.setUint32(38, 0, true);
+    cv.setUint32(42, offset, true);
+    cd.set(name, 46);
+    central.push(cd);
+
+    offset += blk.length;
+  }
+  const cdSize = central.reduce((a, b) => a + b.length, 0);
+  const eocd = new Uint8Array(22);
+  const ev = new DataView(eocd.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(4, 0, true);
+  ev.setUint16(6, 0, true);
+  ev.setUint16(8, files.length, true);
+  ev.setUint16(10, files.length, true);
+  ev.setUint32(12, cdSize, true);
+  ev.setUint32(16, offset, true);
+  ev.setUint16(20, 0, true);
+
+  const total = offset + cdSize + 22;
+  const out = new Uint8Array(total);
+  let p = 0;
+  for (const c of local)   { out.set(c, p); p += c.length; }
+  for (const c of central) { out.set(c, p); p += c.length; }
+  out.set(eocd, p);
+  return out;
+}
+
+function downloadAllBundle() {
+  const plan = window.__lastPlan;
+  if (!plan) return;
+  const files = [];
+
+  // Commands in all three shells.
+  files.push({ name: "ships-run.ps1", body: renderScript(plan.script, "powershell") });
+  files.push({ name: "ships-run.sh",  body: renderScript(plan.script, "bash") });
+  files.push({ name: "ships-run.bat", body: renderScript(plan.script, "cmd") });
+
+  if (plan.tokeniseConf) files.push({ name: "config/tokenise.conf", body: plan.tokeniseConf });
+
+  for (const f of plan.envFiles) files.push({ name: f.name, body: f.body });
+
+  files.push({ name: "plan.json", body: JSON.stringify(buildPlanJson(), null, 2) });
+
+  const readme = [
+    "# SHIPS Navigator bundle",
+    "",
+    "Generated by the offline SHIPS Navigator wizard.",
+    "",
+    "## Files",
+    "",
+    "- `ships-run.ps1` / `ships-run.sh` / `ships-run.bat` — the command sequence in PowerShell, bash, and cmd. Pick the one for your shell.",
+    plan.tokeniseConf ? "- `config/tokenise.conf` — token rewrite rules." : null,
+    plan.envFiles.length ? "- `config/env/*.conf` — env file skeletons (replace `<fill-me>` before running)." : null,
+    plan.tokensAlready ? "- (No env skeletons — source is already tokenised; the script runs `ships bootstrap-env-config` to seed real ones.)" : null,
+    "- `plan.json` — the answers you gave. Paste into the wizard to re-hydrate.",
+    "",
+    "## Running",
+    "",
+    "Drop these files into your SHIPS project root (or run from the parent directory). The scripts assume `ships` is on PATH.",
+    "Long paths bind to shell variables at the top of each script — retargeting is a one-line edit to `$OUTPUT_ROOT`, `$NAME`, or `$SOURCE`.",
+    "",
+    "## Guardrails",
+    "",
+    ...plan.guardrails.map(g => "- " + g),
+    "",
+  ].filter(Boolean).join("\n");
+  files.push({ name: "README.md", body: readme });
+
+  const bytes = buildZip(files);
+  downloadBlob("ships-navigator-bundle.zip", new Blob([bytes], { type: "application/zip" }));
+}
+
+// ---------------------------------------------------------------------------
+// Tab switching + global wiring.
+// ---------------------------------------------------------------------------
+function setTab(id) {
+  activeTab = id;
+  for (const b of document.querySelectorAll("#tabs button")) b.classList.toggle("active", b.dataset.tab === id);
+  for (const p of document.querySelectorAll(".panel")) p.classList.toggle("active", p.id === "panel-" + id);
+  persist();
+}
+document.getElementById("tabs").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-tab]");
+  if (btn) setTab(btn.dataset.tab);
+});
+
+document.getElementById("plan-apply").addEventListener("click", () => {
+  const raw = document.getElementById("plan-import").value.trim();
+  if (!raw) return;
+  try {
+    applyPlan(JSON.parse(raw));
+    persist(); renderAll();
+  } catch (err) {
+    alert("Could not parse plan.json: " + err.message);
+  }
+});
+document.getElementById("plan-clear").addEventListener("click", () => {
+  document.getElementById("plan-import").value = "";
+});
+document.getElementById("reset-all").addEventListener("click", () => {
+  if (!confirm("Clear all answers? This cannot be undone.")) return;
+  for (const k of Object.keys(answers)) delete answers[k];
+  try { localStorage.removeItem(STORAGE_KEY); } catch (e) { /* ignore */ }
+  renderAll();
+});
+document.getElementById("download-all").addEventListener("click", downloadAllBundle);
+
+function renderAll() {
+  renderQuestions();
+  renderOutputs();
+  // Restore tab after re-render
+  setTab(activeTab);
+}
+
+hydrate();
+renderAll();
+</script>
+</body>
+</html>
