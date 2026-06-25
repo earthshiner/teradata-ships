@@ -21,6 +21,8 @@ Answers to the most common questions. Organised by topic — jump to the section
 
 ## Tokenisation and database names
 
+> ⚠️ **Deprecation note (closes [#388](https://github.com/earthshiner/teradata-ships/issues/388)):** `token_map.conf` and the `--token-map` / `--generate-token-map` flags are kept for back-compatibility but should not be used in new projects. **Prefer `config/tokenise.conf`** — regex-based with capture groups, strictly more powerful. Authored via the SHIPS Navigator wizard (`tools/navigator/ships-navigator.html`), the `ships_author_token_map` MCP tool, or by hand. See `examples/callcentre/config/tokenise.conf` for a working example. The legacy guidance below still works.
+
 ### My DDL still has hardcoded database names after harvest. Nothing was tokenised.
 
 Two things to check:
@@ -307,6 +309,8 @@ Exit code: 0 = clean, 1 = at least one environment has undefined tokens (or orph
 ---
 
 ### What is the difference between `token_map.conf` and the env config files?
+
+> ⚠️ For new projects, the relevant question is the difference between `config/tokenise.conf` (regex-based rewrite rules — supersedes `token_map.conf`) and `config/env/<ENV>.conf` (token-to-value bindings). The split below still applies; just substitute `tokenise.conf` for `token_map.conf`.
 
 They serve two different purposes:
 
