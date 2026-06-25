@@ -202,6 +202,22 @@
   .toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
   .glossary dt { font-weight: 600; color: var(--td-orange); margin-top: 10px; }
   .glossary dd { margin: 4px 0 8px 0; font-size: 13px; }
+  .anatomy details { margin-left: 0; }
+  .anatomy details details { margin-left: 18px; border-left: 1px dotted var(--td-grey-2); padding-left: 10px; }
+  .anatomy summary {
+    cursor: pointer; padding: 4px 0;
+    font-family: var(--td-mono); font-size: 13px; color: var(--td-navy);
+  }
+  .anatomy summary:hover { color: var(--td-orange); }
+  .anatomy .leaf {
+    padding: 4px 0 4px 18px;
+    font-family: var(--td-mono); font-size: 13px; color: var(--td-navy);
+  }
+  .anatomy .leaf::before { content: "▫ "; color: var(--td-orange); }
+  .anatomy .desc {
+    font-family: inherit; color: var(--td-grey-3); font-size: 12px;
+    margin: 2px 0 8px 22px; line-height: 1.4;
+  }
 </style>
 </head>
 <body>
@@ -241,6 +257,7 @@
     </h2>
     <div class="tabs" id="tabs">
       <button data-tab="commands" class="active">Commands</button>
+      <button data-tab="anatomy">Anatomy</button>
       <button data-tab="tokenise">tokenise.conf</button>
       <button data-tab="envs">env files</button>
       <button data-tab="inspect">inspect.conf</button>
@@ -249,6 +266,7 @@
     </div>
 
     <div id="panel-commands" class="panel active"></div>
+    <div id="panel-anatomy" class="panel anatomy"></div>
     <div id="panel-tokenise" class="panel"></div>
     <div id="panel-envs" class="panel"></div>
     <div id="panel-inspect" class="panel"></div>
@@ -973,6 +991,7 @@ function renderOutputs() {
   const plan = generatePlan();
   renderIssues(plan.issues);
   renderCommandsPanel(plan);
+  renderAnatomyPanel();
   renderTokenisePanel(plan);
   renderEnvsPanel(plan);
   renderInspectPanel();
@@ -1199,6 +1218,95 @@ function renderRationalePanel(plan) {
   actions.appendChild(makeCopyBtn(text, "Copy plan.json"));
   actions.appendChild(makeDownloadBtn("plan.json", text));
   panel.appendChild(actions);
+}
+
+// ---------------------------------------------------------------------------
+// Anatomy of a SHIPS project (the scaffolded layout — what `ships scaffold`
+// creates on disk). Source of truth: src/td_release_packager/scaffolder.py
+// `_create_directories` + the `_generate_*` helpers. If SHIPS reorganises the
+// layout, regenerate this from that file rather than chase symptoms here.
+// ---------------------------------------------------------------------------
+const ANATOMY = {
+  name: "<project>/",
+  desc: "Created by <code>ships scaffold --name &lt;NAME&gt; --output &lt;PARENT&gt;</code>. Everything below is relative to this root.",
+  children: [
+    { name: ".gitignore",      desc: "Standard ignores — excludes <code>releases/</code>, work directories, and IDE noise so the repo stays clean." },
+    { name: "README.md",       desc: "Placeholder written by scaffold. Describe your project here for the next human." },
+    { name: "ships.yaml",      desc: "Project master config. References <code>config/inspect.conf</code> and <code>config/object_placement.yaml</code>; where you wire up signing keys, change-management requirements, and wave-ordering policy." },
+    { name: ".build_counter",  desc: "Auto-incremented by every <code>ships package</code> so each build gets a unique number, unless <code>--no-increment</code> is passed (e.g. when packaging the same source for a different env)." },
+    { name: "config/", desc: "All project configuration. Three flavours of file with three different formats — each has its own tab in this wizard.",
+      children: [
+        { name: "env/&lt;ENV&gt;.conf  <span style='opacity:.6'>(one per env)</span>", desc: "<b>TOKEN=value</b> bindings. Every <code>{{TOKEN}}</code> the payload references must be bound here, for every env. See the <b>env files</b> tab." },
+        { name: "inspect.conf",         desc: "<b>rule=SEVERITY</b> lint config. See the <b>inspect.conf</b> tab. Don't confuse with env files — they are not interchangeable." },
+        { name: "tokenise.conf",        desc: "<b>Regex rewrite rules</b> applied during harvest to turn literal database names into <code>{{TOKEN}}</code> placeholders (content AND filenames). See the <b>tokenise.conf</b> tab. Not written by scaffold — created via this wizard or by hand." },
+        { name: "object_placement.yaml", desc: "Maps tables databases to view databases for the <code>object_placement</code> lint rule (per the Teradata object-placement standard). Optional — leave at defaults if you're not enforcing placement." },
+      ],
+    },
+    { name: "payload/", desc: "All deployable artefacts. <code>ships harvest</code> writes here; <code>ships package</code> reads from here. The subtree mirrors the deploy phase order (00 → 05).",
+      children: [
+        { name: "database/", desc: "Per-phase, per-object-kind directories.",
+          children: [
+            { name: "system/   <span style='opacity:.6'>(phase 00)</span>",        desc: "Cluster-scope objects that must exist before anything else: <code>maps/</code>, <code>roles/</code>, <code>profiles/</code>, <code>authorizations/</code>, <code>foreign_servers/</code>." },
+            { name: "pre-requisites/   <span style='opacity:.6'>(phase 01)</span>", desc: "<code>databases/</code> and <code>users/</code> — the CREATE statements that DDL in later phases depends on." },
+            { name: "DCL/   <span style='opacity:.6'>(phase 02)</span>",            desc: "Data Control Language — grants. Subfolders: <code>roles/</code>, <code>users/</code>, <code>inter_db/</code>. SHIPS groups DCL per granted-ON database; files are never auto-split." },
+            { name: "DDL/   <span style='opacity:.6'>(phase 03)</span>",            desc: "Atomic, eponymous <code>.sql</code> files — one object per file, filename matches <code>DB.Object.ext</code>. Subfolders by kind: <code>tables/</code>, <code>views/</code>, <code>macros/</code>, <code>procedures/</code>, <code>functions/</code>, <code>triggers/</code>, <code>join_indexes/</code>, <code>jar_install/</code>, <code>script_table_operators/</code>." },
+            { name: "DML/   <span style='opacity:.6'>(phase 04)</span>",            desc: "Data Manipulation. Files kept whole; order preserved. Pin execution order with a curated <code>_order.txt</code>." },
+            { name: "post-install/   <span style='opacity:.6'>(phase 05)</span>",   desc: "Anything that has to run AFTER object creation — <code>COLLECT STATISTICS</code>, <code>REPLACE PROCEDURE COMPILE</code>, materialisation seeds." },
+          ],
+        },
+      ],
+    },
+    { name: "releases/", desc: "Where <code>ships package</code> drops the built <code>.zip</code> artefacts and their sidecars (<code>.hmac</code> for symmetric signing, <code>.sig</code> for asymmetric Ed25519). This directory is git-ignored by default." },
+  ],
+};
+
+function renderAnatomyPanel() {
+  const panel = document.getElementById("panel-anatomy");
+  if (panel.dataset.rendered === "1") return;
+  panel.dataset.rendered = "1";
+
+  const intro = document.createElement("div");
+  intro.className = "info";
+  intro.style.marginBottom = "12px";
+  intro.innerHTML =
+    "<b>What this is.</b> The layout <code>ships scaffold</code> creates on disk — the project a user interacts with daily while authoring DDL." +
+    "<br><br><b>Phase numbers matter.</b> The <code>00 → 05</code> ordering under <code>payload/database/</code> is the deploy phase order: system → pre-requisites → DCL → DDL → DML → post-install. <code>ships analyse</code> computes the intra-phase waves on top of this; <code>ships package</code> bakes both into the deployable archive." +
+    "<br><br><b>Click any folder to expand it.</b> Leaf items are files; the description below each row explains its role.";
+  panel.appendChild(intro);
+
+  panel.appendChild(renderAnatomyNode(ANATOMY, /* expanded */ true));
+}
+
+function renderAnatomyNode(node, expanded) {
+  const hasChildren = !!(node.children && node.children.length);
+  if (!hasChildren) {
+    const wrap = document.createElement("div");
+    const row = document.createElement("div");
+    row.className = "leaf";
+    row.innerHTML = node.name;
+    wrap.appendChild(row);
+    if (node.desc) {
+      const d = document.createElement("div");
+      d.className = "desc";
+      d.innerHTML = node.desc;
+      wrap.appendChild(d);
+    }
+    return wrap;
+  }
+
+  const det = document.createElement("details");
+  if (expanded) det.open = true;
+  const sum = document.createElement("summary");
+  sum.innerHTML = "<b>" + node.name + "</b>";
+  det.appendChild(sum);
+  if (node.desc) {
+    const d = document.createElement("div");
+    d.className = "desc";
+    d.innerHTML = node.desc;
+    det.appendChild(d);
+  }
+  for (const child of node.children) det.appendChild(renderAnatomyNode(child, false));
+  return det;
 }
 
 function renderInspectPanel() {
