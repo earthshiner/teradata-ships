@@ -1089,10 +1089,46 @@ function renderCommandsPanel(plan) {
   const shText  = renderScript(plan.script, "bash");
   const batText = renderScript(plan.script, "cmd");
 
+  // Per-shell "How to run" guidance. The three failure modes a user actually
+  // hits are: (1) paths/working dir (scripts are absolute, run from anywhere),
+  // (2) MOTW blocks on Windows downloads, (3) `ships` not on PATH. Each shell
+  // gets the concrete invocation lines plus those three resolutions.
+  const HOW_TO_RUN = {
+    powershell: [
+      "<b>Run it</b> (from any directory — paths inside are absolute):",
+      "<pre>.\\ships-run.ps1</pre>",
+      "If PowerShell's execution policy blocks the script:",
+      "<pre>powershell -ExecutionPolicy Bypass -File .\\ships-run.ps1</pre>",
+      "If Windows blocks with <i>“These files can't be opened”</i> (Mark-of-the-Web):",
+      "<pre>Unblock-File -Path .\\ships-run.ps1</pre>",
+      "If you see <code>ships : The term 'ships' is not recognized...</code>, " +
+      "<code>ships</code> isn't on PATH. Edit <code>$SHIPS_CMD</code> at the top of the script &mdash; " +
+      "uncomment one of the alternatives (<code>python -m td_release_packager.cli</code> or <code>uv run ...</code>).",
+    ],
+    bash: [
+      "<b>Run it</b> (from any directory — paths inside are absolute):",
+      "<pre>bash /path/to/ships-run.sh</pre>",
+      "Or make it executable once and call directly:",
+      "<pre>chmod +x ships-run.sh\n./ships-run.sh</pre>",
+      "If you see <code>ships: command not found</code>, edit <code>SHIPS_CMD</code> at the top &mdash; " +
+      "uncomment one of the alternatives (<code>python -m td_release_packager.cli</code> or <code>uv run ...</code>).",
+    ],
+    cmd: [
+      "<b>Run it</b> (from any directory — paths inside are absolute):",
+      "<pre>ships-run.bat</pre>",
+      "Or by full path from anywhere:",
+      "<pre>C:\\path\\to\\ships-run.bat</pre>",
+      "If Windows blocks with <i>“These files can't be opened”</i> (Mark-of-the-Web), in PowerShell run:",
+      "<pre>Unblock-File -Path .\\ships-run.bat</pre>",
+      "If you see <code>'ships' is not recognized as an internal or external command</code>, edit <code>set \"SHIPS=...\"</code> at the top &mdash; " +
+      "uncomment one of the alternatives (<code>python -m td_release_packager.cli</code> or <code>uv run ...</code>).",
+    ],
+  };
+
   // The default shell (first in the OS-based order) renders expanded; the other
   // two collapse into <details> so users don't scroll past them but still see
   // they exist and can compare on demand.
-  function block(title, fname, body, expanded) {
+  function block(title, fname, body, expanded, shellKey) {
     const wrap = expanded ? document.createElement("div") : document.createElement("details");
     if (!expanded) wrap.style.marginBottom = "14px";
     wrap.className = "file-block";
@@ -1116,6 +1152,33 @@ function renderCommandsPanel(plan) {
       wrap.appendChild(sum);
     }
 
+    // How-to-run block — expanded by default for the primary shell, collapsed
+    // for the others (its parent <details> hides it until they click anyway).
+    const howWrap = document.createElement("details");
+    howWrap.style.margin = "8px 0";
+    howWrap.style.padding = "8px 12px";
+    howWrap.style.background = "var(--td-info-bg)";
+    howWrap.style.borderLeft = "3px solid var(--td-info-bd)";
+    howWrap.style.borderRadius = "3px";
+    howWrap.style.fontSize = "13px";
+    howWrap.open = expanded;
+    const howSum = document.createElement("summary");
+    howSum.style.cursor = "pointer";
+    howSum.style.fontWeight = "600";
+    howSum.textContent = "How to run this script";
+    howWrap.appendChild(howSum);
+    const howBody = document.createElement("div");
+    howBody.style.marginTop = "6px";
+    howBody.innerHTML = HOW_TO_RUN[shellKey].map(p => `<p style="margin:6px 0">${p}</p>`).join("");
+    // Tighten the inline <pre> nested in the guidance — distinct from the main script pre.
+    howBody.querySelectorAll("pre").forEach(p => {
+      p.style.margin = "4px 0";
+      p.style.padding = "6px 10px";
+      p.style.fontSize = "12.5px";
+    });
+    howWrap.appendChild(howBody);
+    wrap.appendChild(howWrap);
+
     const pre = document.createElement("pre");
     pre.textContent = body;
     wrap.appendChild(pre);
@@ -1130,13 +1193,13 @@ function renderCommandsPanel(plan) {
   }
 
   if (plan.os === "windows") {
-    block("PowerShell (.ps1) — default for Windows paths", "ships-run.ps1", psText,  true);
-    block("Windows cmd (.bat)",                            "ships-run.bat", batText, false);
-    block("POSIX bash (.sh)",                              "ships-run.sh",  shText,  false);
+    block("PowerShell (.ps1) — default for Windows paths", "ships-run.ps1", psText,  true,  "powershell");
+    block("Windows cmd (.bat)",                            "ships-run.bat", batText, false, "cmd");
+    block("POSIX bash (.sh)",                              "ships-run.sh",  shText,  false, "bash");
   } else {
-    block("POSIX bash (.sh) — default for POSIX paths",    "ships-run.sh",  shText,  true);
-    block("PowerShell (.ps1)",                             "ships-run.ps1", psText,  false);
-    block("Windows cmd (.bat)",                            "ships-run.bat", batText, false);
+    block("POSIX bash (.sh) — default for POSIX paths",    "ships-run.sh",  shText,  true,  "bash");
+    block("PowerShell (.ps1)",                             "ships-run.ps1", psText,  false, "powershell");
+    block("Windows cmd (.bat)",                            "ships-run.bat", batText, false, "cmd");
   }
 }
 
