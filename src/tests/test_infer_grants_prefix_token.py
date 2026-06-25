@@ -66,9 +66,7 @@ class TestStatementOwnerPrefixToken:
         sql = "CREATE TABLE {{DB_PREFIX}}_DOM_STD_T.Booking (id INT);"
         owner = default_extractor().extract_statement_owner(sql)
         assert owner is not None
-        assert owner.database == "{{DB_PREFIX}}_DOM_STD_T", (
-            f"got {owner.database!r}"
-        )
+        assert owner.database == "{{DB_PREFIX}}_DOM_STD_T", f"got {owner.database!r}"
 
     def test_extract_per_database_grantee_still_works(self):
         """Regression guard: the per-database (single-token) shape must
@@ -98,8 +96,7 @@ class TestAnalyseFilePrefixToken:
             result = analyse_file(path)
             assert result is not None, "must infer at least one grant for the view"
             assert result["grantee"] == "{{DB_PREFIX}}_SEM_STD_V", (
-                "grantee must preserve compound form — "
-                f"got {result['grantee']!r}"
+                f"grantee must preserve compound form — got {result['grantee']!r}"
             )
             assert "{{DB_PREFIX}}_DOM_STD_T" in result["grants"], (
                 "grantor key must preserve compound form — "
@@ -132,8 +129,7 @@ class TestAnalyseFilePrefixToken:
 class TestGranteeFilenamePrefixToken:
     def test_filename_for_compound_grantee(self):
         assert (
-            grantee_filename("{{DB_PREFIX}}_SEM_STD_V")
-            == "{{DB_PREFIX}}_SEM_STD_V.dcl"
+            grantee_filename("{{DB_PREFIX}}_SEM_STD_V") == "{{DB_PREFIX}}_SEM_STD_V.dcl"
         )
 
     def test_filename_negative_guard(self):
