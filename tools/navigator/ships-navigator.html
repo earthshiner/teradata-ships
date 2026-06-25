@@ -1233,7 +1233,7 @@ const ANATOMY = {
     { name: ".gitignore",      desc: "Standard ignores — excludes <code>releases/</code>, work directories, and IDE noise so the repo stays clean." },
     { name: "README.md",       desc: "Placeholder written by scaffold. Describe your project here for the next human." },
     { name: "ships.yaml",      desc: "Project master config. References <code>config/inspect.conf</code> and <code>config/object_placement.yaml</code>; where you wire up signing keys, change-management requirements, and wave-ordering policy." },
-    { name: ".build_counter",  desc: "Auto-incremented by every <code>ships package</code> so each build gets a unique number, unless <code>--no-increment</code> is passed (e.g. when packaging the same source for a different env)." },
+    { name: ".build_counter",  desc: "Auto-incremented by every <code>ships package</code> so each build gets a unique number. SHIPS reads this to stamp <code>build_number</code> into the package manifest." },
     { name: "config/", desc: "All project configuration. Three flavours of file with three different formats — each has its own tab in this wizard.",
       children: [
         { name: "env/&lt;ENV&gt;.conf  <span style='opacity:.6'>(one per env)</span>", desc: "<b>TOKEN=value</b> bindings. Every <code>{{TOKEN}}</code> the payload references must be bound here, for every env. See the <b>env files</b> tab." },
