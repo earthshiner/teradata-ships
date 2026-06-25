@@ -753,6 +753,28 @@ def _ingest_directory_impl(
                             f"and the source content."
                         )
 
+                    # Eponymy on the apply_tokens path: the filename
+                    # qualifier must mirror the SAME substitution
+                    # applied to the body, so the payload filename
+                    # carries ``{{TOKEN}}`` exactly as the content
+                    # does. ``prefix_tokens`` already does this by
+                    # substituting into ``raw_content`` BEFORE name
+                    # derivation (see ``tokenise_prefixes`` above);
+                    # ``apply_tokens`` runs AFTER, so we re-derive
+                    # here purely for naming. Detection at line ~707
+                    # already recorded the literal name — that record
+                    # stays correct (detection exists to find
+                    # literals to tokenise). The ``or`` fallback
+                    # preserves the pre-substitution name when
+                    # re-extraction returns None (e.g. DCL forms
+                    # where ``_extract_qualified_name`` returns
+                    # ``(None, on_object)``).
+                    _sub_db, _sub_obj = _extract_qualified_name(
+                        _strip_comments(content)
+                    )
+                    db_name = _sub_db or db_name
+                    obj_name = _sub_obj or obj_name
+
                 # -- Determine destination --
                 subdir = _TYPE_TO_SUBDIR.get(obj_type, "DDL")
                 ext = _TYPE_TO_EXT.get(obj_type, ".sql")
