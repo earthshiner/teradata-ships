@@ -14,6 +14,14 @@ dependencies = [
     "mcp>=1.27.1",
 ]
 
+# Console scripts created by `pip install -e .` / `uv sync`.
+# `ships` is the primary user-facing verb and the wizard's default
+# `$SHIPS_CMD` — without this entry users see "ships: command not
+# found" and have to fall back to `python -m td_release_packager.cli`
+# (closes #393).
+[project.scripts]
+ships = "td_release_packager.cli:main"
+
 [project.optional-dependencies]
 # Install with: uv pip install -e ".[otel]"
 otel = [
