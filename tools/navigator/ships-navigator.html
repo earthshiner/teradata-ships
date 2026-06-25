@@ -489,12 +489,6 @@ function applyPlan(plan) {
 // ---------------------------------------------------------------------------
 function isWindowsPath(p) { return !!p && /^[A-Za-z]:[\\/]/.test(p); }
 function targetOs() { return isWindowsPath(answers["project.dir"]) ? "windows" : "posix"; }
-function pathSep(p) { return p && p.indexOf("\\") >= 0 ? "\\" : "/"; }
-function joinPath(p, ...rest) {
-  if (!p) return rest.join("/");
-  const sep = pathSep(p);
-  return [p.replace(/[\\/]+$/, ""), ...rest].join(sep);
-}
 function parentDir(p) {
   if (!p) return ".";
   const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));
@@ -545,10 +539,8 @@ function validate(a) {
 function generatePlan() {
   const a = answers;
   const os = targetOs();
-  const cont = os === "windows" ? " ^" : " \\";
 
   const projDir   = a["project.dir"] || "<project-dir>";
-  const projQ     = q(projDir);
   const parent    = parentDir(projDir);
   const projName  = baseName(projDir);
 
@@ -572,87 +564,134 @@ function generatePlan() {
   const wantScan      = a["scan.enabled"] === "yes";
   const wantStrict    = !!a["process.strict"];
 
-  const lines = [];
+  // ============ Build a shell-agnostic script model ============
+  // Long paths are bound to vars once and reused across commands. Each per-env
+  // block resets ENV + ENV_CONFIG so users can run the per-env section
+  // standalone in a fresh terminal (Option A — simple over clever).
+  const sep = os === "windows" ? "\\" : "/";
+  const sourceLit = sourceType === "filesystem" ? sourceDir
+                  : sourceType === "github"     ? "<cloned-source-dir>"
+                  : "<source-dir>";
+
+  const sharedVars = [["SOURCE", sourceLit]];
+  if (sourceType === "github") {
+    sharedVars.push(["OWNER_REPO", ownerRepo]);
+    sharedVars.push(["REF",        ref]);
+  }
+  sharedVars.push(["OUTPUT_ROOT", parent]);
+  sharedVars.push(["NAME",        projName]);
+  sharedVars.push(["PROJECT",     `$OUTPUT_ROOT${sep}$NAME`]);
+  sharedVars.push(["PKG_NAME",    pkgName]);
+  if (wantGraph) sharedVars.push(["GRAPHS_DIR", `$PROJECT${sep}graphs`]);
+  sharedVars.push(["AUTHOR",      ""]);
+  sharedVars.push(["DESCRIPTION", "SHIPS Packaged release"]);
+
+  const deployVars = [
+    ["DB_HOST", "<your-teradata-host>"],
+    ["DB_USER", "<your-teradata-user>"],
+  ];
+
+  const prelude = [];
   const rationale = [];
-
-  // ---- scaffold ----
   if (needsScaffold) {
-    const sc = [`ships scaffold --name ${q(projName)} --output ${q(parent)}`];
+    const sc = [`ships scaffold --name "$NAME" --output "$OUTPUT_ROOT"`];
     if (envs.length) sc.push(`--environments ${envs.join(",")}`);
-    lines.push(joinContinued(sc, cont));
-    rationale.push({ step: "scaffold", why: "Creates the SHIPS project layout (config/, payload/, db/) at the chosen path with starter env files." });
+    prelude.push(sc);
+    rationale.push({ step: "scaffold", why: "Creates the SHIPS project layout (config/, payload/, db/) at $PROJECT with starter env files." });
   }
 
-  // ---- bootstrap-env-config (when source is already tokenised) ----
-  if (tokensAlready && envList.length) {
-    for (const env of envList) {
-      lines.push(`ships bootstrap-env-config --source ${projQ} --env ${env}`);
+  const headNotes = [];
+  if (mode === "detailed" && sourceType === "github") {
+    headNotes.push("`ships harvest` does NOT accept --source-github.");
+    headNotes.push("Either git-clone the repo first and point $SOURCE at the clone,");
+    headNotes.push("OR switch to Quick mode (`ships process` accepts --source-github).");
+  }
+
+  const perEnv = envList.map((env, idx) => {
+    const vars = [
+      ["ENV",        env],
+      ["ENV_CONFIG", `$PROJECT${sep}config${sep}env${sep}$ENV.conf`],
+    ];
+    const commands = [];
+
+    if (tokensAlready) {
+      commands.push([`ships bootstrap-env-config --source "$PROJECT" --env "$ENV"`]);
     }
-    rationale.push({
-      step: "bootstrap-env-config",
-      why: "Source already uses {{TOKEN}}. Scans the payload for every token reference and seeds a per-env .conf with placeholders for you to fill in — much safer than guessing the token list.",
-    });
-  }
 
-  // ---- Quick mode: one `ships process` per env ----
-  if (mode === "quick") {
-    for (const env of envList) {
-      const pr = [`ships process --project ${projQ}`];
+    if (mode === "quick") {
+      const pr = [`ships process --project "$PROJECT"`];
       if (sourceType === "github") {
-        pr.push(`--source-github ${q(ownerRepo)}`);
-        pr.push(`--source-ref ${q(ref)}`);
-      } else if (sourceType === "filesystem") {
-        pr.push(`--source ${q(sourceDir)}`);
+        pr.push(`--source-github "$OWNER_REPO"`);
+        pr.push(`--source-ref "$REF"`);
       } else {
-        pr.push(`--source <source-dir>`);
+        pr.push(`--source "$SOURCE"`);
       }
       if (!tokensAlready && tokenModel === "prefix") {
         pr.push(`--prefix-token ${prefix || "<PREFIX>"}=DB_PREFIX`);
       }
       if (!wantGenerate) pr.push(`--skip-generate`);
-      pr.push(`--env ${env}`);
-      pr.push(`--env-config ${q(joinPath(projDir, "config", "env", env + ".conf"))}`);
-      pr.push(`--name ${q(pkgName)}`);
+      pr.push(`--env "$ENV"`);
+      pr.push(`--env-config "$ENV_CONFIG"`);
+      pr.push(`--name "$PKG_NAME"`);
       if (wantStrict) pr.push(`--strict`);
-      lines.push(joinContinued(pr, cont));
+      commands.push(pr);
+    } else {
+      // Detailed: harvest/generate/inspect/scan/analyse are env-agnostic so
+      // they only appear in the FIRST env block; package runs in every env block.
+      if (idx === 0) {
+        const h = [`ships harvest --source "$SOURCE" --project "$PROJECT"`];
+        if (!tokensAlready && tokenModel === "prefix") {
+          h.push(`--prefix-token ${prefix || "<PREFIX>"}=DB_PREFIX`);
+        }
+        commands.push(h);
+        if (wantGenerate) commands.push([`ships generate --project "$PROJECT"`]);
+        commands.push([`ships inspect --project "$PROJECT"`]);
+        if (wantScan) commands.push([`ships scan --project "$PROJECT" --all-envs --fail-on-orphan`]);
+        if (wantAnalyse) {
+          const az = [`ships analyse --project "$PROJECT"`];
+          if (wantGraph) {
+            az.push(`--graph "$GRAPHS_DIR"`);
+            az.push(`--namespace "${namespace}"`);
+            az.push(`--project-name "${projectName}"`);
+          }
+          commands.push(az);
+        }
+      }
+      commands.push([
+        `ships package --project "$PROJECT"`,
+        `--env "$ENV"`,
+        `--name "$PKG_NAME"`,
+        `--env-config "$ENV_CONFIG"`,
+      ]);
     }
+
+    return { env, vars, commands };
+  });
+
+  const postlude = [];
+  if (mode === "quick") {
+    if (wantScan)  postlude.push([`ships scan --project "$PROJECT" --all-envs --fail-on-orphan`]);
+    if (wantGraph) postlude.push([
+      `ships analyse --project "$PROJECT"`,
+      `--graph "$GRAPHS_DIR"`,
+      `--namespace "${namespace}"`,
+      `--project-name "${projectName}"`,
+    ]);
+  }
+
+  // Rationale lines in the order steps appear in the script.
+  if (tokensAlready) {
+    rationale.push({ step: "bootstrap-env-config", why: "Source already uses {{TOKEN}}. Scans the payload for every token reference and seeds a per-env .conf with placeholders for you to fill in — safer than guessing the token list." });
+  }
+  if (mode === "quick") {
     rationale.push({
       step: "process",
       why: `Runs harvest → ${wantGenerate ? "generate → " : ""}inspect → ${wantAnalyse ? "analyse → " : ""}package as one orchestrated call per environment, with every stage decision recorded in ships.decisions.json. ${wantStrict ? "Strict mode aborts on the first failing stage." : "Developer mode (default) continues past warnings and summarises errors at the end."}`,
     });
-    // Quick mode caveats: scan + graph are NOT inside `process`.
-    if (wantScan || wantGraph) {
-      lines.push("");
-      lines.push("# Optional follow-ups — `ships process` doesn't run these:");
-      if (wantScan)  lines.push(`ships scan --project ${projQ} --all-envs --fail-on-orphan`);
-      if (wantGraph) {
-        const az = [
-          `ships analyse --project ${projQ}`,
-          `--graph ${q(joinPath(projDir, "graphs"))}`,
-          `--namespace ${q(namespace)}`,
-          `--project-name ${q(projectName)}`,
-        ];
-        lines.push(joinContinued(az, cont));
-      }
-      rationale.push({
-        step: "follow-ups",
-        why: "Orphan-token scanning and graph export are deliberately outside `process` — run them on demand after the pipeline succeeds.",
-      });
+    if (postlude.length) {
+      rationale.push({ step: "follow-ups", why: "Orphan-token scanning and graph export sit outside `process` — run them on demand after the pipeline succeeds." });
     }
   } else {
-    // ---- Detailed mode: each step explicit ----
-    if (sourceType === "github") {
-      lines.push("# Note: `ships harvest` does NOT accept --source-github.");
-      lines.push("# Either git-clone the repo first and point --source at the clone,");
-      lines.push("# OR switch to Quick mode (ships process accepts --source-github).");
-      lines.push("");
-    }
-    // harvest
-    const h = [`ships harvest --source ${sourceType === "filesystem" ? q(sourceDir) : "<cloned-source-dir>"} --project ${projQ}`];
-    if (!tokensAlready && tokenModel === "prefix") {
-      h.push(`--prefix-token ${prefix || "<PREFIX>"}=DB_PREFIX`);
-    }
-    lines.push(joinContinued(h, cont));
     rationale.push({
       step: "harvest",
       why: tokensAlready
@@ -663,47 +702,19 @@ function generatePlan() {
             ? "Reads config/tokenise.conf and produces per-database tokens like {{DOM_STD_T}}, applied to content and filenames."
             : "Cleans payload/ and copies the source in. Pick a tokenisation mode in Q2/Q3 before running.",
     });
-
-    if (wantGenerate) {
-      lines.push(`ships generate --project ${projQ}`);
-      rationale.push({ step: "generate", why: "Builds view-layer DDL (locking views, access views) from the harvested base tables, following the object-placement standard." });
-    }
-
-    lines.push(`ships inspect --project ${projQ}`);
+    if (wantGenerate) rationale.push({ step: "generate", why: "Builds view-layer DDL from the harvested base tables, following the object-placement standard." });
     rationale.push({ step: "inspect", why: "Runs Step 0 lint + Step 0b token-coverage. Auto-loads config/inspect.conf. NEVER pass an env file behind --config." });
-
-    if (wantScan) {
-      lines.push(`ships scan --project ${projQ} --all-envs --fail-on-orphan`);
-      rationale.push({ step: "scan", why: "Validates every {{TOKEN}} reference against every env .conf, and fails if a defined token is never referenced (orphan)." });
-    }
-
-    if (wantAnalyse) {
-      const az = [`ships analyse --project ${projQ}`];
-      if (wantGraph) {
-        az.push(`--graph ${q(joinPath(projDir, "graphs"))}`);
-        az.push(`--namespace ${q(namespace)}`);
-        az.push(`--project-name ${q(projectName)}`);
-      }
-      lines.push(joinContinued(az, cont));
-      rationale.push({
-        step: "analyse",
-        why: wantGraph
-          ? "Computes deploy waves AND exports dependency graph files (incl. OpenLineage JSON) under <project>/graphs/."
-          : "Computes deploy waves from cross-object dependencies and emits _waves.txt so DDL deploys in the right order.",
-      });
-    }
-
-    for (const env of envList) {
-      const pk = [
-        `ships package --project ${projQ}`,
-        `--env ${env}`,
-        `--name ${q(pkgName)}`,
-        `--env-config ${q(joinPath(projDir, "config", "env", env + ".conf"))}`,
-      ];
-      lines.push(joinContinued(pk, cont));
-    }
+    if (wantScan) rationale.push({ step: "scan", why: "Validates every {{TOKEN}} reference against every env .conf, and fails if a defined token is never referenced (orphan)." });
+    if (wantAnalyse) rationale.push({
+      step: "analyse",
+      why: wantGraph
+        ? "Computes deploy waves AND exports dependency graph files (incl. OpenLineage JSON) under $GRAPHS_DIR."
+        : "Computes deploy waves from cross-object dependencies and emits _waves.txt so DDL deploys in the right order.",
+    });
     rationale.push({ step: "package", why: "Builds the deployable release artefact per environment, resolving every {{TOKEN}} from that env's .conf file." });
   }
+
+  const script = { sharedVars, deployVars, prelude, perEnv, postlude, headNotes, mode };
 
   // ---- tokenise.conf ----
   let tokeniseConf = null;
@@ -719,7 +730,7 @@ function generatePlan() {
     }
   }
 
-  // ---- Guardrails (handover §6) ----
+  // ---- Guardrails (handover §6 + var-reuse note) ----
   const guardrails = [
     "Step 0b coverage requires every token referenced by the payload (content AND filenames) to be bound in every env file.",
     "config/inspect.conf is rule=SEVERITY; config/env/<ENV>.conf is TOKEN=value. Never pass an env file behind inspect --config.",
@@ -727,17 +738,87 @@ function generatePlan() {
     "harvest cleans payload/ by default. Use --keep-existing only for an overlay re-harvest.",
     "Atomic + eponymous applies to DDL only. DCL is grouped per granted-ON database; DML is kept whole (order preserved).",
     "ships process is the single front-door for a full pipeline run; scan and graph export sit alongside, not inside it.",
+    "Long paths live in shell variables ($PROJECT, $SOURCE, $ENV_CONFIG) — retargeting is a one-line edit at the top of the script.",
   ];
 
   const issues = validate(a);
-  return { lines, rationale, tokeniseConf, envFiles, os, guardrails, issues, mode, tokensAlready, envList, projDir, pkgName };
+  return { script, rationale, tokeniseConf, envFiles, os, guardrails, issues, mode, tokensAlready, envList, projDir, pkgName };
 }
 
-function joinContinued(parts, cont) {
-  if (parts.length === 1) return parts[0];
-  const indent = "  ";
-  return parts[0] + cont + "\n"
-    + parts.slice(1).map((p, i, arr) => indent + p + (i < arr.length - 1 ? cont : "")).join("\n");
+// ---------------------------------------------------------------------------
+// Render the script model in a chosen shell.
+// shell ∈ { "bash", "powershell", "cmd" }.
+// ---------------------------------------------------------------------------
+function renderScript(script, shell) {
+  const out = [];
+  // For cmd, rewrite $VAR_NAME → %VAR_NAME%. bash and PowerShell both use $VAR.
+  const xform = s => shell === "cmd" ? s.replace(/\$([A-Z_][A-Z0-9_]*)/g, "%$1%") : s;
+  const cont  = shell === "cmd" ? " ^" : shell === "powershell" ? " `" : " \\";
+  const cmnt  = shell === "cmd" ? "::" : "#";
+
+  const setVar = (name, value, commented) => {
+    const v = xform(value);
+    const pfx = commented ? (cmnt + " ") : "";
+    if (shell === "bash")            out.push(`${pfx}${name}="${v}"`);
+    else if (shell === "powershell") out.push(`${pfx}$${name} = "${v}"`);
+    else                             out.push(`${pfx}set "${name}=${v}"`);
+  };
+
+  const emitCmd = (parts) => {
+    if (parts.length === 1) { out.push(xform(parts[0])); return; }
+    const indent = "  ";
+    out.push(xform(parts[0]) + cont);
+    for (let i = 1; i < parts.length; i++) {
+      out.push(indent + xform(parts[i]) + (i < parts.length - 1 ? cont : ""));
+    }
+  };
+
+  // Shebang / shell header.
+  if (shell === "bash") {
+    out.push("#!/usr/bin/env bash");
+    out.push("set -euo pipefail");
+  } else if (shell === "powershell") {
+    out.push("# PowerShell — SHIPS Navigator generated script");
+    out.push('$ErrorActionPreference = "Stop"');
+  } else {
+    out.push("@echo off");
+    out.push("setlocal");
+  }
+  out.push("");
+
+  if (script.headNotes && script.headNotes.length) {
+    for (const n of script.headNotes) out.push(`${cmnt} ${n}`);
+    out.push("");
+  }
+
+  out.push(`${cmnt} === Shared variables — edit these to retarget the whole script ===`);
+  for (const [n, v] of script.sharedVars) setVar(n, v, false);
+  out.push("");
+  out.push(`${cmnt} Deploy-time placeholders — uncomment + fill before running 'ships deploy'`);
+  for (const [n, v] of script.deployVars) setVar(n, v, true);
+  out.push("");
+
+  if (script.prelude.length) {
+    for (const parts of script.prelude) emitCmd(parts);
+    out.push("");
+  }
+
+  for (let i = 0; i < script.perEnv.length; i++) {
+    const b = script.perEnv[i];
+    out.push(`${cmnt} --- Environment: ${b.env} ---`);
+    for (const [n, v] of b.vars) setVar(n, v, false);
+    out.push("");
+    for (const parts of b.commands) emitCmd(parts);
+    if (i < script.perEnv.length - 1) out.push("");
+  }
+
+  if (script.postlude && script.postlude.length) {
+    out.push("");
+    out.push(`${cmnt} Optional follow-ups — 'ships process' doesn't run these`);
+    for (const parts of script.postlude) emitCmd(parts);
+  }
+
+  return out.join("\n");
 }
 
 function makeTokeniseConf(model, prefix) {
@@ -903,13 +984,15 @@ function renderCommandsPanel(plan) {
   const modeBanner = document.createElement("div");
   modeBanner.className = "info";
   modeBanner.style.marginBottom = "12px";
-  modeBanner.innerHTML = plan.mode === "quick"
+  modeBanner.innerHTML = (plan.mode === "quick"
     ? "<b>Quick mode</b> — one <code>ships process</code> call per environment, runs harvest → generate → inspect → analyse → package end-to-end."
-    : "<b>Detailed mode</b> — each pipeline step is shown separately for transparency, CI scripting, or selective re-runs.";
+    : "<b>Detailed mode</b> — each pipeline step shown separately for transparency, CI scripting, or selective re-runs.")
+    + " Long paths bind to shell variables (<code>$PROJECT</code>, <code>$SOURCE</code>, <code>$ENV_CONFIG</code> …) so retargeting is a one-line edit at the top.";
   panel.appendChild(modeBanner);
 
-  const winText = plan.lines.join("\n\n");
-  const shText  = plan.lines.join("\n\n").replace(/ \^\n/g, " \\\n");
+  const psText  = renderScript(plan.script, "powershell");
+  const shText  = renderScript(plan.script, "bash");
+  const batText = renderScript(plan.script, "cmd");
 
   function block(title, fname, body) {
     const fb = document.createElement("div");
@@ -929,11 +1012,13 @@ function renderCommandsPanel(plan) {
   }
 
   if (plan.os === "windows") {
-    block("Windows (.bat)", "ships-run.bat", winText);
-    block("POSIX (.sh)",    "ships-run.sh",  shText);
+    block("PowerShell (.ps1) — default for Windows paths", "ships-run.ps1", psText);
+    block("Windows cmd (.bat)",                            "ships-run.bat", batText);
+    block("POSIX bash (.sh)",                              "ships-run.sh",  shText);
   } else {
-    block("POSIX (.sh)",    "ships-run.sh",  shText);
-    block("Windows (.bat)", "ships-run.bat", winText);
+    block("POSIX bash (.sh) — default for POSIX paths",    "ships-run.sh",  shText);
+    block("PowerShell (.ps1)",                             "ships-run.ps1", psText);
+    block("Windows cmd (.bat)",                            "ships-run.bat", batText);
   }
 }
 
@@ -1236,11 +1321,10 @@ function downloadAllBundle() {
   if (!plan) return;
   const files = [];
 
-  // Commands as both .bat and .sh.
-  const winText = plan.lines.join("\n\n");
-  const shText  = winText.replace(/ \^\n/g, " \\\n");
-  files.push({ name: "ships-run.bat", body: winText });
-  files.push({ name: "ships-run.sh",  body: shText });
+  // Commands in all three shells.
+  files.push({ name: "ships-run.ps1", body: renderScript(plan.script, "powershell") });
+  files.push({ name: "ships-run.sh",  body: renderScript(plan.script, "bash") });
+  files.push({ name: "ships-run.bat", body: renderScript(plan.script, "cmd") });
 
   if (plan.tokeniseConf) files.push({ name: "config/tokenise.conf", body: plan.tokeniseConf });
 
@@ -1255,7 +1339,7 @@ function downloadAllBundle() {
     "",
     "## Files",
     "",
-    "- `ships-run.bat` / `ships-run.sh` — the command sequence in your chosen shape.",
+    "- `ships-run.ps1` / `ships-run.sh` / `ships-run.bat` — the command sequence in PowerShell, bash, and cmd. Pick the one for your shell.",
     plan.tokeniseConf ? "- `config/tokenise.conf` — token rewrite rules." : null,
     plan.envFiles.length ? "- `config/env/*.conf` — env file skeletons (replace `<fill-me>` before running)." : null,
     plan.tokensAlready ? "- (No env skeletons — source is already tokenised; the script runs `ships bootstrap-env-config` to seed real ones.)" : null,
@@ -1263,7 +1347,8 @@ function downloadAllBundle() {
     "",
     "## Running",
     "",
-    "Drop these files into your SHIPS project root (or run from the parent directory). The script assumes `ships` is on PATH.",
+    "Drop these files into your SHIPS project root (or run from the parent directory). The scripts assume `ships` is on PATH.",
+    "Long paths bind to shell variables at the top of each script — retargeting is a one-line edit to `$OUTPUT_ROOT`, `$NAME`, or `$SOURCE`.",
     "",
     "## Guardrails",
     "",

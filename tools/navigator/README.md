@@ -9,7 +9,7 @@ Milestone: [Guided Packaging (SHIPS Navigator)](https://github.com/earthshiner/t
 
 Walks a user through the SHIPS packaging decisions without an AI present and emits:
 
-1. An ordered command sequence (`.bat` for Windows, `.sh` for POSIX). Two modes:
+1. An ordered command sequence in **three shells** — PowerShell (`.ps1`), bash (`.sh`), and Windows cmd (`.bat`). Long paths bind to shell variables (`$SOURCE`, `$OUTPUT_ROOT`, `$NAME`, `$PROJECT`, `$PKG_NAME`, `$GRAPHS_DIR`, plus `$ENV` / `$ENV_CONFIG` reset per environment block) so retargeting is a one-line edit at the top of the script. Two emission modes:
    - **Quick** — one `ships process` call per environment (the full SHIPS pipeline behind one verb).
    - **Detailed** — each pipeline step (`scaffold` / `harvest` / `generate` / `inspect` / `scan` / `analyse` / `package`) shown separately for transparency, CI scripting, or selective re-runs.
 2. A `config/tokenise.conf` matching the chosen token model (prefix or per-database).
