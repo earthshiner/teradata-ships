@@ -1013,42 +1013,77 @@ function renderCommandsPanel(plan) {
   const shText  = renderScript(plan.script, "bash");
   const batText = renderScript(plan.script, "cmd");
 
-  function block(title, fname, body) {
-    const fb = document.createElement("div");
-    fb.className = "file-block";
-    const h = document.createElement("h3");
-    h.textContent = title;
-    fb.appendChild(h);
+  // The default shell (first in the OS-based order) renders expanded; the other
+  // two collapse into <details> so users don't scroll past them but still see
+  // they exist and can compare on demand.
+  function block(title, fname, body, expanded) {
+    const wrap = expanded ? document.createElement("div") : document.createElement("details");
+    if (!expanded) wrap.style.marginBottom = "14px";
+    wrap.className = "file-block";
+
+    if (expanded) {
+      const h = document.createElement("h3");
+      h.textContent = title;
+      wrap.appendChild(h);
+    } else {
+      const sum = document.createElement("summary");
+      sum.style.cursor = "pointer";
+      sum.style.fontWeight = "600";
+      sum.style.color = "var(--td-navy)";
+      sum.style.fontFamily = "var(--td-mono)";
+      sum.style.fontSize = "13px";
+      sum.style.padding = "8px 10px";
+      sum.style.background = "var(--td-grey-1)";
+      sum.style.border = "1px solid var(--td-grey-2)";
+      sum.style.borderRadius = "3px";
+      sum.textContent = "▸ " + title + " — click to expand";
+      wrap.appendChild(sum);
+    }
+
     const pre = document.createElement("pre");
     pre.textContent = body;
-    fb.appendChild(pre);
+    wrap.appendChild(pre);
+
     const actions = document.createElement("div");
     actions.className = "actions";
     actions.appendChild(makeCopyBtn(body));
     actions.appendChild(makeDownloadBtn(fname, body));
-    fb.appendChild(actions);
-    panel.appendChild(fb);
+    wrap.appendChild(actions);
+
+    panel.appendChild(wrap);
   }
 
   if (plan.os === "windows") {
-    block("PowerShell (.ps1) — default for Windows paths", "ships-run.ps1", psText);
-    block("Windows cmd (.bat)",                            "ships-run.bat", batText);
-    block("POSIX bash (.sh)",                              "ships-run.sh",  shText);
+    block("PowerShell (.ps1) — default for Windows paths", "ships-run.ps1", psText,  true);
+    block("Windows cmd (.bat)",                            "ships-run.bat", batText, false);
+    block("POSIX bash (.sh)",                              "ships-run.sh",  shText,  false);
   } else {
-    block("POSIX bash (.sh) — default for POSIX paths",    "ships-run.sh",  shText);
-    block("PowerShell (.ps1)",                             "ships-run.ps1", psText);
-    block("Windows cmd (.bat)",                            "ships-run.bat", batText);
+    block("POSIX bash (.sh) — default for POSIX paths",    "ships-run.sh",  shText,  true);
+    block("PowerShell (.ps1)",                             "ships-run.ps1", psText,  false);
+    block("Windows cmd (.bat)",                            "ships-run.bat", batText, false);
   }
 }
 
 function renderTokenisePanel(plan) {
   const panel = document.getElementById("panel-tokenise");
   panel.innerHTML = "";
+
+  const intro = document.createElement("div");
+  intro.className = "info";
+  intro.style.marginBottom = "12px";
+  intro.innerHTML =
+    "<b>What it is.</b> SHIPS' tokenisation rule file — regex substitutions that rewrite literal database names " +
+    "(e.g. <code>CustomerDNA_DOM_STD_T</code>) into <code>{{TOKEN}}</code> placeholders so the same payload can be packaged for any environment." +
+    "<br><br><b>Where it lives.</b> <code>&lt;project&gt;/config/tokenise.conf</code>." +
+    "<br><br><b>Used by.</b> <code>ships harvest</code> (and therefore <code>ships process</code>) reads it and applies every rule " +
+    "to BOTH file contents AND filenames — that's how eponymy is preserved (a tokenised payload still has files named after the tokens they hold).";
+  panel.appendChild(intro);
+
   if (!plan.tokeniseConf) {
     const e = document.createElement("div");
     e.className = "empty";
     e.textContent = plan.tokensAlready
-      ? "Source is already tokenised — no tokenise.conf needed."
+      ? "Source is already tokenised — no tokenise.conf needed for this run."
       : "Answer Q2 (already tokenised?) and Q3 (token shape) to generate tokenise.conf.";
     panel.appendChild(e);
     return;
@@ -1072,11 +1107,26 @@ function renderTokenisePanel(plan) {
 function renderEnvsPanel(plan) {
   const panel = document.getElementById("panel-envs");
   panel.innerHTML = "";
+
+  const intro = document.createElement("div");
+  intro.className = "info";
+  intro.style.marginBottom = "12px";
+  intro.innerHTML =
+    "<b>What they are.</b> One file per target environment, binding every <code>{{TOKEN}}</code> the payload references to a concrete value for that environment " +
+    "(e.g. <code>DB_PREFIX=CustomerDNA_DEV</code> in DEV, <code>DB_PREFIX=CustomerDNA_PRD</code> in PRD)." +
+    "<br><br><b>Where they live.</b> <code>&lt;project&gt;/config/env/&lt;ENV&gt;.conf</code> — one per environment." +
+    "<br><br><b>Used by.</b> <code>ships inspect</code> (Step 0b auto-discovers every <code>config/env/*.conf</code> and fails if any token is unbound), " +
+    "<code>ships scan</code> with <code>--all-envs</code>, and <code>ships package</code> via <code>--env-config</code> " +
+    "(resolves the tokens into the concrete values baked into the per-env package)." +
+    "<br><br><b>Hard rule.</b> Every token referenced by the payload (content AND filenames) must be bound in every env file. " +
+    "Never put rule severities here — that's <code>config/inspect.conf</code>, a different file with a different format.";
+  panel.appendChild(intro);
+
   if (plan.tokensAlready) {
-    const info = document.createElement("div");
-    info.className = "info";
-    info.innerHTML = "<b>Source is already tokenised.</b> The wizard emits <code>ships bootstrap-env-config</code> calls (see the Commands tab) so SHIPS will scaffold the real env files from the payload's actual token usage. No static env skeleton needed.";
-    panel.appendChild(info);
+    const note = document.createElement("div");
+    note.className = "warn";
+    note.innerHTML = "<b>Source is already tokenised.</b> The wizard emits <code>ships bootstrap-env-config</code> calls (see the Commands tab) so SHIPS will scaffold the real env files from the payload's actual token usage. No static env skeleton needed.";
+    panel.appendChild(note);
     return;
   }
   if (!plan.envFiles.length) {
