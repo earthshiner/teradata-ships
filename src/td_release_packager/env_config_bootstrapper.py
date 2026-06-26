@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 
+from td_release_packager.ships_cmd import ships_cmd
 from td_release_packager.version_args import add_version_argument
 
 logger = logging.getLogger(__name__)
@@ -178,7 +179,7 @@ def render_bootstrap_env_config(
             "   diagnostic stanzas to section 7.",
             "",
             "4. Validate the result:",
-            "     python -m td_release_packager scan --source <project> \\",
+            f"     {ships_cmd()} scan --source <project> \\",
             "         --env-config config/env/{env}.conf".format(env=env),
             "",
             "5. Delete the Imported section once empty.",
