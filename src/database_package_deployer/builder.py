@@ -1291,7 +1291,15 @@ def _create_environment_prereqs_package_if_needed(
 
     generate_package_report(env_pkg_dir, env_manifest.__dict__)
     _generate_integrity_file(env_pkg_dir)
-    archive = _archive_package(env_pkg_dir, archive_format)
+    # Internal archive root drops the build-id so extraction into a
+    # nested ``.ships-work/`` folder stays well under Windows MAX_PATH
+    # (#395).  Archive filename on disk is unchanged.
+    archive = _archive_package(
+        env_pkg_dir,
+        archive_format,
+        internal_root="00_environment_prereqs",
+        archive_path=os.path.join(parent_dir, env_archive_filename),
+    )
     _generate_checksum(archive)
 
     logger.info(
@@ -1505,10 +1513,23 @@ def _split_into_paired_packages(
     # 8. Integrity fingerprints, then archive both. Prereqs first so
     #    the on-disk creation order matches the deploy order.
     _generate_integrity_file(prereqs_pkg_dir)
-    prereqs_archive = _archive_package(prereqs_pkg_dir, archive_format)
+    # Internal archive root drops the build-id so extraction into a
+    # nested ``.ships-work/`` folder stays well under Windows MAX_PATH
+    # (#395).  Archive filenames on disk are unchanged.
+    prereqs_archive = _archive_package(
+        prereqs_pkg_dir,
+        archive_format,
+        internal_root="01_prereqs",
+        archive_path=os.path.join(parent_dir, prereqs_archive_filename),
+    )
     _generate_checksum(prereqs_archive)
     _generate_integrity_file(pkg_dir)
-    main_archive = _archive_package(pkg_dir, archive_format)
+    main_archive = _archive_package(
+        pkg_dir,
+        archive_format,
+        internal_root="02_main",
+        archive_path=os.path.join(parent_dir, main_archive_filename),
+    )
     _generate_checksum(main_archive)
 
     group_archives: list[tuple[str, BuildManifest]] = []
@@ -1685,7 +1706,15 @@ def _finalize_single_package(
 
     generate_package_report(main_pkg_dir, manifest.__dict__)
     _generate_integrity_file(main_pkg_dir)
-    archive_path = _archive_package(main_pkg_dir, archive_format)
+    # Internal archive root drops the build-id so extraction into a
+    # nested ``.ships-work/`` folder stays well under Windows MAX_PATH
+    # (#395).  Archive filename on disk is unchanged.
+    archive_path = _archive_package(
+        main_pkg_dir,
+        archive_format,
+        internal_root="01_main",
+        archive_path=os.path.join(group_dir, main_archive_filename),
+    )
     _generate_checksum(archive_path)
     _write_release_group_files(
         group_dir=group_dir,
@@ -4033,7 +4062,13 @@ def _rmtree_robust(path: str, retries: int = 5, delay: float = 0.2) -> None:
     shutil.rmtree(path, onerror=_on_error)
 
 
-def _archive_package(pkg_dir: str, archive_format: str) -> str:
+def _archive_package(
+    pkg_dir: str,
+    archive_format: str,
+    *,
+    internal_root: str | None = None,
+    archive_path: str | None = None,
+) -> str:
     """Archive the package directory as .zip or .tar.gz.
 
     For zip format this uses :mod:`zipfile` directly rather than
@@ -4051,23 +4086,50 @@ def _archive_package(pkg_dir: str, archive_format: str) -> str:
     Args:
         pkg_dir:        Path to the package directory.
         archive_format: zip or tar.gz.
+        internal_root:  Optional name for the top-level folder inside
+            the archive.  Defaults to ``os.path.basename(pkg_dir)``.
+            Pass a shorter name (e.g. ``"00_environment_prereqs"``) to
+            shorten paths produced when the archive is extracted into
+            a nested ``.ships-work/`` staging directory on Windows —
+            avoids MAX_PATH overruns when the build-id would otherwise
+            appear in both the release-group dir and the staging
+            subdir.  Closes #395.
+        archive_path:   Optional explicit output path for the archive.
+            Defaults to ``pkg_dir + ".zip"`` or ``pkg_dir + ".tar.gz"``.
 
     Returns:
         Path to the archive file.
     """
+    actual_internal_root = internal_root or os.path.basename(pkg_dir)
+    suffix = ".tar.gz" if archive_format == "tar.gz" else ".zip"
+    actual_archive_path = archive_path or (pkg_dir + suffix)
+
     if archive_format == "tar.gz":
-        archive_path = shutil.make_archive(
-            base_name=pkg_dir,
-            format="gztar",
-            root_dir=os.path.dirname(pkg_dir),
-            base_dir=os.path.basename(pkg_dir),
-        )
+        renamed_back = None
+        if actual_internal_root != os.path.basename(pkg_dir):
+            renamed = os.path.join(os.path.dirname(pkg_dir), actual_internal_root)
+            if os.path.exists(renamed):
+                _rmtree_robust(renamed)
+            os.rename(pkg_dir, renamed)
+            renamed_back = pkg_dir
+            pkg_dir = renamed
+        try:
+            produced = shutil.make_archive(
+                base_name=pkg_dir,
+                format="gztar",
+                root_dir=os.path.dirname(pkg_dir),
+                base_dir=os.path.basename(pkg_dir),
+            )
+        except Exception:
+            if renamed_back is not None:
+                os.rename(pkg_dir, renamed_back)
+                pkg_dir = renamed_back
+            raise
+        if os.path.abspath(produced) != os.path.abspath(actual_archive_path):
+            shutil.move(produced, actual_archive_path)
     else:
         import pathlib
         import zipfile as _zipfile
-
-        archive_path = pkg_dir + ".zip"
-        root_dir = os.path.dirname(pkg_dir)
 
         # Suffixes excluded from the archive — these match _package_copy_ignore
         # and _generate_integrity_file exclusions.  __pycache__ directories are
@@ -4085,21 +4147,26 @@ def _archive_package(pkg_dir: str, archive_format: str) -> str:
             ".swo",
         )
 
-        with _zipfile.ZipFile(archive_path, "w", _zipfile.ZIP_DEFLATED) as zf:
+        pkg_dir_path = pathlib.Path(pkg_dir)
+        root_arc = pathlib.Path(actual_internal_root)
+        with _zipfile.ZipFile(actual_archive_path, "w", _zipfile.ZIP_DEFLATED) as zf:
             for current_root, dirs, files in os.walk(pkg_dir):
                 # Prune excluded directories in-place so os.walk skips them.
                 dirs[:] = sorted(
                     d for d in dirs if d not in _SKIP_DIRS and not d.startswith("~")
                 )
 
+                # Compose the archive-relative path from the requested
+                # internal_root plus the walk-relative subpath.  This
+                # decouples the on-disk pkg_dir basename from the
+                # folder name embedded in the archive.
+                rel_to_pkg = pathlib.Path(current_root).relative_to(pkg_dir_path)
+                rel_dir = root_arc if str(rel_to_pkg) == "." else root_arc / rel_to_pkg
                 # Write a directory entry with a POSIX-style path so that
                 # extractall() on any platform — including Windows paths that
                 # traverse dot-named directories such as .ships-work — can
                 # recreate the full directory tree before writing file content.
-                rel_dir = pathlib.Path(current_root).relative_to(root_dir)
-                dir_entry = rel_dir.as_posix() + "/"
-                if dir_entry != "./":
-                    zf.mkdir(dir_entry)
+                zf.mkdir(rel_dir.as_posix() + "/")
 
                 for fname in sorted(files):
                     if fname.startswith("~") or fname.lower().endswith(_SKIP_SUFFIXES):
@@ -4111,9 +4178,9 @@ def _archive_package(pkg_dir: str, archive_format: str) -> str:
     # Remove the unarchived directory robustly — on Windows a bare
     # shutil.rmtree can race with antivirus or search-index handles.
     _rmtree_robust(pkg_dir)
-    logger.info("Archived and cleaned up: %s", archive_path)
+    logger.info("Archived and cleaned up: %s", actual_archive_path)
 
-    return archive_path
+    return actual_archive_path
 
 
 def _generate_integrity_file(pkg_dir: str) -> str:
