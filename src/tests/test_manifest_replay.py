@@ -308,3 +308,49 @@ class TestResumePackageRedeployCheck:
         """resume_package raises FileNotFoundError when manifest is absent."""
         with pytest.raises(FileNotFoundError):
             resume_package(MagicMock(), str(tmp_path / "nope.json"))
+
+
+# ---------------------------------------------------------------
+# update_state — stale error cleanup on successful transition
+# ---------------------------------------------------------------
+
+
+class TestUpdateStateClearsStaleError:
+    """A FAILED → SKIPPED/COMPLETED/ROLLED_BACK transition must clear
+    the prior failure's error string, since the field describes the
+    current state, not the history. Regression for #400."""
+
+    @pytest.mark.parametrize(
+        "successful_state",
+        [DeployState.SKIPPED, DeployState.COMPLETED, DeployState.ROLLED_BACK],
+    )
+    def test_transition_from_failed_clears_error(self, tmp_path, successful_state):
+        m = DeploymentManifest(str(tmp_path))
+        m.register_object("DEV01_DB.Obj", "Obj.tbl")
+        m.update_state("DEV01_DB.Obj", DeployState.FAILED, error="boom")
+        assert m.get_record("DEV01_DB.Obj")["error"] == "boom"
+
+        m.update_state("DEV01_DB.Obj", successful_state)
+
+        rec = m.get_record("DEV01_DB.Obj")
+        assert rec["state"] == successful_state.value
+        assert rec["error"] is None
+
+    def test_explicit_error_on_successful_transition_is_respected(self, tmp_path):
+        """If a caller explicitly passes an error on a non-FAILED transition,
+        keep it — the auto-clear is only the default."""
+        m = DeploymentManifest(str(tmp_path))
+        m.register_object("DEV01_DB.Obj", "Obj.tbl")
+        m.update_state(
+            "DEV01_DB.Obj", DeployState.SKIPPED, error="explicit skip reason"
+        )
+        assert m.get_record("DEV01_DB.Obj")["error"] == "explicit skip reason"
+
+    def test_transition_to_failed_preserves_prior_error_when_unset(self, tmp_path):
+        """A FAILED → FAILED transition with no new error must NOT auto-clear."""
+        m = DeploymentManifest(str(tmp_path))
+        m.register_object("DEV01_DB.Obj", "Obj.tbl")
+        m.update_state("DEV01_DB.Obj", DeployState.FAILED, error="boom")
+        m.update_state("DEV01_DB.Obj", DeployState.FAILED)
+
+        assert m.get_record("DEV01_DB.Obj")["error"] == "boom"

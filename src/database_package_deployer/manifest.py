@@ -291,6 +291,14 @@ class DeploymentManifest:
                 record["rows_migrated"] = rows_migrated
             if error is not None:
                 record["error"] = error
+            elif state in (
+                DeployState.COMPLETED,
+                DeployState.SKIPPED,
+                DeployState.ROLLED_BACK,
+            ):
+                # Clear stale error from a prior FAILED attempt — the field
+                # describes the current state, not the history.
+                record["error"] = None
             if blockers is not None:
                 record["blockers"] = blockers
             if warnings is not None:
