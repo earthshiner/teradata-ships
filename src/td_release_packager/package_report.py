@@ -743,6 +743,246 @@ def _waves_tab(records: List[Dict]) -> str:
     return _waves.render_wave_svg(records)
 
 
+def _load_content_provenance(pkg_dir: str) -> Optional[dict]:
+    """Load the v2 content-provenance document from ``context/ships.provenance.json``.
+
+    Unlike :func:`_load_build_provenance` (which reads project-side
+    ``ships.decisions.json``), this artefact lives **inside** the package
+    and travels with it — so the Content Provenance tab keeps working
+    after the package is handed off or extracted on another machine.
+
+    Schema (v2): top-level ``entries`` maps each packaged path to a chain
+    of four stages (source -> eponymous -> token_resolved -> package),
+    each stage carrying status (applied / no_op / skipped / failed) and
+    an optional note. See ``database_package_deployer.provenance`` for the
+    canonical schema definition.
+
+    Args:
+        pkg_dir: Package root directory passed to ``generate_package_report``.
+
+    Returns:
+        The parsed document, or ``None`` when ``ships.provenance.json`` is
+        missing, unreadable, or carries an unrecognised schema version.
+    """
+    provenance_path = os.path.join(pkg_dir, "context", "ships.provenance.json")
+    if not os.path.isfile(provenance_path):
+        return None
+    try:
+        with open(provenance_path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    # Only v2 is supported; v1 was a flat {package_path: source_path} dict
+    # and is not produced by any shipped version.
+    if not isinstance(data, dict) or data.get("version") != 2:
+        return None
+    if not isinstance(data.get("entries"), dict):
+        return None
+    return data
+
+
+def _content_provenance_tab(
+    doc: Optional[dict], viewer_links: Optional[Dict[str, str]] = None
+) -> str:
+    """Render the Content Provenance tab — one row per packaged file.
+
+    Shows where each packaged artefact came from (source path) and the
+    full transformation chain (source -> eponymous -> token_resolved ->
+    package) including the status badge and note for each stage.
+
+    Each row is clickable to reveal the chain detail; the packaged path
+    links to its source viewer page (``.package_report_code/...html``)
+    when available, so a click goes from "where did this come from?"
+    straight to the highlighted file content.
+
+    Args:
+        doc:          Parsed provenance document from
+                      :func:`_load_content_provenance`. ``None`` renders
+                      the "not available" placeholder.
+        viewer_links: Map of packaged path -> viewer URL. Provided by
+                      :func:`_write_package_viewers`; pass ``None`` or
+                      ``{}`` to render the packaged path as plain text.
+
+    Returns:
+        HTML string ready to embed in the report's ``<div class="card">``.
+    """
+    if doc is None:
+        return (
+            '<p style="color:#6C757D;padding:24px;text-align:center">'
+            "Content provenance not available &mdash; "
+            "<code>context/ships.provenance.json</code> was not found in this "
+            "package, or could not be parsed. Re-build the package with a "
+            "current SHIPS version to populate it."
+            "</p>"
+        )
+
+    entries = doc.get("entries", {})
+    if not entries:
+        return (
+            '<p style="color:#6C757D;padding:24px;text-align:center">'
+            "Content provenance document is empty (zero entries)."
+            "</p>"
+        )
+
+    # Status -> badge style. Map provenance Status values to the same
+    # colour vocabulary used by _build_provenance_tab so the report's
+    # two provenance tabs feel consistent.
+    _STATUS_ICON = {
+        "applied": "✔",
+        "no_op": "—",
+        "skipped": "○",
+        "failed": "✗",
+    }
+    _STATUS_BG = {
+        "applied": "#D4EDDA",
+        "no_op": "#E9ECEF",
+        "skipped": "#E9ECEF",
+        "failed": "#F8D7DA",
+    }
+    _STATUS_FG = {
+        "applied": "#155724",
+        "no_op": "#495057",
+        "skipped": "#495057",
+        "failed": "#721C24",
+    }
+
+    def _status_badge(status: str) -> str:
+        icon = _STATUS_ICON.get(status, "?")
+        bg = _STATUS_BG.get(status, "#E9ECEF")
+        fg = _STATUS_FG.get(status, "#495057")
+        return (
+            f'<span style="display:inline-block;padding:2px 8px;'
+            f"background:{bg};color:{fg};border-radius:10px;"
+            f'font-size:11px;font-weight:600">{icon} {html.escape(status)}</span>'
+        )
+
+    def _esc(s: object) -> str:
+        return html.escape(str(s or ""))
+
+    viewer_links = viewer_links or {}
+
+    rows: List[str] = []
+    stage_counts: Dict[str, int] = {
+        "applied": 0,
+        "no_op": 0,
+        "skipped": 0,
+        "failed": 0,
+    }
+
+    # Sort by packaged path so the table reads in the same order as the
+    # Objects tab — keeps the two views correlatable at a glance.
+    for packaged_path in sorted(entries.keys()):
+        chain = entries[packaged_path] or {}
+        stages = chain.get("stages") or []
+        if not stages:
+            continue
+
+        source_path = stages[0].get("path", "")
+
+        # Packaged path links to the existing viewer page when present.
+        # Don't synthesize a link to a file that wasn't written.
+        viewer_url = viewer_links.get(packaged_path)
+        if viewer_url:
+            packaged_cell = (
+                f'<a href="{_esc(viewer_url)}" '
+                f'title="{_esc(packaged_path)}" '
+                f'style="font-family:ui-monospace,monospace;font-size:12px;'
+                f'color:#0E4D8C;text-decoration:none">{_esc(packaged_path)}</a>'
+            )
+        else:
+            packaged_cell = (
+                f'<span style="font-family:ui-monospace,monospace;'
+                f'font-size:12px">{_esc(packaged_path)}</span>'
+            )
+
+        # Stage-chain detail rendered as a small inner table inside the
+        # row's <details> body. Each stage row: badge + name + path + note.
+        chain_rows: List[str] = []
+        for stage in stages:
+            stage_name = stage.get("stage", "")
+            stage_path = stage.get("path", "")
+            stage_status = stage.get("status", "")
+            stage_note = stage.get("note") or ""
+            stage_counts[stage_status] = stage_counts.get(stage_status, 0) + 1
+            chain_rows.append(
+                f"<tr>"
+                f'<td style="padding:4px 8px;white-space:nowrap">{_status_badge(stage_status)}</td>'
+                f'<td style="padding:4px 8px;font-weight:600;'
+                f'color:#0E4D8C;white-space:nowrap">{_esc(stage_name)}</td>'
+                f'<td style="padding:4px 8px;font-family:ui-monospace,monospace;'
+                f'font-size:11px;color:#333;word-break:break-all">{_esc(stage_path)}</td>'
+                f'<td style="padding:4px 8px;font-size:12px;'
+                f'color:#666;font-style:italic">{_esc(stage_note)}</td>'
+                f"</tr>"
+            )
+
+        rows.append(
+            f"<tr>"
+            f'<td style="padding:8px 10px">'
+            f"<details>"
+            f'<summary style="cursor:pointer;list-style:none">'
+            f"{packaged_cell}"
+            f"</summary>"
+            f'<table style="width:100%;margin-top:8px;border-collapse:collapse;'
+            f'background:#FAFBFC;border:1px solid #E5E7EB;border-radius:4px">'
+            f'<thead><tr style="background:#F0F2F5">'
+            f'<th style="padding:6px 8px;text-align:left;font-size:11px;'
+            f'color:#666">Status</th>'
+            f'<th style="padding:6px 8px;text-align:left;font-size:11px;'
+            f'color:#666">Stage</th>'
+            f'<th style="padding:6px 8px;text-align:left;font-size:11px;'
+            f'color:#666">Path after stage</th>'
+            f'<th style="padding:6px 8px;text-align:left;font-size:11px;'
+            f'color:#666">Note</th>'
+            f"</tr></thead><tbody>" + "".join(chain_rows) + f"</tbody></table>"
+            f"</details>"
+            f"</td>"
+            f'<td style="padding:8px 10px;font-family:ui-monospace,monospace;'
+            f'font-size:12px;color:#444;word-break:break-all">'
+            f"{_esc(source_path)}"
+            f"</td>"
+            f"</tr>"
+        )
+
+    generated_at = doc.get("generated_at", "")
+    schema_version = doc.get("version", "?")
+    summary_parts = [
+        f"<strong>{len(entries)}</strong> files",
+    ]
+    for status_key in ("applied", "no_op", "skipped", "failed"):
+        n = stage_counts.get(status_key, 0)
+        if n:
+            summary_parts.append(
+                f"{_status_badge(status_key)} <strong>{n}</strong> stage steps"
+            )
+    summary = " &middot; ".join(summary_parts)
+
+    return (
+        '<div style="margin-bottom:12px;padding:10px 14px;background:#F0F4F8;'
+        'border-left:3px solid #0E4D8C;border-radius:3px;font-size:13px">'
+        f"{summary}"
+        f'<div style="margin-top:4px;color:#666;font-size:11px">'
+        f"Generated {_esc(generated_at)} &middot; schema v{_esc(schema_version)} &middot; "
+        f"source: <code>context/ships.provenance.json</code>"
+        f"</div>"
+        f"</div>"
+        '<p style="color:#666;font-size:12px;margin:0 0 10px 0">'
+        "Click any packaged path to expand its full transformation chain "
+        "(source &rarr; eponymous &rarr; token_resolved &rarr; package)."
+        "</p>"
+        '<table style="width:100%;border-collapse:collapse;'
+        'background:white;border:1px solid #E5E7EB">'
+        '<thead><tr style="background:#F8F9FA">'
+        '<th style="padding:8px 10px;text-align:left;font-size:12px;'
+        'color:#444;border-bottom:1px solid #E5E7EB">Packaged path '
+        '<span style="color:#999;font-weight:400;font-size:11px">'
+        "(click to expand chain)</span></th>"
+        '<th style="padding:8px 10px;text-align:left;font-size:12px;'
+        'color:#444;border-bottom:1px solid #E5E7EB">Source path</th>'
+        "</tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
+    )
+
+
 def _load_build_provenance(pkg_dir: str) -> List[dict]:
     """Load stage results from ships.decisions.json for the Build Provenance tab.
 
@@ -1731,6 +1971,7 @@ def generate_package_report(pkg_dir: str, manifest_dict: dict) -> str:
     trust = load_trust_result(pkg_dir) or {}
     viewer_links = _write_package_viewers(pkg_dir, records)
     stages = _load_build_provenance(pkg_dir)
+    content_provenance = _load_content_provenance(pkg_dir)
 
     pkg_name = manifest_dict.get("package_name", "Package")
     report_label = _package_report_label(manifest_dict)
@@ -1766,6 +2007,11 @@ def generate_package_report(pkg_dir: str, manifest_dict: dict) -> str:
         ),
         _common.Tab(
             "tab-provenance", "Build Provenance", _build_provenance_tab(stages)
+        ),
+        _common.Tab(
+            "tab-content-provenance",
+            "Content Provenance",
+            _content_provenance_tab(content_provenance, viewer_links),
         ),
         _common.Tab("tab-trust", "Trust Report", _trust_tab(trust)),
         _common.Tab("tab-deploy", "Deploy", _deploy_tab(manifest_dict)),
