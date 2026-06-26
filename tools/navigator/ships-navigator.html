@@ -776,8 +776,29 @@ function renderScript(script, shell) {
   const cont  = shell === "cmd" ? " ^" : shell === "powershell" ? " `" : " \\";
   const cmnt  = shell === "cmd" ? "::" : "#";
 
+  // Bash on Windows needs POSIX-style paths in `cd`, `--source`, etc.
+  // The script model is built once with the user's chosen OS separator,
+  // so a Windows-OS pick bakes backslashes into SOURCE/OUTPUT_ROOT and
+  // the constructed PROJECT/GRAPHS_DIR/ENV_CONFIG. Re-emit those as
+  // forward slashes when rendering bash, and translate the leading
+  // drive-letter form (`C:\` → `/c/`) so Git Bash / MSYS2 understand
+  // them. WSL (`/mnt/c/...`) and Cygwin (`/cygdrive/c/...`) users have
+  // to retarget the SOURCE/OUTPUT_ROOT vars by hand — see the header
+  // note below. Heuristic: only transform strings that look like
+  // file-system paths (contain `\`, `/`, or a drive letter), so we
+  // don't mangle DESCRIPTION or DB_HOST etc.
+  const looksLikePath = s =>
+    /\\/.test(s) || /\//.test(s) || /^[A-Za-z]:/.test(s);
+  const toBashPath = s => {
+    if (!looksLikePath(s)) return s;
+    let out = s.replace(/^([A-Za-z]):/, (_, d) => `/${d.toLowerCase()}`);
+    out = out.replace(/\\/g, "/");
+    return out;
+  };
+  const valueForShell = s => (shell === "bash" ? toBashPath(xform(s)) : xform(s));
+
   const setVar = (name, value, commented) => {
-    const v = xform(value);
+    const v = valueForShell(value);
     const pfx = commented ? (cmnt + " ") : "";
     if (shell === "bash")            out.push(`${pfx}${name}="${v}"`);
     else if (shell === "powershell") out.push(`${pfx}$${name} = "${v}"`);
@@ -799,6 +820,12 @@ function renderScript(script, shell) {
   if (shell === "bash") {
     out.push("#!/usr/bin/env bash");
     out.push("set -euo pipefail");
+    out.push("");
+    out.push("# Paths below use Git Bash / MSYS2 form (`/c/...`). For:");
+    out.push("#   WSL    — retarget vars to `/mnt/c/...`");
+    out.push("#   Cygwin — retarget vars to `/cygdrive/c/...`");
+    out.push("# Only SOURCE and OUTPUT_ROOT typically need editing — the");
+    out.push("# derived $PROJECT / $GRAPHS_DIR / $ENV_CONFIG vars compose from them.");
   } else if (shell === "powershell") {
     out.push("# PowerShell — SHIPS Navigator generated script");
     out.push("# If Windows blocks this with 'These files can't be opened' (Mark-of-the-Web),");

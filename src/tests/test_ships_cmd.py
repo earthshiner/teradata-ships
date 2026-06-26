@@ -11,6 +11,7 @@ from td_release_packager import ships_cmd as ships_cmd_module
 from td_release_packager.ships_cmd import (
     _in_ships_project,
     install_hint,
+    run_from_hint,
     ships_cmd,
 )
 
@@ -114,12 +115,63 @@ def test_install_hint_none_when_ships_on_path(monkeypatch):
     assert install_hint() is None
 
 
-def test_install_hint_present_for_fallback_verbs(monkeypatch, tmp_path):
+def test_install_hint_present_for_python_m_fallback(monkeypatch, tmp_path):
     monkeypatch.setattr(shutil, "which", lambda name: None)
     monkeypatch.chdir(tmp_path)
     hint = install_hint()
     assert hint is not None
     assert "uv tool install" in hint
+    # python -m fallback hint names the active-venv cwd assumption.
+    assert "activated venv" in hint
+
+
+def test_install_hint_for_uv_run_names_project_cwd_assumption(monkeypatch, tmp_path):
+    """When the wizard fell back to `uv run ships`, the hint must tell
+    the user where to run from — `uv run` only finds the SHIPS env when
+    cwd is inside the project."""
+    monkeypatch.setattr(
+        shutil, "which", lambda name: None if name == "ships" else f"/usr/bin/{name}"
+    )
+    project = tmp_path / "fake-ships"
+    project.mkdir()
+    (project / "pyproject.toml").write_text(
+        '[project]\nname = "teradata-ships"\n', encoding="utf-8"
+    )
+    monkeypatch.chdir(project)
+    hint = install_hint()
+    assert hint is not None
+    assert "Run from: inside the SHIPS project" in hint
+    assert "uv tool install" in hint
+
+
+def test_run_from_hint_ships_on_path(monkeypatch):
+    """Bare `ships` works from anywhere, but the hint still mentions
+    that some flags resolve paths against cwd."""
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    hint = run_from_hint()
+    assert "anywhere" in hint
+    assert "cwd" in hint
+
+
+def test_run_from_hint_uv_run(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        shutil, "which", lambda name: None if name == "ships" else f"/usr/bin/{name}"
+    )
+    project = tmp_path / "fake-ships"
+    project.mkdir()
+    (project / "pyproject.toml").write_text(
+        '[project]\nname = "teradata-ships"\n', encoding="utf-8"
+    )
+    monkeypatch.chdir(project)
+    hint = run_from_hint()
+    assert "inside the SHIPS project" in hint
+
+
+def test_run_from_hint_python_m_fallback(monkeypatch, tmp_path):
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    monkeypatch.chdir(tmp_path)
+    hint = run_from_hint()
+    assert "activated venv" in hint
 
 
 def test_cache_returns_stable_result(monkeypatch):

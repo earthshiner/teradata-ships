@@ -51,7 +51,7 @@ from td_release_packager.token_engine import (
 )
 from td_release_packager.models import BuildConfig
 from td_release_packager.scaffolder import scaffold_project
-from td_release_packager.ships_cmd import install_hint, ships_cmd
+from td_release_packager.ships_cmd import install_hint, run_from_hint, ships_cmd
 from td_release_packager.token_engine import (
     read_env_config,
     scan_tokens_in_directory,
@@ -828,6 +828,9 @@ def _print_harvest_next_steps(
     else:
         state = "source ingested; no token activity this run"
     print(f"  Project state: {state}")
+    # Per-verb cwd orientation cue (#403) — answers "where do I run
+    # these from?" before the snippets so users don't have to guess.
+    print(f"  {run_from_hint()}")
     print()
 
     steps: List[str] = []
@@ -1094,6 +1097,10 @@ def _print_onboard_recommendation(state: str, source: str, env: str, scan: dict)
     # bare ``ships`` when on PATH, then ``uv run ships`` inside a uv
     # project, then ``python -m td_release_packager`` as fallback (#403).
     module = ships_cmd()
+    # Per-verb cwd orientation cue — answers "where do I run these
+    # from?" before the snippets so users don't have to guess.
+    print(f"  {run_from_hint()}")
+    print()
 
     if state == "LEGACY":
         print("  Detected: legacy placeholder markers ($VAR / &&VAR&&)")

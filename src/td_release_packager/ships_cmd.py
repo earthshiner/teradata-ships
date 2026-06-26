@@ -82,15 +82,64 @@ def ships_cmd() -> str:
 
 
 def install_hint() -> str | None:
-    """One-line install suggestion when the wizard isn't using bare
-    ``ships``.  Returns ``None`` when ``ships`` is already on PATH so
-    callers can skip printing.
+    """Verb-aware cwd / install guidance for the wizard.
+
+    Returns ``None`` when the detected verb is bare ``ships`` —
+    cwd doesn't matter for a globally-installed console script and
+    there's nothing to suggest.
+
+    When the detected verb is ``uv run ships`` the hint tells the user
+    where to run from (``uv run`` only resolves the SHIPS environment
+    when cwd is inside the project).
+
+    When the detected verb is the ``python -m`` fallback the hint
+    suggests a global install so the user can leave the fallback
+    state — and mentions the cwd assumption that makes ``python -m``
+    work today (an active venv where the module is importable).
     """
-    if ships_cmd() == "ships":
+    cmd = ships_cmd()
+    if cmd == "ships":
         return None
+    if cmd == "uv run ships":
+        return (
+            "Run from: inside the SHIPS project checkout (any subdir works) —\n"
+            "          `uv run` resolves the env from `pyproject.toml` in a parent.\n"
+            "Tip:      for a verb that works from anywhere, install ships globally:\n"
+            "          uv tool install --editable ."
+        )
+    # python -m td_release_packager fallback
     return (
-        "Tip: for a friendlier prompt anywhere, install ships globally:\n"
-        "       uv tool install --editable ."
+        "Run from: anywhere a Python with `td_release_packager` importable is\n"
+        "          active (typically an activated venv).\n"
+        "Tip:      for a friendlier prompt anywhere, install ships globally:\n"
+        "          uv tool install --editable ."
+    )
+
+
+def run_from_hint() -> str:
+    """One-line ``Run from:`` description for the detected verb.
+
+    Used at the top of wizard banners as a quick orientation cue.
+    Always returns a string — even for bare ``ships`` where cwd is
+    irrelevant, the explicit "anywhere" callout is useful because
+    several SHIPS commands write to cwd (``--output releases/``,
+    relative ``--graph`` paths) and users want that confirmed.
+    """
+    cmd = ships_cmd()
+    if cmd == "ships":
+        return (
+            "Run from: anywhere (cwd-independent invocation). "
+            "Relative paths in args — e.g. `--output releases/` — "
+            "are resolved against cwd."
+        )
+    if cmd == "uv run ships":
+        return (
+            "Run from: inside the SHIPS project checkout, any subdir. "
+            "Relative paths in args are resolved against cwd."
+        )
+    return (
+        "Run from: a shell where Python can import `td_release_packager` "
+        "(activated venv). Relative paths in args are resolved against cwd."
     )
 
 
