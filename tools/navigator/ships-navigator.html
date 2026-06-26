@@ -257,6 +257,8 @@
     <h2>
       Generated artefacts
       <span class="toolbar">
+        <button class="btn small" id="copy-plan">Copy plan.json</button>
+        <button class="btn small" id="save-plan">Save plan.json</button>
         <button class="btn small" id="download-all">Download all (.zip)</button>
       </span>
     </h2>
@@ -1897,6 +1899,34 @@ document.getElementById("reset-all").addEventListener("click", () => {
   renderAll();
 });
 document.getElementById("download-all").addEventListener("click", downloadAllBundle);
+
+// Persistent plan.json affordances in the output header. The previous
+// home — buried under the "Why each step" tab — was hard to find when
+// users wanted to save their answers. Both handlers rebuild the plan
+// fresh on click so they always reflect the current form state, not a
+// snapshot from when the panel last rendered.
+document.getElementById("save-plan").addEventListener("click", () => {
+  const text = JSON.stringify(buildPlanJson(), null, 2);
+  downloadBlob("plan.json", new Blob([text], { type: "application/json" }));
+});
+document.getElementById("copy-plan").addEventListener("click", (e) => {
+  const text = JSON.stringify(buildPlanJson(), null, 2);
+  const btn = e.currentTarget;
+  const original = btn.textContent;
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+    btn.textContent = "Copied!";
+    setTimeout(() => { btn.textContent = original; }, 1200);
+  } catch (err) {
+    btn.textContent = "Copy failed";
+    setTimeout(() => { btn.textContent = original; }, 1500);
+  }
+});
 
 function renderAll() {
   renderQuestions();
