@@ -449,6 +449,28 @@ const QUESTIONS = [
   { id: "process.strict", label: "Strict mode (abort on first stage error)?",
     hint: "Off by default — developer mode runs all stages and summarises errors at the end. Tick for CI / platform mode.",
     kind: "checkbox" },
+
+  // --- Bash-flavour for Windows paths in the emitted .sh ---
+  // Only relevant when the project dir looks Windows-shaped — on POSIX
+  // there are no drive letters or backslashes for the bash render to
+  // translate. The transformation lives in renderScript(); the only
+  // reason to ask is to pick the right `C:\` prefix substitution.
+  {
+    id: "bash.flavour",
+    label: "Bash path style for the emitted <code>.sh</code>",
+    hint: "Windows paths can't be expressed in a POSIX shell without translation. " +
+          "<b>Git Bash / MSYS2</b> uses <code>/c/...</code> (default — most common). " +
+          "<b>WSL</b> uses <code>/mnt/c/...</code>. " +
+          "<b>Cygwin</b> uses <code>/cygdrive/c/...</code>. " +
+          "The PowerShell and cmd outputs are unaffected.",
+    kind: "radio",
+    options: [
+      { value: "gitbash", label: "Git Bash / MSYS2 (/c/...)" },
+      { value: "wsl",     label: "WSL (/mnt/c/...)" },
+      { value: "cygwin",  label: "Cygwin (/cygdrive/c/...)" },
+    ],
+    show: () => targetOs() === "windows",
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -761,15 +783,21 @@ function generatePlan() {
     "Long paths live in shell variables ($PROJECT, $SOURCE, $ENV_CONFIG) — retargeting is a one-line edit at the top of the script.",
   ];
 
+  // bashFlavour picks the C:\ → POSIX prefix substitution in renderScript
+  // (Git Bash /c/..., WSL /mnt/c/..., Cygwin /cygdrive/c/...). Default
+  // is Git Bash — most common Windows-Bash. Only consulted by the bash
+  // renderer; PS and cmd renders ignore it.
+  const bashFlavour = a["bash.flavour"] || "gitbash";
+
   const issues = validate(a);
-  return { script, rationale, tokeniseConf, envFiles, os, guardrails, issues, mode, tokensAlready, envList, projDir, pkgName };
+  return { script, rationale, tokeniseConf, envFiles, os, bashFlavour, guardrails, issues, mode, tokensAlready, envList, projDir, pkgName };
 }
 
 // ---------------------------------------------------------------------------
 // Render the script model in a chosen shell.
 // shell ∈ { "bash", "powershell", "cmd" }.
 // ---------------------------------------------------------------------------
-function renderScript(script, shell) {
+function renderScript(script, shell, bashFlavour) {
   const out = [];
   // For cmd, rewrite $VAR_NAME → %VAR_NAME%. bash and PowerShell both use $VAR.
   const xform = s => shell === "cmd" ? s.replace(/\$([A-Z_][A-Z0-9_]*)/g, "%$1%") : s;
@@ -781,17 +809,23 @@ function renderScript(script, shell) {
   // so a Windows-OS pick bakes backslashes into SOURCE/OUTPUT_ROOT and
   // the constructed PROJECT/GRAPHS_DIR/ENV_CONFIG. Re-emit those as
   // forward slashes when rendering bash, and translate the leading
-  // drive-letter form (`C:\` → `/c/`) so Git Bash / MSYS2 understand
-  // them. WSL (`/mnt/c/...`) and Cygwin (`/cygdrive/c/...`) users have
-  // to retarget the SOURCE/OUTPUT_ROOT vars by hand — see the header
-  // note below. Heuristic: only transform strings that look like
+  // drive-letter form (`C:\`) into whatever the user's POSIX-on-Windows
+  // shell expects — Git Bash, WSL, or Cygwin all spell the C: mount
+  // differently. Heuristic: only transform strings that look like
   // file-system paths (contain `\`, `/`, or a drive letter), so we
   // don't mangle DESCRIPTION or DB_HOST etc.
+  const flavour = bashFlavour || "gitbash";
+  const drivePrefix = flavour === "wsl"    ? "/mnt"
+                    : flavour === "cygwin" ? "/cygdrive"
+                                           : "";  // gitbash → /c (no prefix)
   const looksLikePath = s =>
     /\\/.test(s) || /\//.test(s) || /^[A-Za-z]:/.test(s);
   const toBashPath = s => {
     if (!looksLikePath(s)) return s;
-    let out = s.replace(/^([A-Za-z]):/, (_, d) => `/${d.toLowerCase()}`);
+    let out = s.replace(
+      /^([A-Za-z]):/,
+      (_, d) => `${drivePrefix}/${d.toLowerCase()}`
+    );
     out = out.replace(/\\/g, "/");
     return out;
   };
@@ -821,9 +855,25 @@ function renderScript(script, shell) {
     out.push("#!/usr/bin/env bash");
     out.push("set -euo pipefail");
     out.push("");
-    out.push("# Paths below use Git Bash / MSYS2 form (`/c/...`). For:");
-    out.push("#   WSL    — retarget vars to `/mnt/c/...`");
-    out.push("#   Cygwin — retarget vars to `/cygdrive/c/...`");
+    // Header lists the active form first, then the two alternatives,
+    // so a user who picked the wrong flavour in the wizard knows what
+    // to swap to without re-running the generator. Only SOURCE and
+    // OUTPUT_ROOT carry the user-typed Windows paths — the derived
+    // $PROJECT / $GRAPHS_DIR / $ENV_CONFIG compose from those.
+    const flavourLabel = flavour === "wsl"    ? "WSL form (`/mnt/c/...`)"
+                       : flavour === "cygwin" ? "Cygwin form (`/cygdrive/c/...`)"
+                                              : "Git Bash / MSYS2 form (`/c/...`)";
+    const alternativesByFlavour = {
+      gitbash: ["#   WSL    — retarget SOURCE/OUTPUT_ROOT to `/mnt/c/...`",
+                "#   Cygwin — retarget SOURCE/OUTPUT_ROOT to `/cygdrive/c/...`"],
+      wsl:     ["#   Git Bash / MSYS2 — retarget SOURCE/OUTPUT_ROOT to `/c/...`",
+                "#   Cygwin           — retarget SOURCE/OUTPUT_ROOT to `/cygdrive/c/...`"],
+      cygwin:  ["#   Git Bash / MSYS2 — retarget SOURCE/OUTPUT_ROOT to `/c/...`",
+                "#   WSL              — retarget SOURCE/OUTPUT_ROOT to `/mnt/c/...`"],
+    };
+    const alternatives = alternativesByFlavour[flavour] || alternativesByFlavour.gitbash;
+    out.push(`# Paths below use ${flavourLabel}. For other POSIX-on-Windows shells:`);
+    for (const line of alternatives) out.push(line);
     out.push("# Only SOURCE and OUTPUT_ROOT typically need editing — the");
     out.push("# derived $PROJECT / $GRAPHS_DIR / $ENV_CONFIG vars compose from them.");
   } else if (shell === "powershell") {
@@ -1058,9 +1108,9 @@ function renderCommandsPanel(plan) {
     "<b>(b)</b> in PowerShell run <code>Unblock-File -Path .\\ships-run.ps1</code> after download.";
   panel.appendChild(motwBanner);
 
-  const psText  = renderScript(plan.script, "powershell");
-  const shText  = renderScript(plan.script, "bash");
-  const batText = renderScript(plan.script, "cmd");
+  const psText  = renderScript(plan.script, "powershell", plan.bashFlavour);
+  const shText  = renderScript(plan.script, "bash",       plan.bashFlavour);
+  const batText = renderScript(plan.script, "cmd",        plan.bashFlavour);
 
   // The default shell (first in the OS-based order) renders expanded; the other
   // two collapse into <details> so users don't scroll past them but still see
@@ -1618,10 +1668,11 @@ function downloadAllBundle() {
   if (!plan) return;
   const files = [];
 
-  // Commands in all three shells.
-  files.push({ name: "ships-run.ps1", body: renderScript(plan.script, "powershell") });
-  files.push({ name: "ships-run.sh",  body: renderScript(plan.script, "bash") });
-  files.push({ name: "ships-run.bat", body: renderScript(plan.script, "cmd") });
+  // Commands in all three shells. bashFlavour is consulted only by the
+  // bash renderer (PS / cmd ignore it) — see renderScript().
+  files.push({ name: "ships-run.ps1", body: renderScript(plan.script, "powershell", plan.bashFlavour) });
+  files.push({ name: "ships-run.sh",  body: renderScript(plan.script, "bash",       plan.bashFlavour) });
+  files.push({ name: "ships-run.bat", body: renderScript(plan.script, "cmd",        plan.bashFlavour) });
 
   if (plan.tokeniseConf) files.push({ name: "config/tokenise.conf", body: plan.tokeniseConf });
 
