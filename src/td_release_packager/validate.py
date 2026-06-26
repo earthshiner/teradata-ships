@@ -722,6 +722,12 @@ _SYSTEM_SCOPE_TYPES = {
     "FOREIGN_SERVER",
 }
 
+# -- DML-like types: qualified through a statement target (INSERT INTO
+# Db.Object, etc.) rather than a CREATE/REPLACE clause. zero_tokens
+# recognises their qualifier via _DML_QUALIFIED_TARGET_RE, not the
+# DDL-shaped _QUALIFIED_NAME_RE (issue #410).
+_DML_LIKE_TYPES = {"DML", "ORDERED_SQL"}
+
 # -- Qualified name extraction --
 #
 # Anchored to start-of-statement (``^\s*`` + ``re.MULTILINE``) so a
@@ -2287,6 +2293,15 @@ def _check_zero_tokens(rel_path: str, content: str) -> List[ValidationIssue]:
         if "." in qualified:
             return []
 
+    # Case 2b: DML scripts (INSERT/UPDATE/DELETE/MERGE) and ordered SQL
+    # qualify through their statement target rather than a CREATE clause,
+    # so the DDL-shaped _QUALIFIED_NAME_RE above never matches them. A
+    # fully-qualified DML target (e.g. ``INSERT INTO Db.Object ...``)
+    # gives SHIPS a literal database name to auto-tokenise, so it passes
+    # exactly like case 2 (issue #410).
+    if obj_type in _DML_LIKE_TYPES and _DML_QUALIFIED_TARGET_RE.search(content):
+        return []
+
     # Case 3: no token AND no database qualifier — SHIPS cannot auto-tokenise
     # because there is no database name to work with.  The developer must add
     # a database qualifier (e.g. {{MY_DB}}.ObjectName) before SHIPS can help.
@@ -2471,6 +2486,21 @@ _IDENT_OR_TOKEN_RE = r'(\{\{[A-Za-z_]\w*\}\}|"?[A-Za-z_]\w*"?)'
 _DB_QUALIFIED_REF_RE = re.compile(
     r"(?<![.\w])" + _IDENT_OR_TOKEN_RE + r"\." + _IDENT_OR_TOKEN_RE + r"(?![.\w])",
     re.IGNORECASE,
+)
+
+# DML statement target qualifier: INSERT INTO / MERGE INTO / UPDATE /
+# DELETE [FROM] followed by Database.Object (or {{TOKEN}}.Object). DML
+# scripts have no CREATE clause for _QUALIFIED_NAME_RE to capture, so
+# zero_tokens recognises their qualifier through the statement target
+# instead (issue #410). Anchored to statement start (MULTILINE) so a
+# dotted string literal in a VALUES clause cannot masquerade as a
+# qualifier.
+_DML_QUALIFIED_TARGET_RE = re.compile(
+    r"^\s*(?:INSERT\s+INTO|MERGE\s+INTO|UPDATE|DELETE(?:\s+FROM)?)\s+"
+    + _IDENT_OR_TOKEN_RE
+    + r"\."
+    + _IDENT_OR_TOKEN_RE,
+    re.IGNORECASE | re.MULTILINE,
 )
 
 # Patterns for excluding comments and string literals from analysis
