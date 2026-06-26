@@ -51,6 +51,7 @@ from td_release_packager.token_engine import (
 )
 from td_release_packager.models import BuildConfig
 from td_release_packager.scaffolder import scaffold_project
+from td_release_packager.ships_cmd import install_hint, ships_cmd
 from td_release_packager.token_engine import (
     read_env_config,
     scan_tokens_in_directory,
@@ -831,6 +832,12 @@ def _print_harvest_next_steps(
 
     steps: List[str] = []
 
+    # Pick the friendliest invocation that resolves on this shell so
+    # printed snippets can be copy-pasted as-is — bare ``ships`` when on
+    # PATH, ``uv run ships`` inside a uv project, else
+    # ``python -m td_release_packager`` (#403).
+    cmd = ships_cmd()
+
     # Quality-gate block — appears in every flow before packaging.
     # 'inspect' is part of the canonical S-H-I-P-S workflow;
     # 'analyze' produces dependency waves for parallel deploy
@@ -840,14 +847,14 @@ def _print_harvest_next_steps(
         return (
             f"{num}. Validate the harvested DDL before packaging:\n"
             f"\n"
-            f"     python -m td_release_packager inspect \\\n"
+            f"     {cmd} inspect \\\n"
             f"         --source {project}\n"
             f"\n"
-            f"     python -m td_release_packager analyze \\\n"
+            f"     {cmd} analyze \\\n"
             f"         --source {project}            "
             f"# optional, deploy waves\n"
             f"\n"
-            f"     python -m td_release_packager scan \\\n"
+            f"     {cmd} scan \\\n"
             f"         --source {project} \\\n"
             f"         --env-config config/env/DEV.conf\n"
             f"\n"
@@ -873,7 +880,7 @@ def _print_harvest_next_steps(
         return (
             f"{num}. Package for an environment (example: DEV):\n"
             f"\n"
-            f"     python -m td_release_packager package \\\n"
+            f"     {cmd} package \\\n"
             f"         --source {project} --env DEV --name <name> \\\n"
             f"         --env-config config/env/DEV.conf \\\n"
             f"         --output releases/"
@@ -884,7 +891,7 @@ def _print_harvest_next_steps(
         # the token map entirely and bootstrap properties directly
         # from the tokens the source already references.
         bootstrap_cmd_parts = [
-            f"     python -m td_release_packager bootstrap-env-config \\\n"
+            f"     {cmd} bootstrap-env-config \\\n"
             f"         --source {project} \\\n"
             f"         --env DEV"
         ]
@@ -929,7 +936,7 @@ def _print_harvest_next_steps(
             steps.append(
                 f"2. Bootstrap a .conf file from the token map:\n"
                 f"\n"
-                f"     python -m td_release_packager decompose-names \\\n"
+                f"     {cmd} decompose-names \\\n"
                 f"         {generated_token_map_path} \\\n"
                 f"         --env DEV \\\n"
                 f"         --output-dir {project}\\config\n"
@@ -945,7 +952,7 @@ def _print_harvest_next_steps(
         steps.append(
             f"{next_num}. Re-harvest with the token map applied:\n"
             f"\n"
-            f"     python -m td_release_packager harvest \\\n"
+            f"     {cmd} harvest \\\n"
             f"         --source <legacy_src> \\\n"
             f"         --project {project} \\\n"
             f"         --token-map {generated_token_map_path}\n"
@@ -1083,7 +1090,10 @@ def _cmd_onboard(args):
 
 def _print_onboard_recommendation(state: str, source: str, env: str, scan: dict):
     """Print the recommended command sequence for the detected state."""
-    module = "python -m td_release_packager"
+    # Pick the friendliest invocation that resolves on this shell —
+    # bare ``ships`` when on PATH, then ``uv run ships`` inside a uv
+    # project, then ``python -m td_release_packager`` as fallback (#403).
+    module = ships_cmd()
 
     if state == "LEGACY":
         print("  Detected: legacy placeholder markers ($VAR / &&VAR&&)")
@@ -1126,6 +1136,11 @@ def _print_onboard_recommendation(state: str, source: str, env: str, scan: dict)
         print("  Step 3 — bootstrap env config from the token map:")
         print(f"    {module} bootstrap-env-config --source <project_dir> --env {env}")
 
+    hint = install_hint()
+    if hint is not None:
+        print()
+        for line in hint.splitlines():
+            print(f"  {line}")
     print()
 
 
@@ -1139,7 +1154,7 @@ def _onboard_run_auto(state: str, source: str, env: str, args):
         il_main(["--scan-source", source, "--env", env, "--output-dir", output_dir])
     elif state == "TOKENS_NO_CONFIG":
         print("  --auto requires a project directory for bootstrap-env-config.")
-        print("  Run manually: python -m td_release_packager bootstrap-env-config ...")
+        print(f"  Run manually: {ships_cmd()} bootstrap-env-config ...")
     elif state == "READY":
         print("  --auto: source is ready — run harvest manually.")
     else:
@@ -1561,18 +1576,25 @@ def _cmd_scaffold(args):
             print("\n  Repair complete. Missing directories and files have")
             print("  been created. Existing files were NOT overwritten.")
         else:
+            # Friendliest verb available on this shell (#403).
+            _cmd = ships_cmd()
             print("\n  SHIPS workflow — next steps:")
             print("    [S] Scaffold  ✓ Done")
-            print("    [H] Harvest   python -m td_release_packager harvest \\")
+            print(f"    [H] Harvest   {_cmd} harvest \\")
             print(f"                    --source /raw/ddl/ --project {project_dir}")
-            print("    [I] Inspect   python -m td_release_packager inspect \\")
+            print(f"    [I] Inspect   {_cmd} inspect \\")
             print(f"                    --source {project_dir}")
-            print("    [P] Package   python -m td_release_packager package \\")
+            print(f"    [P] Package   {_cmd} package \\")
             print(
                 f"                    --source {project_dir} --env DEV --name {args.name} \\"
             )
             print("                    --env-config config/env/DEV.conf")
             print("    [S] Ship      python deploy.py --host <host> --user <user>")
+            _hint = install_hint()
+            if _hint is not None:
+                print()
+                for _line in _hint.splitlines():
+                    print(f"    {_line}")
 
         print(f"{'=' * 64}\n")
 
@@ -2941,8 +2963,7 @@ def _cmd_repackage(args):
                 "  Replace DBA placeholders in the generated payload files, then rerun:"
             )
             print(
-                "  python -m td_release_packager repackage "
-                f'--package-dir "{args.package_dir}" --strict'
+                f'  {ships_cmd()} repackage --package-dir "{args.package_dir}" --strict'
             )
             sys.exit(1 if getattr(args, "strict", False) else 0)
         sys.exit(0)
@@ -4739,7 +4760,7 @@ def _scan_print_text(
                             f"payload references, run:"
                         )
                         print(
-                            f"        python -m td_release_packager "
+                            f"        {ships_cmd()} "
                             f"bootstrap-env-config --source <project> "
                             f"--env <env> --force"
                         )
