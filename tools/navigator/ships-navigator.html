@@ -631,6 +631,11 @@ function generatePlan() {
   sharedVars.push(["NAME",        projName]);
   sharedVars.push(["PROJECT",     `$OUTPUT_ROOT${sep}$NAME`]);
   sharedVars.push(["PKG_NAME",    pkgName]);
+  // Pin the package output dir. Without --output, `ships package`/`process`
+  // default to the CURRENT directory — so running the script from anywhere
+  // other than the project (e.g. the SHIPS repo) drops the release there.
+  // <project>/releases is the documented home and is git-ignored by default.
+  sharedVars.push(["RELEASES",    `$PROJECT${sep}releases`]);
   if (wantGraph) sharedVars.push(["GRAPHS_DIR", `$PROJECT${sep}graphs`]);
   sharedVars.push(["AUTHOR",      ""]);
   sharedVars.push(["DESCRIPTION", "SHIPS Packaged release"]);
@@ -682,6 +687,7 @@ function generatePlan() {
       pr.push(`--env "$ENV"`);
       pr.push(`--env-config "$ENV_CONFIG"`);
       pr.push(`--name "$PKG_NAME"`);
+      pr.push(`--output "$RELEASES"`);
       if (wantStrict) pr.push(`--strict`);
       commands.push(pr);
     } else {
@@ -711,6 +717,7 @@ function generatePlan() {
         `--env "$ENV"`,
         `--name "$PKG_NAME"`,
         `--env-config "$ENV_CONFIG"`,
+        `--output "$RELEASES"`,
       ]);
     }
 
