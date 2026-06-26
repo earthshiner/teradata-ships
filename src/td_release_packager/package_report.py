@@ -1659,16 +1659,19 @@ def _environment_prereq_banner(manifest_dict: dict) -> str:
     if str(manifest_dict.get("role") or "") != "environment_prereqs":
         return ""
     package_filename = str(manifest_dict.get("package_filename") or "<package>.zip")
-    package_dir = package_filename.rsplit(".", 1)[0]
+    # The archive's internal root drops the build-id so extraction into
+    # a nested ``.ships-work/`` folder stays under Windows MAX_PATH
+    # (#395).  The extracted directory is named for the role only.
+    extracted_dir = "00_environment_prereqs"
     return f"""
 <div class="action-banner">
   <h2>ACTION REQUIRED — DBA REVIEW NEEDED</h2>
   <p>This <strong>_00_environment_prereqs</strong> package is blocked until DBA-approved parent and PERM values are supplied.</p>
   <p><strong>Do not edit:</strong> the source project <code>payload/database/pre-requisites</code>, the zip file directly, or the <strong>_01_prereqs</strong> package.</p>
   <p><strong>1. Extract this package zip:</strong> <code>{package_filename}</code> to a working folder such as <code>.ships-work/</code>.</p>
-  <p><strong>2. Amend generated payload inside the extracted package:</strong> <code>.ships-work/{package_dir}/payload/01_pre_requisites/</code></p>
-  <p><strong>3. Repackage the extracted package root:</strong> <code>python -m td_release_packager repackage --package-dir ".ships-work/{package_dir}" --strict</code></p>
-  <p><strong>Full instructions:</strong> <code>.ships-work/{package_dir}/context/prerequisites/DBA_INSTRUCTIONS.md</code></p>
+  <p><strong>2. Amend generated payload inside the extracted package:</strong> <code>.ships-work/{extracted_dir}/payload/01_pre_requisites/</code></p>
+  <p><strong>3. Repackage the extracted package root:</strong> <code>python -m td_release_packager repackage --package-dir ".ships-work/{extracted_dir}" --strict</code></p>
+  <p><strong>Full instructions:</strong> <code>.ships-work/{extracted_dir}/context/prerequisites/DBA_INSTRUCTIONS.md</code></p>
 </div>
 """
 

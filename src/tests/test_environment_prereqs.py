@@ -286,7 +286,10 @@ def test_repackage_unblocks_reviewed_environment_payload(tmp_project, tmp_path):
     env_archive = group_dir / f"{release_group}_00_environment_prereqs.zip"
     shutil.unpack_archive(str(env_archive), str(group_dir))
 
-    env_pkg_dir = group_dir / f"{release_group}_00_environment_prereqs"
+    # Archive's internal root is the short role name (#395) — drops the
+    # build-id so extraction into nested staging dirs stays under
+    # Windows MAX_PATH.
+    env_pkg_dir = group_dir / "00_environment_prereqs"
     dba_payload = env_pkg_dir / "payload/01_pre_requisites/databases/GCFR_MAIN.db"
     dba_payload.write_text(
         dba_payload.read_text(encoding="utf-8")
@@ -339,7 +342,8 @@ def test_repackage_accepts_payload_subdirectory(tmp_project, tmp_path):
     env_archive = group_dir / f"{release_group}_00_environment_prereqs.zip"
     shutil.unpack_archive(str(env_archive), str(group_dir))
 
-    env_pkg_dir = group_dir / f"{release_group}_00_environment_prereqs"
+    # Archive's internal root is the short role name (#395).
+    env_pkg_dir = group_dir / "00_environment_prereqs"
     dba_payload = env_pkg_dir / "payload/01_pre_requisites/databases/GCFR_MAIN.db"
     dba_payload.write_text(
         dba_payload.read_text(encoding="utf-8")
@@ -389,7 +393,10 @@ def test_repackage_from_ships_work_updates_release_group_archive(tmp_project, tm
     work_dir.mkdir(parents=True, exist_ok=True)
     shutil.unpack_archive(str(env_archive), str(work_dir))
 
-    env_pkg_dir = work_dir / f"{release_group}_00_environment_prereqs"
+    # Archive's internal root is the short role name (#395) — the
+    # build-id is no longer repeated inside ``.ships-work/`` so the
+    # staging path stays under Windows MAX_PATH.
+    env_pkg_dir = work_dir / "00_environment_prereqs"
     dba_payload = env_pkg_dir / "payload/01_pre_requisites/databases/GCFR_MAIN.db"
     dba_payload.write_text(
         dba_payload.read_text(encoding="utf-8")

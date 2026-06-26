@@ -733,7 +733,10 @@ class TestGeneratePackageReport:
         html = (tmp_path / "package_report.html").read_text(encoding="utf-8")
         assert "Do not edit" in html
         assert "source project" in html
-        assert ".ships-work/DEV_APP_BUILD_0001_00_environment_prereqs" in html
+        # Banner names the short staging dir (#395) — the build-id is
+        # not repeated inside ``.ships-work/`` so DBAs on Windows stay
+        # under MAX_PATH during extraction.
+        assert ".ships-work/00_environment_prereqs" in html
         assert "--package-dir" in html
 
     def test_invalid_utf8_payload_still_writes_report(self, tmp_path):

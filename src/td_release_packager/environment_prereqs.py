@@ -455,6 +455,10 @@ def _render_dba_instructions(
 ) -> str:
     """Render package-local DBA instructions for environment prereqs."""
     package_name = package_filename.rsplit(".", 1)[0]
+    # The internal archive root drops the build-id so extraction into
+    # a nested ``.ships-work/`` folder stays under Windows MAX_PATH
+    # (#395).  The extracted directory is named for the role only.
+    extracted_dir_name = "00_environment_prereqs"
     first_payload = (
         payload_paths[0]
         if payload_paths
@@ -498,11 +502,11 @@ If that happens, copy the whole release group folder to a short path such as `C:
 # Example: copy the whole release group folder to C:\\ships\\{release_group} first.
 $ReleaseGroup = "C:\\ships\\{release_group}"
 $PackageName = "{package_name}"
+$ExtractedDir = "{extracted_dir_name}"
 $EnvZip = "$ReleaseGroup\\$PackageName.zip"
-$PackageDir = "$ReleaseGroup\\$PackageName"
 
 Expand-Archive -Path $EnvZip -DestinationPath "$ReleaseGroup\\.ships-work" -Force
-$PackageDir = "$ReleaseGroup\\.ships-work\\$PackageName"
+$PackageDir = "$ReleaseGroup\\.ships-work\\$ExtractedDir"
 
 notepad "$PackageDir\\{first_payload.replace("/", "\\")}"
 
@@ -516,11 +520,11 @@ python -m td_release_packager repackage `
 ```bash
 ReleaseGroup="/path/to/releases/{release_group}"
 PackageName="{package_name}"
+ExtractedDir="{extracted_dir_name}"
 EnvZip="$ReleaseGroup/$PackageName.zip"
-PackageDir="$ReleaseGroup/$PackageName"
 
 unzip -o "$EnvZip" -d "$ReleaseGroup/.ships-work"
-PackageDir="$ReleaseGroup/.ships-work/$PackageName"
+PackageDir="$ReleaseGroup/.ships-work/$ExtractedDir"
 
 ${{EDITOR:-vi}} "$PackageDir/{first_payload}"
 
