@@ -155,6 +155,68 @@ def test_zero_tokens_fail_message_mentions_qualifier():
 
 
 # ---------------------------------------------------------------
+# DML seed/registration scripts — qualifier lives in the statement
+# target (INSERT INTO Db.Object), not a CREATE clause (issue #410)
+# ---------------------------------------------------------------
+
+
+def test_zero_tokens_pass_qualified_dml_insert():
+    """Fully-qualified INSERT seed → PASS (case 2b).
+
+    Regression for the false ERROR where a qualified DML file
+    (e.g. CustomerDNA_SEM_STD_T.value_domain.dml) tripped zero_tokens
+    because the DDL-shaped qualifier regex ignored INSERT INTO.
+    """
+    content = (
+        "INSERT INTO CustomerDNA_SEM_STD_T.value_domain "
+        "( domain_name, domain_value, value_label, sort_order )\n"
+        "VALUES ( 'booking_channel', 'WEB', 'Website', 1 );\n"
+        "INSERT INTO CustomerDNA_SEM_STD_T.value_domain "
+        "( domain_name, domain_value, value_label, sort_order )\n"
+        "VALUES ( 'member_status', 'ACTIVE', 'Active', 1 );\n"
+    )
+    assert (
+        _check_zero_tokens("DML/CustomerDNA_SEM_STD_T.value_domain.dml", content) == []
+    )
+
+
+def test_zero_tokens_pass_tokenised_dml_insert():
+    """INSERT into a {{TOKEN}}.Object target → PASS (case 1)."""
+    content = "INSERT INTO {{SEM_DB}}.value_domain (a) VALUES ('x');\n"
+    assert _check_zero_tokens("DML/value_domain.dml", content) == []
+
+
+def test_zero_tokens_pass_qualified_dml_update_delete_merge():
+    """UPDATE / DELETE / MERGE with a qualified target → PASS (case 2b)."""
+    for stmt in (
+        "UPDATE CustomerDNA_DOM_STD_T.member SET status = 'A';\n",
+        "DELETE FROM CustomerDNA_DOM_STD_T.member WHERE id = 1;\n",
+        "DELETE CustomerDNA_DOM_STD_T.member WHERE id = 1;\n",
+        "MERGE INTO CustomerDNA_DOM_STD_T.member AS t USING s ON t.id = s.id;\n",
+    ):
+        assert _check_zero_tokens("DML/seed.dml", stmt) == [], stmt
+
+
+def test_zero_tokens_fail_unqualified_dml():
+    """Unqualified INSERT target → ERROR (case 3) — the fix must not
+    relax this."""
+    content = "INSERT INTO value_domain (a) VALUES ('x');\n"
+    issues = _check_zero_tokens("DML/value_domain.dml", content)
+    assert len(issues) == 1
+    assert issues[0].severity == "ERROR"
+
+
+def test_zero_tokens_fail_unqualified_dml_with_dotted_literal():
+    """A dotted string literal in an unqualified INSERT must NOT be
+    mistaken for a qualifier — the target regex is anchored to the
+    statement, so this still ERRORs (case 3)."""
+    content = "INSERT INTO value_domain (host) VALUES ('db.table.col');\n"
+    issues = _check_zero_tokens("DML/value_domain.dml", content)
+    assert len(issues) == 1
+    assert issues[0].severity == "ERROR"
+
+
+# ---------------------------------------------------------------
 # Excluded: system-scope objects and unclassifiable files
 # ---------------------------------------------------------------
 
