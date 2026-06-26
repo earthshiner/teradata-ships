@@ -1139,6 +1139,26 @@ function renderCommandsPanel(plan) {
     "<b>(b)</b> in PowerShell run <code>Unblock-File -Path .\\ships-run.ps1</code> after download.";
   panel.appendChild(motwBanner);
 
+  // Tokenise.conf reminder — only on the "wizard configures tokenisation"
+  // path (source not already tokenised). Harvest auto-applies
+  // config/tokenise.conf, but ONLY if the file is actually in the project.
+  // Copy-pasting just the commands (skipping the tokenise.conf tab) leaves
+  // names hardcoded and they resurface as inspect 'hardcoded_name' warnings.
+  if (plan.tokeniseConf) {
+    const projDir = plan.projDir || "<project>";
+    const tokBanner = document.createElement("div");
+    tokBanner.className = "warn";
+    tokBanner.style.marginBottom = "12px";
+    tokBanner.innerHTML =
+      "<b>Before you run harvest:</b> save the <b>tokenise.conf</b> tab to " +
+      "<code>" + escapeHtml(projDir) + "/config/tokenise.conf</code> first. " +
+      "Harvest applies it automatically — but only if the file is in the project. " +
+      "If you copy just the commands and skip it, the database names stay " +
+      "hardcoded and reappear as <code>hardcoded_name</code> warnings in inspect. " +
+      "(The <b>Download all</b> button bundles it in the right place for you.)";
+    panel.appendChild(tokBanner);
+  }
+
   const psText  = renderScript(plan.script, "powershell", plan.bashFlavour);
   const shText  = renderScript(plan.script, "bash",       plan.bashFlavour);
   const batText = renderScript(plan.script, "cmd",        plan.bashFlavour);
@@ -1812,6 +1832,10 @@ function downloadAllBundle() {
     "Drop these files into your SHIPS project root (or run from the parent directory).",
     "Long paths bind to shell variables at the top of each script — retargeting is a one-line edit to `$OUTPUT_ROOT`, `$NAME`, or `$SOURCE`.",
     "",
+    plan.tokeniseConf ? "### Tokenisation" : null,
+    plan.tokeniseConf ? "" : null,
+    plan.tokeniseConf ? "`config/tokenise.conf` must be in the project **before** you run harvest — harvest applies it automatically, but only if the file is present. If it's missing, the database names stay hardcoded and reappear as `hardcoded_name` warnings in inspect. Extracting this whole bundle at the project root puts it in the right place; if you copy commands by hand, save the tokenise.conf tab to `config/tokenise.conf` yourself first." : null,
+    plan.tokeniseConf ? "" : null,
     "### `ships: command not found`?",
     "",
     "`ships` is a Python console script (defined in `pyproject.toml`), not a standalone download. It only appears on your PATH once this repo is installed AND its venv is active. The scripts now preflight-check for it. To fix:",

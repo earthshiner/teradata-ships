@@ -1919,9 +1919,32 @@ def _run_ingest(args, stage, issue_codes, apply_tokens) -> int:
         print("\n  Token candidates (hardcoded database names):")
         for db_name, files in sorted(result.token_candidates.items()):
             print(f"    '{db_name}' ({len(files)} refs)")
-        if not generate_map:
-            print("\n  Tip: re-run with --generate-token-map --env-prefix <PREFIX>")
-            print("  to auto-generate a token mapping file.")
+        # These names were left literal — no tokenisation ran this harvest.
+        # Spell out why and how to fix it now, so a hardcoded payload is not
+        # first discovered two stages later as inspect 'hardcoded_name'
+        # warnings (issue #409).
+        if legacy_migration_rules:
+            print(
+                "\n  ⚠ config/tokenise.conf was applied, but the names above "
+                "matched no rule —\n"
+                "    check its prefix/pattern. They will surface as "
+                "'hardcoded_name' warnings in inspect."
+            )
+        else:
+            print(
+                "\n  ⚠ No tokenisation ran — the names above are still literal "
+                "and will surface\n"
+                "    as 'hardcoded_name' warnings in inspect. To tokenise them, "
+                "do one of:\n"
+                "      • add config/tokenise.conf (the SHIPS Navigator writes "
+                "one) and re-harvest\n"
+                "      • re-run harvest with --auto-tokenise [--env-prefix "
+                "<PREFIX>]\n"
+                "      • re-run with --generate-token-map --env-prefix <PREFIX> "
+                "for a reviewable map\n"
+                "    If the names are intentionally fixed, set "
+                "'hardcoded_name = OFF' in config/inspect.conf."
+            )
 
     if result.warnings:
         print("\n  Warnings:")
