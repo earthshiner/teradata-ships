@@ -202,6 +202,11 @@
   .toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
   .glossary dt { font-weight: 600; color: var(--td-orange); margin-top: 10px; }
   .glossary dd { margin: 4px 0 8px 0; font-size: 13px; }
+  .faq h3 { font-size: 14px; color: var(--td-navy); margin: 20px 0 6px; }
+  .faq h3:first-of-type { margin-top: 4px; }
+  .faq p { margin: 6px 0; font-size: 13px; line-height: 1.55; }
+  .faq code { background: var(--td-grey-1); padding: 1px 4px; border-radius: 3px; font-family: var(--td-mono); font-size: 12px; }
+  .faq pre code { background: none; padding: 0; color: inherit; }
   .anatomy details { margin-left: 0; }
   .anatomy details details { margin-left: 18px; border-left: 1px dotted var(--td-grey-2); padding-left: 10px; }
   .anatomy summary {
@@ -263,6 +268,7 @@
       <button data-tab="inspect">inspect.conf</button>
       <button data-tab="rationale">Why each step</button>
       <button data-tab="glossary">Glossary</button>
+      <button data-tab="faq">FAQ</button>
     </div>
 
     <div id="panel-commands" class="panel active"></div>
@@ -272,6 +278,7 @@
     <div id="panel-inspect" class="panel"></div>
     <div id="panel-rationale" class="panel rationale"></div>
     <div id="panel-glossary" class="panel glossary"></div>
+    <div id="panel-faq" class="panel faq"></div>
   </section>
 </main>
 
@@ -891,6 +898,29 @@ function renderScript(script, shell, bashFlavour) {
   }
   out.push("");
 
+  // Preflight — the #1 support question is "the script runs nothing". The cause
+  // is almost always that `ships` (a Python console script, not a standalone
+  // binary) is not on PATH because the project venv isn't active. Fail loudly
+  // with the remedy instead of letting the first real command die with a bare
+  // "command not found". The FAQ tab explains where `ships` comes from.
+  out.push(`${cmnt} Preflight: 'ships' is a Python console script, not a standalone download.`);
+  out.push(`${cmnt} It is only on PATH once this repo is installed AND its venv is active.`);
+  if (shell === "bash") {
+    out.push("if ! command -v ships >/dev/null 2>&1; then");
+    out.push('  echo "ERROR: \'ships\' is not on PATH. Activate your project venv (source .venv/bin/activate)" >&2');
+    out.push('  echo "       or install it globally (uv tool install --editable <repo>), then re-run." >&2');
+    out.push("  exit 1");
+    out.push("fi");
+  } else if (shell === "powershell") {
+    out.push("if (-not (Get-Command ships -ErrorAction SilentlyContinue)) {");
+    out.push('  Write-Error "\'ships\' is not on PATH. Activate your project venv (.\\.venv\\Scripts\\Activate.ps1) or install it globally (uv tool install --editable <repo>), then re-run. See the FAQ tab in the SHIPS Navigator."');
+    out.push("  exit 1");
+    out.push("}");
+  } else {
+    out.push("where ships >nul 2>nul || (echo ERROR: ships is not on PATH - activate your venv .venv\\Scripts\\activate.bat or install with: uv tool install --editable ^<repo^> ^& exit /b 1)");
+  }
+  out.push("");
+
   if (script.headNotes && script.headNotes.length) {
     for (const n of script.headNotes) out.push(`${cmnt} ${n}`);
     out.push("");
@@ -1074,6 +1104,7 @@ function renderOutputs() {
   renderInspectPanel();
   renderRationalePanel(plan);
   renderGlossaryPanel();
+  renderFaqPanel();
   window.__lastPlan = plan; // for Download-all
 }
 
@@ -1500,6 +1531,89 @@ function renderGlossaryPanel() {
   panel.appendChild(dl);
 }
 
+// Operational FAQ — the questions that stop a generated script from running at
+// all. Static, authored content (so innerHTML is safe here, as in the glossary).
+// Rendered once and cached via dataset.rendered.
+function renderFaqPanel() {
+  const panel = document.getElementById("panel-faq");
+  if (panel.dataset.rendered === "1") return;
+  panel.dataset.rendered = "1";
+
+  const faqs = [
+    {
+      q: "Where does the <code>ships</code> command come from? I never downloaded a <code>ships.exe</code>.",
+      a: "<p><code>ships</code> is <b>not</b> a standalone executable you download. It is a Python "
+       + "<em>console script</em> declared in the project's <code>pyproject.toml</code>:</p>"
+       + "<pre>[project.scripts]\nships = \"td_release_packager.cli:main\"</pre>"
+       + "<p>When you install this repo into a Python environment, the installer generates a small "
+       + "launcher named <code>ships</code> (<code>ships.exe</code> on Windows) inside that "
+       + "environment's scripts folder — e.g. <code>.venv\\Scripts\\ships.exe</code>. The generated "
+       + "run-scripts call <code>ships</code> by name, so that folder has to be on your <code>PATH</code>.</p>",
+    },
+    {
+      q: "I get <code>ships: command not found</code> (or <code>'ships' is not recognized</code>) and nothing runs.",
+      a: "<p>The launcher exists, but your shell can't see it — almost always because the virtual "
+       + "environment that contains it isn't active. Pick one:</p>"
+       + "<p><b>1. Activate the project venv</b> (the generated script then works as-is):</p>"
+       + "<pre># Windows PowerShell\n.\\.venv\\Scripts\\Activate.ps1\n\n# Linux / macOS / Git Bash\nsource .venv/bin/activate</pre>"
+       + "<p><b>2. Or run it through uv</b> without activating: <code>uv run ships --help</code></p>"
+       + "<p><b>3. Or call the full path:</b> <code>.\\.venv\\Scripts\\ships.exe --help</code></p>"
+       + "<p>Confirm it's reachable before running the script: <code>ships --help</code> should print usage text.</p>",
+    },
+    {
+      q: "How do I make <code>ships</code> available in every terminal, permanently?",
+      a: "<p>Install it as a user-level tool instead of relying on a per-project venv:</p>"
+       + "<pre>uv tool install --editable C:\\path\\to\\teradata-ships\n# or:  pipx install -e C:\\path\\to\\teradata-ships</pre>"
+       + "<p>This puts <code>ships</code> on your user <code>PATH</code> so any new terminal can run it. "
+       + "Verify with <code>ships --help</code>.</p>",
+    },
+    {
+      q: "Windows blocks the <code>.ps1</code> / <code>.bat</code> with \"These files can't be opened\".",
+      a: "<p>That's the Mark-of-the-Web flag on browser-downloaded files. Two ways round it:</p>"
+       + "<p><b>(a)</b> Use the <b>Copy</b> button on the Commands tab and paste straight into your "
+       + "terminal — no file, no block.</p>"
+       + "<p><b>(b)</b> Unblock the file once after downloading: <code>Unblock-File -Path .\\ships-run.ps1</code></p>",
+    },
+    {
+      q: "PowerShell says \"running scripts is disabled on this system\".",
+      a: "<p>Your execution policy blocks local scripts. Allow local scripts for your user only "
+       + "(no admin needed):</p>"
+       + "<pre>Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned</pre>"
+       + "<p>Or sidestep it entirely by copy-pasting the commands instead of running the file.</p>",
+    },
+    {
+      q: "Which file do I run — <code>.ps1</code>, <code>.sh</code>, or <code>.bat</code>?",
+      a: "<p>Match it to your shell: <code>.ps1</code> for PowerShell, <code>.sh</code> for bash "
+       + "(Git Bash / WSL / Linux / macOS), <code>.bat</code> for the legacy <code>cmd.exe</code> "
+       + "prompt. They run the same SHIPS commands — only the syntax differs.</p>",
+    },
+    {
+      q: "Do I need a live Teradata connection to run this?",
+      a: "<p>No — not for the pipeline. Scaffold, Harvest, Generate, Inspect, Analyse and Package all "
+       + "run offline. A connection (host / user / password) is only required for the final "
+       + "<code>ships deploy</code> / Ship phase.</p>",
+    },
+  ];
+
+  const intro = document.createElement("div");
+  intro.className = "info";
+  intro.style.marginBottom = "14px";
+  intro.innerHTML = "<b>Operational FAQ</b> — getting the generated scripts to actually run. Most "
+    + "\"nothing happens\" problems are the <code>ships</code> command not being on your "
+    + "<code>PATH</code> (first two entries below). The generated scripts now check for this and "
+    + "fail with the fix.";
+  panel.appendChild(intro);
+
+  for (const f of faqs) {
+    const h = document.createElement("h3");
+    h.innerHTML = f.q;
+    const body = document.createElement("div");
+    body.innerHTML = f.a;
+    panel.appendChild(h);
+    panel.appendChild(body);
+  }
+}
+
 function buildPlanJson() {
   return {
     mode: answers["mode.style"] || "quick",
@@ -1695,8 +1809,17 @@ function downloadAllBundle() {
     "",
     "## Running",
     "",
-    "Drop these files into your SHIPS project root (or run from the parent directory). The scripts assume `ships` is on PATH.",
+    "Drop these files into your SHIPS project root (or run from the parent directory).",
     "Long paths bind to shell variables at the top of each script — retargeting is a one-line edit to `$OUTPUT_ROOT`, `$NAME`, or `$SOURCE`.",
+    "",
+    "### `ships: command not found`?",
+    "",
+    "`ships` is a Python console script (defined in `pyproject.toml`), not a standalone download. It only appears on your PATH once this repo is installed AND its venv is active. The scripts now preflight-check for it. To fix:",
+    "",
+    "- **Activate the venv:** `\\.venv\\Scripts\\Activate.ps1` (PowerShell) or `source .venv/bin/activate` (bash), then re-run; or",
+    "- **Install it globally:** `uv tool install --editable <repo>` (or `pipx install -e <repo>`) so `ships` is on PATH in every terminal.",
+    "",
+    "Verify with `ships --help` before running the script. See the **FAQ** tab in the SHIPS Navigator for more.",
     "",
     "## Guardrails",
     "",
