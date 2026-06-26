@@ -451,10 +451,11 @@ const QUESTIONS = [
     kind: "checkbox" },
 
   // --- Bash-flavour for Windows paths in the emitted .sh ---
-  // Only relevant when the project dir looks Windows-shaped — on POSIX
-  // there are no drive letters or backslashes for the bash render to
-  // translate. The transformation lives in renderScript(); the only
-  // reason to ask is to pick the right `C:\` prefix substitution.
+  // Always shown (not gated on targetOs) because a user may have a
+  // Windows SOURCE with a POSIX-shaped project dir, or simply not have
+  // typed project.dir yet when scanning the form. On purely POSIX
+  // inputs the transform in renderScript() becomes a no-op, so a
+  // visible radio costs nothing and stays discoverable.
   {
     id: "bash.flavour",
     label: "Bash path style for the emitted <code>.sh</code>",
@@ -462,14 +463,13 @@ const QUESTIONS = [
           "<b>Git Bash / MSYS2</b> uses <code>/c/...</code> (default — most common). " +
           "<b>WSL</b> uses <code>/mnt/c/...</code>. " +
           "<b>Cygwin</b> uses <code>/cygdrive/c/...</code>. " +
-          "The PowerShell and cmd outputs are unaffected.",
+          "Ignored when your inputs are already POSIX paths; PowerShell and cmd outputs are always unaffected.",
     kind: "radio",
     options: [
       { value: "gitbash", label: "Git Bash / MSYS2 (/c/...)" },
       { value: "wsl",     label: "WSL (/mnt/c/...)" },
       { value: "cygwin",  label: "Cygwin (/cygdrive/c/...)" },
     ],
-    show: () => targetOs() === "windows",
   },
 ];
 
