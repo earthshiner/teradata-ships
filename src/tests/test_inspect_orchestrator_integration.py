@@ -349,3 +349,41 @@ class TestInspectSkipsManifestForNonProject:
 
         # Stdout still works; ships.decisions.json must NOT have appeared.
         assert not (loose_dir / ".ships" / "ships.decisions.json").exists()
+
+
+class TestStep0SummaryDistinguishesFailureKinds:
+    """Issue #385 — the final ``Step 0 (Tokens)`` summary line must
+    describe the actual failure. A token-coverage failure must not be
+    reported using malformed-marker counters."""
+
+    def test_coverage_failure_not_reported_as_malformed(self, tmp_path, capsys):
+        project = _make_project(tmp_path)
+        # Payload references {{STD_DB}} with no malformed markers.
+        (
+            project / "payload" / "database" / "DDL" / "tables" / "MyDB.Customer.tbl"
+        ).write_text(
+            "CREATE MULTISET TABLE {{STD_DB}}.Customer\n"
+            "(\n"
+            "     Cust_Id INTEGER NOT NULL\n"
+            ")\n"
+            "PRIMARY INDEX (Cust_Id);\n",
+            encoding="utf-8",
+        )
+        # An env config that exists but does NOT define STD_DB → the
+        # token is undefined for DEV, so coverage fails while the format
+        # check passes (zero malformed markers).
+        env_dir = project / "config" / "env"
+        env_dir.mkdir(parents=True)
+        (env_dir / "DEV.conf").write_text("OTHER_DB=SOME_DB\n", encoding="utf-8")
+
+        _run_inspect(_make_namespace(project))
+        out = capsys.readouterr().out
+
+        # The final summary line names the coverage failure, not a
+        # phantom "0 malformed marker(s)".
+        assert "Step 0 (Tokens): FAILED" in out
+        assert "undefined token(s) across 1 env config(s)" in out
+        summary_line = next(
+            line for line in out.splitlines() if "Step 0 (Tokens): FAILED" in line
+        )
+        assert "malformed marker" not in summary_line

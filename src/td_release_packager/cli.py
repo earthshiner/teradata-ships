@@ -2301,6 +2301,14 @@ def _run_inspect(args, stage, issue_codes) -> int:
             validate_payload_token_coverage,
         )
 
+        # Coverage failures are tracked separately from malformed-token
+        # findings (issue #385): the two are distinct Step 0 outcomes and
+        # the final summary must not describe a coverage failure using
+        # malformed-marker counters. Hoisted here so they survive past the
+        # coverage block into the overall-result summary below.
+        coverage_undefined: Set[str] = set()
+        coverage_envs_failed = 0
+
         coverage_by_env = validate_payload_token_coverage(payload_dir, args.project)
         if not coverage_by_env:
             # No env configs found — coverage cannot be verified.
@@ -2318,11 +2326,11 @@ def _run_inspect(args, stage, issue_codes) -> int:
                 "guarantee package will not fail on undefined tokens.",
             )
         else:
-            total_undefined: Set[str] = set()
             for env_name, summary in sorted(coverage_by_env.items()):
                 if not summary["undefined"]:
                     continue
-                total_undefined.update(summary["undefined"])
+                coverage_undefined.update(summary["undefined"])
+                coverage_envs_failed += 1
                 print()
                 print(
                     f"  ✗ Token coverage [{env_name}]: "
@@ -2357,7 +2365,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
                         location=location,
                     )
                 token_ok = False
-            if not total_undefined:
+            if not coverage_undefined:
                 print(
                     f"  All payload tokens are defined across "
                     f"{len(coverage_by_env)} env config(s)."
@@ -2770,16 +2778,25 @@ def _run_inspect(args, stage, issue_codes) -> int:
         print(f"  {overall_icon} SHIPS Inspect — {overall_status}")
         print(f"{'=' * 64}")
 
-        # -- Step 0 line: token format check --
+        # -- Step 0 line: token format + coverage checks --
+        # Step 0 has two independent sub-checks — malformed-marker format
+        # and per-env coverage. Report whichever actually failed; a
+        # coverage failure must not be described with malformed-marker
+        # counters (issue #385).
         if token_ok:
             print("  Step 0 (Tokens): PASSED")
         else:
-            n_files = len(token_findings)
-            n_issues = sum(len(v) for v in token_findings.values())
-            print(
-                f"  Step 0 (Tokens): FAILED — "
-                f"{n_issues} malformed marker(s) in {n_files} file(s)"
-            )
+            reasons = []
+            if token_findings:
+                n_files = len(token_findings)
+                n_issues = sum(len(v) for v in token_findings.values())
+                reasons.append(f"{n_issues} malformed marker(s) in {n_files} file(s)")
+            if coverage_undefined:
+                reasons.append(
+                    f"{len(coverage_undefined)} undefined token(s) across "
+                    f"{coverage_envs_failed} env config(s)"
+                )
+            print(f"  Step 0 (Tokens): FAILED — {'; '.join(reasons)}")
 
         # -- Step 1 line: status, error/warning counts, by-rule breakdown
         if lint_ok:
