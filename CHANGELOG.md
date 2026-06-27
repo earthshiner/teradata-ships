@@ -2,6 +2,24 @@
 
 All notable changes to SHIPS are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Single front door — `process` packaging profile (#384)** — `ships process` now derives the package-stage inputs (`--name`, `--env`, `--env-config`, `--source`) from an opt-in `packaging:` block in `ships.yaml`, so the common case is `ships process --project .`. Precedence is CLI arg > `packaging:` block > convention (project name, first environment, `config/env/<ENV>.conf`). Without a `packaging:` block, behaviour is unchanged — packaging runs only when `--env`/`--env-config`/`--name` are all passed. `ships_yaml.validate()` gained schema validation for the `packaging:` block.
+- **Build invocation provenance (#397)** — Package builds stamp a redacted `build_invocation` block (command, args, cwd, env-config, timestamp, SHIPS/Python versions) into `context/ships.build.json`, so "what command built this?" stays answerable after the package is distributed. The package report's Build Provenance tab falls back to it when the project-side `ships.decisions.json` is not reachable. Secret values (passwords, signing keys) are redacted before the snapshot is written.
+
+### Changed
+
+- **Machine state consolidated under `<project>/.ships/` (#283)** — `.build_counter`, `ships.decisions.json`, and `_waves.txt` live under the git-ignored `.ships/` directory, kept distinct from hand-edited `config/` and `payload/`. Wiping `.ships/` forces a clean rebuild with no risk to authored files. All path resolution flows through `project_paths`, and the `DECISIONS_FILENAME` constant is now single-sourced.
+
+### Fixed
+
+- **Harvest now splits multi-object files containing compound objects (#420)** — the splitter previously bailed out of any file containing `BEGIN` (procedure/function/trigger bodies) or `CREATE/REPLACE MACRO`, collapsing several objects into one and breaking topological (wave) ordering. A new compound-aware scanner tracks parenthesis *and* `BEGIN … END` depth (handling `END IF`/`END WHILE`/`END FOR`/`END LOOP` and `CASE … END`), so multi-object files split into one atomic object per file; genuinely unparseable files are left whole and flagged by `one_object`. The SHIPS Navigator heads-up and FAQ are updated accordingly.
+- **Inspect: env-config passed as `--config` (#386)** — `read_inspect_config` now detects an env/token config accidentally passed via `--config` and fails fast with a pointer to `config/inspect.conf`, instead of silently loading `TOKEN=value` lines as invalid rule severities.
+- **Inspect: clearer Step 0 failure reporting (#385)** — The Step 0 summary now distinguishes malformed-`{{TOKEN}}`-marker failures from token-coverage failures, rather than reporting a coverage failure with malformed-marker counters.
+- **`process` package stage output crash** — Building via `process` without `--output` passed `output=None`, crashing the build at path join; it now defaults to `<project>/releases` (#384).
+
 ## [0.4.0] — 2026-05-03
 
 ### Fixed

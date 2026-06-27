@@ -631,6 +631,34 @@ Only in development. `--allow-dirty` lets you build a package from an uncommitte
 
 ---
 
+### How do I know what command and arguments built a package?
+
+`context/ships.build.json` carries a `build_invocation` block stamped at package time — the command, the (secret-redacted) args, the working directory, the env-config path, a timestamp, and the SHIPS / Python versions. Because it lives *inside* the package, the answer survives distribution: the package report's **Build Provenance** tab falls back to it when the project-side `ships.decisions.json` is not reachable (e.g. the package was extracted on another machine). Secret values (passwords, signing keys) are redacted before the snapshot is written.
+
+---
+
+### Where does SHIPS keep its machine-managed state?
+
+Under `<project>/.ships/` — the build counter (`.build_counter`), the decisions log (`ships.decisions.json`), and the analyse output (`_waves.txt`). This directory is git-ignored and is kept distinct from the hand-edited `config/` and `payload/` surfaces, so you can wipe `.ships/` to force a clean rebuild without any risk to files you authored. `config/` and `ships.yaml` are never touched.
+
+---
+
+### How do I make `ships process` near-zero-arg?
+
+Add an opt-in `packaging:` block to `ships.yaml`. When present, `process` derives the package-stage inputs you omit — precedence is **CLI arg > `packaging:` block > convention** (project name, first environment, `config/env/<ENV>.conf`):
+
+```yaml
+packaging:
+  source: /raw/ddl/                 # optional; omit to package the existing payload
+  name: OMR                         # default: the project name
+  default_env: DEV                  # default: the first entry in environments
+  env_config: config/env/DEV.conf   # default: config/env/<ENV>.conf if it exists
+```
+
+With that block, `python -m td_release_packager process --project .` packages with no further flags; `packaging: {}` opts in using conventions for every field. **Without a `packaging:` block, behaviour is unchanged** — `process` only packages when `--env`, `--env-config`, and `--name` are all passed. The SHIPS Navigator wizard can write this block for you.
+
+---
+
 ## Deployment
 
 ### The deployer says `Error 3523: No privilege`. What do I grant?
