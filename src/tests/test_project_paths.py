@@ -115,3 +115,28 @@ class TestGitignoreTemplate:
         _generate_gitignore(str(tmp_path))
         body = (tmp_path / ".gitignore").read_text(encoding="utf-8")
         assert ".ships/" in body
+
+
+class TestDecisionsFilenameSingleSource:
+    """``DECISIONS_FILENAME`` is defined once in ``project_paths`` and
+    re-used everywhere (issue #283). Consumers that still expose the
+    name must resolve to the same value — guards against a local
+    redefinition silently drifting from the canonical filename."""
+
+    def test_orchestrator_reexports_canonical_name(self) -> None:
+        from td_release_packager import project_paths
+        from td_release_packager.orchestrator import (
+            DECISIONS_FILENAME as orch_name,
+        )
+
+        assert orch_name == project_paths.DECISIONS_FILENAME
+
+    def test_context_artifacts_uses_canonical_name(self) -> None:
+        from td_release_packager import context_artifacts, project_paths
+
+        assert context_artifacts.DECISIONS_FILENAME == project_paths.DECISIONS_FILENAME
+
+    def test_pipeline_report_has_no_local_redefinition(self) -> None:
+        from td_release_packager.reporting import pipeline_report
+
+        assert not hasattr(pipeline_report, "DECISIONS_FILENAME")

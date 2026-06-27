@@ -3,9 +3,10 @@ decisions.py — Append-only writer for ``ships.decisions.json``.
 
 ``ships.decisions.json`` is the single source of truth for what SHIPS did
 to a project: every stage of every run records its inputs, outputs,
-resolved configuration, decisions, and issues into one file at the
-project root. ``td_release_packager explain`` reads it. CI uses it
-to compare runs. Auditors trust it.
+resolved configuration, decisions, and issues into one file under the
+machine-managed ``.ships/`` directory at the project root (resolved via
+``project_paths.decisions_json_path``). ``td_release_packager explain``
+reads it. CI uses it to compare runs. Auditors trust it.
 
 This module supplies the writer. Reading / explaining is a separate
 concern (build-order item 6).
@@ -80,6 +81,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterator, List, Optional
 
+# Re-exported (orchestrator/__init__) and used by tests as the canonical
+# decisions filename. Sourced from project_paths so the name is defined
+# exactly once across the codebase (issue #283).
+from td_release_packager.project_paths import DECISIONS_FILENAME
+
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +113,7 @@ ISSUE_SEVERITIES = ("info", "warning", "error")
 #: Run-level final status vocabulary.
 FINAL_STATUSES = ("success", "warning", "partial", "failed")
 
-DECISIONS_FILENAME = "ships.decisions.json"
+# DECISIONS_FILENAME is imported from project_paths (see top of module).
 
 
 # ---------------------------------------------------------------

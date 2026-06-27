@@ -658,12 +658,12 @@ Draft202012Validator(schema).validate(document)
 
 | Artefact | Location | What an agent reads |
 |---|---|---|
-| `decisions.json` | `<project>/decisions.json` | Stage outcomes, issue codes, config provenance, output counts |
+| `ships.decisions.json` | `<project>/.ships/ships.decisions.json` | Stage outcomes, issue codes, config provenance, output counts |
 | `context/ships.build.json` | Inside the package `.zip` | Build number, environment, file list, token count, integrity hash, **trust report**, baseline\_dir, discovery extensions |
 | `context/ships.context.json` | Inside the package `.zip` | Durable workflow context: current state, constraints, governance controls, source-of-truth pointers, trust label, and evidence references. **Load this first.** |
 | `context/ships.manifest.json` | Inside the package `.zip` | Compact agent-safe inventory: file counts, phase breakdown, dependency contract, token-name summary (values redacted — see `context/ships.build.json`), governance summary, warnings |
 | `context/ships.handoff.json` | Inside the package `.zip` | Next-actor instructions: required actions, preconditions, blocking conditions, and evidence to return after deployment |
-| `_waves.txt` | `<project>/_waves.txt` | Topologically sorted deployment order |
+| `_waves.txt` | `<project>/.ships/_waves.txt` | Topologically sorted deployment order |
 | `config/tokenise.conf` | `<project>/config/tokenise.conf` | Regex rewrite rules (prefer this for new projects) |
 | `config/token_map.conf` | `<project>/config/token_map.conf` | **[DEPRECATED]** Literal → `{{TOKEN}}` mapping. Still works; see [#388](https://github.com/earthshiner/teradata-ships/issues/388). |
 | `config/env/*.conf` | `<project>/config/env/` | Token → resolved value per environment |

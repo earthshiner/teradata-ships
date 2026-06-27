@@ -878,7 +878,7 @@ python -m td_release_packager analyze --project C:\Projects\OMR
 | Flag | Required | Description |
 |---|---|---|
 | `--project` | Yes | SHIPS project directory to analyse |
-| `--output` | No | Output path for `_waves.txt` (default: `<project>/_waves.txt`) |
+| `--output` | No | Output path for `_waves.txt` (default: `<project>/.ships/_waves.txt`) |
 | `--overwrite` | No | Overwrite existing `_waves.txt` |
 
 ---

@@ -31,7 +31,6 @@ from td_release_packager.reporting.common import Tab, h
 
 logger = logging.getLogger(__name__)
 
-DECISIONS_FILENAME = "ships.decisions.json"
 REPORT_DIRNAME = os.path.join("output", "reports")
 REPORT_FILENAME = "pipeline_report.html"
 
