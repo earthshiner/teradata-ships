@@ -23,6 +23,14 @@ Rules are configured via `inspect.conf` in the project root.
 
 ---
 
+## Safety Rules
+
+| Code                       | Default Severity | Description                                                                  |
+|----------------------------|------------------|------------------------------------------------------------------------------|
+| `destructive_change`       | ERROR            | An explicit destructive statement (`DROP …`, `DELETE DATABASE`, `ALTER TABLE … DROP`) in a payload file. These remove structures or data and must not deploy without explicit human review. The SHIPS deployer owns idempotent `CREATE` (any drop+create is its internal concern), so payload files should not carry destructive DDL. Findings name the statement type and object, include the line number, and carry remediation metadata (`requires_human_review: true`, `agent_may_fix: false`) so an agent stops rather than auto-fixing or deploying. Destructive statements inside a procedure/function `BEGIN … END` body (e.g. dropping a volatile table) are exempt. (#169) |
+
+---
+
 ## Style Rules
 
 | Code                       | Default Severity | Description                                                                  |

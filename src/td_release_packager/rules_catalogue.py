@@ -507,6 +507,25 @@ _RULES: dict[str, dict[str, object]] = {
         "risk": "medium",
         "requires_human_review": True,
     },
+    "destructive_change": {
+        "description": (
+            "An explicit destructive statement (``DROP …`` / ``DELETE "
+            "DATABASE`` / ``ALTER TABLE … DROP``) was found in a payload "
+            "file. These remove structures or data. The SHIPS deployer owns "
+            "idempotent CREATE (any drop+create is its internal concern), so "
+            "payload files should never carry destructive DDL."
+        ),
+        "default_severity": "ERROR",
+        "safe_fix_available": False,
+        "automation_level": "manual",
+        "recommended_action": (
+            "Remove the destructive statement from the payload, or obtain "
+            "explicit human approval before deploying. An agent must not "
+            "auto-fix or deploy a destructive change without approval."
+        ),
+        "risk": "high",
+        "requires_human_review": True,
+    },
 }
 
 
