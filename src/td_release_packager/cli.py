@@ -2533,6 +2533,11 @@ def _run_inspect(args, stage, issue_codes) -> int:
             # Record one ships.decisions.json issue per lint finding. The
             # rule name is carried in the message so explain can
             # group by rule even though the issue code is coarse.
+            # Custom-policy findings (issue #167) use a distinct code so
+            # agents/CI can tell them apart from built-in Coding Discipline
+            # violations; both may carry remediation metadata in details
+            # (e.g. the built-in destructive_change rule, issue #169).
+            custom_rule_names = {r.name for r in custom_rules}
             for issue in lint_result.issues:
                 # Map validate.py severities into the recorder's
                 # vocabulary: ERROR/WARNING/INFO → error/warning/info.
@@ -2542,13 +2547,10 @@ def _run_inspect(args, stage, issue_codes) -> int:
                 location = issue.file
                 if issue.line is not None:
                     location = f"{issue.file}:{issue.line}"
-                # Custom-policy findings (issue #167) carry remediation
-                # metadata and use a distinct code so agents/CI can tell
-                # them apart from built-in Coding Discipline violations.
                 remediation = getattr(issue, "remediation", None)
                 code = (
                     issue_codes.INSPECT_CUSTOM_POLICY
-                    if remediation is not None
+                    if issue.rule in custom_rule_names
                     else issue_codes.INSPECT_LINT_VIOLATION
                 )
                 stage.add_issue(

@@ -180,6 +180,13 @@ DEFAULT_RULES: Dict[str, str] = {
     # to-audit privilege graphs. WARNING by default — projects with
     # explicit object-level requirements can set this to OFF.
     "object_level_grant": "WARNING",
+    # destructive_change (issue #169): explicit DROP / DELETE DATABASE /
+    # ALTER ... DROP statements in payload files remove structures or data
+    # and must not deploy without human review. The SHIPS deployer owns
+    # idempotent CREATE (drop+create is its internal concern), so payload
+    # files should never carry destructive DDL. ERROR by default — this is
+    # a deploy-blocking safety control, not a style preference.
+    "destructive_change": "ERROR",
 }
 
 # -- Valid severity values --
@@ -489,6 +496,12 @@ def generate_default_config() -> str:
         "# runtime. Cross-database same-name references are allowed",
         "# (the standard 1:1 locking view pattern).",
         f"view_macro_self_reference={DEFAULT_RULES['view_macro_self_reference']}",
+        "# destructive_change: explicit DROP / DELETE DATABASE /",
+        "# ALTER ... DROP statements in payload files remove structures",
+        "# or data and must not deploy without human review. The SHIPS",
+        "# deployer owns idempotent CREATE, so payloads should not carry",
+        "# destructive DDL. ERROR by default (deploy-blocking safety).",
+        f"destructive_change={DEFAULT_RULES['destructive_change']}",
         "",
         "# Grant architecture rules",
         "# public_grant_on_tables: GRANT ... TO PUBLIC on a tables",
@@ -1326,6 +1339,7 @@ def _validate_directory_impl(
         file_issues.extend(_check_db_qualifier(rel_path, clean))
         file_issues.extend(_check_multiset(rel_path, clean))
         file_issues.extend(_check_deploy_intent(rel_path, clean, strict))
+        file_issues.extend(_check_destructive_change(rel_path, clean))
         file_issues.extend(_check_ddl_terminator(rel_path, clean))
         file_issues.extend(_check_view_macro_self_reference(rel_path, clean))
         file_issues.extend(_check_one_object(rel_path, clean))
@@ -1517,6 +1531,94 @@ def _check_custom_policy(
                     remediation=dict(rule.remediation),
                 )
             )
+    return issues
+
+
+# Destructive-change detection (issue #169). Patterns are line-anchored
+# (MULTILINE) and run against comment-stripped content. The object name,
+# when present, is captured in group "obj" for the finding message.
+# ``^[ \t]*`` (not ``^\s*``) so the anchor stays on the statement's own
+# line — ``\s`` would cross newlines and report the preceding blank line.
+_DESTRUCTIVE_DROP_RE = re.compile(
+    r"^[ \t]*DROP\s+"
+    r"(?P<kind>TABLE|VIEW|MACRO|PROCEDURE|FUNCTION|TRIGGER|DATABASE|USER|"
+    r"ROLE|PROFILE|JOIN\s+INDEX|HASH\s+INDEX|INDEX)\b"
+    r"(?:\s+(?P<obj>[A-Za-z0-9_.\"{}]+))?",
+    re.IGNORECASE | re.MULTILINE,
+)
+_DESTRUCTIVE_DELETE_DB_RE = re.compile(
+    r"^[ \t]*DELETE\s+DATABASE\s+(?P<obj>[A-Za-z0-9_.\"{}]+)?",
+    re.IGNORECASE | re.MULTILINE,
+)
+_DESTRUCTIVE_ALTER_DROP_RE = re.compile(
+    r"^[ \t]*ALTER\s+TABLE\s+(?P<obj>[A-Za-z0-9_.\"{}]+)\s+DROP\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+#: Agent guidance attached to every destructive_change finding so an
+#: autonomous actor knows it must stop, not auto-fix or deploy (#169).
+_DESTRUCTIVE_REMEDIATION = {
+    "requires_human_review": True,
+    "agent_may_fix": False,
+    "agent_may_suggest": False,
+    "automation_level": "manual_review_required",
+    "recommended_action": (
+        "Remove the destructive statement from the payload, or obtain "
+        "explicit human approval before deploying. The SHIPS deployer "
+        "owns idempotent CREATE — payload files should not drop objects "
+        "or data."
+    ),
+}
+
+
+def _check_destructive_change(rel_path: str, content: str) -> List[ValidationIssue]:
+    """Flag explicit destructive DDL in a payload file (issue #169).
+
+    Detects ``DROP <object>``, ``DELETE DATABASE``, and
+    ``ALTER TABLE ... DROP`` — statements that remove structures or data
+    and must not deploy without explicit human review.
+
+    To avoid false positives on procedure/function bodies that legitimately
+    drop volatile/temp tables, only the region **before** the first
+    ``BEGIN`` is scanned: an eponymous payload file's primary statement is
+    a ``CREATE`` header, so a destructive statement here is the file's own
+    top-level operation rather than internal procedural logic. The deployer's
+    own drop+create is internal and never appears in the payload.
+    """
+    # Limit the scan to the top-level statement region (before any compound
+    # BEGIN…END body).
+    begin = re.search(r"\bBEGIN\b", content, re.IGNORECASE)
+    region = content[: begin.start()] if begin else content
+
+    issues: List[ValidationIssue] = []
+
+    def _emit(kind: str, obj: Optional[str], pos: int) -> None:
+        line = region.count("\n", 0, pos) + 1
+        target = f" on {obj}" if obj else ""
+        issues.append(
+            ValidationIssue(
+                file=rel_path,
+                rule="destructive_change",
+                severity="ERROR",
+                message=(
+                    f"Destructive statement ({kind}{target}) found in payload. "
+                    f"Destructive changes (DROP / DELETE DATABASE / ALTER…DROP) "
+                    f"remove structures or data and require explicit human "
+                    f"review and approval before deployment."
+                ),
+                line=line,
+                remediation=dict(_DESTRUCTIVE_REMEDIATION),
+            )
+        )
+
+    for m in _DESTRUCTIVE_DROP_RE.finditer(region):
+        kind = "DROP " + re.sub(r"\s+", " ", m.group("kind").upper())
+        _emit(kind, m.group("obj"), m.start())
+    for m in _DESTRUCTIVE_DELETE_DB_RE.finditer(region):
+        _emit("DELETE DATABASE", m.group("obj"), m.start())
+    for m in _DESTRUCTIVE_ALTER_DROP_RE.finditer(region):
+        _emit("ALTER TABLE … DROP", m.group("obj"), m.start())
+
     return issues
 
 
