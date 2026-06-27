@@ -376,7 +376,7 @@ const QUESTIONS = [
       { value: "unsure", label: "Unsure" },
     ],
     warnOn: v => (v === "no" || v === "unsure")
-      ? "Heads-up: multi-object files containing a procedure/macro or a BEGIN…END body are NOT auto-split. SHIPS will flag them — keep them whole or split by hand."
+      ? "No problem: SHIPS auto-splits multi-object files into one atomic object per file — tables, views, and compound objects (stored procedures, macros, triggers, functions) alike — and names each file eponymously. Anything it genuinely can't parse confidently is left whole and flagged by inspect's one_object rule."
       : null,
   },
 
