@@ -355,6 +355,12 @@ Harvest splits files that contain multiple DDL objects — one object per file i
 
 ---
 
+### My multi-object file with a procedure or macro wasn't split.
+
+This is expected. Harvest does **not** auto-split a file that contains a stored procedure / function body (`BEGIN … END`) or a `CREATE`/`REPLACE MACRO` — those carry semicolons inside their bodies that a naive split would corrupt, so SHIPS keeps the whole file intact rather than risk producing broken statements. If such a file holds more than one object, inspect flags it with the `one_object` rule (*"File contains N DDL statements. Discipline requires one object per file."*) at WARNING severity — the run still passes, but the file is not atomic/eponymous. The fix is to split these by hand into one object per file. A file containing a *single* procedure or macro needs no action — it is already one object.
+
+---
+
 ### Harvest keeps overwriting my manually edited payload files.
 
 By default, harvest wipes and rebuilds the payload from source on every run (clean-payload mode). This is intentional — the payload is not a hand-curated artefact; it is always derived from source.
@@ -628,6 +634,34 @@ This is the correct pattern for promoting a DEV package to TST or PRD — same s
 ### The `--allow-dirty` flag — when should I use it?
 
 Only in development. `--allow-dirty` lets you build a package from an uncommitted working tree. It stamps `source_dirty=true` in `context/ships.build.json` and degrades the trust label to `READY-WITH-CAVEATS`. Never use it for a package you intend to promote to production — the package cannot be reproducibly rebuilt from source because the uncommitted changes are not in version control.
+
+---
+
+### How do I know what command and arguments built a package?
+
+`context/ships.build.json` carries a `build_invocation` block stamped at package time — the command, the (secret-redacted) args, the working directory, the env-config path, a timestamp, and the SHIPS / Python versions. Because it lives *inside* the package, the answer survives distribution: the package report's **Build Provenance** tab falls back to it when the project-side `ships.decisions.json` is not reachable (e.g. the package was extracted on another machine). Secret values (passwords, signing keys) are redacted before the snapshot is written.
+
+---
+
+### Where does SHIPS keep its machine-managed state?
+
+Under `<project>/.ships/` — the build counter (`.build_counter`), the decisions log (`ships.decisions.json`), and the analyse output (`_waves.txt`). This directory is git-ignored and is kept distinct from the hand-edited `config/` and `payload/` surfaces, so you can wipe `.ships/` to force a clean rebuild without any risk to files you authored. `config/` and `ships.yaml` are never touched.
+
+---
+
+### How do I make `ships process` near-zero-arg?
+
+Add an opt-in `packaging:` block to `ships.yaml`. When present, `process` derives the package-stage inputs you omit — precedence is **CLI arg > `packaging:` block > convention** (project name, first environment, `config/env/<ENV>.conf`):
+
+```yaml
+packaging:
+  source: /raw/ddl/                 # optional; omit to package the existing payload
+  name: OMR                         # default: the project name
+  default_env: DEV                  # default: the first entry in environments
+  env_config: config/env/DEV.conf   # default: config/env/<ENV>.conf if it exists
+```
+
+With that block, `python -m td_release_packager process --project .` packages with no further flags; `packaging: {}` opts in using conventions for every field. **Without a `packaging:` block, behaviour is unchanged** — `process` only packages when `--env`, `--env-config`, and `--name` are all passed. The SHIPS Navigator wizard can write this block for you.
 
 ---
 
