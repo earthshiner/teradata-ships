@@ -5664,7 +5664,8 @@ def _build_parser():
         "--project", required=True, help="SHIPS project directory to analyse."
     )
     az.add_argument(
-        "--output", help="Output path for _waves.txt (default: <source>/_waves.txt)."
+        "--output",
+        help="Output path for _waves.txt (default: <source>/.ships/_waves.txt).",
     )
     az.add_argument(
         "--overwrite", action="store_true", help="Overwrite existing _waves.txt."

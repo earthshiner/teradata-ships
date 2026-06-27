@@ -13,7 +13,8 @@ Usage:
 
 Produces:
     /path/to/projects/MortgagePlatform/
-    ├── .build_counter                  ← auto-incremented by builder
+    ├── .ships/                         ← machine-managed state (gitignored):
+    │   └── .build_counter              ←   build counter, decisions log, waves
     ├── .gitignore
     ├── README.md
     ├── ships.yaml                      ← project master config
@@ -67,7 +68,7 @@ def scaffold_project(
         - Missing directories are created
         - Missing config files are generated
         - Existing files are NEVER overwritten
-        - The .build_counter is preserved
+        - The .ships/ state (build counter, decisions log) is preserved
         - Reports what was created vs what was skipped
 
     Args:
@@ -612,8 +613,10 @@ def _generate_gitignore(project_dir: str, skip_existing: bool = False):
     """
     Generate a .gitignore appropriate for a release project.
 
-    Ignores built packages, logs, and Python artefacts.
-    Tracks the .build_counter (it should be committed).
+    Ignores built packages, logs, Python artefacts, and the
+    machine-managed ``.ships/`` state directory (build counter,
+    decisions log, analyse output) — each developer / CI pipeline
+    maintains its own rather than committing a shared one.
 
     Args:
         project_dir:    Project root.

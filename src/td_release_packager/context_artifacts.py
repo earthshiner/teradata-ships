@@ -51,6 +51,7 @@ from td_release_packager.rules_catalogue import (
     RULES_RESULT_REF,
 )
 from td_release_packager.models import BuildConfig, BuildManifest
+from td_release_packager.project_paths import DECISIONS_FILENAME
 from td_release_packager.trust import (
     STATUS_BLOCKED,
     STATUS_CAVEATS,
@@ -69,7 +70,7 @@ HANDOFF_FILENAME = "ships.handoff.json"
 BUILD_FILENAME = "ships.build.json"
 PROVENANCE_FILENAME = "ships.provenance.json"
 INTEGRITY_FILENAME = "ships.integrity.json"
-DECISIONS_FILENAME = "ships.decisions.json"
+# DECISIONS_FILENAME imported from project_paths (single source — issue #283).
 PACKAGE_REPORT_FILENAME = "package_report.html"
 README_FILENAME = "README.txt"
 
