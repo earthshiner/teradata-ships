@@ -73,6 +73,11 @@ INSPECT_TOKEN_MALFORMED = "INSPECT_TOKEN_MALFORMED"
 #: ...) appears in the message body.
 INSPECT_LINT_VIOLATION = "INSPECT_LINT_VIOLATION"
 
+#: Step 1 — A custom lint policy rule (config/ships_lint_policy.yaml)
+#: fired. Carries the rule name in the message and agent-facing
+#: remediation metadata in the issue ``details`` (issue #167).
+INSPECT_CUSTOM_POLICY = "INSPECT_CUSTOM_POLICY"
+
 #: Step 2 — Cross-file grant validation found a drifted, missing,
 #: or orphaned grant relative to the inferred intent.
 INSPECT_GRANT_VIOLATION = "INSPECT_GRANT_VIOLATION"
@@ -232,6 +237,13 @@ ISSUE_CODES: Dict[str, str] = {
         "deploy_intent, etc.) flagged a DDL file. The originating "
         "rule name is carried in the message body so explain and "
         "CI tooling can group findings by rule."
+    ),
+    INSPECT_CUSTOM_POLICY: (
+        "A custom lint policy rule (config/ships_lint_policy.yaml) "
+        "flagged a file. The rule name is in the message body and the "
+        "rule's remediation metadata (safe_fix_available, "
+        "automation_level, requires_human_review, recommended_action, "
+        "etc.) is carried in the issue 'details' for agents and CI."
     ),
     INSPECT_GRANT_VIOLATION: (
         "Cross-file grant validation found a discrepancy between the "
