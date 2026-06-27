@@ -255,6 +255,18 @@ def read_inspect_config(config_path: str) -> Dict[str, str]:
     # Start with defaults
     rules = dict(DEFAULT_RULES)
 
+    # Wrong-file guard (issue #386). An env/token config
+    # (config/env/<ENV>.conf) accidentally passed via --config would
+    # otherwise have every TOKEN=value line treated as an unknown rule
+    # with an invalid severity and silently skipped, leaving the
+    # operator with a baffling "no rules applied" result. We count
+    # assignments to tell an env config apart from a genuine
+    # inspect.conf that merely has a typo, and raise a pointed error
+    # only when nothing in the file resembles inspect rules at all.
+    assignment_count = 0
+    valid_count = 0
+    known_rule_count = 0
+
     with open(config_path, "r", encoding="utf-8") as f:
         for lineno, line in enumerate(f, 1):
             stripped = line.strip()
@@ -272,6 +284,10 @@ def read_inspect_config(config_path: str) -> Dict[str, str]:
 
             name, value = stripped.split("=", 1)
             name = name.strip().lower()
+
+            assignment_count += 1
+            if name in DEFAULT_RULES or name in _DOMAIN_VALUE_RULES:
+                known_rule_count += 1
 
             # -- Retired key shim --
             # PR6 of the deterministic-deploy programme renamed
@@ -310,6 +326,7 @@ def read_inspect_config(config_path: str) -> Dict[str, str]:
                     )
                     continue
                 rules[name] = value_lower
+                valid_count += 1
                 continue
 
             value = value.strip().upper()
@@ -328,6 +345,25 @@ def read_inspect_config(config_path: str) -> Dict[str, str]:
                 continue
 
             rules[name] = value
+            valid_count += 1
+
+    # Wrong-file guard (issue #386): the file has assignments but not one
+    # of them names a known inspect rule or carries a valid severity.
+    # That is the signature of an env/token config passed by mistake, not
+    # a real inspect.conf — fail fast with a pointer to the right file.
+    if assignment_count >= 2 and valid_count == 0 and known_rule_count == 0:
+        raise ValueError(
+            f"'{config_path}' does not look like an inspect rules file: "
+            f"none of its {assignment_count} KEY=VALUE line(s) name a known "
+            f"inspect rule or carry a valid severity "
+            f"(ERROR/WARNING/INFO/OFF).\n"
+            f"--config expects an inspect.conf where each line is "
+            f"'rule_name=SEVERITY' (see config/inspect.conf).\n"
+            f"This file looks like an env/token config "
+            f"(config/env/<ENV>.conf). inspect discovers env configs "
+            f"automatically under config/env/ — do not pass them with "
+            f"--config."
+        )
 
     logger.info("Inspect config: %d rules loaded from %s", len(rules), config_path)
 

@@ -1303,6 +1303,52 @@ class TestReadInspectConfig:
         with pytest.raises(FileNotFoundError):
             read_inspect_config(str(tmp_path / "missing.conf"))
 
+    def test_env_config_passed_as_config_raises(self, tmp_path):
+        """An env/token config passed via --config (issue #386) is
+        detected and raises a pointed error rather than silently
+        loading token lines as invalid rule severities."""
+        conf = tmp_path / "DEV.conf"
+        conf.write_text(
+            "OMR_STD_T=OMR_STD\nOMR_STD_V=OMR_STD\nSHIPS_ENV=DEV\n",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError) as excinfo:
+            read_inspect_config(str(conf))
+
+        message = str(excinfo.value)
+        assert "inspect.conf" in message
+        assert "config/env/" in message
+
+    def test_single_typo_inspect_config_does_not_raise(self, tmp_path):
+        """A genuine inspect.conf with a single typo'd severity still
+        warns-and-skips — the wrong-file guard must not fire because the
+        line names a known rule."""
+        conf = tmp_path / "inspect.conf"
+        conf.write_text(
+            "keyword_case=BANANA\n",
+            encoding="utf-8",
+        )
+
+        rules = read_inspect_config(str(conf))
+
+        assert rules["keyword_case"] == DEFAULT_RULES["keyword_case"]
+
+    def test_custom_rules_with_valid_severities_do_not_raise(self, tmp_path):
+        """A config of only unknown rule names is fine as long as the
+        severities are valid — the guard keys off invalid severities,
+        not unknown names."""
+        conf = tmp_path / "inspect.conf"
+        conf.write_text(
+            "future_rule_one=ERROR\nfuture_rule_two=WARNING\n",
+            encoding="utf-8",
+        )
+
+        rules = read_inspect_config(str(conf))
+
+        assert rules["future_rule_one"] == "ERROR"
+        assert rules["future_rule_two"] == "WARNING"
+
     def test_default_config_includes_every_default_rule(self):
         """Every rule in DEFAULT_RULES must appear as a key in the
         generated inspect.conf. Catches rules that are registered
