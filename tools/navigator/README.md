@@ -43,7 +43,7 @@ The questions encoded here, in order:
 | Q2 | Already tokenised? | `yes` skips Q3/Q4 and triggers `bootstrap-env-config` for each env |
 | Q3 | Token shape | `prefix` (one `DB_PREFIX`) or `per_database` (one binding per db) |
 | Q4 | Product prefix | e.g. `CustomerDNA` |
-| Q5 | Atomic & eponymous? | Surfaces the BEGIN…END / macro caveat on `no` / `unsure` |
+| Q5 | Atomic & eponymous? | Reassures on `no` / `unsure` that SHIPS auto-splits multi-object files (incl. procedures/macros/triggers/functions) into atomic, eponymous files |
 | Q6 | Generate view layer? | Maps to `ships generate` (or `--skip-generate` on Quick) — locking/access/business views |
 | Q7 | Dependency analysis (waves)? | Maps to `ships analyse` — emits `_waves.txt` |
 | Q8 | Export dependency graph? | Adds `--graph` to `analyse` (incl. OpenLineage JSON) + namespace / project name |

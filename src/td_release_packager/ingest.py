@@ -1553,14 +1553,6 @@ def _split_multi_statement(
         element list if the file contains only one statement or if
         splitting is not safe for this DDL type.
     """
-    # Don't split files with procedure/function bodies (BEGIN...END)
-    if re.search(r"\bBEGIN\b", content, re.IGNORECASE):
-        return [content]
-
-    # Don't split macros — body is parenthesised with internal semicolons
-    if re.search(r"(?:CREATE|REPLACE)\s+MACRO\b", content, re.IGNORECASE):
-        return [content]
-
     # --- Build a split-safe version of the content ---
     # Strip comments AND string literals (replaced by spaces with
     # newlines preserved so positions / line numbers survive). Without
@@ -1572,12 +1564,22 @@ def _split_multi_statement(
     clean = strip_comments_and_string_literals(content)
 
     # --- Find statement-terminating semicolons in the clean version ---
-    # A plain ``;`` scan corrupts Teradata triggers. Trigger bodies are
-    # parenthesised and may contain inner SQL statements such as
-    # ``INSERT ...;`` before the trigger's real terminator ``);``. Split
-    # only on top-level semicolons so the inner statement terminator stays
-    # with the trigger body instead of truncating the final closing ``);``.
-    semi_positions = _top_level_semicolon_positions(clean)
+    # A plain ``;`` scan corrupts compound objects. Macro and parenthesised
+    # trigger bodies carry inner semicolons at parenthesis depth > 0; stored
+    # procedures, SQL functions, and BEGIN…END triggers carry them inside a
+    # BEGIN…END block. The compound-aware scanner only treats a semicolon as
+    # a statement boundary when BOTH paren depth and BEGIN depth are zero, so
+    # a multi-object file mixing tables with a procedure/macro/trigger splits
+    # into one atomic object per file — a hard requirement for topological
+    # (wave) ordering.
+    semi_positions, balanced = _compound_aware_semicolon_positions(clean)
+
+    if not balanced:
+        # Unbalanced parens or BEGIN…END nesting — the structure could not be
+        # parsed confidently. Decline to split rather than risk slicing
+        # through a compound body; inspect's one_object rule still flags the
+        # file if it holds more than one object.
+        return [content]
 
     if len(semi_positions) <= 1:
         # Zero or one statement terminators — single statement, return as-is
@@ -1713,6 +1715,93 @@ def _top_level_semicolon_positions(clean_sql: str) -> List[int]:
             positions.append(idx)
 
     return positions
+
+
+# Words that follow ``END`` to close a *control-flow* construct
+# (``END IF`` / ``END WHILE`` / ``END FOR`` / ``END LOOP``) rather than a
+# ``BEGIN`` compound block. These do not change BEGIN nesting depth.
+_END_CONTROL_KEYWORDS = frozenset({"IF", "WHILE", "FOR", "LOOP"})
+
+# Tokeniser for the compound-aware scan: SQL words, or a single
+# structural character we care about. Everything else is ignored.
+_SPLIT_TOKEN_RE = re.compile(r"[A-Za-z_]\w*|[();]")
+
+
+def _compound_aware_semicolon_positions(clean_sql: str) -> Tuple[List[int], bool]:
+    """Locate statement-terminating semicolons in a file that may contain
+    Teradata compound objects (stored procedures, functions, triggers,
+    macros).
+
+    Extends :func:`_top_level_semicolon_positions` (parenthesis depth, which
+    already covers macro and parenthesised-trigger bodies) with **BEGIN…END
+    nesting depth**, so the many semicolons inside a procedure/function
+    compound body are not mistaken for statement boundaries. A semicolon is a
+    top-level terminator only when both paren depth and BEGIN depth are zero.
+
+    BEGIN/END tracking handles the cases a naive counter gets wrong:
+
+    - ``END IF`` / ``END WHILE`` / ``END FOR`` / ``END LOOP`` close
+      control-flow blocks, not BEGIN — they do not pop BEGIN depth.
+    - ``CASE … END`` (case *expression*) and ``CASE … END CASE`` (case
+      *statement*) are tracked separately so a bare ``END`` that closes a
+      CASE expression is not misread as closing a BEGIN block.
+    - Labelled compounds (``L1: BEGIN … END L1;``) — the trailing label is an
+      identifier, handled by the bare-``END`` branch.
+
+    ``clean_sql`` must already have comments and string literals blanked
+    (positions preserved) so keywords inside them are not matched.
+
+    Returns:
+        ``(positions, balanced)`` — the terminator offsets, and whether the
+        text ended with all depths back at zero. When ``balanced`` is False
+        the structure could not be parsed confidently and the caller should
+        decline to split rather than risk corrupting a compound body.
+    """
+    positions: List[int] = []
+    paren = 0
+    begin = 0
+    case = 0
+
+    tokens = list(_SPLIT_TOKEN_RE.finditer(clean_sql))
+    i = 0
+    n = len(tokens)
+    while i < n:
+        tok = tokens[i].group()
+        if tok == "(":
+            paren += 1
+        elif tok == ")":
+            if paren > 0:
+                paren -= 1
+        elif tok == ";":
+            if paren == 0 and begin == 0:
+                positions.append(tokens[i].start())
+        else:
+            word = tok.upper()
+            if word == "BEGIN":
+                begin += 1
+            elif word == "CASE":
+                case += 1
+            elif word == "END":
+                nxt = tokens[i + 1].group().upper() if i + 1 < n else ""
+                if nxt in _END_CONTROL_KEYWORDS:
+                    # ``END IF`` / ``END WHILE`` / … — control flow, not a
+                    # BEGIN block. Consume the keyword; depth unchanged.
+                    i += 1
+                elif nxt == "CASE":
+                    # ``END CASE`` closes a CASE statement.
+                    if case > 0:
+                        case -= 1
+                    i += 1
+                elif case > 0:
+                    # Bare ``END`` closing a CASE expression.
+                    case -= 1
+                elif begin > 0:
+                    # Bare ``END`` / ``END <label>`` closing a BEGIN block.
+                    begin -= 1
+        i += 1
+
+    balanced = paren == 0 and begin == 0 and case == 0
+    return positions, balanced
 
 
 # ---------------------------------------------------------------
