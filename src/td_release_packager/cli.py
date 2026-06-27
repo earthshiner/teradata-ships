@@ -554,6 +554,7 @@ class _NullStageRecorder:
         code: str,
         message: str,
         location=None,
+        details=None,
     ) -> None:
         pass
 
@@ -2448,10 +2449,52 @@ def _run_inspect(args, stage, issue_codes) -> int:
                     "(--fix-non-ascii had nothing to fix)."
                 )
 
+        # -- Load custom lint policy (issue #167) --
+        # Fail closed in strict mode; warn-and-ignore a structurally broken
+        # policy in developer mode (rule-level errors are skipped by the
+        # loader itself). Patterns are matched as data — never executed.
+        from td_release_packager.lint_policy import (
+            POLICY_FILENAME,
+            LintPolicyError,
+            load_lint_policy,
+        )
+
+        custom_rules = []
+        try:
+            custom_rules = load_lint_policy(args.project, strict=args.strict)
+        except LintPolicyError as exc:
+            if args.strict:
+                print(
+                    f"\n  ✗ Custom lint policy invalid (strict mode): {exc}",
+                    file=sys.stderr,
+                )
+                stage.add_issue(
+                    "error",
+                    issue_codes.INSPECT_LINT_VIOLATION,
+                    f"Custom lint policy invalid: {exc}",
+                    location=f"config/{POLICY_FILENAME}",
+                )
+                return 1
+            print(f"\n  ⚠ Custom lint policy ignored — {exc}", file=sys.stderr)
+            stage.add_issue(
+                "warning",
+                issue_codes.INSPECT_LINT_VIOLATION,
+                f"Custom lint policy ignored: {exc}",
+                location=f"config/{POLICY_FILENAME}",
+            )
+            custom_rules = []
+
+        if custom_rules:
+            print(
+                f"  Custom lint rules: {len(custom_rules)} loaded from "
+                f"config/{POLICY_FILENAME}"
+            )
+
         lint_result = validate_directory(
             source_dir=resolve_inspect_root(args.project),
             rules_config=rules_config,
             strict=args.strict,
+            custom_rules=custom_rules,
         )
 
         lint_icon = _status_icon(lint_result.passed)
@@ -2499,11 +2542,21 @@ def _run_inspect(args, stage, issue_codes) -> int:
                 location = issue.file
                 if issue.line is not None:
                     location = f"{issue.file}:{issue.line}"
+                # Custom-policy findings (issue #167) carry remediation
+                # metadata and use a distinct code so agents/CI can tell
+                # them apart from built-in Coding Discipline violations.
+                remediation = getattr(issue, "remediation", None)
+                code = (
+                    issue_codes.INSPECT_CUSTOM_POLICY
+                    if remediation is not None
+                    else issue_codes.INSPECT_LINT_VIOLATION
+                )
                 stage.add_issue(
                     rec_severity,
-                    issue_codes.INSPECT_LINT_VIOLATION,
+                    code,
                     f"[{issue.rule}] {issue.message}",
                     location=location,
+                    details=remediation,
                 )
 
         if lint_result.passed:

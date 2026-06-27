@@ -500,6 +500,7 @@ class StageRecorder:
         code: str,
         message: str,
         location: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Append an issue to the stage's ``issues`` list.
@@ -509,6 +510,10 @@ class StageRecorder:
             code:     Short stable identifier (e.g. ``GEN-COLLISION``).
             message:  Human-readable description.
             location: Optional file/line reference.
+            details:  Optional machine-readable metadata for the finding
+                      (e.g. custom-policy remediation: safe_fix_available,
+                      automation_level, requires_human_review, …). Carried
+                      verbatim into the JSON so agents and CI can act on it.
         """
         if severity not in ISSUE_SEVERITIES:
             raise ValueError(
@@ -521,6 +526,8 @@ class StageRecorder:
         }
         if location is not None:
             issue["location"] = location
+        if details:
+            issue["details"] = details
         self._entry["issues"].append(issue)
 
 

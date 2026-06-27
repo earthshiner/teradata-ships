@@ -518,6 +518,26 @@ Rules set to `OFF` are not checked. Rules set to `WARNING` are reported but do n
 
 ---
 
+### Can I add my own lint rules without changing SHIPS?
+
+Yes. Drop a `config/ships_lint_policy.yaml` in your project and declare custom rules as data — `inspect` runs them alongside the built-in checks. Each rule is a `deny_pattern` (fires on match) or `required_pattern` (fires when absent), scoped by `object_types` and `phases`, with a severity and agent-facing `remediation` metadata. Patterns are matched as text — SQL is never executed.
+
+```yaml
+rules:
+  - name: no_replace_view
+    description: Use CREATE VIEW. The deployer owns idempotency.
+    severity: ERROR
+    applies_to: { object_types: [VIEW], phases: [DDL] }
+    deny_pattern: '^\s*replace\s+view\b'
+    remediation:
+      safe_fix_available: true
+      recommended_action: Change REPLACE to CREATE.
+```
+
+Findings appear in the console and in `ships.decisions.json` (code `INSPECT_CUSTOM_POLICY`, remediation in `details`). A malformed policy fails closed under `inspect --strict`; in developer mode an invalid rule is skipped with a warning. See [docs/references/custom_lint_policy.md](references/custom_lint_policy.md) for the full reference and Teradata examples.
+
+---
+
 ### Inspect has too many errors. How do I tackle them?
 
 Start with the `ERROR`-severity rules — these block packaging. Fix them first, then address warnings.
