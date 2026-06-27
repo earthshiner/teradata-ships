@@ -387,3 +387,50 @@ class TestStep0SummaryDistinguishesFailureKinds:
             line for line in out.splitlines() if "Step 0 (Tokens): FAILED" in line
         )
         assert "malformed marker" not in summary_line
+
+
+class TestCustomLintPolicyEndToEnd:
+    """Issue #167 — a custom lint policy rule fires during inspect and is
+    recorded in ships.decisions.json with the INSPECT_CUSTOM_POLICY code
+    and its remediation metadata in the issue ``details``."""
+
+    def test_custom_policy_finding_recorded_with_details(self, tmp_path, capsys):
+        project = _make_project(tmp_path)
+        views = project / "payload" / "database" / "DDL" / "views"
+        views.mkdir(parents=True, exist_ok=True)
+        (views / "MyDB.v1.viw").write_text(
+            "REPLACE VIEW MyDB.v1 AS SELECT 1 AS x;", encoding="utf-8"
+        )
+        cfg = project / "config"
+        cfg.mkdir(parents=True, exist_ok=True)
+        (cfg / "ships_lint_policy.yaml").write_text(
+            "rules:\n"
+            "  - name: no_replace_view\n"
+            "    description: Use CREATE VIEW; the deployer owns idempotency.\n"
+            "    severity: ERROR\n"
+            "    applies_to:\n"
+            "      object_types: [VIEW]\n"
+            "      phases: [DDL]\n"
+            "    deny_pattern: 'replace view'\n"
+            "    remediation:\n"
+            "      safe_fix_available: true\n"
+            "      automation_level: reviewable_codemod\n"
+            "      recommended_action: Change REPLACE to CREATE.\n"
+            "      requires_human_review: false\n",
+            encoding="utf-8",
+        )
+
+        _run_inspect(_make_namespace(project))
+        capsys.readouterr()
+
+        stage = _read_decisions(project)["runs"][0]["stages"][0]
+        custom = [
+            i for i in stage["issues"] if i.get("code") == "INSPECT_CUSTOM_POLICY"
+        ]
+        assert len(custom) == 1
+        issue = custom[0]
+        assert issue["severity"] == "error"
+        assert "no_replace_view" in issue["message"]
+        assert issue["details"]["safe_fix_available"] is True
+        assert issue["details"]["automation_level"] == "reviewable_codemod"
+        assert issue["details"]["requires_human_review"] is False

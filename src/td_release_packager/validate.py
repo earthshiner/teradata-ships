@@ -28,7 +28,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from td_release_packager.atomic_filename import (
     FilenameDerivationError,
@@ -1160,6 +1160,10 @@ class ValidationIssue:
     severity: str  # 'ERROR' or 'WARNING'
     message: str
     line: Optional[int] = None
+    # Agent-facing remediation metadata, populated for custom-policy
+    # findings (issue #167). None for built-in rules. Carried through to
+    # machine-readable inspect output (ships.decisions.json).
+    remediation: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -1200,6 +1204,7 @@ def validate_directory(
     rules_config: Dict[str, str] = None,
     strict: bool = False,
     placement: "ObjectPlacement" = None,
+    custom_rules: Optional[List[Any]] = None,
 ) -> ValidationResult:
     """
     Validate all DDL files in a directory against the Coding Discipline.
@@ -1207,6 +1212,9 @@ def validate_directory(
     Thin traced wrapper — see ``_validate_directory_impl`` for the full
     implementation.  Emits a ``ships.validate`` OpenTelemetry span when
     ``OTEL_EXPORTER_OTLP_ENDPOINT`` is configured.
+
+    ``custom_rules`` is an optional list of ``lint_policy.CustomLintRule``
+    applied alongside the built-in checks (issue #167).
     """
     from ships_tracing import stage_span
 
@@ -1219,6 +1227,7 @@ def validate_directory(
             rules_config=rules_config,
             strict=strict,
             placement=placement,
+            custom_rules=custom_rules,
         )
         _span.set_attribute("ships.files_scanned", result.files_scanned)
         _span.set_attribute("ships.issues_errors", result.errors)
@@ -1232,6 +1241,7 @@ def _validate_directory_impl(
     rules_config: Dict[str, str] = None,
     strict: bool = False,
     placement: "ObjectPlacement" = None,
+    custom_rules: Optional[List[Any]] = None,
 ) -> ValidationResult:
     """
     Validate all DDL files in a directory against the Coding Discipline.
@@ -1369,6 +1379,17 @@ def _validate_directory_impl(
                 issue.severity = configured_severity
             filtered_issues.append(issue)
 
+        # -- Custom lint policy (issue #167) --
+        # Custom findings carry their own severity from the policy file, so
+        # they bypass the inspect.conf remap above. --strict still promotes
+        # WARNING → ERROR for parity with built-in rules; INFO/OFF are left
+        # as-is (OFF rules never fire — handled in _check_custom_policy).
+        if custom_rules:
+            for issue in _check_custom_policy(rel_path, clean, custom_rules):
+                if strict and issue.severity == "WARNING":
+                    issue.severity = "ERROR"
+                filtered_issues.append(issue)
+
         result.issues.extend(filtered_issues)
 
         if filtered_issues:
@@ -1394,6 +1415,109 @@ def _validate_directory_impl(
 # ---------------------------------------------------------------
 # Individual checks
 # ---------------------------------------------------------------
+
+
+def _phase_for_path(rel_path: str) -> Optional[str]:
+    """Map a payload-relative path to its pipeline phase token.
+
+    The deployable tree is ``payload/database/<PHASE>/...`` and inspect
+    runs from ``payload/database``, so the first path segment is the
+    phase directory. Returns a canonical phase token (DDL / DCL / DML /
+    PREREQS / POST_INSTALL) or None when the path has no recognisable
+    phase segment (e.g. inspect run against an arbitrary directory).
+    """
+    parts = rel_path.replace("\\", "/").split("/")
+    if len(parts) < 2:
+        return None
+    head = parts[0].strip().lower()
+    mapping = {
+        "ddl": "DDL",
+        "dcl": "DCL",
+        "dml": "DML",
+        "pre-requisites": "PREREQS",
+        "pre_requisites": "PREREQS",
+        "prerequisites": "PREREQS",
+        "post-install": "POST_INSTALL",
+        "post_install": "POST_INSTALL",
+    }
+    return mapping.get(head)
+
+
+def _object_type_for_content(content: str) -> Optional[str]:
+    """Best-effort object type for a payload file, as a base type.
+
+    Reuses the classifier patterns already used by the extension check.
+    GRANT / REVOKE resolve to the ``DCL`` convenience alias so a policy
+    can target ``object_types: [DCL]`` without naming both verbs.
+    """
+    for pattern, otype in _CLASSIFY_PATTERNS:
+        if pattern.search(content):
+            from td_release_packager.classifier import base_type
+
+            base = base_type(otype) or otype
+            if base in ("GRANT", "REVOKE"):
+                return "DCL"
+            return base
+    return None
+
+
+def _check_custom_policy(
+    rel_path: str,
+    content: str,
+    custom_rules: List["Any"],
+) -> List[ValidationIssue]:
+    """Apply the custom lint policy (issue #167) to one file.
+
+    For each rule scoped to this file's object type and phase, evaluates
+    the deny / required / exclude patterns over the comment-stripped
+    content and emits a ``ValidationIssue`` carrying the rule's severity
+    and remediation metadata. ``OFF`` rules are loaded but never fire.
+
+    Patterns are matched with ``re`` (compiled at load time) — SQL is
+    treated as data, never executed.
+    """
+    if not custom_rules:
+        return []
+
+    obj_type = _object_type_for_content(content)
+    phase = _phase_for_path(rel_path)
+    issues: List[ValidationIssue] = []
+
+    for rule in custom_rules:
+        if rule.severity == "OFF":
+            continue
+        # Scope: empty set means "applies to all"; otherwise the file's
+        # type/phase must be in the set. A rule scoped to a type we could
+        # not classify simply does not apply.
+        if rule.object_types and (
+            obj_type is None or obj_type not in rule.object_types
+        ):
+            continue
+        if rule.phases and (phase is None or phase not in rule.phases):
+            continue
+        if rule.exclude_pattern and rule.exclude_pattern.search(content):
+            continue
+
+        triggered = False
+        if rule.deny_pattern and rule.deny_pattern.search(content):
+            triggered = True
+        if rule.required_pattern and not rule.required_pattern.search(content):
+            triggered = True
+
+        if triggered:
+            issues.append(
+                ValidationIssue(
+                    file=rel_path,
+                    rule=rule.name,
+                    severity=rule.severity,
+                    message=rule.description,
+                    # Always a dict (possibly empty) so downstream can tell a
+                    # custom-policy finding from a built-in one, which leaves
+                    # remediation as None. Empty dicts are dropped from JSON.
+                    remediation=dict(rule.remediation),
+                )
+            )
+    return issues
 
 
 def _check_db_qualifier(rel_path: str, content: str) -> List[ValidationIssue]:
