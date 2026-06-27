@@ -187,6 +187,14 @@ DEFAULT_RULES: Dict[str, str] = {
     # files should never carry destructive DDL. ERROR by default — this is
     # a deploy-blocking safety control, not a style preference.
     "destructive_change": "ERROR",
+    # data_dependent_change (issue #170): ALTER TABLE / CREATE UNIQUE INDEX
+    # operations whose success depends on the data already in the table
+    # (adding NOT NULL without a default, UNIQUE on possibly-duplicate
+    # data, CHECK that existing rows may violate, PRIMARY INDEX /
+    # partitioning changes that move data). Structurally valid but can
+    # fail or rewrite the table at deploy time. WARNING by default — set
+    # to ERROR in config/inspect.conf where prechecks are mandatory.
+    "data_dependent_change": "WARNING",
 }
 
 # -- Valid severity values --
@@ -502,6 +510,12 @@ def generate_default_config() -> str:
         "# deployer owns idempotent CREATE, so payloads should not carry",
         "# destructive DDL. ERROR by default (deploy-blocking safety).",
         f"destructive_change={DEFAULT_RULES['destructive_change']}",
+        "# data_dependent_change: ALTER TABLE / CREATE UNIQUE INDEX whose",
+        "# success depends on existing data (NOT NULL without DEFAULT,",
+        "# UNIQUE on possibly-duplicate data, CHECK existing rows may",
+        "# violate, PRIMARY INDEX / partitioning changes that move data).",
+        "# WARNING by default; set to ERROR where prechecks are mandatory.",
+        f"data_dependent_change={DEFAULT_RULES['data_dependent_change']}",
         "",
         "# Grant architecture rules",
         "# public_grant_on_tables: GRANT ... TO PUBLIC on a tables",
@@ -1340,6 +1354,7 @@ def _validate_directory_impl(
         file_issues.extend(_check_multiset(rel_path, clean))
         file_issues.extend(_check_deploy_intent(rel_path, clean, strict))
         file_issues.extend(_check_destructive_change(rel_path, clean))
+        file_issues.extend(_check_data_dependent_change(rel_path, clean))
         file_issues.extend(_check_ddl_terminator(rel_path, clean))
         file_issues.extend(_check_view_macro_self_reference(rel_path, clean))
         file_issues.extend(_check_one_object(rel_path, clean))
@@ -1618,6 +1633,128 @@ def _check_destructive_change(rel_path: str, content: str) -> List[ValidationIss
         _emit("DELETE DATABASE", m.group("obj"), m.start())
     for m in _DESTRUCTIVE_ALTER_DROP_RE.finditer(region):
         _emit("ALTER TABLE … DROP", m.group("obj"), m.start())
+
+    return issues
+
+
+# Data-dependent-change detection (issue #170). Matches each ALTER TABLE
+# statement (body bounded by the next ``;`` — ``[^;]`` spans newlines but
+# not statement boundaries) plus CREATE UNIQUE INDEX. Sub-conditions are
+# tested in Python against the statement body.
+_ALTER_TABLE_STMT_RE = re.compile(
+    r"\bALTER\s+TABLE\s+(?P<obj>[A-Za-z0-9_.\"{}]+)(?P<body>[^;]*)",
+    re.IGNORECASE,
+)
+_CREATE_UNIQUE_INDEX_RE = re.compile(
+    r"\bCREATE\s+UNIQUE\s+INDEX\b[^;]*?\bON\s+(?P<obj>[A-Za-z0-9_.\"{}]+)",
+    re.IGNORECASE,
+)
+
+
+def _check_data_dependent_change(rel_path: str, content: str) -> List[ValidationIssue]:
+    """Flag DDL whose success depends on existing table data (issue #170).
+
+    Targets operations on *existing* tables — ``ALTER TABLE`` and
+    ``CREATE UNIQUE INDEX`` — that are structurally valid but can fail or
+    rewrite the table depending on the data already present:
+
+      * adding a ``NOT NULL`` column/constraint without a ``DEFAULT``,
+      * adding a ``UNIQUE`` constraint or unique index,
+      * adding a ``CHECK`` constraint,
+      * changing ``PRIMARY INDEX`` / partitioning (data movement).
+
+    A ``CREATE TABLE`` is a new, empty object and is never flagged. Each
+    finding indicates that live metadata is required to assess the risk and
+    carries a recommended precheck. As with destructive_change, only the
+    top-level region (before any ``BEGIN``) is scanned so procedural
+    ``ALTER`` inside a body is not misread.
+    """
+    begin = re.search(r"\bBEGIN\b", content, re.IGNORECASE)
+    region = content[: begin.start()] if begin else content
+
+    issues: List[ValidationIssue] = []
+
+    def _emit(kind: str, obj: str, pos: int, precheck: str) -> None:
+        line = region.count("\n", 0, pos) + 1
+        issues.append(
+            ValidationIssue(
+                file=rel_path,
+                rule="data_dependent_change",
+                severity="WARNING",
+                message=(
+                    f"Data-dependent change ({kind}) on existing table {obj}. "
+                    f"This is structurally valid but its success depends on the "
+                    f"data already in the table — assess against live metadata "
+                    f"before deploying."
+                ),
+                line=line,
+                remediation={
+                    "safe_fix_available": False,
+                    "automation_level": "manual_review_required",
+                    "requires_human_review": True,
+                    "requires_live_metadata": True,
+                    "recommended_precheck": precheck,
+                    "recommended_action": (
+                        "Run the precheck against the target environment; "
+                        "remediate the data (backfill / dedupe / supply a "
+                        "DEFAULT) or obtain approval before deploying."
+                    ),
+                },
+            )
+        )
+
+    for m in _ALTER_TABLE_STMT_RE.finditer(region):
+        obj = m.group("obj")
+        body = m.group("body") or ""
+        body_u = body.upper()
+        pos = m.start()
+        if re.search(r"\bNOT\s+NULL\b", body_u) and not re.search(
+            r"\bDEFAULT\b", body_u
+        ):
+            _emit(
+                "adds NOT NULL without DEFAULT",
+                obj,
+                pos,
+                f"SELECT COUNT(*) FROM {obj}; — adding NOT NULL fails if rows "
+                f"exist with no value. Supply a DEFAULT or backfill first.",
+            )
+        if re.search(r"\bUNIQUE\b", body_u):
+            _emit(
+                "adds a UNIQUE constraint",
+                obj,
+                pos,
+                f"Check for duplicates before adding UNIQUE: SELECT <cols>, "
+                f"COUNT(*) FROM {obj} GROUP BY <cols> HAVING COUNT(*) > 1;",
+            )
+        if re.search(r"\bCHECK\s*\(", body_u):
+            _emit(
+                "adds a CHECK constraint",
+                obj,
+                pos,
+                f"Run the CHECK predicate as a SELECT against {obj} to find "
+                f"rows that would violate it before adding the constraint.",
+            )
+        if re.search(
+            r"\b(?:PRIMARY\s+INDEX|PARTITION\s+BY|MODIFY\s+PRIMARY)\b", body_u
+        ):
+            _emit(
+                "changes PRIMARY INDEX / partitioning",
+                obj,
+                pos,
+                f"Assess the size and lock impact of {obj}; changing the "
+                f"primary index / partitioning redistributes existing rows "
+                f"and may need a scratch-table rebuild.",
+            )
+
+    for m in _CREATE_UNIQUE_INDEX_RE.finditer(region):
+        _emit(
+            "creates a UNIQUE INDEX",
+            m.group("obj"),
+            m.start(),
+            f"Check for duplicates before creating a unique index: "
+            f"SELECT <cols>, COUNT(*) FROM {m.group('obj')} GROUP BY <cols> "
+            f"HAVING COUNT(*) > 1;",
+        )
 
     return issues
 

@@ -526,6 +526,26 @@ _RULES: dict[str, dict[str, object]] = {
         "risk": "high",
         "requires_human_review": True,
     },
+    "data_dependent_change": {
+        "description": (
+            "An ALTER TABLE / CREATE UNIQUE INDEX whose success depends on "
+            "the data already in the table (adding NOT NULL without a "
+            "DEFAULT, UNIQUE on possibly-duplicate data, CHECK existing rows "
+            "may violate, or a PRIMARY INDEX / partitioning change that moves "
+            "data). Structurally valid but can fail or rewrite the table at "
+            "deploy time."
+        ),
+        "default_severity": "WARNING",
+        "safe_fix_available": False,
+        "automation_level": "manual",
+        "recommended_action": (
+            "Run the finding's recommended precheck against the target "
+            "environment (live metadata required); backfill / dedupe / supply "
+            "a DEFAULT, or obtain approval before deploying."
+        ),
+        "risk": "medium",
+        "requires_human_review": True,
+    },
 }
 
 
