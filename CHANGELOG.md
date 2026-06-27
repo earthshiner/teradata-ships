@@ -15,6 +15,7 @@ All notable changes to SHIPS are documented in this file.
 
 ### Fixed
 
+- **Harvest now splits multi-object files containing compound objects (#420)** — the splitter previously bailed out of any file containing `BEGIN` (procedure/function/trigger bodies) or `CREATE/REPLACE MACRO`, collapsing several objects into one and breaking topological (wave) ordering. A new compound-aware scanner tracks parenthesis *and* `BEGIN … END` depth (handling `END IF`/`END WHILE`/`END FOR`/`END LOOP` and `CASE … END`), so multi-object files split into one atomic object per file; genuinely unparseable files are left whole and flagged by `one_object`. The SHIPS Navigator heads-up and FAQ are updated accordingly.
 - **Inspect: env-config passed as `--config` (#386)** — `read_inspect_config` now detects an env/token config accidentally passed via `--config` and fails fast with a pointer to `config/inspect.conf`, instead of silently loading `TOKEN=value` lines as invalid rule severities.
 - **Inspect: clearer Step 0 failure reporting (#385)** — The Step 0 summary now distinguishes malformed-`{{TOKEN}}`-marker failures from token-coverage failures, rather than reporting a coverage failure with malformed-marker counters.
 - **`process` package stage output crash** — Building via `process` without `--output` passed `output=None`, crashing the build at path join; it now defaults to `<project>/releases` (#384).

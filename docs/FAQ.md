@@ -355,9 +355,11 @@ Harvest splits files that contain multiple DDL objects — one object per file i
 
 ---
 
-### My multi-object file with a procedure or macro wasn't split.
+### Does harvest split multi-object files that contain a procedure, macro, trigger, or function?
 
-This is expected. Harvest does **not** auto-split a file that contains a stored procedure / function body (`BEGIN … END`) or a `CREATE`/`REPLACE MACRO` — those carry semicolons inside their bodies that a naive split would corrupt, so SHIPS keeps the whole file intact rather than risk producing broken statements. If such a file holds more than one object, inspect flags it with the `one_object` rule (*"File contains N DDL statements. Discipline requires one object per file."*) at WARNING severity — the run still passes, but the file is not atomic/eponymous. The fix is to split these by hand into one object per file. A file containing a *single* procedure or macro needs no action — it is already one object.
+Yes. Harvest splits a multi-object file into one atomic object per file for **all** sourced object types, including compound objects — stored procedures and SQL functions (`BEGIN … END`), triggers (parenthesised or `BEGIN ATOMIC`), and macros (parenthesised bodies). The splitter is compound-aware: it tracks parenthesis depth *and* `BEGIN … END` nesting depth (handling `END IF` / `END WHILE` / `END FOR` / `END LOOP` and `CASE … END` expressions), so the many semicolons inside a compound body are never mistaken for statement boundaries. Atomic splitting is required for topological (wave) ordering — every object must be its own file to become a node in the dependency graph.
+
+The one exception is a file SHIPS cannot parse confidently (e.g. an unbalanced `BEGIN … END`): rather than risk slicing through a body, harvest leaves it whole, and inspect's `one_object` rule flags it (*"File contains N DDL statements. Discipline requires one object per file."*) at WARNING severity so you can split it by hand. A file containing a *single* compound object needs no action — it is already one object.
 
 ---
 
