@@ -355,6 +355,14 @@ Harvest splits files that contain multiple DDL objects — one object per file i
 
 ---
 
+### Does harvest split multi-object files that contain a procedure, macro, trigger, or function?
+
+Yes. Harvest splits a multi-object file into one atomic object per file for **all** sourced object types, including compound objects — stored procedures and SQL functions (`BEGIN … END`), triggers (parenthesised or `BEGIN ATOMIC`), and macros (parenthesised bodies). The splitter is compound-aware: it tracks parenthesis depth *and* `BEGIN … END` nesting depth (handling `END IF` / `END WHILE` / `END FOR` / `END LOOP` and `CASE … END` expressions), so the many semicolons inside a compound body are never mistaken for statement boundaries. Atomic splitting is required for topological (wave) ordering — every object must be its own file to become a node in the dependency graph.
+
+The one exception is a file SHIPS cannot parse confidently (e.g. an unbalanced `BEGIN … END`): rather than risk slicing through a body, harvest leaves it whole, and inspect's `one_object` rule flags it (*"File contains N DDL statements. Discipline requires one object per file."*) at WARNING severity so you can split it by hand. A file containing a *single* compound object needs no action — it is already one object.
+
+---
+
 ### Harvest keeps overwriting my manually edited payload files.
 
 By default, harvest wipes and rebuilds the payload from source on every run (clean-payload mode). This is intentional — the payload is not a hand-curated artefact; it is always derived from source.
