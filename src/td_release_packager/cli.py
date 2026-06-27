@@ -3629,6 +3629,101 @@ def _cmd_process(args):
             tmp.cleanup()
 
 
+def _apply_process_defaults_from_ships_yaml(args, project_dir: str) -> None:
+    """Fill missing ``process`` args from ``ships.yaml`` (#384 single front door).
+
+    Makes ``ships process --project .`` a near-zero-arg common case by
+    deriving the package-stage inputs when the operator did not pass them.
+    Precedence is always **CLI arg > ``packaging:`` block > convention**;
+    a value the operator supplied is never overridden.
+
+    **Opt-in by design.** Derivation only happens when ships.yaml carries a
+    ``packaging:`` block (even an empty one). Without it, ``process`` behaves
+    exactly as before — packaging runs only when ``--env``/``--env-config``/
+    ``--name`` are all passed explicitly. This keeps the "package by default"
+    behaviour from surprising existing projects; opting in is a deliberate
+    one-time act (the SHIPS Navigator wizard writes this block — #382).
+
+    Derivation (only when the packaging block is present):
+        - ``name``       ← ``packaging.name`` else ``project``.
+        - ``env``        ← ``packaging.default_env`` else ``environments[0]``.
+        - ``env_config`` ← ``packaging.env_config`` else the conventional
+          ``config/env/<ENV>.conf`` — but only when that file actually
+          exists, so a missing config skips packaging cleanly rather than
+          failing the run.
+        - ``source``     ← ``packaging.source`` (no convention fallback —
+          omitting source legitimately means "use the existing payload").
+
+    The ``packaging:`` block is the same profile the SHIPS Navigator wizard
+    persists (#382). No-ops silently when ``ships.yaml`` is absent or
+    unreadable — ``process`` then behaves exactly as before.
+
+    Mutates ``args`` in place and prints the derived values for transparency.
+    """
+    ships_yaml_path = os.path.join(project_dir, "ships.yaml")
+    if not os.path.isfile(ships_yaml_path):
+        return
+
+    from td_release_packager.orchestrator import ships_yaml as _sy
+
+    try:
+        data = _sy.load(ships_yaml_path)
+    except Exception:
+        # A malformed ships.yaml is surfaced by the stages that require it;
+        # defaulting must never be the thing that aborts the run.
+        return
+    if not isinstance(data, dict):
+        return
+
+    packaging = data.get("packaging")
+    if not isinstance(packaging, dict):
+        # No packaging profile → opt-out: leave process behaviour unchanged.
+        return
+
+    derived = []
+
+    if not getattr(args, "name", None):
+        name = packaging.get("name") or data.get("project")
+        if isinstance(name, str) and name.strip():
+            args.name = name
+            derived.append(f"name={name}")
+
+    if not getattr(args, "env", None):
+        environments = data.get("environments") or []
+        env = packaging.get("default_env") or (
+            environments[0] if isinstance(environments, list) and environments else None
+        )
+        if isinstance(env, str) and env.strip():
+            args.env = env
+            derived.append(f"env={env}")
+
+    if not getattr(args, "env_config", None) and getattr(args, "env", None):
+        explicit = packaging.get("env_config")
+        if isinstance(explicit, str) and explicit.strip():
+            # An explicit packaging.env_config is honoured verbatim — the
+            # author asked for this path; existence is the package stage's
+            # problem to report, not ours to second-guess.
+            args.env_config = explicit
+            derived.append(f"env-config={explicit}")
+        else:
+            # Convention fallback: only adopt config/env/<ENV>.conf when it
+            # actually exists, so a missing file skips packaging cleanly
+            # rather than failing the run on an invented path.
+            candidate = os.path.join("config", "env", f"{args.env}.conf")
+            if os.path.isfile(os.path.join(project_dir, candidate)):
+                args.env_config = candidate
+                derived.append(f"env-config={candidate}")
+
+    if not getattr(args, "source", None):
+        source = packaging.get("source")
+        if isinstance(source, str) and source.strip():
+            args.source = source
+            derived.append(f"source={source}")
+
+    if derived:
+        print(f"  Defaults from ships.yaml: {', '.join(derived)}")
+
+
 def _cmd_process_impl(args):
     """Run the full pipeline (inner — after source is resolved)."""
     from td_release_packager.orchestrator import issue_codes as _ic
@@ -3637,6 +3732,10 @@ def _cmd_process_impl(args):
     if not os.path.isdir(project_dir):
         print(f"ERROR: Project directory not found: {project_dir}", file=sys.stderr)
         sys.exit(1)
+
+    # #384: single front door — fill missing source/env/env-config/name
+    # from ships.yaml so the common case is near-zero-arg.
+    _apply_process_defaults_from_ships_yaml(args, project_dir)
 
     strict = getattr(args, "strict", False)
 
@@ -3763,7 +3862,11 @@ def _cmd_process_impl(args):
                 env=args.env,
                 env_config=env_config_path,
                 name=args.name,
-                output=getattr(args, "output", None),
+                # Default to <project>/releases when unset (#384 single front
+                # door; matches the package-output convention from #411). A
+                # None output_dir would otherwise crash the build at path join.
+                output=getattr(args, "output", None)
+                or os.path.join(project_dir, "releases"),
                 format=getattr(args, "format", "zip"),
                 author=getattr(args, "author", ""),
                 description=getattr(args, "description", ""),
@@ -3794,7 +3897,9 @@ def _cmd_process_impl(args):
                     sys.exit(1)
         else:
             print(
-                "  [P] Package … skipped (provide --env --env-config --name to enable)"
+                "  [P] Package … skipped (need env + env-config + name — pass "
+                "--env/--env-config/--name or set them in ships.yaml; "
+                "env-config must exist on disk)"
             )
 
     package_context_archives = []
@@ -5957,13 +6062,16 @@ def _build_parser():
     pr.add_argument(
         "--env",
         default=None,
-        help="Target environment (e.g. DEV). Required to run the package stage.",
+        help="Target environment (e.g. DEV). Enables the package stage. "
+        "If omitted, defaults to packaging.default_env or the first entry "
+        "in ships.yaml environments (#384).",
     )
     pr.add_argument(
         "--env-config",
         default=None,
-        help="Path to the .conf file for token resolution. Required "
-        "to run the package stage.",
+        help="Path to the .conf file for token resolution. If omitted, "
+        "defaults to packaging.env_config or config/env/<ENV>.conf when "
+        "that file exists (#384).",
     )
     pr.add_argument(
         "--root-parent",
@@ -5976,7 +6084,8 @@ def _build_parser():
     pr.add_argument(
         "--name",
         default=None,
-        help="Package name. Required to run the package stage.",
+        help="Package name. If omitted, defaults to packaging.name or the "
+        "ships.yaml project name (#384).",
     )
     pr.add_argument(
         "--output",

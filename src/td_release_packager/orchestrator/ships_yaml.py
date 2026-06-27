@@ -330,6 +330,39 @@ def validate(data: Dict[str, Any]) -> List[ValidationError]:
                         )
                     )
 
+    # -- packaging block — optional; the "single front door" profile (#384).
+    #    Lets `ships process` package with near-zero args by supplying
+    #    defaults for source / name / default_env / env_config. All values
+    #    are strings; default_env, when given, must be one of environments.
+    #    This is the same block the SHIPS Navigator wizard persists (#382).
+    packaging_block = data.get("packaging")
+    if packaging_block is not None:
+        if not isinstance(packaging_block, dict):
+            errors.append(ValidationError("packaging", "must be a mapping"))
+        else:
+            for key in ("source", "name", "default_env", "env_config"):
+                if key in packaging_block:
+                    val = packaging_block[key]
+                    if not isinstance(val, str) or not val.strip():
+                        errors.append(
+                            ValidationError(
+                                f"packaging.{key}", "must be a non-empty string"
+                            )
+                        )
+            default_env = packaging_block.get("default_env")
+            if (
+                isinstance(default_env, str)
+                and default_env.strip()
+                and isinstance(environments, list)
+                and default_env not in environments
+            ):
+                errors.append(
+                    ValidationError(
+                        "packaging.default_env",
+                        f"{default_env!r} is not one of environments {environments}",
+                    )
+                )
+
     # -- stages block — optional; each entry must be a known stage with
     #    valid strict/on_error values --
     stages_block = data.get("stages")

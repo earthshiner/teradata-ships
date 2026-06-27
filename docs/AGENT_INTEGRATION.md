@@ -44,6 +44,23 @@ python -m td_release_packager process \
 
 Exit code 0 = package produced and all stages passed. Exit code 1 = something failed; read `decisions.json` for detail.
 
+### Single front door — `packaging:` profile (#384)
+
+To make `process` near-zero-arg, add an opt-in `packaging:` block to `ships.yaml`. When present, `process` derives the package-stage inputs you omit — precedence is **CLI arg > `packaging:` block > convention**:
+
+```yaml
+# ships.yaml
+project: OMR
+environments: [DEV, TST, PRD]
+packaging:
+  source: /raw/ddl/          # optional; omit to package the existing payload
+  name: OMR                  # default: the project name
+  default_env: DEV           # default: the first entry in environments
+  env_config: config/env/DEV.conf   # default: config/env/<ENV>.conf if it exists
+```
+
+With that block, `python -m td_release_packager process --project /projects/OMR` packages with no further flags. An empty `packaging: {}` opts in using conventions for every field. **Without a `packaging:` block, behaviour is unchanged** — `process` only packages when `--env`, `--env-config`, and `--name` are all passed. The SHIPS Navigator wizard writes this block for you (#382).
+
 ---
 
 ## Token validation gate (`ships scan`)
