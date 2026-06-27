@@ -182,6 +182,43 @@ class TestValidate:
 
 
 # ---------------------------------------------------------------
+# packaging block (#384 single front door)
+# ---------------------------------------------------------------
+
+
+class TestPackagingBlock:
+    def test_valid_packaging_block(self):
+        data = _valid_minimal()
+        data["environments"] = ["DEV", "PRD"]
+        data["packaging"] = {
+            "source": "src/ddl",
+            "name": "OMR",
+            "default_env": "DEV",
+            "env_config": "config/env/DEV.conf",
+        }
+        assert validate(data) == []
+
+    def test_packaging_must_be_mapping(self):
+        data = _valid_minimal()
+        data["packaging"] = "nope"
+        errs = validate(data)
+        assert any(e.path == "packaging" for e in errs)
+
+    def test_packaging_values_must_be_non_empty_strings(self):
+        data = _valid_minimal()
+        data["packaging"] = {"name": "  "}
+        errs = validate(data)
+        assert any(e.path == "packaging.name" for e in errs)
+
+    def test_default_env_must_be_a_known_environment(self):
+        data = _valid_minimal()
+        data["environments"] = ["DEV"]
+        data["packaging"] = {"default_env": "PRD"}
+        errs = validate(data)
+        assert any(e.path == "packaging.default_env" for e in errs)
+
+
+# ---------------------------------------------------------------
 # apply_defaults()
 # ---------------------------------------------------------------
 
