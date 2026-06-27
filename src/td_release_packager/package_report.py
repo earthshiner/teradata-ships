@@ -1026,7 +1026,63 @@ def _load_build_provenance(pkg_dir: str) -> List[dict]:
     return []
 
 
-def _build_provenance_tab(stages: List[dict]) -> str:
+def _build_invocation_fallback(inv: dict) -> str:
+    """Render the build-invocation snapshot (#397) as the Build Provenance
+    fallback shown when the project-side ``ships.decisions.json`` is not
+    reachable (e.g. a distributed/extracted package).
+
+    Args:
+        inv: The ``build_invocation`` block from ``ships.build.json``
+             (command, args, cwd, env_config, timestamp, ships_version,
+             python_version). Args are already redacted at capture time.
+
+    Returns:
+        HTML string for use inside the Build Provenance card.
+    """
+    command = inv.get("command", "")
+    args = inv.get("args", []) or []
+    # Reconstruct the command line for display; args are pre-redacted.
+    cmd_line = " ".join([str(command)] + [str(a) for a in args]).strip()
+
+    def _row(label: str, value: object) -> str:
+        if value in (None, ""):
+            return ""
+        return (
+            '<tr><td style="padding:6px 16px 6px 0;color:#6C757D;'
+            'white-space:nowrap;vertical-align:top">'
+            f"{_h(label)}</td>"
+            f'<td style="padding:6px 0"><code>{_h(value)}</code></td></tr>'
+        )
+
+    rows = "".join(
+        [
+            _row("Working directory", inv.get("cwd")),
+            _row("Env config", inv.get("env_config")),
+            _row("Timestamp", inv.get("timestamp")),
+            _row("SHIPS version", inv.get("ships_version")),
+            _row("Python version", inv.get("python_version")),
+        ]
+    )
+
+    return (
+        '<div style="padding:16px">'
+        '<p style="color:#6C757D;margin:0 0 12px">'
+        "Pipeline stage history (<code>ships.decisions.json</code>) is not "
+        "available in this package — showing the recorded build invocation "
+        "from <code>ships.build.json</code> instead. Secret values are redacted."
+        "</p>"
+        '<pre style="background:#F8F9FA;border:1px solid #E9ECEF;border-radius:6px;'
+        'padding:12px;overflow-x:auto;font-size:13px"><code>'
+        f"{_h(cmd_line)}</code></pre>"
+        '<table style="border-collapse:collapse;font-size:13px;margin-top:8px">'
+        f"{rows}</table>"
+        "</div>"
+    )
+
+
+def _build_provenance_tab(
+    stages: List[dict], build_invocation: Optional[dict] = None
+) -> str:
     """Render the Build Provenance tab from a list of pipeline stage dicts.
 
     Produces a compact timeline — one row per stage — showing the stage name,
@@ -1034,22 +1090,31 @@ def _build_provenance_tab(stages: List[dict]) -> str:
     the stage's ``outputs`` dict.  Each row is clickable to expand a detail
     panel showing any issues recorded during that stage.
 
-    Returns a ready-to-embed HTML string, or a "not available" placeholder
-    when ``stages`` is empty.
+    When ``stages`` is empty (the project-side ``ships.decisions.json`` is not
+    reachable — the normal case for a distributed package), falls back to the
+    ``build_invocation`` snapshot carried inside ``ships.build.json`` (#397),
+    so "what command + args built this?" stays answerable. Only when neither
+    source is available does the "not available" placeholder render.
 
     Args:
-        stages: List of stage dicts from ``_load_build_provenance``.
+        stages:           Stage dicts from ``_load_build_provenance``.
+        build_invocation: The ``build_invocation`` block from the package
+                          manifest, used as the post-distribution fallback.
 
     Returns:
         HTML string for use inside the Build Provenance ``<div class="card">``.
     """
     if not stages:
+        if build_invocation:
+            return _build_invocation_fallback(build_invocation)
         return (
             '<p style="color:#6C757D;padding:24px;text-align:center">'
             "Build provenance not available — "
             "<code>ships.decisions.json</code> was not found in the project "
-            "directory tree. Run the full pipeline (harvest → inspect → scan "
-            "→ analyse → package) from the project root to populate it."
+            "directory tree, and no build invocation was recorded in "
+            "<code>ships.build.json</code>. Run the full pipeline (harvest → "
+            "inspect → scan → analyse → package) from the project root to "
+            "populate it."
             "</p>"
         )
 
@@ -2009,7 +2074,9 @@ def generate_package_report(pkg_dir: str, manifest_dict: dict) -> str:
             "tab-objects", "Objects", _objects_tab(records, trust, viewer_links)
         ),
         _common.Tab(
-            "tab-provenance", "Build Provenance", _build_provenance_tab(stages)
+            "tab-provenance",
+            "Build Provenance",
+            _build_provenance_tab(stages, manifest_dict.get("build_invocation")),
         ),
         _common.Tab(
             "tab-content-provenance",

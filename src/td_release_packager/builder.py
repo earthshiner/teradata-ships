@@ -786,6 +786,9 @@ def _build_package_impl(
         ),
         # Option C: public key PEM embedded in the package (from ships.yaml signing.public_key).
         ships_public_key=_read_signing_public_key(config.source_dir),
+        # #397: redacted command + args that built this package, so the
+        # Build Provenance report stays answerable after distribution.
+        build_invocation=config.build_invocation,
     )
 
     # -- Phase 8a: Write provenance document (v2) --
@@ -1230,6 +1233,8 @@ def _create_environment_prereqs_package_if_needed(
         package_age_violation_level=manifest.package_age_violation_level,
         require_asymmetric_signature=manifest.require_asymmetric_signature,
         ships_public_key=manifest.ships_public_key,
+        # #397: carry the same build invocation onto the prereq half.
+        build_invocation=manifest.build_invocation,
     )
     from td_release_packager.trust import (
         STATUS_BLOCKED,
