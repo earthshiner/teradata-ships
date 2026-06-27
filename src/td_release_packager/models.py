@@ -176,6 +176,12 @@ class BuildConfig:
     allow_dirty: bool = False
     # GAP-004: optional change management ticket reference.
     change_ref: Optional[str] = None
+    # #397: redacted snapshot of the command + args that built this
+    # package, captured by the CLI and stamped into ships.build.json so
+    # "what built this?" stays answerable after the package is
+    # distributed. None when the builder is driven programmatically
+    # without a CLI invocation to record.
+    build_invocation: Optional[Dict[str, object]] = None
 
 
 @dataclass
@@ -311,6 +317,13 @@ class BuildManifest:
     # Stamped from ships.yaml signing.public_key (if present) at Package time.
     # Allows DBAs to verify without needing a separate --public-key flag.
     ships_public_key: str = ""
+    # #397: redacted snapshot of the command + args that built this
+    # package (command, args, cwd, env_config, timestamp, ships_version,
+    # python_version). Travels inside the package so the Build Provenance
+    # report can answer "what built this?" even after distribution, when
+    # the project-side ships.decisions.json is no longer reachable. None
+    # for programmatic builds with no recorded invocation.
+    build_invocation: Optional[Dict[str, object]] = None
     schema_version: str = "1.0"
 
 

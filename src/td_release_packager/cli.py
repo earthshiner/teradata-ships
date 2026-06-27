@@ -3151,6 +3151,23 @@ def _run_build(args, stage, issue_codes) -> int:
             )
             sys.exit(1)
 
+    # #397: snapshot the redacted top-level invocation so the package can
+    # answer "what command + args built this?" after distribution, when
+    # the project-side ships.decisions.json is no longer reachable. Derive
+    # from sys.argv (not args.command) because `process` runs the package
+    # stage via a synthesised namespace — sys.argv still holds the real
+    # subcommand the operator typed (`package` or `process`).
+    from td_release_packager import build_invocation as _build_invocation
+
+    _argv = sys.argv[1:]
+    _subcommand = _argv[0] if _argv else "package"
+    _invocation = _build_invocation.snapshot(
+        command=f"ships {_subcommand}",
+        args=_argv[1:],
+        cwd=os.getcwd(),
+        env_config=getattr(args, "env_config", None),
+    )
+
     config = BuildConfig(
         source_dir=args.project,
         environment=args.env.upper(),
@@ -3164,6 +3181,7 @@ def _run_build(args, stage, issue_codes) -> int:
         source_commit=args.commit or "",
         allow_dirty=getattr(args, "allow_dirty", False),
         change_ref=getattr(args, "change_ref", None),
+        build_invocation=_invocation,
     )
 
     (main_pair, companion_pair) = build_package(config)
