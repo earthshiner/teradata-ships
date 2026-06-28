@@ -1,11 +1,12 @@
-# Changeset detection (`ships changeset`)
+# Changeset detection & packaging
 
-Issue [#114](https://github.com/earthshiner/teradata-ships/issues/114).
+Issues [#114](https://github.com/earthshiner/teradata-ships/issues/114) (detection)
+and [#115](https://github.com/earthshiner/teradata-ships/issues/115) (packaging).
 
 `ships changeset` previews the set of payload objects that changed since a
-reference point, plus every object that transitively depends on them. It is the
-detection half of the changeset feature; building a minimal package from a
-changeset follows in [#115](https://github.com/earthshiner/teradata-ships/issues/115).
+reference point, plus every object that transitively depends on them.
+`ships package --since-tag/--since-commit/--objects` then builds a *minimal*
+package scoped to exactly that set.
 
 ## Usage
 
@@ -55,3 +56,48 @@ Changed objects:
 Dependants pulled in:
   ~ DB.ActiveCust
 ```
+
+## Changeset-scoped packaging (#115)
+
+`ships package` builds a minimal package from a changeset using the same three
+selectors:
+
+```bash
+# Scope by git tag / commit (reuses #114 detection)
+ships package --project . --env DEV --env-config config/env/DEV.conf \
+    --name OMR_changeset --since-tag v1.4.2
+ships package ... --since-commit abc1234
+
+# Scope to an explicit object list (agent-driven partial deploy)
+ships package ... --objects OMR_STD.Customer,OMR_STD.CustomerSummary
+```
+
+How it works:
+
+1. Resolve the changed set (git/baseline) or take the explicit `--objects` list.
+2. Forward-BFS the dependency graph to add dependants.
+3. Stage a filtered copy of the project containing only those objects' files
+   (plus `config/`, `.ships/`, `ships.yaml`), then run the **normal** build
+   pipeline over it. The staged copy is throwaway; the project's build counter
+   stays continuous.
+4. Stamp `ships.build.json` with a `changeset` block:
+
+   ```json
+   "changeset": {
+     "mode": "git",
+     "base": "v1.4.2",
+     "objects": ["DB.Customer", "DB.ActiveCust"],
+     "changed": ["DB.Customer"],
+     "dependants": ["DB.ActiveCust"]
+   }
+   ```
+
+A changeset package is a first-class SHIPS package — same format, integrity
+fingerprint, trust report, and deploy command. The deployer needs no special
+handling; it just deploys what's in the payload. If nothing changed, no package
+is built.
+
+Scope note: changeset packaging selects DDL **objects** (and their dependants).
+It assumes the target databases already exist (the normal case for an
+incremental deploy on top of a prior full release); database/role prerequisites
+are not auto-added to a changeset package.

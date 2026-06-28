@@ -3256,6 +3256,53 @@ def _run_build(args, stage, issue_codes) -> int:
             )
             sys.exit(1)
 
+    # #115: changeset-scoped packaging. When --since-tag / --since-commit /
+    # --objects is given, resolve the changed object set + dependants and
+    # stage a filtered copy of the project so the normal build pipeline runs
+    # unchanged over just that subset. The build number is fixed up-front
+    # (the staged copy is throwaway) so it stays continuous with the project.
+    source_dir = args.project
+    staged_dir = None
+    changeset_meta = None
+    _since = getattr(args, "since_tag", None) or getattr(args, "since_commit", None)
+    _objects = getattr(args, "objects", None)
+    if _since or _objects:
+        from td_release_packager import changeset as _changeset
+
+        if _objects:
+            requested = {o.strip() for o in _objects.split(",") if o.strip()}
+            result = _changeset.changeset_from_objects(args.project, requested)
+            _base = "objects"
+        else:
+            result = _changeset.detect_changeset(args.project, since=_since)
+            _base = _since
+        if result.note:
+            print(f"  Changeset: {result.note}")
+        if result.mode == "none":
+            print(f"ERROR: {result.note}", file=sys.stderr)
+            return 1
+        if not result.selected:
+            print("  Changeset: no changed objects detected — nothing to package.")
+            return 0
+        if build_number is None:
+            from td_release_packager.build_counter import next_build_number
+
+            build_number = next_build_number(args.project)
+        staged_dir = _changeset.stage_changeset_payload(args.project, result.selected)
+        source_dir = staged_dir
+        changeset_meta = {
+            "mode": result.mode,
+            "base": _base,
+            "objects": sorted(result.selected),
+            "changed": sorted(result.changed),
+            "dependants": sorted(result.dependants),
+        }
+        print(
+            f"  Changeset: {len(result.changed)} changed + "
+            f"{len(result.dependants)} dependants = "
+            f"{len(result.selected)} object(s) packaged ({result.mode})"
+        )
+
     # #397: snapshot the redacted top-level invocation so the package can
     # answer "what command + args built this?" after distribution, when
     # the project-side ships.decisions.json is no longer reachable. Derive
@@ -3274,7 +3321,7 @@ def _run_build(args, stage, issue_codes) -> int:
     )
 
     config = BuildConfig(
-        source_dir=args.project,
+        source_dir=source_dir,
         environment=args.env.upper(),
         package_name=args.name,
         env_config_file=args.env_config,
@@ -3287,9 +3334,18 @@ def _run_build(args, stage, issue_codes) -> int:
         allow_dirty=getattr(args, "allow_dirty", False),
         change_ref=getattr(args, "change_ref", None),
         build_invocation=_invocation,
+        changeset=changeset_meta,
     )
 
-    (main_pair, companion_pair) = build_package(config)
+    try:
+        (main_pair, companion_pair) = build_package(config)
+    finally:
+        # #115: the staged changeset copy is throwaway — remove it whether
+        # the build succeeds or raises.
+        if staged_dir is not None:
+            import shutil
+
+            shutil.rmtree(staged_dir, ignore_errors=True)
     archive_path, manifest = main_pair
 
     # -- GAP-005: sign the package archive(s) if a key is available --
@@ -5752,6 +5808,32 @@ def _build_parser():
             "(or SHIPS_PRIVATE_KEY_PATH is set), a .sig sidecar is written "
             "alongside the archive. Requires the cryptography package."
         ),
+    )
+    # #115: changeset-scoped packaging — build a minimal package of only
+    # changed objects + their dependants instead of the whole payload.
+    bp.add_argument(
+        "--since-tag",
+        dest="since_tag",
+        default=None,
+        metavar="TAG",
+        help="Build a changeset package scoped to objects changed since this "
+        "git tag/ref (plus their dependants). See `ships changeset` (#114).",
+    )
+    bp.add_argument(
+        "--since-commit",
+        dest="since_commit",
+        default=None,
+        metavar="COMMIT",
+        help="Build a changeset package scoped to objects changed since this "
+        "git commit (plus their dependants).",
+    )
+    bp.add_argument(
+        "--objects",
+        dest="objects",
+        default=None,
+        metavar="DB.Obj,DB.Obj",
+        help="Build a changeset package scoped to this explicit comma-separated "
+        "object list (plus their dependants). For agent-driven partial deploys.",
     )
 
     # -- deploy --

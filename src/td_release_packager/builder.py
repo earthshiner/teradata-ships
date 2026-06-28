@@ -789,6 +789,8 @@ def _build_package_impl(
         # #397: redacted command + args that built this package, so the
         # Build Provenance report stays answerable after distribution.
         build_invocation=config.build_invocation,
+        # #115: changeset scope (None for a full build).
+        changeset=config.changeset,
     )
 
     # -- Phase 8a: Write provenance document (v2) --
