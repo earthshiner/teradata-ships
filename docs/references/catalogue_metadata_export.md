@@ -19,6 +19,7 @@ and which product boundary it belongs to.
 ```bash
 ships metadata export-alation  --package-dir ./releases/CallCentre_..._01_main --output ./metadata
 ships metadata export-collibra --package-dir ./releases/CallCentre_..._01_main --output ./metadata
+ships metadata export-datahub  --package-dir ./releases/CallCentre_..._01_main --output ./metadata
 ```
 
 | Flag | Meaning |
@@ -73,6 +74,15 @@ Collibra's Import-API conventions (a `Community` → `Domain` → `Asset` graph:
 data product, its interface assets, and column assets, with attributes and
 relations; lineage as `Relation` resources) — plus `governance.json` (trust +
 access), `provenance.json`, `decisions.json`, and `manifest.json`.
+
+## DataHub bundle
+
+`<output>/datahub/`: `datahub_mcps.json` — a list of MetadataChangeProposals
+(MCPs) in the file-emitter `aspect.json` envelope consumable by DataHub's file
+source. Emits a `dataset` entity per physical asset (`datasetProperties`,
+`subTypes`, `schemaMetadata` with typed fields), `upstreamLineage` per lineage
+edge, and a `dataProduct` entity grouping the assets — plus `manifest.json`.
+Dataset URNs follow `urn:li:dataset:(urn:li:dataPlatform:teradata,<DB.Object>,<ENV>)`.
 
 ## Out of scope (future enhancements)
 

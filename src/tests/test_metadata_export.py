@@ -21,6 +21,7 @@ from td_release_packager.metadata_export import (
 )
 from td_release_packager.metadata_export.alation import render as render_alation
 from td_release_packager.metadata_export.collibra import render as render_collibra
+from td_release_packager.metadata_export.datahub import render as render_datahub
 
 
 def _write(path: Path, obj) -> None:
@@ -223,6 +224,33 @@ class TestCollibraRenderer:
         assert "CC_DOM_BUS_V.call_summary_current" in names
         # Lineage rendered as a Relation resource.
         assert any(r["resourceType"] == "Relation" for r in resources)
+
+
+class TestDataHubRenderer:
+    def test_mcp_envelope_and_entities(self, tmp_path):
+        meta = extract_product_metadata(str(_make_package(tmp_path)))
+        bundle = render_datahub(meta, "2026-05-28T00:00:00Z")
+        assert bundle["manifest.json"]["bundle_type"] == "datahub_metadata_export"
+        mcps = bundle["datahub_mcps.json"]["proposals"]
+        # Every MCP uses the file-emitter envelope.
+        assert all(m["changeType"] == "UPSERT" and "json" in m["aspect"] for m in mcps)
+        aspects = {m["aspectName"] for m in mcps}
+        assert {"datasetProperties", "subTypes", "schemaMetadata"} <= aspects
+        # A dataProduct entity groups the assets.
+        dp = [m for m in mcps if m["entityType"] == "dataProduct"]
+        assert dp and dp[0]["aspect"]["json"]["assets"]
+
+    def test_dataset_urn_and_lineage(self, tmp_path):
+        meta = extract_product_metadata(str(_make_package(tmp_path)))
+        mcps = render_datahub(meta, "t")["datahub_mcps.json"]["proposals"]
+        urns = {m["entityUrn"] for m in mcps}
+        assert (
+            "urn:li:dataset:(urn:li:dataPlatform:teradata,"
+            "CC_DOM_BUS_V.call_summary_current,DEV)"
+        ) in urns
+        lineage = [m for m in mcps if m["aspectName"] == "upstreamLineage"]
+        assert lineage
+        assert lineage[0]["aspect"]["json"]["upstreams"][0]["type"] == "TRANSFORMED"
 
 
 # ---------------------------------------------------------------

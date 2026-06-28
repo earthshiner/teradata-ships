@@ -18,10 +18,11 @@ RENDERERS = {}
 
 
 def _register() -> None:
-    from td_release_packager.metadata_export import alation, collibra
+    from td_release_packager.metadata_export import alation, collibra, datahub
 
     RENDERERS["alation"] = alation.render
     RENDERERS["collibra"] = collibra.render
+    RENDERERS["datahub"] = datahub.render
 
 
 _register()

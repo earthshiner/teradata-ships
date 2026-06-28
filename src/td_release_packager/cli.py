@@ -5462,8 +5462,10 @@ def _cmd_metadata(args) -> int:
         return _export_catalogue(args, "alation")
     if sub == "export-collibra":
         return _export_catalogue(args, "collibra")
+    if sub == "export-datahub":
+        return _export_catalogue(args, "datahub")
     print(
-        "Usage: ships metadata export-alation | export-collibra "
+        "Usage: ships metadata export-alation | export-collibra | export-datahub "
         "--package-dir DIR --output DIR [--include-internal] [--strict]"
     )
     return 1
@@ -6323,6 +6325,7 @@ def _build_parser():
     for _cat, _help in (
         ("export-alation", "Export an Alation-ready metadata bundle."),
         ("export-collibra", "Export a Collibra-ready metadata bundle."),
+        ("export-datahub", "Export a DataHub MCP ingestion bundle."),
     ):
         _mp = md_subs.add_parser(_cat, help=_help)
         _mp.add_argument(
