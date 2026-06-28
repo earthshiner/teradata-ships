@@ -388,10 +388,47 @@ Build a release package for a target environment. Resolves all `{{TOKEN}}` refer
 | `source_github` | string | no | Fetch DDL source from GitHub: `"owner/repo"`. Mutually exclusive with `project` source DDL. |
 | `source_ref` | string | no | Branch, tag, or SHA to fetch (default: `"main"`). Used with `source_github`. |
 | `github_token` | string | no | GitHub PAT for private repos. Falls back to `GITHUB_TOKEN` env var. |
+| `since_tag` | string | no | Build a **changeset-scoped** package of objects changed since this git tag/ref (plus dependants). See `ships_changeset` (#115). |
+| `since_commit` | string | no | Changeset-scoped package since this git commit. |
+| `objects` | string | no | Changeset-scoped package of an explicit comma-separated `DB.Object` list (plus dependants). For agent-driven partial deploys. |
 
 **Returns:** `{"success": bool, "archive_path": str, "build_number": int, "file_count": int, "token_count": int, "trust_label": str, "warnings": list}`
 
 The `trust_label` field is `READY`, `READY-WITH-CAVEATS`, or `BLOCKED`. An agent should check this before proceeding to deployment.
+
+---
+
+#### `ships_changeset`
+
+Preview the changed objects + downstream dependants for a project (#114), so an agent can build a **minimal** package instead of the whole payload. Detection is git-native when `since_tag`/`since_commit` is given inside a git repo, with a content-hash baseline (`.ships/`) fallback; `objects` expands an explicit set by dependants. A forward walk over the dependency graph pulls in every object that transitively depends on a changed one. Feed the result to `ships_package` (same `since_tag`/`since_commit`/`objects`).
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `project` | string | yes | SHIPS project directory |
+| `since_tag` | string | no | Git tag/ref to diff HEAD against |
+| `since_commit` | string | no | Git commit to diff HEAD against |
+| `objects` | string | no | Explicit comma-separated `DB.Object` list |
+
+**Returns:** `{"success": bool, "mode": "git"|"baseline"|"objects"|"none", "changed": [...], "dependants": [...], "selected": [...], "changed_files": [...], "note": str}`
+
+---
+
+#### `ships_plan`
+
+Detect-and-recommend a packaging plan from a raw source tree (#379). Inspects the source read-only, auto-answers the detectable questions (filesystem source, `{{TOKEN}}` present, atomic vs compound files, DCL/DML), and returns the recommended ordered `ships` command sequence, a per-step rationale, and the canonical `plan.json` answers snapshot. This is the non-interactive, agent-facing form of the SHIPS Navigator / CLI wizard — all share one decision model and plan engine.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `source` | string | yes | Raw source DDL directory to inspect |
+| `project` | string | no | Target SHIPS project dir (default: the source dir) |
+| `env` | string | no | Target environments, e.g. `"DEV,TST,PRD"` |
+| `name` | string | no | Package name (default: `create_objects`) |
+| `mode` | string | no | `"quick"` (one process per env) or `"detailed"` |
+| `strict` | bool | no | Recommend `--strict` on process |
+| `scaffolded` | bool | no | Project already scaffolded — omit the scaffold step |
+| `no_generate` | bool | no | Skip the view-layer generate step |
+
+**Returns:** `{"success": bool, "detected": [...], "notes": [...], "commands": [...], "rationale": [...], "plan": {...}}`
 
 ---
 
@@ -519,6 +556,22 @@ Format a prior pipeline run as a structured summary for review.
 | `command_filter` | string | no | Filter by command type (e.g. `process`) |
 
 **Returns:** `{"success": bool, "run_id": str, "final_status": str, "stages": [...], "issues_summary": {...}, "all_issues": [...]}`
+
+---
+
+#### `ships_metadata_export`
+
+Export AI-native data-product metadata for an enterprise catalogue (#244). Extracts a single neutral product-metadata model from a built package (identity, interfaces, physical assets, columns, lineage, trust, provenance, access, decisions) and renders a catalogue-ready bundle — **Alation**, **Collibra**, or **DataHub**. One extraction feeds any catalogue. Conservative: views/macros are approved consumer-facing interfaces, tables internal unless `include_internal`; ownership/glossary/AI-approval are emitted only when present in the package (never fabricated). SQL is parsed as text, never executed.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `package_dir` | string | yes | Root of an unpacked SHIPS package or release-group directory |
+| `output` | string | yes | Output directory; bundle written to `<output>/<catalogue>/` |
+| `catalogue` | string | no | `"alation"` (default), `"collibra"`, or `"datahub"` |
+| `include_internal` | bool | no | Include internal implementation objects as interfaces |
+| `strict` | bool | no | Fail if required product metadata is missing |
+
+**Returns:** `{"success": bool, "catalogue": str, "output_dir": str, "files": [...], "interfaces": int, "assets": int, "columns": int, "warnings": [...]}`
 
 ---
 

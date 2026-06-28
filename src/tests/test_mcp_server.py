@@ -555,6 +555,9 @@ class TestToolRegistration:
             "ships_fix",
             "ships_status",
             "ships_describe_package",
+            "ships_changeset",
+            "ships_plan",
+            "ships_metadata_export",
         ]
         for name in expected:
             assert name in tool_names, f"Tool {name!r} not registered"
