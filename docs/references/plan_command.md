@@ -56,3 +56,22 @@ be replayed by another.
 Config-skeleton *files* (env `.conf`, `tokenise.conf`, `ships.yaml`) are authored
 by the `scaffold` / `bootstrap-env-config` commands the plan recommends — the
 plan points at them rather than duplicating that authoring logic.
+
+## `ships wizard` — interactive sibling (#381)
+
+`ships wizard` is the interactive terminal front end over the same model. It
+asks the `decision-tree.yaml` questions one at a time — honouring the model's
+`show` visibility and `warn` rules — then emits the identical plan + `plan.json`.
+It's a plain stdin/stdout loop, so it works over SSH where the offline HTML
+Navigator can't run.
+
+```bash
+ships wizard                       # answer every question interactively
+ships wizard --source /raw/omr     # pre-seed answers from source detection (#379)
+ships wizard --json plan.json      # also write the answers snapshot
+```
+
+`ships plan` (non-interactive, detection-driven), `ships wizard` (interactive),
+and the HTML Navigator all share one model and one plan-emission engine
+(`td_release_packager.packaging_plan`), so identical answers always yield
+identical recommendations.

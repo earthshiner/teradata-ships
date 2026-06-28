@@ -286,6 +286,8 @@ def _main():
         sys.exit(_cmd_changeset(args))
     elif args.command == "plan":
         sys.exit(_cmd_plan(args))
+    elif args.command == "wizard":
+        sys.exit(_cmd_wizard(args))
     elif args.command == "import-legacy":
         _cmd_import_legacy(args)
     elif args.command == "migrate-source":
@@ -5393,13 +5395,53 @@ def _cmd_plan(args) -> int:
         for n in plan.notes:
             print(f"  ! {n}")
 
-    print("\nRecommended commands:")
-    for line in plan.command_lines:
-        print(f"  {line}")
+    print()
+    print(_pp.format_plan(plan))
 
-    print("\nWhy each step:")
-    for r in plan.rationale:
-        print(f"  [{r['step']}] {r['why']}")
+    out_path = getattr(args, "json", None)
+    if out_path:
+        with open(out_path, "w", encoding="utf-8") as fh:
+            _json.dump(plan.plan_json, fh, indent=2, ensure_ascii=False)
+            fh.write("\n")
+        print(f"\nWrote plan.json: {out_path}")
+
+    return 0
+
+
+def _cmd_wizard(args) -> int:
+    """Interactive terminal wizard over the decision model (#381).
+
+    Walks the decision-tree questions, optionally pre-seeded from source
+    detection, then emits the recommended plan + optional plan.json. A plain
+    stdin/stdout loop, so it works over SSH.
+    """
+    import json as _json
+
+    from td_release_packager import packaging_plan as _pp
+    from td_release_packager import plan_detect as _pd
+    from td_release_packager import wizard as _wiz
+
+    seed: dict = {}
+    source = getattr(args, "source", None)
+    if source:
+        if not os.path.isdir(source):
+            print(f"ERROR: source directory not found: {source}", file=sys.stderr)
+            return 1
+        detection = _pd.detect_answers(source)
+        seed = detection.answers
+        print("Detected from source:")
+        for f in detection.findings:
+            print(f"  - {f}")
+
+    try:
+        answers = _wiz.run_wizard(answers=seed)
+    except (EOFError, KeyboardInterrupt):
+        print("\nWizard cancelled.", file=sys.stderr)
+        return 1
+
+    plan = _pp.build_plan(answers)
+    print("\n" + "=" * 60)
+    print(_pp.format_plan(plan))
 
     out_path = getattr(args, "json", None)
     if out_path:
@@ -6191,6 +6233,20 @@ def _build_parser():
         help="Skip the view-layer generate step.",
     )
     pl.add_argument(
+        "--json", metavar="PATH", help="Write the machine-readable plan.json here."
+    )
+
+    # -- wizard --
+    wz = subs.add_parser(
+        "wizard",
+        help="Interactive terminal wizard over the decision model — works over "
+        "SSH (#381).",
+    )
+    wz.add_argument(
+        "--source",
+        help="Optional raw source DDL directory to pre-seed answers via detection.",
+    )
+    wz.add_argument(
         "--json", metavar="PATH", help="Write the machine-readable plan.json here."
     )
 
