@@ -159,7 +159,7 @@ via `DBC.DiskSpaceV` with skew correction.
 | Code                        | Severity | Description                                                                 | Gap     |
 |-----------------------------|----------|-----------------------------------------------------------------------------|---------|
 | `SECRET_PATTERN_DETECTED`   | ERROR    | Embedded credentials or secret patterns found in DDL/DML file bodies.       | GAP-003 |
-| `DYNAMIC_SQL_DETECTED`      | WARNING  | Dynamic SQL constructs (`EXECUTE IMMEDIATE`, `DBC.SYSEXECSQL`) detected.    | GAP-008 |
+| `DYNAMIC_SQL_DETECTED`      | WARNING  | Dynamic SQL (`EXECUTE IMMEDIATE`, `DBC.SYSEXECSQL`/`DBC.EXECSQL`) in procedures/macros. Each finding carries a `risk_category` (#166): `dynamic_sql_execute_immediate`, `dynamic_sql_calls_sys_exec_sql`, `dynamic_sql_concatenates_literal`, or — highest risk — `dynamic_sql_uses_unsanitised_parameter` when a variable/parameter is concatenated (`\|\|`) into the executed SQL (possible injection). Agents must **not** auto-remove dynamic SQL. Rule key `dynamic_sql` controls severity. | GAP-008 |
 | `VAULT_REF_UNRESOLVED`      | ERROR    | Unresolved `$env:` or `vault:` prefix found in payload after Harvest.       | GAP-011 |
 
 ---

@@ -143,20 +143,68 @@ def scan_secret_patterns(
 # DYNAMIC_SQL_DETECTED — GAP-008
 # ---------------------------------------------------------------
 
-_DYNAMIC_SQL_PATTERNS: List[tuple] = [
+# Dynamic-SQL execution constructs → (regex, base risk category, label).
+# These are the unambiguous "dynamic SQL is present and executed" signals.
+_DYNAMIC_SQL_CONSTRUCTS: List[tuple] = [
     (
         re.compile(r"(?i)\bEXECUTE\s+IMMEDIATE\b"),
-        "EXECUTE IMMEDIATE — dynamic SQL execution",
+        "dynamic_sql_execute_immediate",
+        "EXECUTE IMMEDIATE",
     ),
     (
         re.compile(r"(?i)\bCALL\s+DBC\.SYSEXECSQL\b"),
-        "DBC.SYSEXECSQL — dynamic SQL execution",
+        "dynamic_sql_calls_sys_exec_sql",
+        "DBC.SYSEXECSQL",
     ),
     (
         re.compile(r"(?i)\bCALL\s+DBC\.EXECSQL\b"),
-        "DBC.EXECSQL — dynamic SQL execution",
+        "dynamic_sql_calls_sys_exec_sql",
+        "DBC.EXECSQL",
     ),
 ]
+
+# String-concatenation operator used to build dynamic SQL from parts.
+_CONCAT_RE = re.compile(r"\|\|")
+# A bare (unquoted) identifier operand of a `||` concatenation — i.e. a
+# variable or parameter spliced into SQL text. We strip quoted literals
+# first, so anything word-shaped left next to `||` is an identifier/param.
+_QUOTED_LITERAL_RE = re.compile(r"'(?:''|[^'])*'")
+_CONCAT_IDENTIFIER_RE = re.compile(r"(?:\|\|\s*([A-Za-z_]\w*)|([A-Za-z_]\w*)\s*\|\|)")
+# A quoted literal whose text contains a SQL verb — i.e. the line is
+# assembling SQL text (not just concatenating ordinary strings).
+_SQL_VERB_IN_LITERAL_RE = re.compile(
+    r"'(?:''|[^'])*\b(?:SELECT|INSERT|UPDATE|DELETE|MERGE|CREATE|REPLACE|"
+    r"DROP|ALTER|GRANT|REVOKE|CALL)\b",
+    re.IGNORECASE,
+)
+
+#: Agent guidance shared by every dynamic-SQL finding (#166): an agent must
+#: NOT auto-remove or auto-rewrite dynamic SQL — it needs human review.
+_DYNAMIC_SQL_REMEDIATION_BASE = {
+    "safe_fix_available": False,
+    "automation_level": "manual_review_required",
+    "agent_may_fix": False,
+    "recommended_action": (
+        "Review the dynamic SQL for injection, privilege, and deployment "
+        "risk. Do NOT auto-remove or auto-rewrite it — dynamic execution is "
+        "often intentional; rewriting can change behaviour."
+    ),
+}
+
+
+def _classify_dynamic_sql(line_no_literals: str) -> "Optional[str]":
+    """Return a concatenation risk category for a construct line, or None.
+
+    ``line_no_literals`` has quoted string literals already blanked, so a
+    surviving word-shaped operand next to ``||`` is an identifier/parameter
+    (the unsanitised-parameter case); concatenation with only literals
+    remaining is the lower-risk literal case.
+    """
+    if not _CONCAT_RE.search(line_no_literals):
+        return None
+    if _CONCAT_IDENTIFIER_RE.search(line_no_literals):
+        return "dynamic_sql_uses_unsanitised_parameter"
+    return "dynamic_sql_concatenates_literal"
 
 
 def scan_dynamic_sql(
@@ -164,44 +212,110 @@ def scan_dynamic_sql(
     content: str,
     file_path: str,
 ) -> List[ValidationIssue]:
-    """Scan stored procedures and macros for dynamic SQL constructs.
+    """Scan stored procedures and macros for dynamic SQL, by risk category.
 
-    Dynamic SQL has legitimate uses, so findings are WARNING rather than
-    ERROR.  The rule is scoped to procedure and macro files by extension
-    (``.spl``, ``.sql``, ``.mcr``, ``.prc``).
+    Refines the single ``dynamic_sql`` finding into the risk categories from
+    issue #166. Every finding carries a ``risk_category`` (one of
+    ``dynamic_sql_execute_immediate``, ``dynamic_sql_calls_sys_exec_sql``,
+    ``dynamic_sql_concatenates_literal``, ``dynamic_sql_uses_unsanitised_parameter``)
+    in its remediation, plus agent guidance to never auto-remove dynamic SQL.
 
-    Args:
-        rel_path:  Path relative to the source directory.
-        content:   Full file content.
-        file_path: Absolute path (used for extension check).
+    When the executing line concatenates (``||``) values into the SQL text,
+    the category escalates: concatenating a bare identifier/parameter is the
+    highest-risk ``dynamic_sql_uses_unsanitised_parameter`` (possible
+    injection); concatenating only literals is ``dynamic_sql_concatenates_literal``.
 
-    Returns:
-        List of ValidationIssue (one per matching line, rule
-        ``dynamic_sql``, severity ``WARNING``).
+    All findings use rule ``dynamic_sql``, so a single ``inspect.conf`` key
+    controls severity (WARNING by default; set to ERROR to block dynamic SQL).
+    Scoped to procedure/macro files by extension.
     """
     ext = os.path.splitext(file_path)[1].lower()
     if ext not in _DYNAMIC_SQL_EXTENSIONS:
         return []
 
     issues: List[ValidationIssue] = []
+    construct_lines: set = set()
+    lines = content.splitlines()
 
-    for lineno, line in enumerate(content.splitlines(), start=1):
-        for pattern, description in _DYNAMIC_SQL_PATTERNS:
-            if pattern.search(line):
-                issues.append(
-                    ValidationIssue(
-                        file=rel_path,
-                        rule="dynamic_sql",
-                        severity="WARNING",
-                        line=lineno,
-                        message=(
-                            f"DYNAMIC_SQL_DETECTED — {description} at line {lineno}. "
-                            f"Dynamic SQL bypasses compile-time checks and may "
-                            f"introduce SQL injection risk. Review intent."
-                        ),
-                    )
+    for lineno, line in enumerate(lines, start=1):
+        for pattern, base_category, label in _DYNAMIC_SQL_CONSTRUCTS:
+            if not pattern.search(line):
+                continue
+            construct_lines.add(lineno)
+            # Blank quoted literals so concatenation analysis only sees code.
+            line_no_literals = _QUOTED_LITERAL_RE.sub("''", line)
+            concat_category = _classify_dynamic_sql(line_no_literals)
+            category = concat_category or base_category
+            requires_review = category == "dynamic_sql_uses_unsanitised_parameter"
+
+            if category == "dynamic_sql_uses_unsanitised_parameter":
+                risk_note = (
+                    "concatenates a variable/parameter into the SQL text — "
+                    "possible SQL injection if the value is unsanitised"
                 )
-                break
+            elif category == "dynamic_sql_concatenates_literal":
+                risk_note = "builds the SQL text by concatenating literals"
+            else:
+                risk_note = "executes dynamic SQL — bypasses compile-time checks"
+
+            remediation = dict(_DYNAMIC_SQL_REMEDIATION_BASE)
+            remediation["risk_category"] = category
+            remediation["requires_human_review"] = requires_review
+
+            issues.append(
+                ValidationIssue(
+                    file=rel_path,
+                    rule="dynamic_sql",
+                    severity="WARNING",
+                    line=lineno,
+                    message=(
+                        f"DYNAMIC_SQL_DETECTED [{category}] — {label} at line "
+                        f"{lineno}: {risk_note}. Review intent; do not "
+                        f"auto-remove dynamic SQL."
+                    ),
+                    remediation=remediation,
+                )
+            )
+            break
+
+    # Second pass: SQL assembled by concatenation (often across lines, e.g.
+    # ``SET v = 'DROP TABLE ' || iName;`` followed by EXECUTE IMMEDIATE v).
+    # Only runs when the file actually executes dynamic SQL, so ordinary
+    # string concatenation is never flagged.
+    if construct_lines:
+        for lineno, line in enumerate(lines, start=1):
+            if lineno in construct_lines or not _CONCAT_RE.search(line):
+                continue
+            if not _SQL_VERB_IN_LITERAL_RE.search(line):
+                continue
+            blanked = _QUOTED_LITERAL_RE.sub("''", line)
+            category = _classify_dynamic_sql(blanked)
+            if category is None:
+                continue
+            requires_review = category == "dynamic_sql_uses_unsanitised_parameter"
+            risk_note = (
+                "assembles SQL by concatenating a variable/parameter — "
+                "possible SQL injection if unsanitised"
+                if requires_review
+                else "assembles SQL by concatenating literals"
+            )
+            remediation = dict(_DYNAMIC_SQL_REMEDIATION_BASE)
+            remediation["risk_category"] = category
+            remediation["requires_human_review"] = requires_review
+            issues.append(
+                ValidationIssue(
+                    file=rel_path,
+                    rule="dynamic_sql",
+                    severity="WARNING",
+                    line=lineno,
+                    message=(
+                        f"DYNAMIC_SQL_DETECTED [{category}] — dynamic SQL "
+                        f"assembly at line {lineno}: {risk_note}. Review intent; "
+                        f"do not auto-remove dynamic SQL."
+                    ),
+                    remediation=remediation,
+                )
+            )
 
     return issues
 

@@ -298,17 +298,22 @@ _RULES: dict[str, dict[str, object]] = {
     },
     "dynamic_sql": {
         "description": (
-            "``EXECUTE IMMEDIATE`` / ``DBC.SYSEXECSQL`` / "
-            "``DBC.EXECSQL`` in procedures and macros must be reviewed "
-            "for SQL injection."
+            "``EXECUTE IMMEDIATE`` / ``DBC.SYSEXECSQL`` / ``DBC.EXECSQL`` in "
+            "procedures and macros. Each finding carries a per-finding "
+            "``risk_category`` (#166): ``dynamic_sql_execute_immediate``, "
+            "``dynamic_sql_calls_sys_exec_sql``, "
+            "``dynamic_sql_concatenates_literal``, or — highest risk — "
+            "``dynamic_sql_uses_unsanitised_parameter`` when a "
+            "variable/parameter is concatenated into the SQL text "
+            "(possible injection)."
         ),
         "default_severity": "WARNING",
         "safe_fix_available": False,
         "automation_level": "manual",
         "recommended_action": (
-            "Refactor to remove the dynamic SQL where possible, or "
-            "document the injection-risk review and parameterise all "
-            "operator-supplied inputs."
+            "Review for injection, privilege, and deployment risk. Do NOT "
+            "auto-remove dynamic SQL — it is often intentional. Parameterise "
+            "operator-supplied inputs rather than concatenating them."
         ),
         "risk": "medium",
         "requires_human_review": True,
