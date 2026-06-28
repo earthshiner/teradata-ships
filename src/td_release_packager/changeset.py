@@ -222,3 +222,69 @@ def detect_changeset(
         changed_files=changed_files,
         note=note,
     )
+
+
+def changeset_from_objects(project_dir: str, objects: Set[str]) -> ChangesetResult:
+    """Build a changeset from an explicit object list + their dependants.
+
+    Used by ``package --objects A,B`` for agent-driven partial deploys: no
+    git/baseline detection, just the named objects expanded by forward
+    dependants over the analyser graph.
+    """
+    from td_release_packager.analyser import analyse_project
+
+    analysis = analyse_project(project_dir)
+    known = set(analysis.objects.keys())
+    changed = {o for o in objects if o in known}
+    reverse = _reverse_dependants(analysis.dependencies)
+    dependants = _expand_dependants(changed, reverse)
+    note = ""
+    unknown = sorted(objects - known)
+    if unknown:
+        note = "Unknown objects ignored: " + ", ".join(unknown)
+    return ChangesetResult(
+        mode="objects",
+        changed=changed,
+        dependants=dependants,
+        selected=changed | dependants,
+        changed_files=[],
+        note=note,
+    )
+
+
+def stage_changeset_payload(project_dir: str, selected: Set[str]) -> str:
+    """Stage a filtered copy of the project containing only ``selected`` objects.
+
+    Copies ``config/``, ``.ships/`` and any ``ships.yaml`` verbatim (the build
+    reads env settings from them) and only the payload files backing the
+    selected objects, preserving their project-relative paths. Returns the
+    path to a fresh temp directory the caller must remove when done. The
+    normal build pipeline runs unchanged against this directory.
+    """
+    import shutil
+    import tempfile
+
+    from td_release_packager.analyser import analyse_project
+
+    analysis = analyse_project(project_dir)
+    dest = tempfile.mkdtemp(prefix="ships_changeset_")
+
+    for name in ("config", ".ships"):
+        src = os.path.join(project_dir, name)
+        if os.path.isdir(src):
+            shutil.copytree(src, os.path.join(dest, name), dirs_exist_ok=True)
+    for fname in ("ships.yaml", "ships.yml"):
+        src = os.path.join(project_dir, fname)
+        if os.path.isfile(src):
+            shutil.copy2(src, os.path.join(dest, fname))
+
+    for qn in sorted(selected):
+        obj = analysis.objects.get(qn)
+        if obj is None:
+            continue
+        src = os.path.join(project_dir, obj.file_path)
+        dst = os.path.join(dest, obj.file_path)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy2(src, dst)
+
+    return dest

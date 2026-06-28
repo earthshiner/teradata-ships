@@ -182,6 +182,10 @@ class BuildConfig:
     # distributed. None when the builder is driven programmatically
     # without a CLI invocation to record.
     build_invocation: Optional[Dict[str, object]] = None
+    # #115: when this package was scoped to a changeset, the detection
+    # metadata ({mode, base, objects}) so the deployer/DBA can see it is a
+    # partial package and what drove the scope. None for full builds.
+    changeset: Optional[Dict[str, object]] = None
 
 
 @dataclass
@@ -324,6 +328,9 @@ class BuildManifest:
     # the project-side ships.decisions.json is no longer reachable. None
     # for programmatic builds with no recorded invocation.
     build_invocation: Optional[Dict[str, object]] = None
+    # #115: changeset scope metadata when this is a partial package
+    # ({mode, base, objects}); None for a full build of the whole payload.
+    changeset: Optional[Dict[str, object]] = None
     schema_version: str = "1.0"
 
 
