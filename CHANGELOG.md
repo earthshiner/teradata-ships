@@ -28,6 +28,8 @@ All notable changes to SHIPS are documented in this file.
 
 ### Changed
 
+- **Tokenisation — canonical surfaces blessed + documented (#383, first slice)** — `config/tokenise.conf` is now the documented single source of truth for project tokenisation, resolved through new `project_paths.tokenise_conf_path()` / `TOKENISE_CONF_RELPATH` / `TOKENISE_CONF_FILENAME` helpers; the scattered hard-coded `os.path.join(project_dir, "config", "tokenise.conf")` literals in `cli.py`, `project_actions.py`, `project_policy.py`, and `project_index.py` now route through them (behaviour-identical, golden tests green), and a guard test fails the build if a join literal reappears. Added `docs/references/tokenisation.md` mapping every canonical tokenisation surface (`token_engine` prefix/substitution/token-map, `source_migrator` rule parse+apply, `eponymous_rename` filename derivation) and flagging the `eponymous_rename`/`infer_grants` token-reference regexes as the next, more delicate consolidation candidate (deliberately left untouched).
+
 - **Machine state consolidated under `<project>/.ships/` (#283)** — `.build_counter`, `ships.decisions.json`, and `_waves.txt` live under the git-ignored `.ships/` directory, kept distinct from hand-edited `config/` and `payload/`. Wiping `.ships/` forces a clean rebuild with no risk to authored files. All path resolution flows through `project_paths`, and the `DECISIONS_FILENAME` constant is now single-sourced.
 
 ### Fixed

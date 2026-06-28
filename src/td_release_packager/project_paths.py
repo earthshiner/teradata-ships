@@ -30,6 +30,14 @@ CHANGESET_BASELINE_FILENAME = "changeset.baseline.json"
 OBJECT_PLACEMENT_YAML_FILENAME = "object_placement.yaml"
 CONFIG_DIRNAME = "config"
 
+#: The canonical tokenisation config (issue #383). ``config/tokenise.conf`` is
+#: the single source of truth for a project's tokenisation rules; every consumer
+#: resolves it through :func:`tokenise_conf_path` (for file access) or
+#: :data:`TOKENISE_CONF_RELPATH` (for a forward-slash catalogue reference)
+#: rather than hard-coding the literal.
+TOKENISE_CONF_FILENAME = "tokenise.conf"
+TOKENISE_CONF_RELPATH = "config/tokenise.conf"
+
 
 def ships_state_dir(project_dir: str) -> str:
     """Return ``<project_dir>/.ships`` without creating it."""
@@ -83,6 +91,15 @@ def changeset_baseline_path(project_dir: str) -> str:
     changed when the project is not a git repository.
     """
     return os.path.join(ships_state_dir(project_dir), CHANGESET_BASELINE_FILENAME)
+
+
+def tokenise_conf_path(project_dir: str) -> str:
+    """Return the resolved path to the canonical ``config/tokenise.conf``.
+
+    The single source of truth for a project's tokenisation rules (issue #383).
+    Hand-edited config, so it lives under ``config/`` rather than ``.ships/``.
+    """
+    return os.path.join(project_dir, CONFIG_DIRNAME, TOKENISE_CONF_FILENAME)
 
 
 def object_placement_yaml_path(project_dir: str) -> str:

@@ -240,6 +240,8 @@ def _latest_package(project_dir: str) -> Optional[str]:
 
 
 def _references(project_dir: str) -> Dict[str, Any]:
+    from td_release_packager.project_paths import TOKENISE_CONF_RELPATH
+
     refs: Dict[str, Any] = {}
 
     def _add_if_exists(key: str, rel_path: str) -> None:
@@ -248,7 +250,7 @@ def _references(project_dir: str) -> Dict[str, Any]:
 
     _add_if_exists("ships_yaml", "ships.yaml")
     _add_if_exists("decisions_log", ".ships/ships.decisions.json")
-    _add_if_exists("tokenise_config", "config/tokenise.conf")
+    _add_if_exists("tokenise_config", TOKENISE_CONF_RELPATH)
     env_configs = _collect_env_configs(project_dir)
     if env_configs:
         refs["env_configs"] = env_configs

@@ -40,6 +40,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from td_release_packager.project_paths import (
+    TOKENISE_CONF_RELPATH,
+    tokenise_conf_path,
+)
 from td_release_packager.project_index import (
     STATE_ANALYSED,
     STATE_HARVESTED,
@@ -150,9 +154,7 @@ class ProjectActionsReport:
 def _discovery_flags(project_dir: str) -> Dict[str, bool]:
     """Lightweight presence checks for downstream composition."""
     flags = {
-        "tokenise_config_present": os.path.isfile(
-            os.path.join(project_dir, "config", "tokenise.conf")
-        ),
+        "tokenise_config_present": os.path.isfile(tokenise_conf_path(project_dir)),
         "env_configs_present": False,
         "source_payload_present": False,
     }
@@ -196,7 +198,7 @@ def _build_allowed_and_blocked(
         ProjectActionConstraint(
             action=ACTION_TOKENISE,
             reason=REASON_REWRITES_SOURCE_FILES,
-            evidence_ref="config/tokenise.conf",
+            evidence_ref=TOKENISE_CONF_RELPATH,
             instruction=(
                 "Run `migrate-source --dry-run` first to preview the rewrite. "
                 "Apply only after the operator reviews the diff."

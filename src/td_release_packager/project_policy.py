@@ -40,6 +40,10 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from td_release_packager.project_index import compute_project_index
+from td_release_packager.project_paths import (
+    TOKENISE_CONF_RELPATH,
+    tokenise_conf_path,
+)
 
 
 # ---------------------------------------------------------------
@@ -98,7 +102,7 @@ _STOP_CATALOGUE: Dict[str, Dict[str, str]] = {
             "<project_dir>/config/tokenise.conf is present but cannot be "
             "parsed (no valid rules)."
         ),
-        "evidence_ref": "config/tokenise.conf",
+        "evidence_ref": TOKENISE_CONF_RELPATH,
         "instruction": (
             "Stop. Fix the malformed rules before harvest or migrate-source "
             "is allowed to run; harvest auto-applies the config."
@@ -132,7 +136,7 @@ _APPROVAL_CATALOGUE: Dict[str, Dict[str, str]] = {
         "detect_via": (
             "About to call migrate-source without --dry-run on a non-empty source tree."
         ),
-        "evidence_ref": "config/tokenise.conf",
+        "evidence_ref": TOKENISE_CONF_RELPATH,
         "instruction": (
             "Pause. Run migrate-source --dry-run first; surface the diff "
             "to the operator before applying."
@@ -257,7 +261,7 @@ def compute_project_policy(project_dir: str) -> ProjectAgentPolicy:
         _make_entry(_STOP_CATALOGUE, PROJECT_STOP_INSPECT_ERRORS),
         _make_entry(_STOP_CATALOGUE, PROJECT_STOP_UNKNOWN_STATE),
     ]
-    if os.path.isfile(os.path.join(project_dir, "config", "tokenise.conf")):
+    if os.path.isfile(tokenise_conf_path(project_dir)):
         stops.insert(
             -1,  # before the defensive unknown-state entry
             _make_entry(_STOP_CATALOGUE, PROJECT_STOP_TOKENISE_CONFIG_INVALID),
