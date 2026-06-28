@@ -60,6 +60,8 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Dict, Set, List, Optional, Tuple
 
+from td_release_packager import token_ref
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -68,33 +70,24 @@ from typing import Dict, Set, List, Optional, Tuple
 # DDL file extensions we scan (lowercase, without leading dot)
 SCANNABLE_EXTENSIONS = {"viw", "spl", "mcr", "trg", "fnc"}
 
-SQL_OBJECT_NAME_PATTERN = r'(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_]*)'
-
-# Database-reference building block, used by every reference regex in
-# this module. A database reference can be:
+# Object name and database-reference building blocks now come from the shared
+# token-reference vocabulary (issue #383) so this module and eponymous_rename
+# express the "what a tokenised reference looks like" grammar once. A database
+# reference can be:
 #   * a whole-name token              : ``{{DOM_DATABASE_V}}``
 #   * a literal database name         : ``CallCentre_DOM_BUS_V``
 #   * a prefix-token + literal suffix : ``{{DB_PREFIX}}_DOM_BUS_V``
 #   * a literal prefix + token suffix : ``CallCentre_{{ENV}}``
-# The atom loop after the first atom lets a reference start with
-# either a token or a literal and continue with any mix of further
-# tokens and word-character runs. Without it the regex truncates a
-# prefix-token reference at the closing ``}}`` and inference silently
-# misses every cross-database reference in a prefix-tokenised payload
-# (issue #309 — same root cause as the harvest filename collapse).
+# The token/literal continuation loop keeps a prefix-token reference whole
+# rather than truncating at the closing ``}}`` (issue #309).
 #
-# The token branch capture INCLUDES the ``{{...}}`` braces and any
-# literal suffix, so callers can use it verbatim. The literal branch
-# captures the bare name. ``extract_db_ref`` distinguishes which
-# branch fired and returns the reference in canonical form.
-_DB_TOKEN_PART = (
-    r"\{\{[A-Z][A-Z0-9_]*\}\}"
-    r"(?:\w+|\{\{[A-Z][A-Z0-9_]*\}\})*"
-)
-_DB_LITERAL_PART = (
-    r"[A-Z][A-Z0-9_]{1,127}"
-    r"(?:\{\{[A-Z][A-Z0-9_]*\}\}|\w+)*"
-)
+# The token branch capture INCLUDES the ``{{...}}`` braces and any literal
+# suffix, so callers can use it verbatim. The literal branch captures the bare
+# name. ``extract_db_ref`` distinguishes which branch fired and returns the
+# reference in canonical form.
+SQL_OBJECT_NAME_PATTERN = token_ref.OBJECT_NAME
+_DB_TOKEN_PART = token_ref.DB_TOKEN_PART
+_DB_LITERAL_PART = token_ref.DB_LITERAL_PART
 _DB_REF_GROUPED = rf"(?:({_DB_TOKEN_PART})|({_DB_LITERAL_PART}))"
 
 # Regex to match tokenised database references: {{TOKEN}}[.suffix].ObjectName
