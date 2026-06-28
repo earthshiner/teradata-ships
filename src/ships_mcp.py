@@ -81,7 +81,12 @@ mcp = FastMCP(
         "database deployment framework. Use these tools to build and deploy "
         "Teradata DDL packages. Pipeline tools (scaffold through package) are "
         "offline. Deployment tools (deploy, explain, rollback) require a live "
-        "Teradata connection via host/user/password."
+        "Teradata connection via host/user/password. "
+        "For agent-driven work: ships_plan detects a raw source tree and "
+        "recommends the command sequence; ships_changeset previews changed "
+        "objects + dependants for a minimal changeset-scoped ships_package; "
+        "ships_metadata_export publishes data-product metadata to Alation, "
+        "Collibra, or DataHub."
     ),
 )
 
@@ -1159,6 +1164,9 @@ async def ships_package(
     author: str = "",
     description: str = "",
     commit: str = "",
+    since_tag: Optional[str] = None,
+    since_commit: Optional[str] = None,
+    objects: Optional[str] = None,
     ctx: Optional[Context] = None,
 ) -> dict:
     """Dispatch the package stage as a detached subprocess (#319).
@@ -1168,6 +1176,11 @@ async def ships_package(
     then call :func:`ships_verify` for the trust evaluation and
     :func:`ships_describe_package` for the structured archive
     summary.
+
+    Changeset-scoped packaging (#115): pass ``since_tag`` / ``since_commit``
+    (git diff) or ``objects`` (explicit comma-separated ``DB.Object`` list) to
+    build a minimal package of only the changed objects plus their dependants.
+    Preview the selection first with :func:`ships_changeset`.
     """
     args = [
         "package",
@@ -1188,6 +1201,12 @@ async def ships_package(
         args += ["--description", description]
     if commit:
         args += ["--commit", commit]
+    if since_tag:
+        args += ["--since-tag", since_tag]
+    if since_commit:
+        args += ["--since-commit", since_commit]
+    if objects:
+        args += ["--objects", objects]
     return _launch_background("td_release_packager", args, project)
 
 
@@ -1630,6 +1649,217 @@ def ships_verify(project: str) -> dict:
         if archive_exists:
             response.update(_ships_context_response(archive))
         return response
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@mcp.tool()
+def ships_changeset(
+    project: str,
+    since_tag: Optional[str] = None,
+    since_commit: Optional[str] = None,
+    objects: Optional[str] = None,
+) -> dict:
+    """Preview the changed objects + downstream dependants for a project (#114).
+
+    Detection is git-native when ``since_tag`` / ``since_commit`` is given inside
+    a git repo (``git diff <ref>..HEAD``), falling back to a content-hash
+    baseline under ``.ships/`` otherwise. Pass ``objects`` (comma-separated
+    ``DB.Object``) to expand an explicit set by dependants instead of detecting.
+    A forward walk over the dependency graph adds every object that transitively
+    depends on a changed one (a changed table pulls in the views built on it).
+
+    Feed the result to :func:`ships_package` (same ``since_tag`` / ``since_commit``
+    / ``objects``) to build a minimal, changeset-scoped package.
+
+    Args:
+        project:       SHIPS project directory.
+        since_tag:     Git tag/ref to diff HEAD against.
+        since_commit:  Git commit to diff HEAD against.
+        objects:       Explicit comma-separated ``DB.Object`` list.
+
+    Returns:
+        {"success", "mode", "changed": [...], "dependants": [...],
+         "selected": [...], "changed_files": [...], "note"}
+    """
+    try:
+        from td_release_packager import changeset as _cs
+
+        if not os.path.isdir(project):
+            return {"success": False, "error": f"project not found: {project}"}
+
+        if objects:
+            requested = {o.strip() for o in objects.split(",") if o.strip()}
+            result = _cs.changeset_from_objects(project, requested)
+        else:
+            since = since_tag or since_commit
+            result = _cs.detect_changeset(project, since=since)
+
+        return {
+            "success": result.mode != "none",
+            "mode": result.mode,
+            "changed": sorted(result.changed),
+            "dependants": sorted(result.dependants),
+            "selected": sorted(result.selected),
+            "changed_files": list(result.changed_files),
+            "note": result.note,
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@mcp.tool()
+def ships_plan(
+    source: str,
+    project: Optional[str] = None,
+    env: Optional[str] = None,
+    name: Optional[str] = None,
+    mode: str = "quick",
+    strict: bool = False,
+    scaffolded: bool = False,
+    no_generate: bool = False,
+) -> dict:
+    """Detect-and-recommend a packaging plan from a raw source tree (#379).
+
+    Inspects ``source`` read-only, auto-answers the detectable questions
+    (filesystem source, ``{{TOKEN}}`` already present, atomic vs compound
+    files, DCL/DML presence), overlays any overrides, and returns the
+    recommended ordered ``ships`` command sequence, a per-step rationale, and the
+    canonical ``plan.json`` answers snapshot — without an interactive prompt.
+    This is the non-interactive, agent-facing form of the SHIPS Navigator / CLI
+    wizard; all three share one decision model and plan-emission engine.
+
+    Args:
+        source:       Raw source DDL directory to inspect.
+        project:      Target SHIPS project dir (default: the source dir).
+        env:          Target environments, e.g. "DEV,TST,PRD".
+        name:         Package name (default: create_objects).
+        mode:         "quick" (one process per env) or "detailed" (each step).
+        strict:       Recommend --strict on process.
+        scaffolded:   Project already scaffolded — omit the scaffold step.
+        no_generate:  Skip the view-layer generate step.
+
+    Returns:
+        {"success", "detected": [...], "notes": [...], "commands": [...],
+         "rationale": [...], "plan": {...}}
+    """
+    try:
+        from td_release_packager import packaging_plan as _pp
+        from td_release_packager import plan_detect as _pd
+
+        if not os.path.isdir(source):
+            return {"success": False, "error": f"source not found: {source}"}
+
+        detection = _pd.detect_answers(source)
+        overrides = {
+            "project.dir": project or source,
+            "package.name": name,
+            "mode.style": mode,
+            "envs": env,
+        }
+        if strict:
+            overrides["process.strict"] = True
+        if scaffolded:
+            overrides["project.scaffolded"] = True
+        if no_generate:
+            overrides["generate.enabled"] = "no"
+
+        answers = _pd.merge_answers(detection.answers, overrides)
+        plan = _pp.build_plan(answers)
+        return {
+            "success": True,
+            "detected": list(detection.findings),
+            "notes": list(plan.notes),
+            "commands": plan.command_lines,
+            "rationale": list(plan.rationale),
+            "plan": plan.plan_json,
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@mcp.tool()
+def ships_metadata_export(
+    package_dir: str,
+    output: str,
+    catalogue: str = "alation",
+    include_internal: bool = False,
+    strict: bool = False,
+) -> dict:
+    """Export AI-native data-product metadata for an enterprise catalogue (#244).
+
+    Extracts a neutral product-metadata model from a built SHIPS package
+    (identity, interfaces, physical assets, columns, lineage, trust, provenance,
+    access, decisions) and renders a catalogue-ready bundle. One extraction feeds
+    any catalogue — adding one is a new renderer, not a re-read.
+
+    Conservative: views/macros are approved consumer-facing interfaces, tables
+    internal unless ``include_internal``; ownership/glossary/AI-approval are
+    emitted only when present in the package (never fabricated), with warnings
+    otherwise. SQL is parsed as text, never executed.
+
+    Args:
+        package_dir:      Root of an unpacked SHIPS package or release-group dir.
+        output:           Output directory; bundle written to <output>/<catalogue>/.
+        catalogue:        "alation" | "collibra" | "datahub".
+        include_internal: Include internal implementation objects as interfaces.
+        strict:           Fail if required product metadata is missing.
+
+    Returns:
+        {"success", "catalogue", "output_dir", "files": [...],
+         "interfaces", "assets", "columns", "warnings": [...]}
+    """
+    try:
+        from datetime import datetime, timezone
+
+        from td_release_packager.metadata_export import (
+            RENDERERS,
+            MetadataExtractError,
+            extract_product_metadata,
+        )
+
+        catalogue = catalogue.lower()
+        if catalogue not in RENDERERS:
+            return {
+                "success": False,
+                "error": f"unknown catalogue {catalogue!r}; choose from "
+                f"{sorted(RENDERERS)}",
+            }
+
+        try:
+            meta = extract_product_metadata(
+                package_dir, include_internal=include_internal
+            )
+        except MetadataExtractError as exc:
+            return {"success": False, "error": str(exc)}
+
+        if strict and meta.warnings:
+            return {
+                "success": False,
+                "error": "strict mode: metadata incomplete",
+                "warnings": meta.warnings,
+            }
+
+        generated_at = datetime.now(timezone.utc).isoformat()
+        bundle = RENDERERS[catalogue](meta, generated_at)
+
+        out_dir = os.path.join(output, catalogue)
+        os.makedirs(out_dir, exist_ok=True)
+        for filename, obj in bundle.items():
+            with open(os.path.join(out_dir, filename), "w", encoding="utf-8") as fh:
+                json.dump(obj, fh, indent=2, ensure_ascii=False)
+                fh.write("\n")
+
+        return {
+            "success": True,
+            "catalogue": catalogue,
+            "output_dir": out_dir,
+            "files": sorted(bundle.keys()),
+            "interfaces": len(meta.interfaces),
+            "assets": len(meta.physical_assets),
+            "columns": len(meta.columns),
+            "warnings": list(meta.warnings),
+        }
     except Exception as e:
         return {"success": False, "error": str(e)}
 
