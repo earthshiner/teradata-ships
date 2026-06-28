@@ -1,0 +1,214 @@
+# decision-tree.yaml — single source of truth for the SHIPS packaging
+# elicitation tree (issue #378).
+#
+# Consumed by the three guided-packaging front ends so they stay lockstep:
+#   * the offline HTML wizard (tools/navigator/ships-navigator.html)
+#   * the CLI wizard
+#   * the AI packaging skill
+#
+# The model is DATA, not code. Visibility ("show this question only when…")
+# and warnings are expressed with a small condition DSL — never an embedded
+# expression — so every consumer evaluates them identically:
+#
+#   eq:      {field: <id>, value: <v>}     answer == v
+#   ne:      {field: <id>, value: <v>}     answer != v
+#   truthy:  <id>                          answer is set and non-empty
+#   derived: {name: <d>, op: eq, value: v} a computed value (e.g. target_os)
+#   all:     [<condition>, ...]            logical AND
+#   any:     [<condition>, ...]            logical OR
+#
+# Derived values (computed by the consumer, not answered by the user):
+#   target_os — "windows" when project.dir looks Windows-shaped (drive
+#               letter or backslash), else "posix".
+#
+# `kind` is one of: radio | text | checkbox.
+
+schema_version: "1.0"
+
+questions:
+  # Mode toggle — first so the user picks which command shape they want.
+  - id: mode.style
+    label: "How should I show the SHIPS commands?"
+    hint: "<b>Quick</b> emits one <code>ships process</code> call per env (recommended for first-timers). <b>Detailed</b> shows each step (scaffold/harvest/generate/inspect/scan/analyse/package) for transparency or CI scripts."
+    kind: radio
+    options:
+      - {value: quick, label: "Quick (process)"}
+      - {value: detailed, label: "Detailed (each step)"}
+
+  # --- Q1 source ---
+  - id: source.type
+    label: "Q1. Where does your source come from?"
+    hint: "GitHub means SHIPS clones into a temp work dir; filesystem reads from disk."
+    kind: radio
+    options:
+      - {value: github, label: "GitHub"}
+      - {value: filesystem, label: "Filesystem"}
+
+  - id: source.owner_repo
+    label: "GitHub owner/repo"
+    hint: "e.g. acme/customer-dna"
+    kind: text
+    show: {eq: {field: source.type, value: github}}
+
+  - id: source.ref
+    label: "GitHub ref (branch/tag/sha)"
+    hint: "Defaults to <code>main</code> if blank."
+    kind: text
+    default: main
+    show: {eq: {field: source.type, value: github}}
+
+  - id: source.dir
+    label: "Absolute path to source DDL"
+    hint: "e.g. C:\\src\\customer-dna or /home/me/customer-dna"
+    kind: text
+    show: {eq: {field: source.type, value: filesystem}}
+
+  # --- Q2 already tokenised ---
+  - id: tokens.already
+    label: "Q2. Does the source already use <code>{{TOKEN}}</code> placeholders?"
+    hint: "Yes = harvest as-is; the wizard will run <code>bootstrap-env-config</code> to seed env files from the tokens already in the source. No / unsure = wizard configures tokenisation."
+    kind: radio
+    options:
+      - {value: "yes", label: "Yes"}
+      - {value: "no", label: "No"}
+      - {value: unsure, label: "Unsure"}
+
+  # --- Q3 token shape ---
+  - id: tokens.model
+    label: "Q3. Token shape"
+    hint: "<b>Prefix</b>: one product token (one env binding). <b>Per-database</b>: one binding per database."
+    kind: radio
+    options:
+      - {value: prefix, label: "Prefix (one DB_PREFIX)"}
+      - {value: per_database, label: "Per-database (one token per db)"}
+    show:
+      all:
+        - {truthy: tokens.already}
+        - {ne: {field: tokens.already, value: "yes"}}
+
+  # --- Q4 prefix ---
+  - id: tokens.prefix
+    label: "Q4. Product prefix"
+    hint: "Bare prefix without trailing underscore. e.g. <code>CustomerDNA</code>."
+    kind: text
+    show:
+      all:
+        - {truthy: tokens.already}
+        - {ne: {field: tokens.already, value: "yes"}}
+
+  # --- Q5 atomic + eponymous ---
+  - id: atomic.eponymous
+    label: "Q5. Is DDL already <abbr title='one object per file'>atomic</abbr> &amp; <abbr title='filename matches DB.Object.ext'>eponymous</abbr>?"
+    hint: "Atomic = one object per file. Eponymous = filename matches <code>DB.Object.ext</code>."
+    kind: radio
+    options:
+      - {value: "yes", label: "Yes"}
+      - {value: "no", label: "No — let SHIPS split + rename"}
+      - {value: unsure, label: "Unsure"}
+    warn:
+      - when_value_in: ["no", unsure]
+        message: "No problem: SHIPS auto-splits multi-object files into one atomic object per file — tables, views, and compound objects (stored procedures, macros, triggers, functions) alike — and names each file eponymously. Anything it genuinely can't parse confidently is left whole and flagged by inspect's one_object rule."
+
+  # --- Q6 generate (view-layer) ---
+  - id: generate.enabled
+    label: "Q6. Generate a <abbr title='locking views, access views, business views (STD_V / ACL_V / BUS_V)'>view layer</abbr>?"
+    hint: "If your tables have companion views per the object-placement standard, SHIPS can auto-generate them. Skip if you author all views by hand or your source already includes them."
+    kind: radio
+    options:
+      - {value: "yes", label: "Yes — auto-generate"}
+      - {value: "no", label: "No — base tables only"}
+      - {value: unsure, label: "Unsure (defaults to Yes)"}
+
+  # --- Q7 analyse (waves) ---
+  - id: analyse.enabled
+    label: "Q7. Compute deploy <abbr title='ordered batches of objects with no intra-batch dependencies'>waves</abbr> (dependency analysis)?"
+    hint: "SHIPS reads cross-object dependencies and emits <code>_waves.txt</code> so DDL deploys in the right order. Recommended unless you maintain your own ordering."
+    kind: radio
+    options:
+      - {value: "yes", label: "Yes (recommended)"}
+      - {value: "no", label: "No"}
+
+  # --- Q8 dependency graph ---
+  - id: analyse.graph
+    label: "Q8. Export a dependency graph (incl. <abbr title='OpenLineage is an open standard for data lineage events'>OpenLineage</abbr>)?"
+    hint: "Emits dependency graph files (incl. OpenLineage JSON) under <code>&lt;project&gt;/graphs/</code>. Useful for impact analysis or feeding a lineage tool. Off by default."
+    kind: radio
+    options:
+      - {value: "no", label: "No"}
+      - {value: "yes", label: "Yes — export graph files"}
+    show: {ne: {field: analyse.enabled, value: "no"}}
+
+  - id: analyse.namespace
+    label: "OpenLineage namespace"
+    hint: "Defaults to <code>teradata://ships-analysis</code>. For a live system use <code>teradata://hostname:1025</code>."
+    kind: text
+    default: "teradata://ships-analysis"
+    show: {eq: {field: analyse.graph, value: "yes"}}
+
+  - id: analyse.projectName
+    label: "OpenLineage project name"
+    hint: "Defaults to <code>ships-project</code>."
+    kind: text
+    default: ships-project
+    show: {eq: {field: analyse.graph, value: "yes"}}
+
+  # --- Q9 scan ---
+  - id: scan.enabled
+    label: "Q9. Add an orphan-token scan?"
+    hint: "Catches tokens defined in env files but never used in the payload (CI gate for clean env configs). <code>inspect</code> already validates coverage the other way."
+    kind: radio
+    options:
+      - {value: "no", label: "No"}
+      - {value: "yes", label: "Yes — fail on orphan tokens"}
+
+  # --- Q10 envs ---
+  - id: envs
+    label: "Q10. Target environments"
+    hint: "Comma- or space-separated. e.g. <code>DEV, TST, PRD</code>."
+    kind: text
+
+  # --- External parent databases → env-config EXTERNAL_PARENTS ---
+  # Only meaningful when the wizard writes the env skeletons (the
+  # not-already-tokenised path). Stops the build's environment-prereq trust
+  # gate flagging platform-owned parents as needing DBA review.
+  - id: env.externalParents
+    label: "External parent databases (optional)"
+    hint: "Comma-separated. Parent databases/users that <b>already exist</b> in the target and are NOT created by this package — e.g. the <code>FROM</code> parent in <code>CREATE DATABASE Child FROM DATAPRODUCTS</code>. Written as <code>EXTERNAL_PARENTS=…</code> into each generated env file so the build's trust gate doesn't block them with <code>environment_prereq_requires_dba_review</code>. Leave blank if your package creates every database it references."
+    kind: text
+    show: {ne: {field: tokens.already, value: "yes"}}
+
+  # --- Q11 project path + scaffold flag ---
+  - id: project.dir
+    label: "Q11. Absolute path to your SHIPS project"
+    hint: "e.g. <code>C:\\projects\\customer-dna-ships</code>. Drive letter implies Windows <code>.bat</code> output."
+    kind: text
+
+  - id: project.scaffolded
+    label: "Project already scaffolded?"
+    hint: "Tick if the project layout already exists. If unticked, <code>scaffold</code> runs first using the basename as the project name."
+    kind: checkbox
+
+  # --- Q12 package name ---
+  - id: package.name
+    label: "Q12. Package name"
+    hint: "Build artefact name. e.g. <code>create_objects</code>. No spaces; underscores OK."
+    kind: text
+
+  # --- Strict mode toggle ---
+  - id: process.strict
+    label: "Strict mode (abort on first stage error)?"
+    hint: "Off by default — developer mode runs all stages and summarises errors at the end. Tick for CI / platform mode."
+    kind: checkbox
+
+  # --- Bash-flavour for Windows paths in the emitted .sh ---
+  # Only relevant when the project dir looks Windows-shaped — on POSIX there
+  # are no drive letters or backslashes for the bash render to translate.
+  - id: bash.flavour
+    label: "Bash path style for the emitted <code>.sh</code>"
+    hint: "Windows paths can't be expressed in a POSIX shell without translation. <b>Git Bash / MSYS2</b> uses <code>/c/...</code> (default — most common). <b>WSL</b> uses <code>/mnt/c/...</code>. <b>Cygwin</b> uses <code>/cygdrive/c/...</code>. The PowerShell and cmd outputs are unaffected."
+    kind: radio
+    options:
+      - {value: gitbash, label: "Git Bash / MSYS2 (/c/...)"}
+      - {value: wsl, label: "WSL (/mnt/c/...)"}
+      - {value: cygwin, label: "Cygwin (/cygdrive/c/...)"}
+    show: {derived: {name: target_os, op: eq, value: windows}}

@@ -31,9 +31,21 @@ Double-click `ships-navigator.html` from any file share, or open it from your br
 
 ## Decision model
 
-v1.1 inlines the decision tree directly in the HTML for portability. Once
-[#378 — declarative decision model `decision-tree.yaml`](https://github.com/earthshiner/teradata-ships/issues/378)
-lands, the wizard will be regenerated from that shared model so the CLI, HTML, and AI front ends stay lock-step.
+The authoritative elicitation model lives in
+[`decision-tree.yaml`](decision-tree.yaml) (issue #378) — the single source of
+truth shared by the HTML wizard, the CLI wizard, and the AI skill. The model is
+data: each question carries its `id`, `label`, `hint`, `kind`, `options`,
+optional `default`, and a `show` / `warn` condition expressed in a small DSL
+(`eq` / `ne` / `truthy` / `all` / `any` / `derived`) so every front end
+evaluates visibility identically.
+
+The Python side loads and evaluates it via
+`td_release_packager.decision_tree` (`load_decision_tree`, `is_visible`,
+`active_warnings`). The offline single-file HTML wizard embeds the same model as
+its inline `QUESTIONS` array — it can't read an external file at `file://` —
+and a lockstep test (`src/tests/test_decision_tree.py::TestLockstep`) fails the
+build if the YAML and the inline copy drift. Edit the YAML and mirror the change
+in the HTML in the same commit.
 
 The questions encoded here, in order:
 
@@ -107,10 +119,9 @@ const APP_NAME = "SHIPS Navigator";
 ```
 tools/navigator/
   ships-navigator.html   # the wizard
+  decision-tree.yaml     # authoritative elicitation model (#378)
   README.md              # this file
 ```
-
-A `decision-tree.yaml` will join this directory under [#378](https://github.com/earthshiner/teradata-ships/issues/378).
 
 ## Troubleshooting
 

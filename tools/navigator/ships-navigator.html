@@ -297,8 +297,14 @@ document.title = APP_NAME;
 const STORAGE_KEY = "ships-navigator-v1";
 
 // ---------------------------------------------------------------------------
-// Decision model (handover Part B §3, extended). v1.1 inlines the model; once
-// decision-tree.yaml lands (issue #378) the wizard can load that instead.
+// Decision model (handover Part B §3, extended).
+//
+// The authoritative model now lives in tools/navigator/decision-tree.yaml
+// (issue #378) — the single source of truth shared with the CLI wizard and AI
+// skill. This inline QUESTIONS array is the wizard's offline embedding of that
+// model (the single-file wizard must run with no network / no file reads). A
+// test (src/tests/test_decision_tree.py::TestLockstep) fails the build if the
+// two drift, so edit the YAML and mirror the change here in the same commit.
 // ---------------------------------------------------------------------------
 const QUESTIONS = [
   // Mode toggle — first so the user picks which command shape they want.
