@@ -219,6 +219,14 @@ DEFAULT_RULES: Dict[str, str] = {
     # policy). WARNING by default; flags only a clear mismatch (e.g. a view
     # placed in a ``_T`` token), never a token without a kind suffix.
     "token_naming": "WARNING",
+    # contract_change (issue #171): compares the current source against a
+    # captured contract baseline (.ships/contracts.baseline.json) and flags
+    # backward-incompatible changes — removed/renamed/reordered view columns,
+    # changed procedure parameters, dropped/retyped table columns, or an
+    # object that disappeared. No-op until a baseline is captured with
+    # ``inspect --update-contract-baseline``. WARNING by default; set to ERROR
+    # when comparing against a governed baseline / previous release.
+    "contract_change": "WARNING",
 }
 
 # -- Valid severity values --
@@ -556,6 +564,13 @@ def generate_default_config() -> str:
         "# WARNING by default; --strict promotes to ERROR. Transaction",
         "# control inside a procedure BEGIN…END body is exempt.",
         f"transaction_control_in_payload={DEFAULT_RULES['transaction_control_in_payload']}",
+        "# contract_change: compares current source against a captured",
+        "# contract baseline (.ships/contracts.baseline.json) and flags",
+        "# backward-incompatible changes (removed view columns, changed proc",
+        "# params, dropped table columns, ...). No-op until a baseline is",
+        "# captured with `inspect --update-contract-baseline`. WARNING; set",
+        "# ERROR when comparing against a governed baseline.",
+        f"contract_change={DEFAULT_RULES['contract_change']}",
         "",
         "# Grant architecture rules",
         "# public_grant_on_tables: GRANT ... TO PUBLIC on a tables",

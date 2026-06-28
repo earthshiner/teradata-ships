@@ -611,6 +611,26 @@ _RULES: dict[str, dict[str, object]] = {
         "risk": "low",
         "requires_human_review": True,
     },
+    "contract_change": {
+        "description": (
+            "A backward-incompatible object contract change vs the captured "
+            "baseline (``.ships/contracts.baseline.json``): a removed / "
+            "renamed / reordered view column, a changed procedure parameter "
+            "(removed / direction / datatype), a dropped or retyped table "
+            "column, or an object that disappeared (drop or rename). Can break "
+            "downstream consumers. No-op until a baseline is captured."
+        ),
+        "default_severity": "WARNING",
+        "safe_fix_available": False,
+        "automation_level": "manual",
+        "recommended_action": (
+            "Confirm no downstream consumer depends on the previous contract "
+            "(or version the object), then re-baseline with "
+            "``ships inspect --update-contract-baseline``."
+        ),
+        "risk": "medium",
+        "requires_human_review": True,
+    },
 }
 
 

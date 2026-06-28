@@ -434,3 +434,38 @@ class TestCustomLintPolicyEndToEnd:
         assert issue["details"]["safe_fix_available"] is True
         assert issue["details"]["automation_level"] == "reviewable_codemod"
         assert issue["details"]["requires_human_review"] is False
+
+
+class TestContractChangeEndToEnd:
+    """Issue #171 — inspect captures a contract baseline with
+    --update-contract-baseline, then flags a backward-incompatible change
+    on the next run (recorded in ships.decisions.json)."""
+
+    def test_baseline_capture_then_flag(self, tmp_path, capsys):
+        project = _make_project(tmp_path)
+        views = project / "payload" / "database" / "DDL" / "views"
+        views.mkdir(parents=True, exist_ok=True)
+        vfile = views / "{{DB}}.v.viw"
+        vfile.write_text(
+            "CREATE VIEW {{DB}}.v (a, b) AS SELECT 1 AS a, 2 AS b;", encoding="utf-8"
+        )
+
+        # 1) Capture the baseline.
+        _run_inspect(_make_namespace(project, update_contract_baseline=True))
+        capsys.readouterr()
+
+        # 2) Drop a column → backward-incompatible change.
+        vfile.write_text(
+            "CREATE VIEW {{DB}}.v (a) AS SELECT 1 AS a;", encoding="utf-8"
+        )
+        _run_inspect(_make_namespace(project))
+        capsys.readouterr()
+
+        stage = _read_decisions(project)["runs"][-1]["stages"][0]
+        contract = [
+            i
+            for i in stage["issues"]
+            if "contract_change" in i.get("message", "")
+        ]
+        assert contract, "expected a contract_change finding after dropping a column"
+        assert any("b" in i["message"] for i in contract)
