@@ -631,6 +631,26 @@ _RULES: dict[str, dict[str, object]] = {
         "risk": "medium",
         "requires_human_review": True,
     },
+    "teradata_expensive_change": {
+        "description": (
+            "A physical change that is syntactically valid but O(table size) "
+            "and lock-heavy on large tables: ``ALTER TABLE … ADD … DEFAULT`` "
+            "(full table rewrite) or ``CREATE INDEX`` (non-unique secondary "
+            "index build). Cost depends on the live row count, so findings "
+            "flag ``requires_live_metadata`` plus a recommended preflight "
+            "check, possible lock and spool/perm impact, and DBA review."
+        ),
+        "default_severity": "WARNING",
+        "safe_fix_available": False,
+        "automation_level": "manual",
+        "recommended_action": (
+            "Assess the table size against live metadata, schedule a "
+            "DBA-reviewed maintenance window, and run the recommended "
+            "preflight check before deploying."
+        ),
+        "risk": "medium",
+        "requires_human_review": True,
+    },
 }
 
 

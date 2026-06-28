@@ -227,6 +227,15 @@ DEFAULT_RULES: Dict[str, str] = {
     # ``inspect --update-contract-baseline``. WARNING by default; set to ERROR
     # when comparing against a governed baseline / previous release.
     "contract_change": "WARNING",
+    # teradata_expensive_change (issue #175): physical changes that are
+    # syntactically valid but operationally expensive / lock-heavy on large
+    # tables — adding a column with a DEFAULT (full table rewrite) and
+    # creating a non-unique secondary index (full index build). Cost depends
+    # on table size, so findings flag requires_live_metadata + a recommended
+    # preflight check. (PI/partition/UNIQUE/CHECK/NOT-NULL changes are covered
+    # by data_dependent_change; DROP/recreate by destructive_change.)
+    # WARNING by default.
+    "teradata_expensive_change": "WARNING",
 }
 
 # -- Valid severity values --
@@ -553,6 +562,11 @@ def generate_default_config() -> str:
         "# violate, PRIMARY INDEX / partitioning changes that move data).",
         "# WARNING by default; set to ERROR where prechecks are mandatory.",
         f"data_dependent_change={DEFAULT_RULES['data_dependent_change']}",
+        "# teradata_expensive_change: physical changes that are O(table size)",
+        "# and lock-heavy — ADD column with DEFAULT (full rewrite), CREATE",
+        "# non-unique secondary index (full build). Findings flag",
+        "# requires_live_metadata + a preflight check. WARNING.",
+        f"teradata_expensive_change={DEFAULT_RULES['teradata_expensive_change']}",
         "# non_linear_package_history: project-level check over releases/.",
         "# Flags reused build numbers with different contents, out-of-order",
         "# builds, orphaned prereqs/main halves, missing required siblings,",
@@ -1410,6 +1424,7 @@ def _validate_directory_impl(
         file_issues.extend(_check_deploy_intent(rel_path, clean, strict))
         file_issues.extend(_check_destructive_change(rel_path, clean))
         file_issues.extend(_check_data_dependent_change(rel_path, clean))
+        file_issues.extend(_check_expensive_change(rel_path, clean))
         file_issues.extend(_check_transaction_control(rel_path, clean))
         file_issues.extend(_check_ddl_terminator(rel_path, clean))
         file_issues.extend(_check_view_macro_self_reference(rel_path, clean))
@@ -1838,6 +1853,96 @@ _TXN_CONTROL_PATTERNS = [
 # ``BEGIN TRANSACTION``. Transaction control inside such a body (e.g. an
 # exception-handler ROLLBACK) is procedural, not a payload-level statement.
 _COMPOUND_BEGIN_RE = re.compile(r"\bBEGIN\b(?!\s+TRANSACTION\b)", re.IGNORECASE)
+
+
+# Expensive-change detection (issue #175). ``ALTER TABLE … ADD … DEFAULT`` is a
+# full table rewrite; ``CREATE INDEX`` (non-unique secondary index) is a full
+# index build. Both are O(table size), so cost can't be judged statically.
+_EXPENSIVE_ADD_DEFAULT_RE = re.compile(
+    r"^[ \t]*ALTER\s+TABLE\s+(?P<obj>[A-Za-z0-9_.\"{}]+)[^;]*?\bADD\b[^;]*?\bDEFAULT\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+# CREATE INDEX but NOT CREATE UNIQUE INDEX (the latter is data_dependent_change).
+_EXPENSIVE_SECONDARY_INDEX_RE = re.compile(
+    r"^[ \t]*CREATE\s+INDEX\b[^;]*?\bON\s+(?P<obj>[A-Za-z0-9_.\"{}]+)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+#: Agent metadata for every expensive-change finding (#175).
+_EXPENSIVE_REMEDIATION_BASE = {
+    "safe_fix_available": False,
+    "automation_level": "manual_review_required",
+    "requires_human_review": True,
+    "requires_live_metadata": True,
+    "requires_dba_review": True,
+    "possible_lock_impact": True,
+    "possible_spool_or_perm_impact": True,
+}
+
+
+def _check_expensive_change(rel_path: str, content: str) -> List[ValidationIssue]:
+    """Flag operationally expensive physical changes (issue #175).
+
+    Targets changes that are syntactically valid but O(table size) and
+    lock-heavy on large Teradata tables:
+
+      * ``ALTER TABLE … ADD … DEFAULT`` — populating the default rewrites
+        every existing row (data-safe, so ``data_dependent_change`` exempts
+        it — this rule covers the *performance* cost).
+      * ``CREATE INDEX`` (non-unique secondary index) — a full index build.
+
+    Cost depends on the live row count, so findings carry
+    ``requires_live_metadata`` and a recommended preflight check. Scanned only
+    in the top-level region (before any procedure ``BEGIN`` body).
+    """
+    begin = re.search(r"\bBEGIN\b", content, re.IGNORECASE)
+    region = content[: begin.start()] if begin else content
+
+    issues: List[ValidationIssue] = []
+
+    def _emit(kind: str, obj: str, pos: int, precheck: str) -> None:
+        line = region.count("\n", 0, pos) + 1
+        remediation = dict(_EXPENSIVE_REMEDIATION_BASE)
+        remediation["recommended_precheck"] = precheck
+        remediation["recommended_action"] = (
+            "Assess the table's row count / size against live metadata and "
+            "schedule a DBA-reviewed maintenance window; the operation may "
+            "hold locks and consume spool/perm during a full rewrite/build."
+        )
+        issues.append(
+            ValidationIssue(
+                file=rel_path,
+                rule="teradata_expensive_change",
+                severity="WARNING",
+                message=(
+                    f"Potentially expensive change ({kind}) on {obj}. This is "
+                    f"O(table size) and lock-heavy on large tables — assess "
+                    f"against live metadata before deploying."
+                ),
+                line=line,
+                remediation=remediation,
+            )
+        )
+
+    for m in _EXPENSIVE_ADD_DEFAULT_RE.finditer(region):
+        _emit(
+            "ADD column with DEFAULT — full table rewrite",
+            m.group("obj"),
+            m.start(),
+            f"SELECT COUNT(*) FROM {m.group('obj')}; — adding a column with a "
+            f"DEFAULT rewrites every row. Size the impact and a maintenance "
+            f"window first.",
+        )
+    for m in _EXPENSIVE_SECONDARY_INDEX_RE.finditer(region):
+        _emit(
+            "CREATE secondary INDEX — full index build",
+            m.group("obj"),
+            m.start(),
+            f"Check the size of {m.group('obj')}; building a secondary index "
+            f"scans the whole table and consumes spool/perm.",
+        )
+
+    return issues
 
 
 def _check_transaction_control(rel_path: str, content: str) -> List[ValidationIssue]:
