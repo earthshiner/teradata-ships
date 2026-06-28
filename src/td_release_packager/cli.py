@@ -2497,6 +2497,29 @@ def _run_inspect(args, stage, issue_codes) -> int:
             custom_rules=custom_rules,
         )
 
+        # -- Non-linear package history (issue #168) --
+        # Project-level check over <project>/releases/. Folded into the lint
+        # result so its findings flow through the same pass/fail accounting,
+        # console recap, and ships.decisions.json recording as the per-file
+        # rules. Severity honours config/inspect.conf (+ --strict promotion).
+        ph_severity = rules_config.get("non_linear_package_history", "WARNING")
+        if ph_severity == "WARN":
+            ph_severity = "WARNING"
+        if args.strict and ph_severity == "WARNING":
+            ph_severity = "ERROR"
+        if ph_severity != "OFF":
+            from td_release_packager.package_history import check_package_history
+
+            ph_issues = check_package_history(args.project, severity=ph_severity)
+            if ph_issues:
+                lint_result.issues.extend(ph_issues)
+                lint_result.errors = sum(
+                    1 for i in lint_result.issues if i.severity == "ERROR"
+                )
+                lint_result.warnings = sum(
+                    1 for i in lint_result.issues if i.severity == "WARNING"
+                )
+
         lint_icon = _status_icon(lint_result.passed)
         lint_status = "PASSED" if lint_result.passed else "FAILED"
         mode = " (strict)" if args.strict else ""

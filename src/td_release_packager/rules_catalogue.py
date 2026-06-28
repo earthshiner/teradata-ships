@@ -546,6 +546,27 @@ _RULES: dict[str, dict[str, object]] = {
         "risk": "medium",
         "requires_human_review": True,
     },
+    "non_linear_package_history": {
+        "description": (
+            "A project-level check over the built packages under "
+            "``releases/``. Flags a package sequence that cannot be trusted: "
+            "a build number reused with different contents, an older build "
+            "appearing after a newer one, an orphaned prereqs/main half, a "
+            "package requiring a missing sibling, or an integrity sidecar "
+            "that no longer matches its archive."
+        ),
+        "default_severity": "WARNING",
+        "safe_fix_available": False,
+        "automation_level": "manual",
+        "recommended_action": (
+            "Rebuild the affected release group cleanly (a fresh build "
+            "number), restore the missing package half, or regenerate the "
+            "integrity sidecar. Never reuse a build number for different "
+            "contents."
+        ),
+        "risk": "medium",
+        "requires_human_review": True,
+    },
 }
 
 

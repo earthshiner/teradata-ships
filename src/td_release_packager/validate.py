@@ -195,6 +195,15 @@ DEFAULT_RULES: Dict[str, str] = {
     # fail or rewrite the table at deploy time. WARNING by default — set
     # to ERROR in config/inspect.conf where prechecks are mandatory.
     "data_dependent_change": "WARNING",
+    # non_linear_package_history (issue #168): a project-level check over
+    # the built packages under <project>/releases/. Detects a package
+    # sequence that cannot be trusted — a build number reused with
+    # different contents, an older build appearing after a newer one, an
+    # orphaned prereqs/main half, a package that requires a missing
+    # sibling, or an integrity sidecar that no longer matches its archive.
+    # WARNING by default (early development); set to ERROR for
+    # release/promotion workflows in config/inspect.conf.
+    "non_linear_package_history": "WARNING",
 }
 
 # -- Valid severity values --
@@ -516,6 +525,12 @@ def generate_default_config() -> str:
         "# violate, PRIMARY INDEX / partitioning changes that move data).",
         "# WARNING by default; set to ERROR where prechecks are mandatory.",
         f"data_dependent_change={DEFAULT_RULES['data_dependent_change']}",
+        "# non_linear_package_history: project-level check over releases/.",
+        "# Flags reused build numbers with different contents, out-of-order",
+        "# builds, orphaned prereqs/main halves, missing required siblings,",
+        "# and integrity sidecar mismatches. WARNING by default; set to",
+        "# ERROR for release/promotion workflows.",
+        f"non_linear_package_history={DEFAULT_RULES['non_linear_package_history']}",
         "",
         "# Grant architecture rules",
         "# public_grant_on_tables: GRANT ... TO PUBLIC on a tables",
