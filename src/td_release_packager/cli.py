@@ -284,6 +284,8 @@ def _main():
         _cmd_analyze(args)
     elif args.command == "changeset":
         sys.exit(_cmd_changeset(args))
+    elif args.command == "plan":
+        sys.exit(_cmd_plan(args))
     elif args.command == "import-legacy":
         _cmd_import_legacy(args)
     elif args.command == "migrate-source":
@@ -5346,6 +5348,69 @@ def _cmd_changeset(args) -> int:
     return 0
 
 
+def _cmd_plan(args) -> int:
+    """Detect-and-recommend: inspect a source tree and emit a packaging plan.
+
+    Auto-answers the detectable questions (source type, tokenised, atomic),
+    overlays any CLI overrides on top, then prints the recommended ``ships``
+    command sequence + rationale and (optionally) writes plan.json. Issue #379.
+    """
+    import json as _json
+
+    from td_release_packager import packaging_plan as _pp
+    from td_release_packager import plan_detect as _pd
+
+    source = args.source
+    if not os.path.isdir(source):
+        print(f"ERROR: source directory not found: {source}", file=sys.stderr)
+        return 1
+
+    detection = _pd.detect_answers(source)
+
+    overrides = {
+        "project.dir": getattr(args, "project", None) or source,
+        "package.name": getattr(args, "name", None),
+        "mode.style": getattr(args, "mode", None),
+        "envs": getattr(args, "env", None),
+    }
+    if getattr(args, "strict", False):
+        overrides["process.strict"] = True
+    if getattr(args, "scaffolded", False):
+        overrides["project.scaffolded"] = True
+    if getattr(args, "no_generate", False):
+        overrides["generate.enabled"] = "no"
+
+    answers = _pd.merge_answers(detection.answers, overrides)
+    plan = _pp.build_plan(answers)
+
+    print("SHIPS packaging plan")
+    print("=" * 60)
+    print("\nDetected:")
+    for f in detection.findings:
+        print(f"  - {f}")
+    if plan.notes:
+        print("\nNotes:")
+        for n in plan.notes:
+            print(f"  ! {n}")
+
+    print("\nRecommended commands:")
+    for line in plan.command_lines:
+        print(f"  {line}")
+
+    print("\nWhy each step:")
+    for r in plan.rationale:
+        print(f"  [{r['step']}] {r['why']}")
+
+    out_path = getattr(args, "json", None)
+    if out_path:
+        with open(out_path, "w", encoding="utf-8") as fh:
+            _json.dump(plan.plan_json, fh, indent=2, ensure_ascii=False)
+            fh.write("\n")
+        print(f"\nWrote plan.json: {out_path}")
+
+    return 0
+
+
 # ---------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------
@@ -6088,6 +6153,45 @@ def _build_parser():
         action="store_true",
         help="Capture the current payload content hashes as the changeset "
         "baseline (for git-less detection) and exit.",
+    )
+
+    # -- plan --
+    pl = subs.add_parser(
+        "plan",
+        help="Detect-and-recommend — inspect a source tree and emit an ordered "
+        "command plan + plan.json (#379).",
+    )
+    pl.add_argument(
+        "--source", required=True, help="Raw source DDL directory to inspect."
+    )
+    pl.add_argument(
+        "--project",
+        help="Target SHIPS project directory (default: the source directory).",
+    )
+    pl.add_argument("--env", help="Target environments, e.g. DEV,TST,PRD.")
+    pl.add_argument("--name", help="Package name (default: create_objects).")
+    pl.add_argument(
+        "--mode",
+        choices=["quick", "detailed"],
+        default="quick",
+        help="quick = one `ships process` per env; detailed = each step (default: quick).",
+    )
+    pl.add_argument(
+        "--strict", action="store_true", help="Recommend --strict on process."
+    )
+    pl.add_argument(
+        "--scaffolded",
+        action="store_true",
+        help="Project is already scaffolded — omit the scaffold step.",
+    )
+    pl.add_argument(
+        "--no-generate",
+        dest="no_generate",
+        action="store_true",
+        help="Skip the view-layer generate step.",
+    )
+    pl.add_argument(
+        "--json", metavar="PATH", help="Write the machine-readable plan.json here."
     )
 
     # -- import-legacy --
