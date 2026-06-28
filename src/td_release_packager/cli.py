@@ -2513,12 +2513,37 @@ def _run_inspect(args, stage, issue_codes) -> int:
             ph_issues = check_package_history(args.project, severity=ph_severity)
             if ph_issues:
                 lint_result.issues.extend(ph_issues)
-                lint_result.errors = sum(
-                    1 for i in lint_result.issues if i.severity == "ERROR"
+
+        # -- Backward-incompatible contract changes (issue #171) --
+        # Project-level: compares current payload contracts against the
+        # captured baseline (.ships/contracts.baseline.json). No-op until a
+        # baseline exists. --update-contract-baseline (re)captures it instead.
+        from td_release_packager import contract as _contract
+        from td_release_packager.project_paths import contracts_baseline_path
+
+        _inspect_root = resolve_inspect_root(args.project)
+        if getattr(args, "update_contract_baseline", False):
+            _bpath = contracts_baseline_path(args.project)
+            _contract.write_baseline(_bpath, _contract.build_contracts(_inspect_root))
+            print(f"\n  ✎ Contract baseline updated: {_bpath}")
+        else:
+            cc_severity = rules_config.get("contract_change", "WARNING")
+            if cc_severity == "WARN":
+                cc_severity = "WARNING"
+            if args.strict and cc_severity == "WARNING":
+                cc_severity = "ERROR"
+            if cc_severity != "OFF":
+                cc_issues = _contract.check_contract_changes(
+                    args.project, _inspect_root, severity=cc_severity
                 )
-                lint_result.warnings = sum(
-                    1 for i in lint_result.issues if i.severity == "WARNING"
-                )
+                if cc_issues:
+                    lint_result.issues.extend(cc_issues)
+
+        # Recompute counts after folding in project-level findings (#168/#171).
+        lint_result.errors = sum(1 for i in lint_result.issues if i.severity == "ERROR")
+        lint_result.warnings = sum(
+            1 for i in lint_result.issues if i.severity == "WARNING"
+        )
 
         lint_icon = _status_icon(lint_result.passed)
         lint_status = "PASSED" if lint_result.passed else "FAILED"
@@ -5510,6 +5535,16 @@ def _build_parser():
         "--strict",
         action="store_true",
         help="Strict mode: all WARNING rules promoted to ERROR. OFF rules remain off.",
+    )
+    vl.add_argument(
+        "--update-contract-baseline",
+        action="store_true",
+        dest="update_contract_baseline",
+        default=False,
+        help="Capture the current source object contracts (view columns, "
+        "procedure parameters, table columns) as the baseline under "
+        ".ships/ for the contract_change rule (#171), instead of comparing "
+        "against it. Run this once you accept the current contracts.",
     )
     vl.add_argument(
         "--skip-tokens",

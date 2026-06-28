@@ -24,6 +24,7 @@ SHIPS_STATE_DIRNAME = ".ships"
 BUILD_COUNTER_FILENAME = ".build_counter"
 DECISIONS_FILENAME = "ships.decisions.json"
 WAVES_FILENAME = "_waves.txt"
+CONTRACTS_BASELINE_FILENAME = "contracts.baseline.json"
 
 OBJECT_PLACEMENT_YAML_FILENAME = "object_placement.yaml"
 CONFIG_DIRNAME = "config"
@@ -60,6 +61,17 @@ def waves_txt_path(project_dir: str) -> str:
     are.
     """
     return os.path.join(ships_state_dir(project_dir), WAVES_FILENAME)
+
+
+def contracts_baseline_path(project_dir: str) -> str:
+    """Return the resolved path to the object-contract baseline under ``.ships/``.
+
+    The baseline (issue #171) is the last-captured snapshot of each object's
+    contract (view columns, procedure parameters, table columns) that
+    ``inspect`` compares the current source against to flag backward-
+    incompatible changes.
+    """
+    return os.path.join(ships_state_dir(project_dir), CONTRACTS_BASELINE_FILENAME)
 
 
 def object_placement_yaml_path(project_dir: str) -> str:
