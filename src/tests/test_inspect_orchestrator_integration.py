@@ -455,17 +455,13 @@ class TestContractChangeEndToEnd:
         capsys.readouterr()
 
         # 2) Drop a column → backward-incompatible change.
-        vfile.write_text(
-            "CREATE VIEW {{DB}}.v (a) AS SELECT 1 AS a;", encoding="utf-8"
-        )
+        vfile.write_text("CREATE VIEW {{DB}}.v (a) AS SELECT 1 AS a;", encoding="utf-8")
         _run_inspect(_make_namespace(project))
         capsys.readouterr()
 
         stage = _read_decisions(project)["runs"][-1]["stages"][0]
         contract = [
-            i
-            for i in stage["issues"]
-            if "contract_change" in i.get("message", "")
+            i for i in stage["issues"] if "contract_change" in i.get("message", "")
         ]
         assert contract, "expected a contract_change finding after dropping a column"
         assert any("b" in i["message"] for i in contract)

@@ -14,7 +14,8 @@ Walks a user through the SHIPS packaging decisions without an AI present and emi
    - **Detailed** — each pipeline step (`scaffold` / `harvest` / `generate` / `inspect` / `scan` / `analyse` / `package`) shown separately for transparency, CI scripting, or selective re-runs.
 2. A `config/tokenise.conf` matching the chosen token model (prefix or per-database).
 3. One `config/env/<ENV>.conf` skeleton per target environment. If the source is already tokenised, the wizard instead emits `ships bootstrap-env-config` calls so SHIPS scaffolds the real env files from the payload's actual token usage.
-4. A "Why each step" rationale + a glossary of the vocabulary.
+4. A `ships.yaml` with a `packaging:` profile (source, package name, default env, env-config) capturing the wizard's answers so `ships process --project .` re-runs argless (#382, consumed by the single front door #384).
+5. A "Why each step" rationale + a glossary of the vocabulary.
 
 The wizard is deterministic — the same answers always produce the same output.
 
@@ -23,7 +24,7 @@ The wizard is deterministic — the same answers always produce the same output.
 Double-click `ships-navigator.html` from any file share, or open it from your browser's `File → Open` menu. No server, no network, no install.
 
 1. Answer the questions in the left pane. Hidden questions auto-clear when their parent answer rules them out. Heads-up messages surface above the output for things like a trailing-underscore prefix or a non-absolute project path.
-2. Read the five tabs in the right pane (Commands, tokenise.conf, env files, Why each step, Glossary). Each artefact has Copy + Download buttons.
+2. Read the tabs in the right pane (Commands, tokenise.conf, env files, ships.yaml, inspect.conf, Why each step, Glossary, FAQ). Each artefact has Copy + Download buttons.
 3. Click **Download all (.zip)** at the top of the outputs to get every generated file plus a `plan.json` and a small `README.md` in one bundle. The ZIP encoder is vanilla JS — no CDN.
 4. Answers persist to `localStorage`, so refreshing the page doesn't wipe a 13-question fill. Use **Reset** in the questions header to clear.
 5. (Optional) Export `plan.json` from the rationale tab so the next run can paste it in and skip the questionnaire.
