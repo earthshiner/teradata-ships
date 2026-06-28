@@ -19,7 +19,6 @@ the manifest as .deploy_report_{deployment_id}.html.
 import json
 import logging
 import os
-import re
 from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple
 
@@ -30,10 +29,15 @@ from database_package_deployer.models import (
 )
 from database_package_deployer.provenance import ProvenanceChain, ProvenanceDocument
 from database_package_deployer.provenance_renderer import PROVENANCE_CSS, render_chain
+from td_release_packager.reporting.common import (
+    Tab as _Tab,
+    render_page as _render_page,
+    status_pill as _status_pill,
+)
 from td_release_packager.report_viewer import (
-    SQL_KEYWORDS as _SQL_KEYWORDS,
+    SQL_KEYWORDS as _SQL_KEYWORDS,  # noqa: F401 — re-exported for tests
     VIEWER_INDEX_FILENAME as _VIEWER_INDEX_FILENAME,
-    highlight_sql as _highlight_sql,
+    highlight_sql as _highlight_sql,  # noqa: F401 — re-exported for tests
     safe_viewer_filename as _safe_viewer_filename,
     source_viewer_html as _source_viewer_html,
     signal_name_cell as _signal_name_cell,
@@ -70,17 +74,9 @@ _WHITE = "#FFFFFF"
 _LIGHT_BG = "#F8F9FA"
 _BORDER = "#DEE2E6"
 
-# -- Wordmark logo — inline SVG so there are no base64 or CSP issues --
-_LOGO_SVG = (
-    '<svg width="108" height="28" viewBox="0 0 108 28" '
-    'xmlns="http://www.w3.org/2000/svg" aria-label="Teradata">'
-    '<text x="0" y="22" '
-    'font-family="Inter,-apple-system,BlinkMacSystemFont,sans-serif" '
-    'font-size="21" font-weight="600" letter-spacing="-0.3" fill="#FFFFFF">'
-    "Teradata"
-    "</text>"
-    "</svg>"
-)
+# Note: the header wordmark now comes from the shared chrome
+# (reporting.common via render_page) — the deploy report no longer carries its
+# own logo SVG (#359).
 
 # -- Object types treated as pre-requisites in the wave graph --
 # These run serially before the parallel DDL waves and are grouped
@@ -289,33 +285,33 @@ def _build_html(
         _html_object_results(result, provenance, source_view_links),
     ]
 
+    # #359: render through the shared report chrome (reporting.common.render_page)
+    # so the deploy report shares look-and-feel with the pipeline + package
+    # reports. The provenance notice sits above the tabs (content_prefix); the
+    # footer is appended inside the deployment pane (render_page has no footer
+    # slot). Per-tab content builders are unchanged — this is shell only.
+    deployment_body = "\n".join([*deployment_content, _html_footer_inline(now)])
+    tabs = [_Tab(id="tab-deployment", label="Deployment", body=deployment_body)]
     if result.is_wave_parallel:
-        sections = [
-            _html_head(result, now, mode),
-            _html_header(result, now, mode, status, status_colour),
-            '<div class="tab-nav">',
-            '  <button class="tab-btn active"'
-            "   onclick=\"switchTab(this,'tab-deployment')\">Deployment</button>",
-            '  <button class="tab-btn"'
-            "   onclick=\"switchTab(this,'tab-graph')\">Wave Graph</button>",
-            "</div>",
-            '<div class="tab-pane active" id="tab-deployment">',
-            *deployment_content,
-            "</div>",
-            '<div class="tab-pane" id="tab-graph">',
-            _html_wave_graph_tab(result),
-            "</div>",
-            _html_footer(now),
-        ]
-    else:
-        sections = [
-            _html_head(result, now, mode),
-            _html_header(result, now, mode, status, status_colour),
-            *deployment_content,
-            _html_footer(now),
-        ]
+        tabs.append(
+            _Tab(id="tab-graph", label="Wave Graph", body=_html_wave_graph_tab(result))
+        )
 
-    return "\n".join(sections)
+    fg = "#FFFFFF" if status == "PASSED" else "#FFFFFF"
+    return _render_page(
+        doc_title=f"{mode} Report — {result.deployment_id}",
+        header_title=f"{mode} Report",
+        header_sub=result.deployment_id,
+        header_pill=_status_pill(status, status_colour, fg),
+        meta_html=(
+            f"<span><strong>{mode}</strong></span>"
+            f"<span>{result.deployment_id}</span>"
+            f"<span>{now}</span>"
+        ),
+        tabs=tabs,
+        content_prefix=_html_provenance_notice(provenance_status),
+        extra_css=_DEPLOY_CONTENT_CSS,
+    )
 
 
 def _html_provenance_notice(status_message: str) -> str:
@@ -341,28 +337,10 @@ def _html_provenance_notice(status_message: str) -> str:
     )
 
 
-def _html_head(result, now, mode):
-    """HTML document head with embedded styles."""
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{mode} Report — {result.deployment_id}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
-<style>
-  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-  body {{ font-family: 'Inter', -apple-system, sans-serif; font-size: 14px;
-         line-height: 1.6; color: {_NAVY}; background: {_WHITE}; }}
-  .header {{ background: {_NAVY}; color: {_WHITE}; padding: 24px 32px;
-             display: flex; align-items: center; justify-content: space-between; }}
-  .header svg {{ display: block; }}
-  .header-right {{ text-align: right; font-size: 13px; opacity: 0.85; }}
-  .header h1 {{ font-size: 20px; font-weight: 500; margin: 0; }}
-  .header .status {{ display: inline-block; padding: 3px 12px; border-radius: 4px;
-                     font-size: 13px; font-weight: 600; margin-left: 12px; }}
-  .container {{ max-width: 960px; margin: 0 auto; padding: 24px 32px; }}
+# #359: content-only CSS. The page chrome (reset, body, header bar, tabs, cards,
+# content width) now comes from reporting.common.BASE_CSS via render_page; only
+# the deploy report's content-specific rules live here, appended as extra_css.
+_DEPLOY_CONTENT_CSS = f"""
   h2 {{ font-size: 16px; font-weight: 600; color: {_NAVY}; margin: 28px 0 12px;
         padding-bottom: 6px; border-bottom: 2px solid {_ORANGE}; }}
   .action-items {{ background: #FFF3CD; border: 1px solid #FFEAA7; border-radius: 6px;
@@ -415,50 +393,23 @@ def _html_head(result, now, mode):
   .preflight-grid {{ display: grid; gap: 4px; }}
   .pf-row {{ display: grid; grid-template-columns: 24px 1fr; gap: 8px;
              padding: 3px 0; font-size: 13px; }}
-  .footer {{ text-align: center; padding: 20px 32px; font-size: 12px;
+  .deploy-footer {{ text-align: center; padding: 20px 32px; font-size: 12px;
              color: #6C757D; border-top: 1px solid {_BORDER}; margin-top: 32px; }}
   .blocker {{ background: #F8D7DA; padding: 4px 8px; border-radius: 3px;
               margin: 2px 0; font-size: 12px; }}
   .warning {{ background: #FFF3CD; padding: 4px 8px; border-radius: 3px;
               margin: 2px 0; font-size: 12px; }}
-  /* Tab navigation */
-  .tab-nav {{ display:flex; gap:4px; border-bottom:2px solid {_BORDER}; margin-bottom:24px; }}
-  .tab-btn {{ padding:8px 20px; border:none; background:none; cursor:pointer;
-              font:500 14px 'Inter',-apple-system,sans-serif; color:#6C757D;
-              border-bottom:3px solid transparent; margin-bottom:-2px;
-              border-radius:4px 4px 0 0; transition:color .15s,border-color .15s; }}
-  .tab-btn:hover {{ color:{_NAVY}; background:{_LIGHT_BG}; }}
-  .tab-btn.active {{ color:{_NAVY}; border-bottom-color:{_ORANGE}; font-weight:600; }}
-  .tab-pane {{ display:none; }}
-  .tab-pane.active {{ display:block; }}
-  @media print {{
-    .header {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
-    .tab-nav {{ display:none; }}
-    .tab-pane {{ display:block !important; }}
-    body {{ font-size: 12px; }}
-  }}
   {PROVENANCE_CSS}
-</style>
-</head>
-<body>"""
+"""
 
 
-def _html_header(result, now, mode, status, status_colour):
-    """Branded header bar with logo and status."""
-    return f"""
-<div class="header">
-  <div>
-    {_LOGO_SVG}
-    <h1 style="margin-top:8px">{mode} Report
-      <span class="status" style="background:{status_colour}">{status}</span>
-    </h1>
-  </div>
-  <div class="header-right">
-    <div>{result.deployment_id}</div>
-    <div>{now}</div>
-  </div>
-</div>
-<div class="container">"""
+def _html_footer_inline(now):
+    """Report footer rendered inside the deployment pane (render_page has no
+    footer slot)."""
+    return (
+        f'<div class="deploy-footer">Generated by database_package_deployer '
+        f"v2.0 &nbsp;|&nbsp; {now}</div>"
+    )
 
 
 def _filename_only(path: str) -> str:
@@ -1668,22 +1619,3 @@ def _html_wave_graph_tab(result: "PackageDeployResult") -> str:
         "</div>\n"
         f"<script>{_WAVE_GRAPH_JS}</script>\n"
     )
-
-
-def _html_footer(now):
-    """Report footer with tab-switch helper."""
-    return f"""
-</div>
-<div class="footer">
-  Generated by database_package_deployer v2.0 &nbsp;|&nbsp; {now}
-</div>
-<script>
-function switchTab(btn, pane) {{
-  document.querySelectorAll('.tab-btn').forEach(function(b) {{ b.classList.remove('active'); }});
-  document.querySelectorAll('.tab-pane').forEach(function(p) {{ p.classList.remove('active'); }});
-  btn.classList.add('active');
-  document.getElementById(pane).classList.add('active');
-}}
-</script>
-</body>
-</html>"""
