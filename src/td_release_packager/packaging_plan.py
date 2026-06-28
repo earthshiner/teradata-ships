@@ -46,6 +46,21 @@ def _quote(arg: str) -> str:
     return '"' + arg.replace('"', '\\"') + '"'
 
 
+def format_plan(plan: "Plan") -> str:
+    """Render a plan as a human-readable block (shared by `plan` + `wizard`)."""
+    lines: List[str] = []
+    if plan.notes:
+        lines.append("Notes:")
+        lines += [f"  ! {n}" for n in plan.notes]
+        lines.append("")
+    lines.append("Recommended commands:")
+    lines += [f"  {line}" for line in plan.command_lines]
+    lines.append("")
+    lines.append("Why each step:")
+    lines += [f"  [{r['step']}] {r['why']}" for r in plan.rationale]
+    return "\n".join(lines)
+
+
 def parse_envs(raw: Optional[str]) -> List[str]:
     """Split a comma/space-separated environment list, upper-cased + de-duped."""
     if not raw:
