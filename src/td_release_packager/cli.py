@@ -288,6 +288,8 @@ def _main():
         sys.exit(_cmd_plan(args))
     elif args.command == "wizard":
         sys.exit(_cmd_wizard(args))
+    elif args.command == "metadata":
+        sys.exit(_cmd_metadata(args))
     elif args.command == "import-legacy":
         _cmd_import_legacy(args)
     elif args.command == "migrate-source":
@@ -5453,6 +5455,69 @@ def _cmd_wizard(args) -> int:
     return 0
 
 
+def _cmd_metadata(args) -> int:
+    """Dispatch `ships metadata` sub-commands (#244)."""
+    sub = getattr(args, "metadata_subcommand", None)
+    if sub == "export-alation":
+        return _export_catalogue(args, "alation")
+    if sub == "export-collibra":
+        return _export_catalogue(args, "collibra")
+    if sub == "export-datahub":
+        return _export_catalogue(args, "datahub")
+    print(
+        "Usage: ships metadata export-alation | export-collibra | export-datahub "
+        "--package-dir DIR --output DIR [--include-internal] [--strict]"
+    )
+    return 1
+
+
+def _export_catalogue(args, catalogue: str) -> int:
+    """Extract product metadata from a package and render a catalogue bundle."""
+    import json as _json
+    from datetime import datetime, timezone
+
+    from td_release_packager.metadata_export import (
+        RENDERERS,
+        MetadataExtractError,
+        extract_product_metadata,
+    )
+
+    try:
+        meta = extract_product_metadata(
+            args.package_dir, include_internal=getattr(args, "include_internal", False)
+        )
+    except MetadataExtractError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+
+    if getattr(args, "strict", False) and meta.warnings:
+        print("ERROR: --strict and metadata is incomplete:", file=sys.stderr)
+        for w in meta.warnings:
+            print(f"  - {w}", file=sys.stderr)
+        return 1
+
+    generated_at = datetime.now(timezone.utc).isoformat()
+    bundle = RENDERERS[catalogue](meta, generated_at)
+
+    out_dir = os.path.join(args.output, catalogue)
+    os.makedirs(out_dir, exist_ok=True)
+    for filename, obj in bundle.items():
+        with open(os.path.join(out_dir, filename), "w", encoding="utf-8") as fh:
+            _json.dump(obj, fh, indent=2, ensure_ascii=False)
+            fh.write("\n")
+
+    print(f"{catalogue.title()} metadata bundle written to: {out_dir}")
+    print(
+        f"  files: {len(bundle)}  interfaces: {len(meta.interfaces)}  "
+        f"assets: {len(meta.physical_assets)}  columns: {len(meta.columns)}"
+    )
+    if meta.warnings:
+        print("  warnings:")
+        for w in meta.warnings:
+            print(f"    ! {w}")
+    return 0
+
+
 # ---------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------
@@ -6249,6 +6314,39 @@ def _build_parser():
     wz.add_argument(
         "--json", metavar="PATH", help="Write the machine-readable plan.json here."
     )
+
+    # -- metadata (catalogue export) --
+    md = subs.add_parser(
+        "metadata",
+        help="Export AI-native data-product metadata for an enterprise catalogue "
+        "(Alation / Collibra) (#244).",
+    )
+    md_subs = md.add_subparsers(dest="metadata_subcommand")
+    for _cat, _help in (
+        ("export-alation", "Export an Alation-ready metadata bundle."),
+        ("export-collibra", "Export a Collibra-ready metadata bundle."),
+        ("export-datahub", "Export a DataHub MCP ingestion bundle."),
+    ):
+        _mp = md_subs.add_parser(_cat, help=_help)
+        _mp.add_argument(
+            "--package-dir",
+            required=True,
+            help="Root of an unpacked SHIPS package or release-group directory.",
+        )
+        _mp.add_argument(
+            "--output", required=True, help="Output directory for the bundle."
+        )
+        _mp.add_argument(
+            "--include-internal",
+            dest="include_internal",
+            action="store_true",
+            help="Include internal implementation objects as interfaces too.",
+        )
+        _mp.add_argument(
+            "--strict",
+            action="store_true",
+            help="Fail if any required product metadata is missing.",
+        )
 
     # -- import-legacy --
     il = subs.add_parser(
