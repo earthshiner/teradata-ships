@@ -211,6 +211,14 @@ DEFAULT_RULES: Dict[str, str] = {
     # platform workflows. Transaction control inside a procedure/function
     # BEGIN…END body (e.g. an exception-handler ROLLBACK) is exempt.
     "transaction_control_in_payload": "WARNING",
+    # token_naming (issue #172): a DDL object's database token should carry
+    # the kind suffix matching its object type — tables (and their indexes /
+    # triggers) in a ``{{*_T}}`` token, views in a ``{{*_V}}`` token. Only
+    # the unambiguous T/V case is enforced (macro/procedure/function kind
+    # suffixes are site-configurable; express those via a custom lint
+    # policy). WARNING by default; flags only a clear mismatch (e.g. a view
+    # placed in a ``_T`` token), never a token without a kind suffix.
+    "token_naming": "WARNING",
 }
 
 # -- Valid severity values --
@@ -489,6 +497,11 @@ def generate_default_config() -> str:
         f"eponymous={DEFAULT_RULES['eponymous']}",
         f"extension={DEFAULT_RULES['extension']}",
         f"type_suffix={DEFAULT_RULES['type_suffix']}",
+        "# token_naming: a DDL object's database token should carry the kind",
+        "# suffix matching its type — tables/indexes/triggers in {{*_T}},",
+        "# views in {{*_V}}. Flags only a clear mismatch (e.g. a view in a",
+        "# _T token); tokens without a kind suffix are left alone. WARNING.",
+        f"token_naming={DEFAULT_RULES['token_naming']}",
         "",
         "# Style rules",
         f"hardcoded_name={DEFAULT_RULES['hardcoded_name']}",
@@ -1389,6 +1402,7 @@ def _validate_directory_impl(
         file_issues.extend(_check_eponymous(rel_path, clean, file_path))
         file_issues.extend(_check_extension(rel_path, clean, file_path))
         file_issues.extend(_check_type_suffixes(rel_path, clean))
+        file_issues.extend(_check_token_naming(rel_path, clean))
         file_issues.extend(_check_hardcoded_names(rel_path, clean))
         file_issues.extend(_check_zero_tokens(rel_path, clean))
         file_issues.extend(_check_keyword_case(rel_path, clean))
@@ -2679,6 +2693,79 @@ def _check_type_suffixes(rel_path: str, content: str) -> List[ValidationIssue]:
                 message=f"Object name '{obj_name}' contains a type suffix "
                 f"(_V, _T, VW_, etc.). Object type belongs in the "
                 f"database name, not the object name.",
+            )
+        ]
+    return []
+
+
+# Object types whose database token should carry an unambiguous kind suffix.
+# Macro/procedure/function kinds are site-configurable (default _T), so they
+# are deliberately excluded — enforce those via a custom lint policy (#167).
+_TOKEN_NAMING_EXPECTED_KIND = {
+    "TABLE": "T",
+    "JOIN_INDEX": "T",
+    "HASH_INDEX": "T",
+    "INDEX": "T",
+    "TRIGGER": "T",
+    "VIEW": "V",
+}
+
+
+def _check_token_naming(rel_path: str, content: str) -> List[ValidationIssue]:
+    """Check a DDL object's database token carries the right kind suffix (#172).
+
+    Tables (and their indexes/triggers) belong in a ``{{*_T}}`` token; views in
+    a ``{{*_V}}`` token. Flags only a *clear* mismatch — a view in a ``_T``
+    token, a table in a ``_V`` token. A token with no kind suffix is left
+    alone (not every project uses the convention), and macro/procedure/function
+    kinds (site-configurable) are not checked here.
+    """
+    m = _TOKEN_AWARE_QUALIFIED_NAME_RE.search(content)
+    if not m:
+        return []
+
+    obj_type = _object_type_for_content(content)
+    expected = _TOKEN_NAMING_EXPECTED_KIND.get(obj_type or "")
+    if expected is None:
+        return []
+
+    dbpart = (m.group("dbpart") or "").strip()
+    if dbpart.startswith("{{") and dbpart.endswith("}}"):
+        token = dbpart[2:-2].strip()
+    else:
+        token = dbpart.strip('"')
+
+    from td_release_packager.kind_suffix import has_kind_suffix
+
+    if not has_kind_suffix(token):
+        return []
+
+    actual = token.rsplit("_", 1)[1].upper()
+    # Only the unambiguous T/V confusion is a finding here.
+    if actual in {"T", "V"} and actual != expected:
+        line = content.count("\n", 0, m.start()) + 1
+        return [
+            ValidationIssue(
+                file=rel_path,
+                rule="token_naming",
+                severity="WARNING",
+                message=(
+                    f"{obj_type} should live in a {{{{*_{expected}}}}} database "
+                    f"token; found '{dbpart}' (kind suffix '_{actual}'). "
+                    f"Place {obj_type.lower()}s in a '_{expected}' token so "
+                    f"object placement stays consistent and agent-readable."
+                ),
+                line=line,
+                remediation={
+                    "safe_fix_available": False,
+                    "automation_level": "manual_review_required",
+                    "requires_human_review": True,
+                    "recommended_action": (
+                        f"Move the object to a '_{expected}' database token "
+                        f"(or set token_naming=OFF in config/inspect.conf if "
+                        f"your project uses a different convention)."
+                    ),
+                },
             )
         ]
     return []

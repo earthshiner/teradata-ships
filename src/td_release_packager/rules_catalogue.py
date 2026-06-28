@@ -591,6 +591,26 @@ _RULES: dict[str, dict[str, object]] = {
         "risk": "medium",
         "requires_human_review": True,
     },
+    "token_naming": {
+        "description": (
+            "A DDL object's database token should carry the kind suffix "
+            "matching its object type — tables (and their indexes/triggers) "
+            "in a ``{{*_T}}`` token, views in a ``{{*_V}}`` token. Flags only "
+            "a clear mismatch (e.g. a view in a ``_T`` token); tokens without "
+            "a kind suffix are left alone, and macro/procedure/function kinds "
+            "(site-configurable) are enforced via a custom lint policy instead."
+        ),
+        "default_severity": "WARNING",
+        "safe_fix_available": False,
+        "automation_level": "manual",
+        "recommended_action": (
+            "Move the object to a database token with the correct kind suffix, "
+            "or set ``token_naming=OFF`` in ``config/inspect.conf`` if your "
+            "project uses a different naming convention."
+        ),
+        "risk": "low",
+        "requires_human_review": True,
+    },
 }
 
 
