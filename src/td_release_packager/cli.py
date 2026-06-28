@@ -1495,7 +1495,9 @@ def _load_project_legacy_migration_rules(project_dir: str, stage=None):
     are normalised to ``{{TOKEN}}`` form before classification and
     packaging.
     """
-    migration_path = os.path.join(project_dir, "config", "tokenise.conf")
+    from td_release_packager.project_paths import tokenise_conf_path
+
+    migration_path = tokenise_conf_path(project_dir)
     has_config = os.path.isfile(migration_path)
 
     if stage is not None:

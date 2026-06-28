@@ -1,6 +1,13 @@
 """
 token_engine.py — Token substitution engine.
 
+This module is the canonical home for tokenisation *logic* (prefix
+tokenisation, {{TOKEN}} substitution, token-map IO). The canonical
+tokenisation *config* is ``config/tokenise.conf`` (resolve via
+``project_paths.tokenise_conf_path``). See
+``docs/references/tokenisation.md`` for the full map of canonical surfaces
+(issue #383).
+
 Reads token values from a .conf file and substitutes
 {{TOKENNAME}} placeholders in DDL, DCL, and DML files.
 
