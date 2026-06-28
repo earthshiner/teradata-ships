@@ -41,20 +41,24 @@ Harvest (`ingest.py`) is the principal consumer: it calls `tokenise_prefixes`
 for prefix mode and `apply_migration_rules_to_text` for `tokenise.conf` mode,
 then re-derives eponymous filenames from the substituted body.
 
-## Remaining consolidation candidate (not yet collapsed)
+## Token-reference grammar (`token_ref`)
 
-Two modules independently encode "what a tokenised database reference looks
-like" as regexes:
+The shape of a *tokenised database/object reference* — a `{{TOKEN}}`, a literal
+name, a prefix-token + literal suffix (`{{DB_PREFIX}}_DOM_STD_T`), or a literal +
+token suffix — is defined once in `td_release_packager.token_ref` as a set of
+building blocks (`TOKEN_ATOM`, `QUOTED_IDENT`, `BARE_IDENT`, `OBJECT_NAME`,
+`NAME_SEGMENT`, `DB_TOKEN_PART`, `DB_LITERAL_PART`). Both consumers compose their
+context-specific regexes from this vocabulary instead of re-deriving the grammar:
 
-- `eponymous_rename.py` — `_QUALIFIED_DDL_RE` / `_SINGLE_NAME_DDL_RE` (parses the
-  DB/object out of a `CREATE` header, token-aware: `{{DB_PREFIX}}_DOM_STD_T`).
-- `infer_grants.py` — `RE_TOKEN_REF` (matches `{{TOKEN}}[.suffix].Object` cross-
-  database references in grant inference).
+- `eponymous_rename.py` — `_QUALIFIED_DDL_RE` / `_SINGLE_NAME_DDL_RE` build their
+  name capture from `NAME_SEGMENT` (statement-anchored `CREATE` header parse).
+- `infer_grants.py` — `RE_TOKEN_REF` and the DML/CREATE matchers build from
+  `DB_TOKEN_PART` / `DB_LITERAL_PART` / `OBJECT_NAME` (mid-line cross-database
+  references).
 
-These are tuned to different contexts (DDL header vs body reference) and merging
-them risks behaviour change in two well-tested paths, so they are **left as-is**
-for now and flagged here as the next, more delicate consolidation step. Any merge
-must keep the golden harvest/grant tests green.
+Each keeps its own anchoring and grouping (the *contexts* differ), but the
+"what a tokenised reference looks like" grammar is no longer duplicated. The
+golden harvest/grant test suites guard the consolidation.
 
 ## Why this matters
 

@@ -23,6 +23,7 @@ import re
 from pathlib import Path
 from typing import List, NamedTuple, Optional, Tuple
 
+from td_release_packager import token_ref
 from td_release_packager.atomic_filename import (
     FilenameDerivationError,
     derive_filename_from_text,
@@ -54,6 +55,13 @@ def _strip_sql_comments(text: str) -> str:
 # their permissions script went.
 _EPO_STMT_FLAGS = re.IGNORECASE | re.MULTILINE
 
+# A name segment (database or object name) — token / quoted / bare first atom
+# plus a token-or-word continuation loop so a prefix-token reference like
+# ``{{DB_PREFIX}}_DOM_STD_T`` is captured whole rather than truncated at the
+# closing ``}}`` (issue #309). The grammar lives in the shared token-reference
+# vocabulary (issue #383).
+_SEG = token_ref.NAME_SEGMENT
+
 # Covers all object types that follow Database.ObjectName convention.
 _QUALIFIED_DDL_RE = re.compile(
     r"^\s*(?:CREATE|REPLACE)\s+"
@@ -63,16 +71,7 @@ _QUALIFIED_DDL_RE = re.compile(
     r"(?:SPECIFIC\s+)?"
     r"(?:JOIN\s+INDEX|HASH\s+INDEX|TABLE|VIEW|MACRO|PROCEDURE|"
     r"FUNCTION|TRIGGER)\s+"
-    # A name segment may be a bare identifier, a quoted identifier,
-    # a whole-name token, OR a token concatenated with a literal
-    # suffix/prefix (prefix-token tokenisation, issue #309) such as
-    # ``{{DB_PREFIX}}_DOM_STD_T``. The atom loop after the first
-    # atom allows any mix of further tokens and word runs so the
-    # rename pass does not truncate the segment at the closing ``}}``.
-    r"((?:(?:\{\{[A-Za-z_]\w*\}\}|\"[^\"]+\"|[A-Za-z_]\w*)"
-    r"(?:\{\{[A-Za-z_]\w*\}\}|\w+)*)"
-    r"(?:\.(?:(?:\{\{[A-Za-z_]\w*\}\}|\"[^\"]+\"|[A-Za-z_]\w*)"
-    r"(?:\{\{[A-Za-z_]\w*\}\}|\w+)*))?)",
+    rf"({_SEG}(?:\.{_SEG})?)",
     _EPO_STMT_FLAGS,
 )
 
@@ -81,8 +80,7 @@ _SINGLE_NAME_DDL_RE = re.compile(
     r"^\s*(?:CREATE)\s+"
     r"(?:DATABASE|USER|ROLE|PROFILE|MAP|AUTHORIZATION|"
     r"FOREIGN\s+SERVER)\s+"
-    r"((?:(?:\{\{[A-Za-z_]\w*\}\}|\"[^\"]+\"|[A-Za-z_]\w*)"
-    r"(?:\{\{[A-Za-z_]\w*\}\}|\w+)*))",
+    rf"({_SEG})",
     _EPO_STMT_FLAGS,
 )
 
