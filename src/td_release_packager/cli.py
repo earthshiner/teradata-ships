@@ -282,6 +282,8 @@ def _main():
         sys.exit(_cmd_scan(args))
     elif args.command in ("analyze", "analyse"):
         _cmd_analyze(args)
+    elif args.command == "changeset":
+        sys.exit(_cmd_changeset(args))
     elif args.command == "import-legacy":
         _cmd_import_legacy(args)
     elif args.command == "migrate-source":
@@ -5240,6 +5242,54 @@ def _export_graph(result, args):
         print(f"    ✓ {fmt:<14s} → {filepath} ({size_kb:.1f} KB)")
 
 
+def _cmd_changeset(args) -> int:
+    """Preview the changed-object set + dependants since a reference point.
+
+    Detection mode is git-native when a ``--since-tag`` / ``--since-commit``
+    ref is given inside a git repo, falling back to a content-hash baseline
+    under ``.ships/`` otherwise. ``--update-baseline`` captures the current
+    payload state for the next git-less run. Issue #114.
+    """
+    from td_release_packager.changeset import (
+        detect_changeset,
+        write_changeset_baseline,
+    )
+    from td_release_packager.validate import resolve_inspect_root
+
+    project = args.project
+    if not os.path.isdir(project):
+        print(f"ERROR: project directory not found: {project}")
+        return 1
+
+    if getattr(args, "update_baseline", False):
+        payload_dir = resolve_inspect_root(project)
+        path = write_changeset_baseline(project, payload_dir)
+        print(f"Captured changeset baseline: {path}")
+        return 0
+
+    since = getattr(args, "since_tag", None) or getattr(args, "since_commit", None)
+    result = detect_changeset(project, since=since)
+
+    if result.mode == "none":
+        print(result.note)
+        return 1
+
+    print(f"Detection mode : {result.mode}")
+    print(f"Changed files  : {len(result.changed_files)}")
+    print(f"Changed objects: {len(result.changed)}")
+    print(f"Dependants     : {len(result.dependants)}")
+    print(f"Total selected : {len(result.selected)}")
+    if result.changed:
+        print("\nChanged objects:")
+        for qn in sorted(result.changed):
+            print(f"  + {qn}")
+    if result.dependants:
+        print("\nDependants pulled in:")
+        for qn in sorted(result.dependants):
+            print(f"  ~ {qn}")
+    return 0
+
+
 # ---------------------------------------------------------------
 # Argument parser
 # ---------------------------------------------------------------
@@ -5933,6 +5983,29 @@ def _build_parser():
         "--project-name",
         default="ships-project",
         help="OpenLineage job namespace / project name (default: ships-project).",
+    )
+
+    # -- changeset --
+    cs = subs.add_parser(
+        "changeset",
+        help="Preview the changed-object set + dependants since a ref (#114).",
+    )
+    cs.add_argument(
+        "--project", required=True, help="SHIPS project directory to inspect."
+    )
+    cs.add_argument(
+        "--since-tag",
+        help="Git tag/ref to diff HEAD against (git-native detection).",
+    )
+    cs.add_argument(
+        "--since-commit",
+        help="Git commit to diff HEAD against (git-native detection).",
+    )
+    cs.add_argument(
+        "--update-baseline",
+        action="store_true",
+        help="Capture the current payload content hashes as the changeset "
+        "baseline (for git-less detection) and exit.",
     )
 
     # -- import-legacy --

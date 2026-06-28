@@ -25,6 +25,7 @@ BUILD_COUNTER_FILENAME = ".build_counter"
 DECISIONS_FILENAME = "ships.decisions.json"
 WAVES_FILENAME = "_waves.txt"
 CONTRACTS_BASELINE_FILENAME = "contracts.baseline.json"
+CHANGESET_BASELINE_FILENAME = "changeset.baseline.json"
 
 OBJECT_PLACEMENT_YAML_FILENAME = "object_placement.yaml"
 CONFIG_DIRNAME = "config"
@@ -72,6 +73,16 @@ def contracts_baseline_path(project_dir: str) -> str:
     incompatible changes.
     """
     return os.path.join(ships_state_dir(project_dir), CONTRACTS_BASELINE_FILENAME)
+
+
+def changeset_baseline_path(project_dir: str) -> str:
+    """Return the resolved path to the changeset content-hash baseline.
+
+    Used by git-less change detection (issue #114): a snapshot of each
+    payload file's content hash that the next run diffs against to find what
+    changed when the project is not a git repository.
+    """
+    return os.path.join(ships_state_dir(project_dir), CHANGESET_BASELINE_FILENAME)
 
 
 def object_placement_yaml_path(project_dir: str) -> str:
