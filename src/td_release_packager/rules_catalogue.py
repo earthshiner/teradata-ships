@@ -567,6 +567,25 @@ _RULES: dict[str, dict[str, object]] = {
         "risk": "medium",
         "requires_human_review": True,
     },
+    "transaction_control_in_payload": {
+        "description": (
+            "A transaction-control statement (BT/ET, BEGIN/END TRANSACTION, "
+            "COMMIT, ROLLBACK) appears in a payload file. Transaction "
+            "boundaries are owned by the SHIPS deployer, so payload files "
+            "should not open, commit, or roll back transactions. Statements "
+            "inside a procedure/function BEGIN…END body are exempt."
+        ),
+        "default_severity": "WARNING",
+        "safe_fix_available": False,
+        "automation_level": "manual",
+        "recommended_action": (
+            "Remove the transaction-control statement from the payload; the "
+            "deployer manages BT/ET / COMMIT / ROLLBACK around each "
+            "deployment unit."
+        ),
+        "risk": "medium",
+        "requires_human_review": True,
+    },
 }
 
 

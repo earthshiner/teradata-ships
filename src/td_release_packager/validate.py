@@ -204,6 +204,13 @@ DEFAULT_RULES: Dict[str, str] = {
     # WARNING by default (early development); set to ERROR for
     # release/promotion workflows in config/inspect.conf.
     "non_linear_package_history": "WARNING",
+    # transaction_control_in_payload (issue #173): BT/ET, BEGIN/END
+    # TRANSACTION, COMMIT, and ROLLBACK belong to the SHIPS deployer, which
+    # owns the transaction boundary — they should not be hidden inside
+    # payload files. WARNING by default; --strict promotes to ERROR for
+    # platform workflows. Transaction control inside a procedure/function
+    # BEGIN…END body (e.g. an exception-handler ROLLBACK) is exempt.
+    "transaction_control_in_payload": "WARNING",
 }
 
 # -- Valid severity values --
@@ -531,6 +538,11 @@ def generate_default_config() -> str:
         "# and integrity sidecar mismatches. WARNING by default; set to",
         "# ERROR for release/promotion workflows.",
         f"non_linear_package_history={DEFAULT_RULES['non_linear_package_history']}",
+        "# transaction_control_in_payload: BT/ET, BEGIN/END TRANSACTION,",
+        "# COMMIT, ROLLBACK belong to the deployer, not payload files.",
+        "# WARNING by default; --strict promotes to ERROR. Transaction",
+        "# control inside a procedure BEGIN…END body is exempt.",
+        f"transaction_control_in_payload={DEFAULT_RULES['transaction_control_in_payload']}",
         "",
         "# Grant architecture rules",
         "# public_grant_on_tables: GRANT ... TO PUBLIC on a tables",
@@ -1370,6 +1382,7 @@ def _validate_directory_impl(
         file_issues.extend(_check_deploy_intent(rel_path, clean, strict))
         file_issues.extend(_check_destructive_change(rel_path, clean))
         file_issues.extend(_check_data_dependent_change(rel_path, clean))
+        file_issues.extend(_check_transaction_control(rel_path, clean))
         file_issues.extend(_check_ddl_terminator(rel_path, clean))
         file_issues.extend(_check_view_macro_self_reference(rel_path, clean))
         file_issues.extend(_check_one_object(rel_path, clean))
@@ -1771,6 +1784,77 @@ def _check_data_dependent_change(rel_path: str, content: str) -> List[Validation
             f"HAVING COUNT(*) > 1;",
         )
 
+    return issues
+
+
+# Transaction-control detection (issue #173). Line-anchored (``^[ \t]*``) so a
+# control statement is matched on its own line, run against comment-stripped
+# content (commented BT/ET/COMMIT never fire).
+_TXN_CONTROL_PATTERNS = [
+    (re.compile(r"^[ \t]*BT\s*;", re.IGNORECASE | re.MULTILINE), "BT"),
+    (re.compile(r"^[ \t]*ET\s*;", re.IGNORECASE | re.MULTILINE), "ET"),
+    (
+        re.compile(r"^[ \t]*BEGIN\s+TRANSACTION\b", re.IGNORECASE | re.MULTILINE),
+        "BEGIN TRANSACTION",
+    ),
+    (
+        re.compile(r"^[ \t]*END\s+TRANSACTION\b", re.IGNORECASE | re.MULTILINE),
+        "END TRANSACTION",
+    ),
+    (re.compile(r"^[ \t]*COMMIT\b", re.IGNORECASE | re.MULTILINE), "COMMIT"),
+    (re.compile(r"^[ \t]*ROLLBACK\b", re.IGNORECASE | re.MULTILINE), "ROLLBACK"),
+]
+
+# A procedure/function compound body opens with ``BEGIN`` that is NOT
+# ``BEGIN TRANSACTION``. Transaction control inside such a body (e.g. an
+# exception-handler ROLLBACK) is procedural, not a payload-level statement.
+_COMPOUND_BEGIN_RE = re.compile(r"\bBEGIN\b(?!\s+TRANSACTION\b)", re.IGNORECASE)
+
+
+def _check_transaction_control(rel_path: str, content: str) -> List[ValidationIssue]:
+    """Flag transaction-control statements in a payload file (issue #173).
+
+    BT/ET, BEGIN/END TRANSACTION, COMMIT, and ROLLBACK belong to the SHIPS
+    deployer, which owns the transaction boundary — they should not be hidden
+    inside payload files. Detection runs on comment-stripped content (so
+    commented DI-tool workaround tokens never fire) and only over the region
+    before any procedure/function compound ``BEGIN`` body, so an
+    exception-handler ROLLBACK inside a stored procedure is exempt while a
+    standalone ``BEGIN TRANSACTION`` is still caught.
+    """
+    begin = _COMPOUND_BEGIN_RE.search(content)
+    region = content[: begin.start()] if begin else content
+
+    phase = _phase_for_path(rel_path)
+    phase_note = f" [{phase}]" if phase else ""
+
+    issues: List[ValidationIssue] = []
+    for pattern, kind in _TXN_CONTROL_PATTERNS:
+        for m in pattern.finditer(region):
+            line = region.count("\n", 0, m.start()) + 1
+            issues.append(
+                ValidationIssue(
+                    file=rel_path,
+                    rule="transaction_control_in_payload",
+                    severity="WARNING",
+                    message=(
+                        f"Transaction-control statement ({kind}) in payload"
+                        f"{phase_note}. Transaction boundaries are owned by the "
+                        f"SHIPS deployer — remove {kind} from the payload file."
+                    ),
+                    line=line,
+                    remediation={
+                        "safe_fix_available": False,
+                        "automation_level": "manual_review_required",
+                        "requires_human_review": True,
+                        "recommended_action": (
+                            "Remove the transaction-control statement; the "
+                            "deployer manages BT/ET / COMMIT / ROLLBACK around "
+                            "each deployment unit."
+                        ),
+                    },
+                )
+            )
     return issues
 
 
