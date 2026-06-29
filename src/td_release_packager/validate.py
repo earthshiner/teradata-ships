@@ -2509,10 +2509,27 @@ def _check_view_macro_self_reference(
     obj_part = header.group("objpart").replace('"', "")
     qualified_name = f"{db_part}.{obj_part}"
 
-    # Body starts immediately after the header match. Comments are
-    # stripped so commented-out self-references are not flagged.
+    # Body starts immediately after the header match. Comments and
+    # string literals are stripped so commented-out or string-embedded
+    # self-references are not flagged. The body is then truncated at
+    # the FIRST top-level statement terminator (``;`` at paren depth
+    # zero) so subsequent DDL like a ``COMMENT ON VIEW <name> IS '...'``
+    # — which legitimately mentions the view's own qualified name in
+    # the catalogue, not in the view's SELECT body — is not searched
+    # for self-references. A macro body is wrapped in ``(...)`` so its
+    # internal ``;``s are at depth>0; only the closing ``);`` at
+    # depth-0 truncates.
     body_offset = header.end()
     stripped_body = _strip_sql_comments(content[body_offset:])
+    depth = 0
+    for i, ch in enumerate(stripped_body):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif ch == ";" and depth <= 0:
+            stripped_body = stripped_body[:i]
+            break
 
     # Build a search regex that matches the literal qualified name
     # case-insensitively (Teradata identifier rules) and refuses
@@ -3818,9 +3835,18 @@ def _check_non_ascii_literals(rel_path: str, content: str) -> List[ValidationIss
         pass
 
     # Suggested ASCII replacements for the characters most commonly
-    # introduced by rich-text editors and word processors.
+    # introduced by rich-text editors and word processors. The em-dash
+    # note is worded carefully: ``--`` is a perfectly valid SQL comment
+    # marker and the rule does NOT discourage hand-written comments —
+    # the warning is just that the *replacement* for U+2014 must be a
+    # single hyphen with surrounding spaces, not a double-hyphen
+    # (which would silently turn the rest of the line into a comment).
     _SUGGESTIONS: dict = {
-        "\\u2014": '" - " (em-dash -> hyphen; do NOT use -- which creates a SQL comment)',
+        "\\u2014": (
+            '" - " (em-dash -> spaced hyphen; substitute with a single '
+            "hyphen, not double — `--` would turn the rest of the line "
+            "into a SQL comment)"
+        ),
         "\\u2022": '"-" (bullet -> hyphen)',
         "\\u2192": '"->" (right arrow -> ASCII arrow)',
         "\\u2500": '"-" (box-drawing -> hyphen)',
