@@ -437,6 +437,24 @@ def test_guide_tab_is_first_and_carries_pipeline_phases(tmp_path):
     assert ".guide-glossary" in html
 
 
+def test_pluralise_handles_irregular_plurals():
+    """``child`` must pluralise to ``children``, not ``childs`` — the
+    perm-footprint card surfaces ``(N children)`` next to each parent
+    rollup and the naive ``+s`` rule was producing ``childs`` on the
+    rendered card. Other irregulars covered here for safety.
+    """
+    from td_release_packager.reporting.common import pluralise
+
+    assert pluralise("child", 1) == "child"
+    assert pluralise("child", 2) == "children"
+    assert pluralise("Child", 2) == "Children"  # capitalisation preserved
+    assert pluralise("person", 3) == "people"
+    # Regular nouns still take +s.
+    assert pluralise("database", 2) == "databases"
+    # Already-plural words still pass through unchanged.
+    assert pluralise("statistics", 5) == "statistics"
+
+
 def test_payload_summary_does_not_double_pluralise_statistics(tmp_path):
     """Object-type names that are already plural (STATISTICS) must not
     get an extra trailing ``s`` in the Payload tab summary line.
