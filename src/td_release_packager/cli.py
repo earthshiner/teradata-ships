@@ -5214,14 +5214,18 @@ def _run_analyze(args, stage, issue_codes) -> int:
         waves_path = waves_txt_path(source_dir)
 
     if result.waves:
-        if os.path.exists(waves_path) and not args.overwrite:
-            print(f"\n  ⚠ {waves_path} already exists. Use --overwrite to replace.")
-        else:
-            with open(waves_path, "w", encoding="utf-8") as f:
-                f.write(result.waves_file_content)
-            stage.set_outputs(waves_path=waves_path)
-            print(f"\n  ✓ Wave file written: {waves_path}")
-            print(f"    {len(result.waves)} waves, {len(result.objects)} objects")
+        # ``.ships/_waves.txt`` is a regenerable artefact, not user-edited
+        # state. Always rewrite it on analyse so downstream consumers
+        # (pipeline_report Payload tab, packaging) reflect the current
+        # source state — keeping the previous run's file frozen made the
+        # Payload tab render 'waves not computed yet' after every source
+        # edit (#449). ``--overwrite`` remains as a no-op flag for
+        # backwards compatibility.
+        with open(waves_path, "w", encoding="utf-8") as f:
+            f.write(result.waves_file_content)
+        stage.set_outputs(waves_path=waves_path)
+        print(f"\n  ✓ Wave file written: {waves_path}")
+        print(f"    {len(result.waves)} waves, {len(result.objects)} objects")
 
     if result.cycles:
         print(f"\n  ⚠ {len(result.cycles)} cycle(s) detected — review before deploying")
@@ -6216,7 +6220,14 @@ def _build_parser():
         help="Output path for _waves.txt (default: <source>/.ships/_waves.txt).",
     )
     az.add_argument(
-        "--overwrite", action="store_true", help="Overwrite existing _waves.txt."
+        "--overwrite",
+        action="store_true",
+        help=(
+            "Deprecated no-op — analyse always rewrites _waves.txt now "
+            "that the previous skip-if-exists behaviour caused stale "
+            "wave data to outlive source edits (#449). Kept so existing "
+            "scripts that pass --overwrite continue to parse."
+        ),
     )
     az.add_argument(
         "--graph",
