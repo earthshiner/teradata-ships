@@ -30,6 +30,8 @@ CHANGESET_BASELINE_FILENAME = "changeset.baseline.json"
 OBJECT_PLACEMENT_YAML_FILENAME = "object_placement.yaml"
 CONFIG_DIRNAME = "config"
 
+SHIPS_YAML_FILENAME = "ships.yaml"
+
 #: The canonical tokenisation config (issue #383). ``config/tokenise.conf`` is
 #: the single source of truth for a project's tokenisation rules; every consumer
 #: resolves it through :func:`tokenise_conf_path` (for file access) or
@@ -109,3 +111,51 @@ def object_placement_yaml_path(project_dir: str) -> str:
     stays under ``config/`` rather than moving to ``.ships/``.
     """
     return os.path.join(project_dir, CONFIG_DIRNAME, OBJECT_PLACEMENT_YAML_FILENAME)
+
+
+def ships_yaml_path(project_dir: str) -> str:
+    """Return the resolved path to the project's ``ships.yaml`` (may not exist)."""
+    return os.path.join(project_dir, SHIPS_YAML_FILENAME)
+
+
+def resolve_project_name(project_dir: str) -> str:
+    """Resolve the project name shown on reports and embedded in JSON artefacts.
+
+    Resolution order (issue #481):
+
+    1. If ``<project_dir>/ships.yaml`` exists and carries a non-empty
+       ``project:`` field, return that. This is the canonical, operator-
+       authored name (e.g. ``callcentre``).
+    2. Otherwise fall back to the project directory basename (e.g.
+       ``CustomerDNA`` for ``/path/to/CustomerDNA``).
+
+    The lookup is dependency-free — uses a hand-rolled, line-oriented
+    parse so importing this helper from low-level modules doesn't drag
+    in PyYAML. ``ships.yaml`` is always a small file and the
+    ``project:`` field is always a top-level scalar, so a one-line
+    regex covers it.
+
+    Args:
+        project_dir: SHIPS project root.
+
+    Returns:
+        A non-empty project-name string. Never raises; if everything is
+        unreadable the basename fallback still yields *something*.
+    """
+    import re
+
+    path = ships_yaml_path(project_dir)
+    if os.path.isfile(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for raw in f:
+                    line = raw.split("#", 1)[0].rstrip()
+                    m = re.match(r"^project\s*:\s*(.+?)\s*$", line)
+                    if m:
+                        value = m.group(1).strip().strip('"').strip("'")
+                        if value:
+                            return value
+        except OSError:
+            pass
+
+    return os.path.basename(os.path.abspath(project_dir)) or "unknown"

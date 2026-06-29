@@ -1457,6 +1457,8 @@ def _build_index_document(
         "$schema": "./schemas/ships.index.schema.json",
         "schema": "teradata-ships/package-index/v1",
         "schema_version": INDEX_SCHEMA_VERSION,
+        "ships_version": manifest.get("ships_version") or "",
+        "project_name": manifest.get("project_name") or "",
         "package_type": "teradata-ships",
         "index_version": INDEX_SCHEMA_VERSION,
         "read_first": _context_path(INDEX_FILENAME),
@@ -1501,6 +1503,8 @@ def _build_context_document(
     return {
         "$schema": "./schemas/ships.context.schema.json",
         "schema_version": CONTEXT_SCHEMA_VERSION,
+        "ships_version": manifest.get("ships_version") or "",
+        "project_name": manifest.get("project_name") or "",
         "context_id": context_id,
         "generated_at": generated_at,
         "purpose": "Durable SHIPS workflow context for humans, CI/CD, MCP tools, and autonomous agents.",
@@ -1560,6 +1564,8 @@ def _build_agent_manifest_document(
     return {
         "$schema": "./schemas/ships.manifest.schema.json",
         "schema_version": CONTEXT_SCHEMA_VERSION,
+        "ships_version": manifest.get("ships_version") or "",
+        "project_name": manifest.get("project_name") or "",
         "context_id": context_id,
         "generated_at": generated_at,
         "package": {
@@ -1641,6 +1647,8 @@ def _build_handoff_document(
     return {
         "$schema": "./schemas/ships.handoff.schema.json",
         "schema_version": CONTEXT_SCHEMA_VERSION,
+        "ships_version": manifest.get("ships_version") or "",
+        "project_name": manifest.get("project_name") or "",
         "context_id": context_id,
         "generated_at": generated_at,
         "handoff_type": "package-to-deployment",

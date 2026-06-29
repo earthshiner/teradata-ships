@@ -941,6 +941,8 @@ def generate_pipeline_report(project_dir: str) -> Optional[str]:
         ),
     ]
 
+    from td_release_packager.project_paths import resolve_project_name
+
     doc = common.render_page(
         doc_title=f"SHIPS Pipeline Report — {run.get('command', '')}",
         header_title="Pipeline Report",
@@ -949,6 +951,7 @@ def generate_pipeline_report(project_dir: str) -> Optional[str]:
         meta_html=meta_html,
         tabs=tabs,
         extra_css=common.GUIDE_CSS,
+        project_name=resolve_project_name(project_dir),
     )
 
     report_dir = os.path.join(project_dir, REPORT_DIRNAME)

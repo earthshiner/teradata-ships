@@ -230,12 +230,40 @@ def compute_trust_report(source_dir: str, pkg_dir: str) -> TrustReport:
     return TrustReport(status=status, evaluated_at=now, signals=signals)
 
 
-def write_trust_result(pkg_dir: str, report: TrustReport) -> str:
-    """Write the canonical trust result JSON to ``pkg_dir`` and return its path."""
+def write_trust_result(
+    pkg_dir: str,
+    report: TrustReport,
+    *,
+    project_name: str = "",
+    ships_version: str = "",
+) -> str:
+    """Write the canonical trust result JSON to ``pkg_dir`` and return its path.
+
+    Args:
+        pkg_dir:       Built package root; ``context/ships.trust.json`` is
+                       written underneath.
+        report:        Trust report to serialise.
+        project_name:  Project this trust result belongs to (issue #481).
+                       Stamped at the top of the JSON alongside
+                       ``ships_version`` so a consumer can answer "which
+                       project / which SHIPS produced this trust result?"
+                       without inspecting the surrounding package.
+        ships_version: SHIPS version that produced the trust result.
+                       Defaults to ``td_release_packager.__version__``
+                       when empty.
+    """
+    document = report.to_dict()
+    from td_release_packager._version import __version__ as _SHIPS_VERSION
+
+    document = {
+        "ships_version": ships_version or _SHIPS_VERSION,
+        "project_name": project_name or "",
+        **document,
+    }
     path = os.path.join(pkg_dir, "context", TRUST_RESULT_FILENAME)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(report.to_dict(), f, indent=2, ensure_ascii=False)
+        json.dump(document, f, indent=2, ensure_ascii=False)
         f.write("\n")
     return path
 
