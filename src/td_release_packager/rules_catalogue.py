@@ -574,29 +574,30 @@ _RULES: dict[str, dict[str, object]] = {
     },
     "orphan_database": {
         "description": (
-            "A project-level check over "
-            "``payload/database/pre-requisites/``. Flags a ``.db`` / "
-            "``.usr`` declaration whose database name is not "
-            "referenced anywhere in the rest of the payload — no "
-            "table or view qualified with it, no grant target / "
-            "grantee mentioning it, no child database created FROM "
-            "it. Typically the residue of a naming-convention "
-            "crossfire where one CREATE DATABASE was hand-authored "
-            "under a full-name shape and the view-layer generator "
-            "emitted an abbreviated sibling for the same role; one "
-            "gets populated at deploy time, the other becomes dead "
-            "infrastructure."
+            "A project-level note over "
+            "``payload/database/pre-requisites/``. Surfaces a ``.db`` "
+            "/ ``.usr`` declaration whose database name is not "
+            "referenced anywhere else in the payload — no table or "
+            "view qualified with it, no grant target / grantee "
+            "mentioning it, no child database created FROM it. "
+            "Sometimes the residue of a naming-convention crossfire "
+            "(a hand-authored full-name declaration alongside a "
+            "view-layer-generated abbreviated sibling for the same "
+            "role); often intentional — empty containers like data "
+            "labs, sandboxes, or schemas users populate themselves "
+            "are valid SHIPS payloads. Informational by default."
         ),
-        "default_severity": "WARNING",
+        "default_severity": "INFO",
         "safe_fix_available": False,
         "automation_level": "manual",
         "recommended_action": (
-            "Decide which naming convention this project uses, then "
-            "either delete the orphan declaration or rename payload "
-            "references to point at it."
+            "Review whether the declaration is intentional. If it's "
+            "leftover from a naming-convention change, reconcile the "
+            "two names. If it's an empty container for downstream "
+            "consumers, no action needed."
         ),
         "risk": "low",
-        "requires_human_review": True,
+        "requires_human_review": False,
     },
     "transaction_control_in_payload": {
         "description": (

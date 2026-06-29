@@ -192,7 +192,7 @@ def _collect_referenced_databases(project_dir: str, declared: Set[str]) -> Set[s
 
 
 def check_orphan_databases(
-    project_dir: str, severity: str = "WARNING"
+    project_dir: str, severity: str = "INFO"
 ) -> List[ValidationIssue]:
     """Scan prereq ``.db`` / ``.usr`` files for orphan database declarations.
 
@@ -248,24 +248,26 @@ def check_orphan_databases(
                 severity=severity,
                 message=(
                     f"{kind.title()} '{declared_name}' is declared but "
-                    f"nothing in the payload references it. Likely "
-                    f"causes: a stale hand-authored declaration "
-                    f"superseded by the view-layer generator's emitted "
-                    f"name (e.g. ``{{{{DB_PREFIX}}}}_Domain_STD_V`` "
-                    f"vs ``{{{{DB_PREFIX}}}}_DOM_STD_V``), or a "
-                    f"database declared upfront but never populated. "
-                    f"Either delete this file or point payload objects "
-                    f"at it."
+                    f"nothing else in the payload references it. This "
+                    f"is sometimes a naming-convention crossfire (a "
+                    f"hand-authored full-name declaration like "
+                    f"``{{{{DB_PREFIX}}}}_Domain_STD_V`` alongside the "
+                    f"view-layer generator's abbreviated "
+                    f"``{{{{DB_PREFIX}}}}_DOM_STD_V``), but often "
+                    f"intentional — empty containers like data labs, "
+                    f"sandboxes, or schemas users will populate "
+                    f"themselves are valid SHIPS payloads. Informational."
                 ),
                 remediation={
                     "safe_fix_available": False,
-                    "automation_level": "manual_review_required",
-                    "requires_human_review": True,
+                    "automation_level": "manual_review_optional",
+                    "requires_human_review": False,
                     "recommended_action": (
-                        "Decide which naming convention this project "
-                        "uses, then either delete the orphan "
-                        "declaration or rename payload references "
-                        "to point at it."
+                        "Review whether this declaration is intentional. "
+                        "If it's leftover from a naming-convention "
+                        "change, reconcile the two names. If it's an "
+                        "empty container for downstream consumers, no "
+                        "action needed."
                     ),
                 },
             )
