@@ -3245,13 +3245,24 @@ def _build_exclusion_mask(text: str) -> List[bool]:
     return mask
 
 
+_LOCKING_ROW_ACCESS_RE = re.compile(r"\bLOCKING\s+ROW\s+FOR\s+ACCESS\b", re.IGNORECASE)
+
+
 def _is_locking_view(content: str) -> bool:
     """
     Determine whether the SQL content represents a 1:1 locking view.
 
-    Detection is based on marker comments in the first 20 lines
-    of the file header. The recommended marker is ``-- LOCKING VIEW``.
-    Markers are checked case-insensitively.
+    Two detectors run, either of which is sufficient:
+
+    * **Marker comment** — ``-- LOCKING VIEW`` (or the legacy aliases
+      ``-- 1:1 VIEW`` / ``-- DIRTY READ VIEW``) in the first 20 lines.
+    * **Canonical shape** — the SHIPS Object Placement 1:1 locking-view
+      pattern: a ``CREATE/REPLACE VIEW <X>_V.<obj>`` header whose
+      body contains ``LOCKING ROW FOR ACCESS`` and a ``FROM`` clause
+      targeting ``<X>_T.<obj>`` (the matching ``_T`` companion with
+      the same object name). Catches the common case of an operator
+      hand-authoring a canonical locking view but not knowing about
+      the marker comment.
 
     Args:
         content: The full SQL text of the view file.
@@ -3260,7 +3271,44 @@ def _is_locking_view(content: str) -> bool:
         True if the file is identified as a 1:1 locking view.
     """
     header = "\n".join(content.split("\n")[:20])
-    return any(marker.search(header) for marker in _LOCKING_VIEW_MARKERS)
+    if any(marker.search(header) for marker in _LOCKING_VIEW_MARKERS):
+        return True
+    return _matches_canonical_locking_shape(content)
+
+
+def _matches_canonical_locking_shape(content: str) -> bool:
+    """Detect the canonical 1:1 locking-view structural pattern."""
+    if not _LOCKING_ROW_ACCESS_RE.search(content):
+        return False
+
+    head = _VIEW_MACRO_DEF_NAME_RE.search(content)
+    if head is None:
+        return False
+    view_db = head.group("dbpart").replace('"', "")
+    view_obj = head.group("objpart").replace('"', "")
+
+    # The companion _T identifier shares everything with the view's _V
+    # except the trailing tier suffix. Cover both Shape A (paired token
+    # inside braces, ``{{X_V}}`` ↔ ``{{X_T}}``) and Shape B (literal
+    # tail suffix, ``{{P}}_X_V`` ↔ ``{{P}}_X_T``).
+    if view_db.endswith("_V}}") and len(view_db) >= 5:
+        # ``...V}}`` → ``...T}}`` for Shape A.
+        companion_t = view_db[:-4] + "_T}}"
+    elif view_db.endswith("_V"):
+        # ``..._V`` → ``..._T`` for Shape B (or bare).
+        companion_t = view_db[:-2] + "_T"
+    else:
+        return False
+
+    pattern = re.compile(
+        r"\bFROM\s+"
+        + re.escape(companion_t)
+        + r"\s*\.\s*"
+        + re.escape(view_obj)
+        + r"(?![A-Za-z0-9_])",
+        re.IGNORECASE,
+    )
+    return pattern.search(content) is not None
 
 
 def _strip_identifier_quotes(identifier: str) -> str:
