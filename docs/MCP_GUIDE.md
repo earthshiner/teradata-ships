@@ -388,6 +388,8 @@ Build a release package for a target environment. Resolves all `{{TOKEN}}` refer
 | `source_github` | string | no | Fetch DDL source from GitHub: `"owner/repo"`. Mutually exclusive with `project` source DDL. |
 | `source_ref` | string | no | Branch, tag, or SHA to fetch (default: `"main"`). Used with `source_github`. |
 | `github_token` | string | no | GitHub PAT for private repos. Falls back to `GITHUB_TOKEN` env var. |
+| `root_parent` | string | no | Root database/user parent for parentless `CREATE DATABASE`/`USER` prereqs |
+| `change_ref` | string | no | Change-management ticket reference (e.g. `CHG0012345`); required when the target env sets `require_change_ref` |
 | `since_tag` | string | no | Build a **changeset-scoped** package of objects changed since this git tag/ref (plus dependants). See `ships_changeset` (#115). |
 | `since_commit` | string | no | Changeset-scoped package since this git commit. |
 | `objects` | string | no | Changeset-scoped package of an explicit comma-separated `DB.Object` list (plus dependants). For agent-driven partial deploys. |
@@ -446,13 +448,20 @@ Run the full pipeline in one call: harvest → generate → inspect → analyse 
 | `token_map` | string | no | Token substitution map |
 | `auto_tokenise` | bool | no | Auto-detect and apply tokens |
 | `env_prefix` | string | no | Env prefix for auto-tokenise |
-| `env` | string | no | Target environment (enables package stage) |
-| `env_config` | string | no | Env config file (enables package stage) |
-| `name` | string | no | Package name (enables package stage) |
+| `env` | string | no | Target environment. Omit to derive from the `packaging:` profile in `ships.yaml` (#384). |
+| `env_config` | string | no | Env config file. Omit to derive from the `packaging:` profile / convention (#384). |
+| `name` | string | no | Package name. Omit to derive from the `packaging:` profile / project name (#384). |
+| `output` | string | no | Output directory for the built package archive |
+| `root_parent` | string | no | Root database/user parent for parentless `CREATE DATABASE`/`USER` prereqs |
 | `skip_generate` | bool | no | Skip view-layer generate stage |
 | `strict` | bool | no | Abort on first stage error |
+| `author` | string | no | Builder identifier for provenance |
+| `description` | string | no | Release description |
+| `commit` | string | no | Git commit hash |
 
 **Returns:** `{"success": bool, "stages": {"harvest": {...}, "inspect": {...}, ...}, "failed_stages": list}`
+
+**Single front door (#384):** with a `packaging:` profile in `ships.yaml`, `ships_process(project=...)` runs the whole pipeline (including package) with no `env`/`env_config`/`name` — precedence is explicit arg > `packaging:` profile > convention.
 
 ---
 

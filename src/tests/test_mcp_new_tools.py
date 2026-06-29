@@ -125,6 +125,62 @@ def _mk_package(tmp_path: Path) -> Path:
     return tmp_path / "pkg"
 
 
+class TestDispatchArgs:
+    """The async dispatch tools must forward the new CLI flags verbatim."""
+
+    def _capture(self, monkeypatch):
+        captured = {}
+
+        def fake_launch(module, args, project_dir):
+            captured["module"] = module
+            captured["args"] = args
+            return {"success": True, "run_id": "test"}
+
+        monkeypatch.setattr(ships_mcp, "_launch_background", fake_launch)
+        return captured
+
+    def test_process_forwards_github_and_provenance(self, monkeypatch):
+        import asyncio
+
+        captured = self._capture(monkeypatch)
+        asyncio.run(
+            ships_mcp.ships_process(
+                project="/p",
+                source_github="acme/omr",
+                source_ref="v1",
+                output="/out",
+                root_parent="DATAPRODUCTS",
+                author="ci",
+            )
+        )
+        args = captured["args"]
+        assert "--source-github" in args and "acme/omr" in args
+        assert "--source-ref" in args and "v1" in args
+        assert "--output" in args and "/out" in args
+        assert "--root-parent" in args and "DATAPRODUCTS" in args
+        assert "--author" in args and "ci" in args
+
+    def test_package_forwards_changeset_and_github(self, monkeypatch):
+        import asyncio
+
+        captured = self._capture(monkeypatch)
+        asyncio.run(
+            ships_mcp.ships_package(
+                project="/p",
+                env="DEV",
+                name="pkg",
+                env_config="/p/DEV.conf",
+                since_tag="v1.0",
+                source_github="acme/omr",
+                change_ref="CHG1",
+            )
+        )
+        args = captured["args"]
+        assert "--since-tag" in args and "v1.0" in args
+        assert "--source-github" in args and "acme/omr" in args
+        assert "--change-ref" in args and "CHG1" in args
+
+
 class TestShipsMetadataExport:
     def test_alation(self, tmp_path):
         pkg = _mk_package(tmp_path)
