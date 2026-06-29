@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run python .claude/hooks/skill_sync_reminder.py"
+          }
+        ]
+      }
+    ]
+  }
+}
