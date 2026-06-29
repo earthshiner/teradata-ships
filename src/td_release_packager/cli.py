@@ -3423,6 +3423,12 @@ def _run_build(args, stage, issue_codes) -> int:
     # Standalone builds (``ships package`` after individual
     # harvest/inspect/analyse runs) need the same per-stage results so
     # an agent inspecting the archive never has to scrape decisions.json.
+    #
+    # The two writer helpers below mutate the archive's bytes, so they
+    # also refresh the ``.sha256`` sidecar (#450) — otherwise the
+    # sidecar that ``build_package`` wrote stays frozen at the
+    # pre-append hash and the next ``ships inspect`` reports
+    # ``INSPECT_PACKAGE_INTEGRITY`` mismatches across every release.
     try:
         archive_paths_for_stage_results = [archive_path]
         if companion_pair is not None:
@@ -3702,7 +3708,14 @@ def _write_process_results_to_zip(
     archive_path: str,
     results: Dict[str, Dict[str, Any]],
 ) -> None:
-    """Append package-local process/stage result files to a zip archive."""
+    """Append package-local process/stage result files to a zip archive.
+
+    Mutates the archive's bytes — the ``.sha256`` sidecar that
+    ``build_package`` wrote against the pre-append archive is stale
+    after this call, so we refresh it here. Keeping that refresh in
+    the mutator means every caller stays consistent without having to
+    remember to re-sidecar (#450).
+    """
     package_root = _archive_root_for_zip(archive_path)
     with zipfile.ZipFile(
         archive_path, "a", compression=zipfile.ZIP_DEFLATED
@@ -3714,13 +3727,20 @@ def _write_process_results_to_zip(
                 json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True)
                 + "\n",
             )
+    _refresh_archive_sidecar(archive_path)
 
 
 def _write_process_results_to_tar_gz(
     archive_path: str,
     results: Dict[str, Dict[str, Any]],
 ) -> None:
-    """Inject package-local process/stage result files into a tar.gz archive."""
+    """Inject package-local process/stage result files into a tar.gz archive.
+
+    Mutates the archive's bytes (rebuilds the .tar.gz from a
+    re-extracted tree with the stage files added). Refreshes the
+    ``.sha256`` sidecar — see ``_write_process_results_to_zip`` for
+    the rationale (#450).
+    """
     with tempfile.TemporaryDirectory(prefix="ships_process_results_") as tmp_dir:
         with tarfile.open(archive_path, "r:gz") as archive:
             archive.extractall(tmp_dir, filter="data")
@@ -3746,6 +3766,29 @@ def _write_process_results_to_tar_gz(
             base_dir=package_root,
         )
         shutil.copyfile(rebuilt, archive_path)
+    _refresh_archive_sidecar(archive_path)
+
+
+def _refresh_archive_sidecar(archive_path: str) -> None:
+    """Regenerate the ``.sha256`` sidecar for an archive after mutation.
+
+    Best-effort — if the original archive had no sidecar (e.g. a
+    caller used these helpers outside the standard build flow) this
+    still creates one with the current bytes, matching the build
+    flow's invariant that every released archive has a sidecar
+    consistent with its bytes.
+    """
+    from td_release_packager.builder import _generate_checksum
+
+    try:
+        _generate_checksum(archive_path)
+    except OSError as exc:  # pragma: no cover - defensive
+        logger.warning(
+            "could not refresh .sha256 sidecar for %s: %s — "
+            "downstream INSPECT_PACKAGE_INTEGRITY checks may report a mismatch.",
+            archive_path,
+            exc,
+        )
 
 
 def _write_package_run_context_to_archives(

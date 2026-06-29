@@ -397,3 +397,18 @@ class TestStandaloneBuildEmitsStageResults:
                 assert doc["stage"] == stage
                 assert doc["status"] == "success"
                 assert isinstance(doc["next_action"], str)
+
+        # Sidecar must reflect the POST-append archive bytes (#450).
+        # Without the refresh the sidecar froze at the pre-append hash
+        # and every fresh build reported INSPECT_PACKAGE_INTEGRITY
+        # mismatches.
+        import hashlib as _hashlib
+
+        live_hash = _hashlib.sha256(open(archive_path, "rb").read()).hexdigest()
+        sidecar = Path(archive_path + ".sha256")
+        assert sidecar.is_file(), "build_package should have produced a .sha256"
+        recorded_hash = sidecar.read_text(encoding="utf-8").split()[0].lower()
+        assert recorded_hash == live_hash, (
+            "sidecar/archive mismatch after stage-results append: "
+            f"recorded={recorded_hash[:16]}… live={live_hash[:16]}…"
+        )
