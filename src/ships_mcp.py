@@ -1164,6 +1164,11 @@ async def ships_package(
     author: str = "",
     description: str = "",
     commit: str = "",
+    source_github: Optional[str] = None,
+    source_ref: Optional[str] = None,
+    github_token: Optional[str] = None,
+    root_parent: Optional[str] = None,
+    change_ref: Optional[str] = None,
     since_tag: Optional[str] = None,
     since_commit: Optional[str] = None,
     objects: Optional[str] = None,
@@ -1201,6 +1206,16 @@ async def ships_package(
         args += ["--description", description]
     if commit:
         args += ["--commit", commit]
+    if source_github:
+        args += ["--source-github", source_github]
+    if source_ref:
+        args += ["--source-ref", source_ref]
+    if github_token:
+        args += ["--github-token", github_token]
+    if root_parent:
+        args += ["--root-parent", root_parent]
+    if change_ref:
+        args += ["--change-ref", change_ref]
     if since_tag:
         args += ["--since-tag", since_tag]
     if since_commit:
@@ -1214,15 +1229,23 @@ async def ships_package(
 async def ships_process(
     project: str,
     source: Optional[str] = None,
+    source_github: Optional[str] = None,
+    source_ref: Optional[str] = None,
+    github_token: Optional[str] = None,
     token_map: Optional[str] = None,
     auto_tokenise: bool = False,
     env_prefix: Optional[str] = None,
     env: Optional[str] = None,
     env_config: Optional[str] = None,
     name: Optional[str] = None,
+    output: Optional[str] = None,
+    root_parent: Optional[str] = None,
     skip_generate: bool = False,
     strict: bool = False,
     prefix_token: Optional[str] = None,
+    author: str = "",
+    description: str = "",
+    commit: str = "",
     ctx: Optional[Context] = None,
 ) -> dict:
     """Dispatch the full pipeline as a detached subprocess (#319).
@@ -1232,10 +1255,26 @@ async def ships_process(
     deadline; this tool always fires it off the loop.  Returns
     immediately with a dispatch receipt; poll with
     :func:`ships_poll_build`.
+
+    Source: pass ``source`` (a local DDL directory) OR ``source_github``
+    (``"owner/repo"``, optionally ``source_ref`` / ``github_token``) to package
+    straight from GitHub with no local clone. Omit all three to process the
+    project's existing payload.
+
+    Single front door (#384): omit ``env`` / ``env_config`` / ``name`` and they
+    are derived from the ``packaging:`` profile in ``ships.yaml`` (or
+    convention), so ``ships_process(project=...)`` runs the whole pipeline
+    argless.
     """
     args = ["process", "--project", project]
     if source:
         args += ["--source", source]
+    if source_github:
+        args += ["--source-github", source_github]
+    if source_ref:
+        args += ["--source-ref", source_ref]
+    if github_token:
+        args += ["--github-token", github_token]
     if token_map:
         args += ["--token-map", token_map]
     if auto_tokenise:
@@ -1250,10 +1289,20 @@ async def ships_process(
         args += ["--env-config", env_config]
     if name:
         args += ["--name", name]
+    if output:
+        args += ["--output", output]
+    if root_parent:
+        args += ["--root-parent", root_parent]
     if skip_generate:
         args.append("--skip-generate")
     if strict:
         args.append("--strict")
+    if author:
+        args += ["--author", author]
+    if description:
+        args += ["--description", description]
+    if commit:
+        args += ["--commit", commit]
     return _launch_background("td_release_packager", args, project)
 
 
