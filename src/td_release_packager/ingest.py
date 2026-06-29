@@ -20,12 +20,14 @@ Usage:
         --detect-tokens
 """
 
+import json
 import logging
 import os
 import re
 import shutil
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -295,6 +297,12 @@ class IngestResult:
     placement_index_dir: Optional[str] = None
     placement_index_files: int = 0
     view_type_affix_renames: int = 0
+    #: Path to the per-project source-map written by harvest, mapping each
+    #: payload-relative path to the source file it came from (#466). Lets
+    #: downstream consumers — notably the pre-package pipeline report —
+    #: tell a reader which source file to edit when an inspect finding
+    #: fires against a payload file.
+    source_map_path: Optional[str] = None
 
 
 def ingest_directory(
@@ -1047,6 +1055,12 @@ def _ingest_directory_impl(
         _emit_database_placement_mirror(project_dir, result.files_placed)
     )
 
+    # Write the source map so the pre-package pipeline report can render
+    # "edit this source file" hints next to inspect findings (#466).
+    result.source_map_path = _emit_source_map(
+        project_dir, source_dir, result.files_placed
+    )
+
     logger.info(
         "Ingest complete: %d classified, %d unclassified, "
         "%d overwritten, %d skipped (existing), "
@@ -1059,6 +1073,63 @@ def _ingest_directory_impl(
     )
 
     return result
+
+
+def _emit_source_map(
+    project_dir: str,
+    source_dir: str,
+    files_placed: List[Tuple[str, str, str]],
+) -> Optional[str]:
+    """Write ``.ships/harvest/source_map.json`` mapping payload → source.
+
+    Each entry is keyed by the *payload-relative* path so callers can
+    look up a finding's source from its inspect-time location. Returns
+    the path written, or ``None`` if nothing was placed.
+
+    ``files_placed`` already stores relative paths — ``src_rel`` is
+    relative to ``source_dir`` and ``dest_rel`` is relative to
+    ``project_dir``. We pair each with its absolute equivalent so a
+    UI can render either form without re-deriving.
+
+    Args:
+        project_dir: SHIPS project root.
+        source_dir:  Root of the user-authored source tree harvest read
+                     from.
+        files_placed: ``(src_rel, dest_rel, type)`` tuples accumulated
+                     by harvest.
+    """
+    if not files_placed:
+        return None
+
+    source_root_abs = os.path.abspath(source_dir).replace("\\", "/")
+    project_root_abs = os.path.abspath(project_dir).replace("\\", "/")
+
+    entries: Dict[str, Dict[str, str]] = {}
+    for src_rel, dest_rel, obj_type in files_placed:
+        dest_rel_norm = dest_rel.replace("\\", "/")
+        src_rel_norm = src_rel.replace("\\", "/")
+        src_abs = os.path.abspath(os.path.join(source_dir, src_rel)).replace("\\", "/")
+        entries[dest_rel_norm] = {
+            "source_relpath": src_rel_norm,
+            "source_abspath": src_abs,
+            "type": obj_type,
+        }
+
+    doc = {
+        "schema_version": "1.0",
+        "source_root": source_root_abs,
+        "project_root": project_root_abs,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "entries": entries,
+    }
+
+    out_dir = os.path.join(project_dir, ".ships", "harvest")
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, "source_map.json")
+    with open(out_path, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh, indent=2, ensure_ascii=False)
+        fh.write("\n")
+    return out_path
 
 
 # ---------------------------------------------------------------
