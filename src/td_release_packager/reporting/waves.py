@@ -204,18 +204,30 @@ def render_wave_svg(records: List[Dict]) -> str:
     for wn in wave_nums:
         columns.append((f"Wave {wn}", wave_groups[wn]))
 
+    # Layout constants. Cell width widened (was 160) so tokenised
+    # qualified names like ``{{DB_PREFIX}}_DOM_STD_T.customer_keymap``
+    # display intact instead of truncating to ``{{DB_PREFIX}}_DOM_S…``.
     cell_h = 22
-    cell_w = 160
+    cell_w = 260
     gap = 28  # arrow gap between columns
     col_pad = 8  # padding inside column header
     header_h = 30
     margin = 16
     arrow_w = gap
+    item_cap = 40  # max items per column before "... N more" footer
 
-    max_items = max(len(items) for _, items in columns)
-    col_h = max_items * cell_h + header_h + col_pad * 2
+    # Each column sizes to its own content rather than the tallest
+    # column — the prior "max_items everywhere" layout left lots of
+    # whitespace under shorter waves.
+    def _column_height(items: List[Dict]) -> int:
+        n = min(len(items), item_cap)
+        if len(items) > item_cap:
+            n += 1  # "... N more" footer takes one cell row
+        return n * cell_h + header_h + col_pad * 2
+
+    col_heights = [_column_height(items) for _, items in columns]
     svg_w = len(columns) * (cell_w + gap) - gap + margin * 2
-    svg_h = col_h + margin * 2
+    svg_h = max(col_heights) + margin * 2
 
     svg_parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{svg_w}" height="{svg_h}" '
@@ -225,6 +237,7 @@ def render_wave_svg(records: List[Dict]) -> str:
     for ci, (label, items) in enumerate(columns):
         x = margin + ci * (cell_w + gap)
         y = margin
+        col_h = col_heights[ci]
 
         # Column background
         svg_parts.append(
@@ -244,34 +257,37 @@ def render_wave_svg(records: List[Dict]) -> str:
             f'font-size="12" font-weight="600" fill="{WHITE}">{label}</text>'
         )
 
-        # Items
-        for ii, item in enumerate(items[:40]):  # cap at 40 per wave for readability
+        # Items — cap at item_cap per wave for readability; full names
+        # remain on the SVG <title> tooltip for the truncated ones.
+        for ii, item in enumerate(items[:item_cap]):
             iy = y + header_h + col_pad + ii * cell_h
             bg, fg = TYPE_COLOURS.get(item["type"], TYPE_COLOUR_DEFAULT)
             # type dot
             svg_parts.append(
                 f'<circle cx="{x + 12}" cy="{iy + 11}" r="4" fill="{bg}"/>'
             )
-            # object name (truncate to fit); SVG <title> exposes full name as a tooltip.
+            # object name. Truncate to roughly fit the wider cell; the
+            # SVG <title> still exposes the full name on hover.
             full_name = item["name"]
-            display_name = truncate(full_name, 20)
+            display_name = truncate(full_name, 36)
             svg_parts.append(
                 f'<text x="{x + 22}" y="{iy + 15}" font-size="11" fill="#333">'
                 f"<title>{h(full_name)}</title>{h(display_name)}</text>"
             )
 
-        if len(items) > 40:
-            iy = y + header_h + col_pad + 40 * cell_h
+        if len(items) > item_cap:
+            iy = y + header_h + col_pad + item_cap * cell_h
             svg_parts.append(
                 f'<text x="{x + cell_w // 2}" y="{iy + 11}" text-anchor="middle" '
-                f'font-size="11" fill="#6C757D">… {len(items) - 40} more</text>'
+                f'font-size="11" fill="#6C757D">… {len(items) - item_cap} more</text>'
             )
 
-        # Arrow to next column — slim line with a small, tight arrowhead.
+        # Arrow to next column — anchored at the column-header midline
+        # so arrows still align across columns of different heights.
         if ci < len(columns) - 1:
-            ax_start = x + cell_w + 5  # small gap off the right column edge
-            ax_end = x + cell_w + arrow_w - 5  # tip just before the next column
-            ay = margin + col_h // 2
+            ax_start = x + cell_w + 5
+            ax_end = x + cell_w + arrow_w - 5
+            ay = margin + header_h // 2
             svg_parts.append(
                 f'<line x1="{ax_start}" y1="{ay}" x2="{ax_end}" y2="{ay}" '
                 f'stroke="{ORANGE}" stroke-width="1.5" stroke-linecap="round" '
@@ -293,7 +309,9 @@ def render_wave_svg(records: List[Dict]) -> str:
 
     svg_parts.append("</svg>")
 
-    # Type legend
+    # Type legend — pinned at the top of the visualisation so the
+    # reader knows what each colour dot means before scanning the
+    # waves, rather than scrolling past the SVG to find it.
     legend_items = sorted({r["type"] for r in records})
     legend_parts = []
     for t in legend_items[:12]:
@@ -304,10 +322,17 @@ def render_wave_svg(records: List[Dict]) -> str:
             f'<span style="font-size:12px;color:#555">{t}</span></span>'
         )
 
-    return (
-        '<div style="overflow-x:auto;padding:8px 0">\n'
-        + "\n".join(svg_parts)
-        + '\n</div>\n<div style="margin-top:16px;padding:0 8px">'
+    legend_html = (
+        '<div style="display:flex;flex-wrap:wrap;align-items:center;'
+        "padding:8px 12px;margin-bottom:12px;background:#F8F9FA;"
+        'border:1px solid #DEE2E6;border-radius:6px">'
         + "".join(legend_parts)
         + "</div>"
+    )
+
+    return (
+        legend_html
+        + '<div style="overflow-x:auto;padding:8px 0">\n'
+        + "\n".join(svg_parts)
+        + "\n</div>"
     )
