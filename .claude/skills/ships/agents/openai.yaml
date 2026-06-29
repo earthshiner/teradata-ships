@@ -1,0 +1,4 @@
+interface:
+  display_name: "SHIPS"
+  short_description: "Guide SHIPS deployment pipeline work"
+  default_prompt: "Use $ships to work through a SHIPS pipeline task in teradata-deployment-agent."
