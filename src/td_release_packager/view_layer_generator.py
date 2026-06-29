@@ -99,14 +99,34 @@ logger = logging.getLogger("generate_view_layer")
 # Constants — token patterns, paths, indentation
 # ---------------------------------------------------------------------------
 
-# Paired placement token pattern: {{<TOKEN_BASE>_T}} or {{<TOKEN_BASE>_V}}.
-# Captures: (token_base, suffix) where suffix is 'T' or 'V'. Supports both
-# legacy OPS-style tokens ({{APP_DATABASE_T}}) and simpler project tokens
-# ({{DB_DOMAIN_T}}).
+# Database identifier shapes recognised by the generator. Two conventions
+# are supported and treated as equivalent for pairing / locking-view
+# generation / body rewrites:
+#
+#   Shape A — paired token entirely inside braces:
+#       {{DOM_STD_T}}.foo.tbl   ↔   {{DOM_STD_V}}.foo.viw
+#       {{APP_DATABASE_T}}.foo.tbl   ↔   {{APP_DATABASE_V}}.foo.viw
+#
+#   Shape B — single prefix token followed by a literal `_<MODULE>_<TIER>_T/V`
+#   suffix (produced by the SHIPS Navigator's "One DB-PREFIX" scaffolding
+#   option, used by AI-Native Data Product demos like CustomerDNA — #456):
+#       {{DB_PREFIX}}_DOM_STD_T.foo.tbl   ↔   {{DB_PREFIX}}_DOM_STD_V.foo.viw
+#
+# Both shapes carry a "T" or "V" terminator on the *database identifier*;
+# the only difference is whether that terminator lives inside the braces
+# (Shape A) or outside, after a literal suffix (Shape B).
 _MODULE_TOKEN_RE = re.compile(r"\{\{([A-Z][A-Z0-9_]*?)_([TV])\}\}")
+_PREFIXED_DB_IDENT_RE = re.compile(
+    r"(\{\{[A-Z][A-Z0-9_]*\}\}[A-Z0-9_]+?)_([TV])(?![A-Z0-9_])"
+)
 
-# Generic paired placement token reference (any {{XXX_[TV]}}).
-_TOKEN_REF_RE = re.compile(r"\{\{[A-Z][A-Z0-9_]*?_[TV]\}\}")
+# Generic paired-token / Shape-B reference scanner — matches a full
+# database identifier in either shape, anywhere in a DDL body. Used by
+# the rewrite + grant-detection passes.
+_TOKEN_REF_RE = re.compile(
+    r"\{\{[A-Z][A-Z0-9_]*?_[TV]\}\}"
+    r"|\{\{[A-Z][A-Z0-9_]*\}\}[A-Z0-9_]+?_[TV](?![A-Z0-9_])"
+)
 
 # SQL comments — used for masking before structural parsing.
 _LINE_COMMENT_RE = re.compile(r"--.*$", re.MULTILINE)
@@ -318,14 +338,21 @@ class GenerationResult:
 
 def parse_module_token(token: str) -> Optional[Tuple[str, str]]:
     """
-    Parse a paired placement token ending ``_T`` or ``_V``.
+    Parse a paired placement database identifier ending ``_T`` or ``_V``.
 
     Args:
-        token: A token literal including the surrounding braces.
+        token: A token literal including the surrounding braces. Accepts
+            both Shape A (``{{NAME_T}}``) and Shape B (``{{NAME}}_LIT_T``);
+            see the ``_MODULE_TOKEN_RE`` / ``_PREFIXED_DB_IDENT_RE``
+            commentary at the top of the file.
 
     Returns:
-        ``(token_base, suffix)`` where suffix is "T" or "V", or None if
-        the token does not match the expected pattern.
+        ``(module_key, suffix)`` where ``suffix`` is "T" or "V", or None
+        if the token does not match either shape. ``module_key`` is the
+        shared base that pairs the T identifier with its V companion —
+        for Shape A that's the legacy token base (with ``_DATABASE``
+        stripped); for Shape B it's the full ``{{TOKEN}}<literal>``
+        string up to but not including the trailing ``_T`` / ``_V``.
     """
     parsed = _parse_placement_token(token)
     if parsed is None:
@@ -337,11 +364,19 @@ def parse_module_token(token: str) -> Optional[Tuple[str, str]]:
 
 
 def _parse_placement_token(token: str) -> Optional[Tuple[str, str]]:
-    """Return the raw paired token base and suffix for ``{{..._T/V}}``."""
+    """Return the paired token base and suffix for either shape.
+
+    Tries Shape A first (``{{NAME_T}}``); falls through to Shape B
+    (``{{NAME}}<literal>_T``) so the SHIPS Navigator's "One DB-PREFIX"
+    scaffolding shape is recognised as a paired identifier.
+    """
     match = _MODULE_TOKEN_RE.fullmatch(token)
-    if not match:
-        return None
-    return match.group(1), match.group(2)
+    if match:
+        return match.group(1), match.group(2)
+    match = _PREFIXED_DB_IDENT_RE.fullmatch(token)
+    if match:
+        return match.group(1), match.group(2)
+    return None
 
 
 def _module_from_token_base(token_base: str) -> str:
@@ -353,25 +388,45 @@ def _module_from_token_base(token_base: str) -> str:
 
 def companion_token(token: str) -> Optional[str]:
     """
-    Return the companion token (T <-> V) for a paired placement token.
+    Return the companion token (T <-> V) for a paired placement identifier.
 
     Example:
         ``{{APP_DATABASE_T}}`` -> ``{{APP_DATABASE_V}}``
         ``{{DB_DOMAIN_T}}`` -> ``{{DB_DOMAIN_V}}``
+        ``{{DB_PREFIX}}_DOM_STD_T`` -> ``{{DB_PREFIX}}_DOM_STD_V``
     """
-    parsed = _parse_placement_token(token)
-    if parsed is None:
-        return None
-    token_base, suffix = parsed
-    other = "V" if suffix == "T" else "T"
-    return f"{{{{{token_base}_{other}}}}}"
+    # Shape A: rebuild as ``{{base_other}}``.
+    match = _MODULE_TOKEN_RE.fullmatch(token)
+    if match:
+        token_base = match.group(1)
+        suffix = match.group(2)
+        other = "V" if suffix == "T" else "T"
+        return f"{{{{{token_base}_{other}}}}}"
+    # Shape B: substitute the trailing suffix on the literal tail.
+    match = _PREFIXED_DB_IDENT_RE.fullmatch(token)
+    if match:
+        shared_base = match.group(1)
+        suffix = match.group(2)
+        other = "V" if suffix == "T" else "T"
+        return f"{shared_base}_{other}"
+    return None
 
 
 def split_object_filename(filename: str) -> Optional[Tuple[str, str, str]]:
     """
     Split a SHIPS object filename into ``(token, object_name, ext)``.
 
-    SHIPS files are named ``{{<TOKEN>}}.<ObjectName>.<ext>``.
+    SHIPS files are named ``<DATABASE_TOKEN>.<ObjectName>.<ext>``. The
+    database token is either:
+
+      * Shape A — purely tokenised: ``{{DOM_STD_T}}.foo.tbl``
+      * Shape B — tokenised prefix with literal tier suffix:
+        ``{{DB_PREFIX}}_DOM_STD_T.foo.tbl``
+
+    In both shapes the database token starts at ``{{`` and ends at the
+    next ``.`` *outside* the braces — not at the first ``}}``, which
+    only terminates the token name in Shape A but is mid-identifier
+    in Shape B.
 
     Args:
         filename: The base filename, no directory.
@@ -384,18 +439,18 @@ def split_object_filename(filename: str) -> Optional[Tuple[str, str, str]]:
     if not ext:
         return None
 
-    # The file can have multi-part object names (e.g. "Foo.Bar"),
-    # but the token is always the first ".}}"-terminated chunk.
     if not name.startswith("{{"):
         return None
-    end = name.find("}}")
-    if end < 0:
+    close = name.find("}}")
+    if close < 0:
         return None
-    token = name[: end + 2]
-    rest = name[end + 2 :]
-    if not rest.startswith("."):
+    # Find the first ``.`` that comes after the closing braces — that's
+    # the boundary between the database identifier and the object name.
+    dot = name.find(".", close + 2)
+    if dot < 0:
         return None
-    object_name = rest[1:]
+    token = name[:dot]
+    object_name = name[dot + 1 :]
     if not object_name:
         return None
     return token, object_name, ext
@@ -1005,19 +1060,26 @@ def rewrite_tables_to_views(
         for pos in range(match.start(), match.end()):
             mask[pos] = True
 
-    # Walk every {{<TOKEN_BASE>_T}} occurrence and rewrite if not masked.
+    # Walk every database identifier in either shape and rewrite the
+    # ``_T`` form to its ``_V`` companion when not masked by comments /
+    # strings. ``_TOKEN_REF_RE`` matches both Shape A (``{{X_T}}``) and
+    # Shape B (``{{X}}<literal>_T``) — see the regex commentary block
+    # near the top of this file.
     out_parts: List[str] = []
     last_end = 0
     count = 0
-    for match in _MODULE_TOKEN_RE.finditer(view_content):
-        if match.group(2) != "T":
+    for match in _TOKEN_REF_RE.finditer(view_content):
+        full = match.group(0)
+        parsed = _parse_placement_token(full)
+        if parsed is None or parsed[1] != "T":
             continue
         if mask[match.start()]:
             continue
-        # Append text up to this match, then the rewritten token.
+        companion = companion_token(full)
+        if companion is None:
+            continue
         out_parts.append(view_content[last_end : match.start()])
-        token_base = match.group(1)
-        out_parts.append(f"{{{{{token_base}_V}}}}")
+        out_parts.append(companion)
         last_end = match.end()
         count += 1
     out_parts.append(view_content[last_end:])
@@ -1370,13 +1432,14 @@ def collect_cross_module_grants(
             continue
         grantee = view.database_token
         cleaned = _strip_sql_comments(content)
-        for match in _MODULE_TOKEN_RE.finditer(cleaned):
-            ref_base = match.group(1)
+        for match in _TOKEN_REF_RE.finditer(cleaned):
+            ref_token = match.group(0)
+            parsed = _parse_placement_token(ref_token)
+            if parsed is None:
+                continue
+            ref_base, ref_suffix = parsed
             ref_module = _module_from_token_base(ref_base)
-            ref_suffix = match.group(2)
-            ref_token = f"{{{{{ref_base}_{ref_suffix}}}}}"
-            # Skip self-references to the view's own _V (a view in
-            # A view referencing its own _V token is a no-op grant.
+            # Skip self-references to the view's own _V.
             if ref_token == grantee:
                 continue
             # Skip same-module _T references (the same-module grant
@@ -1420,12 +1483,15 @@ def run(
         result.skip_reason = (
             f"No paired-token tables found under "
             f"{project_root / _PATH_TABLES}. View-layer generation is "
-            f"only applicable when ``.tbl`` files use the "
-            f"``{{{{DB_DOMAIN_T}}}}.<Name>.tbl`` convention (with a "
-            f"matching ``{{{{DB_DOMAIN_V}}}}`` companion). Run "
-            f"``ships harvest --auto-tokenise`` to introduce the "
-            f"paired tokens, or ignore this stage if your project "
-            f"deploys views by hand."
+            f"only applicable when ``.tbl`` files use a paired-token "
+            f"convention — either the inline form "
+            f"``{{{{DB_DOMAIN_T}}}}.<Name>.tbl`` (with a matching "
+            f"``{{{{DB_DOMAIN_V}}}}`` companion) or the SHIPS Navigator's "
+            f"One-DB-PREFIX form "
+            f"``{{{{DB_PREFIX}}}}_<MOD>_<TIER>_T.<Name>.tbl`` (paired with "
+            f"``..._V``). Run ``ships harvest --auto-tokenise`` to "
+            f"introduce paired tokens, or ignore this stage if your "
+            f"project deploys views by hand."
         )
         return result
 
