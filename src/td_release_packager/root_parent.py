@@ -7,9 +7,12 @@ from pathlib import Path
 from typing import Iterable
 
 
+# ``{{TOKEN}}\w*`` allows tokenised database names with a literal suffix
+# (e.g. ``{{DB_PREFIX}}_Domain``) to match in full instead of truncating
+# after the closing braces (#454).
 CREATE_PREREQ_HEADER_RE = re.compile(
     r"\bCREATE\s+(?:DATABASE|USER)\s+"
-    r"(?:\"[^\"]+\"|\{\{[A-Za-z_][A-Za-z0-9_]*\}\}|[A-Za-z_][A-Za-z0-9_$#]*)",
+    r"(?:\"[^\"]+\"|\{\{[A-Za-z_][A-Za-z0-9_]*\}\}\w*|[A-Za-z_][A-Za-z0-9_$#]*)",
     re.IGNORECASE,
 )
 PREREQ_FROM_RE = re.compile(r"\bFROM\b", re.IGNORECASE)

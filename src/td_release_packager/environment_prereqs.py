@@ -18,11 +18,14 @@ from pathlib import Path
 from typing import Iterable
 
 # Teradata database/user creation syntax used by SHIPS prerequisite payloads.
+# ``{{TOKEN}}\w*`` keeps tokenised database names with a literal suffix —
+# e.g. ``{{DB_PREFIX}}_Domain_STD`` — as one identifier rather than truncating
+# at the closing braces (#454).
 _CREATE_PARENT_RE = re.compile(
     r"^\s*CREATE\s+(DATABASE|USER)\s+"
-    r"(\{\{[A-Za-z_]\w*\}\}|[\"']?[A-Za-z_]\w*[\"']?)"
+    r"(\{\{[A-Za-z_]\w*\}\}\w*|[\"']?[A-Za-z_]\w*[\"']?)"
     r"\s+FROM\s+"
-    r"(\{\{[A-Za-z_]\w*\}\}|[\"']?[A-Za-z_]\w*[\"']?)",
+    r"(\{\{[A-Za-z_]\w*\}\}\w*|[\"']?[A-Za-z_]\w*[\"']?)",
     re.IGNORECASE | re.MULTILINE,
 )
 _PERM_RE = re.compile(

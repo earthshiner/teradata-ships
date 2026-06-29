@@ -580,6 +580,7 @@ def _guide_tab(run: dict) -> str:
     command = h(str(run.get("command", "—")))
     run_id = h(str(run.get("run_id", "—")))
     stage_count = len(run.get("stages", []) or [])
+    issue_code_glossary = common.render_issue_code_glossary()
     return f"""
 <div class="guide-hero">
   <div class="guide-hero-text">
@@ -712,6 +713,7 @@ def _guide_tab(run: dict) -> str:
   <dd>The append-only audit log of every pipeline run. This report is a
       projection of the most recent run's findings.</dd>
 </div>
+{issue_code_glossary}
 </div>
 """
 

@@ -87,7 +87,10 @@ def is_locking_view(sql_text: str) -> bool:
 # Reference detection (reuses patterns from migrate_view_references)
 # ---------------------------------------------------------------------------
 
-_IDENT_OR_TOKEN = r'(\{\{[A-Za-z_]\w*\}\}|"?[A-Za-z_]\w*"?)'
+# ``{{TOKEN}}\w*`` keeps tokenised database names with a literal suffix as one
+# identifier — ``{{DB_PREFIX}}_DOM_STD_T`` must not split into the bare token
+# (#454).
+_IDENT_OR_TOKEN = r'(\{\{[A-Za-z_]\w*\}\}\w*|"?[A-Za-z_]\w*"?)'
 _QUALIFIED_REF_PATTERN = re.compile(
     r"(?<![.\w])" + _IDENT_OR_TOKEN + r"\." + _IDENT_OR_TOKEN + r"(?![.\w])",
     re.IGNORECASE,

@@ -64,7 +64,9 @@ from database_package_deployer.models import (
 # Deploy classification may run against tokenised payloads before environment
 # substitution. Treat the token as a valid name part so the parser can still
 # recognise that the DDL is explicitly qualified.
-_NP = r'(?:"[^"]+"|\{\{[A-Za-z_][A-Za-z0-9_]*\}\}|[A-Za-z_]\w*)'  # one name part
+# ``{{TOKEN}}\w*`` keeps tokenised names like ``{{DB_PREFIX}}_DOM_STD_T`` as
+# one identifier rather than truncating at the closing braces (#454).
+_NP = r'(?:"[^"]+"|\{\{[A-Za-z_][A-Za-z0-9_]*\}\}\w*|[A-Za-z_]\w*)'  # one name part
 
 # Whitespace between name parts and the dot. Teradata accepts any
 # combination of spaces, tabs, and a single newline on either side:
