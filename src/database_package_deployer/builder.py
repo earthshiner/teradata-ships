@@ -141,7 +141,11 @@ _INJECT_MULTISET_RE = re.compile(
 # filenames from tokenised SHIPS payloads without depending on deploy-time
 # parser behaviour.
 
-_NAME_PART_RE = r'(?:"[^"]+"|\{\{[A-Za-z_][A-Za-z0-9_]*\}\}|[A-Za-z_][A-Za-z0-9_$#]*)'
+# ``{{TOKEN}}\w*`` keeps tokenised names like ``{{DB_PREFIX}}_DOM_STD_T`` as
+# one identifier rather than truncating at the closing braces (#454).
+_NAME_PART_RE = (
+    r'(?:"[^"]+"|\{\{[A-Za-z_][A-Za-z0-9_]*\}\}\w*|[A-Za-z_][A-Za-z0-9_$#]*)'
+)
 _QUALIFIED_NAME_RE = rf"{_NAME_PART_RE}(?:\s*\.\s*{_NAME_PART_RE})?"
 _NAME_END_RE = r"(?=$|\s|[;(])"
 

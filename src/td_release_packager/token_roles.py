@@ -112,8 +112,10 @@ class RoleAssignment:
 # analyser's structural-reference list.
 
 # Permissive name pattern: enough to swallow tokenised, quoted, qualified
-# forms; the parser handles the structure.
-_NAME_RX = r'(?:"[^"]+"|\{\{[A-Za-z_]\w*\}\}|[A-Za-z_$][\w$]*|&&[A-Za-z_]\w*&&)'
+# forms; the parser handles the structure. ``{{TOKEN}}\w*`` keeps tokenised
+# names with a literal suffix (``{{DB_PREFIX}}_ROLE_READ``) as one
+# identifier instead of stripping the suffix (#454).
+_NAME_RX = r'(?:"[^"]+"|\{\{[A-Za-z_]\w*\}\}\w*|[A-Za-z_$][\w$]*|&&[A-Za-z_]\w*&&)'
 _QNAME_RX = rf"{_NAME_RX}(?:\s*\.\s*{_NAME_RX})?"
 
 _IDENTITY_ANCHORS = [

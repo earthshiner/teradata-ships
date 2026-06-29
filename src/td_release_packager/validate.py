@@ -891,7 +891,11 @@ _QUALIFIED_NAME_RE = re.compile(
 # Anchored — see _QUALIFIED_NAME_RE.
 _VIEW_MACRO_DEF_NAME_RE = re.compile(
     r"^\s*(?:CREATE|REPLACE)\s+(?:VIEW|MACRO)\s+"
-    r'(?P<dbpart>"[^"]+"|\{\{[A-Za-z_][A-Za-z0-9_-]*\}\}|[A-Za-z_]\w*)'
+    # ``{{TOKEN}}\w*`` keeps tokenised names like ``{{DB_PREFIX}}_DOM_ACL_V``
+    # as one identifier (#454) — without the trailing ``\w*`` the dbpart
+    # group truncates at the closing braces and the whole regex fails to
+    # match the standard SHIPS tokenised header shape.
+    r'(?P<dbpart>"[^"]+"|\{\{[A-Za-z_][A-Za-z0-9_-]*\}\}\w*|[A-Za-z_]\w*)'
     r"\s*\.\s*"
     r'(?P<objpart>"[^"]+"|[A-Za-z_]\w*)',
     re.IGNORECASE | re.MULTILINE,
@@ -925,7 +929,9 @@ _VIEW_MACRO_DEF_NAME_RE = re.compile(
 # immediately followed by an opening parenthesis — those carry an
 # explicit column list and are therefore compliant.
 _VCL_IDENT_FRAG = (
-    r"(?:\{\{[A-Za-z_][A-Za-z0-9_-]*\}\}"  # {{TOKEN}}
+    # ``{{TOKEN}}\w*`` keeps tokenised names like ``{{DB_PREFIX}}_DOM_STD_T``
+    # as one identifier (#454).
+    r"(?:\{\{[A-Za-z_][A-Za-z0-9_-]*\}\}\w*"  # {{TOKEN}} or {{TOKEN}}suffix
     r'|"[^"]+"'  # "Quoted Identifier"
     r"|[A-Za-z_]\w*)"  # bare_identifier
 )
@@ -977,8 +983,10 @@ _TOKEN_RE = re.compile(r"\{\{([A-Za-z_][A-Za-z0-9_-]*)\}\}")
 #      above does not accept ``{{TOKEN}}`` in the database slot,
 #      so we provide a token-aware variant scoped to this rule.
 
-# Identifier shape: bare ident, quoted ident, or {{TOKEN}}
-_PREREQ_IDENT_FRAG = r'(?:\{\{[A-Za-z_][A-Za-z0-9_-]*\}\}|"[^"]+"|[A-Za-z_]\w*)'
+# Identifier shape: bare ident, quoted ident, or {{TOKEN}} (with optional
+# literal suffix — {{DB_PREFIX}}_DOM is one identifier, not the bare token —
+# #454).
+_PREREQ_IDENT_FRAG = r'(?:\{\{[A-Za-z_][A-Za-z0-9_-]*\}\}\w*|"[^"]+"|[A-Za-z_]\w*)'
 
 # Permissive token-aware identifier — accepts prefix-token shapes
 # (``{{DB_PREFIX}}_T``), multi-token shapes (``{{ENV}}_{{SUFFIX}}``),
@@ -1075,8 +1083,10 @@ _DDL_TERMINATOR_START_RE = re.compile(
 # ---------------------------------------------------------------
 
 # Identifier shape — accepts the three forms that appear in GRANT
-# targets: tokens, Teradata-quoted ids, and bare ids.
-_GRANT_IDENT = r'(?:\{\{[A-Za-z_]\w*\}\}|"[^"]+"|[A-Za-z_]\w*)'
+# targets: tokens (optionally followed by literal suffix —
+# ``{{DB_PREFIX}}_DOM_STD_V`` is one identifier, #454), Teradata-
+# quoted ids, and bare ids.
+_GRANT_IDENT = r'(?:\{\{[A-Za-z_]\w*\}\}\w*|"[^"]+"|[A-Za-z_]\w*)'
 
 # Full GRANT statement. Captures privileges, target (db or db.obj),
 # and grantees. Permissive on whitespace so multi-line GRANTs match.
@@ -3186,8 +3196,10 @@ _LOCKING_VIEW_MARKERS = [
 ]
 
 # Database-qualified reference: DATABASE.OBJECT
-# Also matches {{TOKEN}}.OBJECT for tokenised DDL.
-_IDENT_OR_TOKEN_RE = r'(\{\{[A-Za-z_]\w*\}\}|"?[A-Za-z_]\w*"?)'
+# Also matches {{TOKEN}}.OBJECT for tokenised DDL — ``{{TOKEN}}\w*`` keeps
+# ``{{DB_PREFIX}}_DOM_STD_V`` as one database identifier instead of
+# stripping the suffix (#454).
+_IDENT_OR_TOKEN_RE = r'(\{\{[A-Za-z_]\w*\}\}\w*|"?[A-Za-z_]\w*"?)'
 _DB_QUALIFIED_REF_RE = re.compile(
     r"(?<![.\w])" + _IDENT_OR_TOKEN_RE + r"\." + _IDENT_OR_TOKEN_RE + r"(?![.\w])",
     re.IGNORECASE,

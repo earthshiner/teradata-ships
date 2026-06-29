@@ -137,9 +137,12 @@ class PrivilegeCheckResult:
 
 
 _DATABASE_STATEMENT_RE = re.compile(
+    # ``{{TOKEN}}\w*`` keeps tokenised database names with a literal
+    # suffix as one identifier — ``DATABASE {{DB_PREFIX}}_Domain;`` must
+    # match in full instead of failing to match at all (#454).
     r"""
     (?:^|;)\s*DATABASE\s+
-    ("[^"]+"|\{\{[A-Za-z_][A-Za-z0-9_]*\}\}|[A-Za-z_][A-Za-z0-9_]*)
+    ("[^"]+"|\{\{[A-Za-z_][A-Za-z0-9_]*\}\}\w*|[A-Za-z_][A-Za-z0-9_]*)
     \s*;
     """,
     re.IGNORECASE | re.VERBOSE,

@@ -102,7 +102,10 @@ class FileResult(NamedTuple):
 #
 # The regex matches the DATABASE.OBJECT pattern; the caller is
 # responsible for skipping comments and string literals.
-_IDENT_OR_TOKEN = r'(\{\{[A-Za-z_]\w*\}\}|"?[A-Za-z_]\w*"?)'
+# ``{{TOKEN}}\w*`` keeps tokenised database names with a literal suffix
+# (``{{DB_PREFIX}}_DOM_STD_V``) as one identifier rather than stripping
+# the suffix (#454).
+_IDENT_OR_TOKEN = r'(\{\{[A-Za-z_]\w*\}\}\w*|"?[A-Za-z_]\w*"?)'
 _QUALIFIED_REF_PATTERN = re.compile(
     r"(?<![.\w])"  # Not preceded by dot or word char
     + _IDENT_OR_TOKEN  # Group 1: database name
