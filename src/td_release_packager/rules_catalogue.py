@@ -572,29 +572,29 @@ _RULES: dict[str, dict[str, object]] = {
         "risk": "medium",
         "requires_human_review": True,
     },
-    "orphan_database": {
+    "unreferenced_database": {
         "description": (
-            "A project-level note over "
+            "A project-level informational note over "
             "``payload/database/pre-requisites/``. Surfaces a ``.db`` "
             "/ ``.usr`` declaration whose database name is not "
             "referenced anywhere else in the payload — no table or "
             "view qualified with it, no grant target / grantee "
-            "mentioning it, no child database created FROM it. "
-            "Sometimes the residue of a naming-convention crossfire "
-            "(a hand-authored full-name declaration alongside a "
-            "view-layer-generated abbreviated sibling for the same "
-            "role); often intentional — empty containers like data "
-            "labs, sandboxes, or schemas users populate themselves "
-            "are valid SHIPS payloads. Informational by default."
+            "mentioning it, no child database created FROM it. Empty "
+            "containers like data labs, sandboxes, or schemas users "
+            "populate themselves are valid SHIPS payloads and need "
+            "no action. Occasionally the same shape is the residue of "
+            "a naming-convention crossfire (a hand-authored full-name "
+            "declaration alongside a view-layer-generated abbreviated "
+            "sibling for the same role); the note exists so the "
+            "operator can spot that case. Informational by default."
         ),
         "default_severity": "INFO",
         "safe_fix_available": False,
         "automation_level": "manual",
         "recommended_action": (
-            "Review whether the declaration is intentional. If it's "
+            "No action needed in most cases. If the declaration is "
             "leftover from a naming-convention change, reconcile the "
-            "two names. If it's an empty container for downstream "
-            "consumers, no action needed."
+            "two names; otherwise leave the declaration as-is."
         ),
         "risk": "low",
         "requires_human_review": False,
