@@ -805,6 +805,68 @@ class TestAnalyseProject:
             < wave_for["{{OPR_V}}.GCFR_RV_Row_Count"]
         )
 
+    def test_token_prefixed_qualified_names_resolve_to_internal_refs(self, tmp_project):
+        """``{{DB_PREFIX}}_<suffix>.<obj>`` qualified names index without truncation.
+
+        Regression for the case where every tokenised DDL object collapsed to a
+        ``$TYPE.{{DB_PREFIX}}`` graph key because ``_NAME_FRAG`` only matched the
+        bare ``{{TOKEN}}`` and dropped the literal suffix. With the suffix dropped
+        the dependency graph lost every edge and a comment file's reference to its
+        matching view was flagged as ANALYSE_EXTERNAL_REF.
+        """
+        tables_dir = tmp_project / "payload" / "database" / "DDL" / "tables"
+        views_dir = tmp_project / "payload" / "database" / "DDL" / "views"
+        comments_dir = tmp_project / "payload" / "database" / "DDL" / "comments"
+        comments_dir.mkdir(parents=True, exist_ok=True)
+
+        (tables_dir / "{{DB_PREFIX}}_DOM_STD_T.customer.tbl").write_text(
+            "CREATE MULTISET TABLE {{DB_PREFIX}}_DOM_STD_T.customer (Id INTEGER);",
+            encoding="utf-8",
+        )
+        (views_dir / "{{DB_PREFIX}}_DOM_STD_V.customer.viw").write_text(
+            "REPLACE VIEW {{DB_PREFIX}}_DOM_STD_V.customer AS\n"
+            "SELECT Id FROM {{DB_PREFIX}}_DOM_STD_T.customer;",
+            encoding="utf-8",
+        )
+        (views_dir / "{{DB_PREFIX}}_DOM_ACL_V.customer_current.viw").write_text(
+            "REPLACE VIEW {{DB_PREFIX}}_DOM_ACL_V.customer_current AS\n"
+            "SELECT Id FROM {{DB_PREFIX}}_DOM_STD_V.customer;",
+            encoding="utf-8",
+        )
+        (comments_dir / "{{DB_PREFIX}}_DOM_ACL_V.customer_current.cmt").write_text(
+            "COMMENT ON VIEW {{DB_PREFIX}}_DOM_ACL_V.customer_current "
+            "IS 'Current customers.';",
+            encoding="utf-8",
+        )
+
+        result = analyse_project(str(tmp_project))
+
+        # Every tokenised DDL object is indexed under its full qualified name.
+        assert "{{DB_PREFIX}}_DOM_STD_T.customer" in result.objects
+        assert "{{DB_PREFIX}}_DOM_STD_V.customer" in result.objects
+        assert "{{DB_PREFIX}}_DOM_ACL_V.customer_current" in result.objects
+
+        # No spurious ``$TYPE.{{DB_PREFIX}}`` collapsing.
+        for qn in result.objects:
+            assert not qn.endswith(".{{DB_PREFIX}}"), (
+                f"qualified name truncated at token: {qn!r}"
+            )
+
+        # Internal references resolve — nothing leaks into external_deps.
+        assert result.external_deps == {} or all(
+            not refs for refs in result.external_deps.values()
+        ), f"unexpected external refs: {result.external_deps!r}"
+
+        # View → STD_V → STD_T chain is captured.
+        assert (
+            "{{DB_PREFIX}}_DOM_STD_T.customer"
+            in result.dependencies["{{DB_PREFIX}}_DOM_STD_V.customer"]
+        )
+        assert (
+            "{{DB_PREFIX}}_DOM_STD_V.customer"
+            in result.dependencies["{{DB_PREFIX}}_DOM_ACL_V.customer_current"]
+        )
+
     def test_database_parent_child_prereqs_produce_ordered_waves(self, tmp_project):
         """CREATE DATABASE child FROM parent creates a wave dependency."""
         databases_dir = (
