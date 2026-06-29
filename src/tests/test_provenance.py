@@ -143,6 +143,54 @@ class TestProvenanceChain:
         c = _complete_chain(src="src/x.tbl")
         assert c.source_path() == "src/x.tbl"
 
+    def test_harvest_source_defaults_to_none(self):
+        """``harvest_source`` is optional — chains built outside the
+        harvest-aware build flow leave it unset and serialise without
+        the field."""
+        c = _complete_chain()
+        assert c.harvest_source is None
+        d = c.to_dict()
+        assert "harvest_source" not in d, (
+            "Unset harvest_source must be omitted to keep on-disk "
+            "documents backward-compatible with pre-#477 readers."
+        )
+
+    def test_harvest_source_serialises_when_set(self):
+        c = _complete_chain()
+        c.harvest_source = "90_access/CustomerDNA_ACCESS.role_admin.dcl"
+        d = c.to_dict()
+        assert d["harvest_source"] == "90_access/CustomerDNA_ACCESS.role_admin.dcl"
+
+    def test_harvest_source_roundtrips_via_from_dict(self):
+        c = _complete_chain()
+        c.harvest_source = "src/auth.dcl"
+        roundtripped = ProvenanceChain.from_dict(c.to_dict())
+        assert roundtripped.harvest_source == "src/auth.dcl"
+
+    def test_pre_477_dict_loads_with_harvest_source_none(self):
+        """Documents written before #477 don't carry the field — readers
+        must treat that as ``None``, not raise."""
+        legacy = {
+            "stages": [
+                {"stage": "source", "path": "x.tbl", "status": "applied"},
+                {
+                    "stage": "eponymous",
+                    "path": "x.tbl",
+                    "status": "no_op",
+                    "note": "n",
+                },
+                {
+                    "stage": "token_resolved",
+                    "path": "x.tbl",
+                    "status": "no_op",
+                    "note": "n",
+                },
+                {"stage": "package", "path": "03_tables/x.tbl", "status": "applied"},
+            ]
+        }
+        c = ProvenanceChain.from_dict(legacy)
+        assert c.harvest_source is None
+
 
 # -------------------------------------------------------------------
 # ProvenanceDocument

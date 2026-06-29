@@ -877,7 +877,19 @@ def _content_provenance_tab(
         if not stages:
             continue
 
-        source_path = stages[0].get("path", "")
+        # ``harvest_source`` (#477) is the *user-authored* source file
+        # the chain ultimately traces back to — the path the operator
+        # actually edits to change the deployed object. The post-harvest
+        # ``source`` stage's path is downstream of this: harvest splits
+        # multi-statement source files into one destination file per
+        # statement and renames them to the eponymous-form layout.
+        # When the field is present, surface it in the outer row's
+        # "Source path" column so the operator sees the path they
+        # actually need to open; otherwise fall back to the post-harvest
+        # source-stage path (the prior behaviour, kept for chains built
+        # outside the harvest-aware build flow).
+        harvest_source = chain.get("harvest_source") or ""
+        source_path = harvest_source or stages[0].get("path", "")
 
         # Packaged path links to the existing viewer page when present.
         # Don't synthesize a link to a file that wasn't written.
@@ -898,6 +910,29 @@ def _content_provenance_tab(
         # Stage-chain detail rendered as a small inner table inside the
         # row's <details> body. Each stage row: badge + name + path + note.
         chain_rows: List[str] = []
+        if harvest_source:
+            # Render harvest_source as a synthetic leading row so the
+            # full provenance is visible end-to-end. It sits *before*
+            # the v2 ``source`` stage because it is upstream of harvest.
+            # No status badge — this is a recorded fact about the user
+            # workspace, not a pipeline-stage outcome.
+            chain_rows.append(
+                f"<tr>"
+                f'<td style="padding:4px 8px;white-space:nowrap">'
+                f'<span style="display:inline-block;padding:2px 8px;'
+                f"border-radius:3px;background:#E0E7FF;color:#3730A3;"
+                f'font-size:10px;font-weight:600;text-transform:uppercase">'
+                f"authored</span></td>"
+                f'<td style="padding:4px 8px;font-weight:600;'
+                f'color:#0E4D8C;white-space:nowrap">harvest_source</td>'
+                f'<td style="padding:4px 8px;font-family:ui-monospace,monospace;'
+                f'font-size:11px;color:#333;word-break:break-all">'
+                f"{_esc(harvest_source)}</td>"
+                f'<td style="padding:4px 8px;font-size:12px;'
+                f'color:#666;font-style:italic">'
+                f"User-authored source file (pre-harvest)</td>"
+                f"</tr>"
+            )
         for stage in stages:
             stage_name = stage.get("stage", "")
             stage_path = stage.get("path", "")
@@ -968,7 +1003,9 @@ def _content_provenance_tab(
         f"</div>"
         '<p style="color:#666;font-size:12px;margin:0 0 10px 0">'
         "Click any packaged path to expand its full transformation chain "
-        "(source &rarr; eponymous &rarr; token_resolved &rarr; package)."
+        "(harvest_source &rarr; source &rarr; eponymous &rarr; "
+        "token_resolved &rarr; package). The harvest_source row is only "
+        "shown when the package was built from a harvested source tree."
         "</p>"
         '<table style="width:100%;border-collapse:collapse;'
         'background:white;border:1px solid #E5E7EB">'
