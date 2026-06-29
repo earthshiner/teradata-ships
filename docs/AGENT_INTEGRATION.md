@@ -700,7 +700,11 @@ Every issue recorded in `decisions.json` carries a stable code. Agents branch on
 | Harvest | `HARVEST_TOKEN_CANDIDATE` | info | Hardcoded DB name detected |
 | Inspect | `INSPECT_TOKEN_MALFORMED` | error | Malformed `{{TOKEN}}` marker |
 | Inspect | `INSPECT_LINT_VIOLATION` | varies | Coding Discipline rule fired |
-| Inspect | `INSPECT_GRANT_VIOLATION` | varies | Grant drift detected |
+| Inspect | `INSPECT_GRANT_AUTO_GENERATED` | info | `.grt` files auto-generated from DDL intent |
+| Inspect | `INSPECT_GRANT_EXTERNAL` | varies | Grant targets an object not declared in this package |
+| Inspect | `INSPECT_GRANT_MISSING` | info | DDL implies a grant absent from `.dcl` files |
+| Inspect | `INSPECT_GRANT_DRIFT` | varies | `.dcl` entry diverges from inferred grant set |
+| Inspect | `INSPECT_GRANT_VIOLATION` | varies | Deprecated alias for the four codes above |
 | Analyse | `ANALYSE_CYCLE` | error | Circular dependency |
 | Analyse | `ANALYSE_EXTERNAL_REF` | info | Reference not in package |
 | Generate | `GENERATE_ERROR` | error | View generator failed |

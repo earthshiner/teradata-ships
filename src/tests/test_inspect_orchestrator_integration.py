@@ -465,3 +465,78 @@ class TestContractChangeEndToEnd:
         ]
         assert contract, "expected a contract_change finding after dropping a column"
         assert any("b" in i["message"] for i in contract)
+
+
+# ---------------------------------------------------------------
+# Package-integrity check routing (#452)
+# ---------------------------------------------------------------
+
+
+class TestPackageIntegrityRouting:
+    """``non_linear_package_history`` findings carry INSPECT_PACKAGE_INTEGRITY,
+    not INSPECT_LINT_VIOLATION — the check runs over ``releases/``, not
+    source DDL, and conflating them with Coding Discipline lint mis-groups
+    findings in ``explain`` and CI dashboards (#452).
+    """
+
+    def test_sidecar_mismatch_routes_to_package_integrity_code(self, tmp_path, capsys):
+        import hashlib
+
+        project = _make_project(tmp_path)
+
+        # A clean payload so per-file lint says nothing surprising.
+        (project / "payload" / "database" / "DDL" / "tables" / "MyDB.T.tbl").write_text(
+            "CREATE MULTISET TABLE {{DB}}.T (Id INT) PRIMARY INDEX (Id);",
+            encoding="utf-8",
+        )
+
+        # Build a synthetic releases/ group whose .sha256 sidecar deliberately
+        # disagrees with its archive — this is the exact shape the user hit.
+        releases = project / "releases" / "DEV_PKG_BUILD_0001_20260101000000"
+        releases.mkdir(parents=True)
+        archive = "DEV_PKG_BUILD_0001_20260101000000_01_main.zip"
+        (releases / archive).write_bytes(b"actual-payload")
+        # Bad sidecar: hash of different bytes.
+        bad_digest = hashlib.sha256(b"DIFFERENT-BYTES").hexdigest()
+        (releases / (archive + ".sha256")).write_text(
+            f"{bad_digest}  {archive}\n", encoding="utf-8"
+        )
+        (releases / "release_group.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "release_group": "DEV_PKG_BUILD_0001_20260101000000",
+                    "environment": "DEV",
+                    "package_name": "PKG",
+                    "packages": [
+                        {
+                            "role": "main",
+                            "archive": archive,
+                            "checksum": archive + ".sha256",
+                            "requires": [],
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        _run_inspect(_make_namespace(project))
+        capsys.readouterr()
+
+        stage = _read_decisions(project)["runs"][0]["stages"][0]
+        history_issues = [
+            i
+            for i in stage["issues"]
+            if "non_linear_package_history" in i.get("message", "")
+        ]
+        assert history_issues, (
+            "expected a non_linear_package_history finding from the sidecar "
+            "mismatch fixture"
+        )
+        # Every package-history finding should carry the new code, not the
+        # old INSPECT_LINT_VIOLATION it used to ride through.
+        for issue in history_issues:
+            assert issue["code"] == "INSPECT_PACKAGE_INTEGRITY", (
+                f"package-history finding mis-routed: {issue!r}"
+            )

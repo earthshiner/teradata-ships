@@ -184,7 +184,7 @@ python -m td_release_packager package \
 |---|---|
 | `inspect_token_format` | INSPECT_TOKEN_MALFORMED error in inspect stage |
 | `inspect_lint` | INSPECT_LINT_VIOLATION error in inspect stage |
-| `inspect_grants` | INSPECT_GRANT_VIOLATION error in inspect stage |
+| `inspect_grants` | Any INSPECT_GRANT_* error in inspect stage (per-condition: AUTO_GENERATED / EXTERNAL / MISSING / DRIFT) |
 | `provenance_complete` | `context/ships.provenance.json` absent from the package |
 | `build_reproducible` | `source_dirty` flag set in `context/ships.build.json` |
 

@@ -787,8 +787,11 @@ def _scan_references(
 
 # Qualified name extraction
 # A name fragment: either a regular identifier, a quoted identifier,
-# or a {{TOKEN}} placeholder.
-_NAME_FRAG = rf'(?:"[^"]+"|[A-Za-z_]\w*|\{{\{{[A-Za-z_]\w*\}}\}}|{_LEGACY_IDENT})'
+# or a {{TOKEN}} placeholder optionally followed by literal suffix
+# characters — `{{DB_PREFIX}}_DOM_STD_T` is one identifier, not
+# `{{DB_PREFIX}}` followed by stray tokens. The trailing `\w*` matches
+# the suffix used everywhere SHIPS tokenises a database name prefix.
+_NAME_FRAG = rf'(?:"[^"]+"|[A-Za-z_]\w*|\{{\{{[A-Za-z_]\w*\}}\}}\w*|{_LEGACY_IDENT})'
 _QUAL_NAME = _NAME_FRAG + r"(?:\." + _NAME_FRAG + r")?"
 
 # Anchored — see classifier.py for the GRANT-with-CREATE-PROCEDURE

@@ -44,6 +44,7 @@ from typing import Any, Dict, List, Optional, Set
 from td_release_packager.builder import build_package
 from td_release_packager.build_counter import read_build_number
 from td_release_packager.ingest import ingest_directory
+from td_release_packager.package_history import RULE_NAME as _PACKAGE_HISTORY_RULE
 from td_release_packager.token_engine import (
     read_token_map,
     write_token_map,
@@ -2606,11 +2607,17 @@ def _run_inspect(args, stage, issue_codes) -> int:
                 if issue.line is not None:
                     location = f"{issue.file}:{issue.line}"
                 remediation = getattr(issue, "remediation", None)
-                code = (
-                    issue_codes.INSPECT_CUSTOM_POLICY
-                    if issue.rule in custom_rule_names
-                    else issue_codes.INSPECT_LINT_VIOLATION
-                )
+                # Three buckets of finding flow through this list:
+                #   1. Per-file Coding Discipline rules → INSPECT_LINT_VIOLATION
+                #   2. Custom lint policy rules → INSPECT_CUSTOM_POLICY
+                #   3. Project-level package-integrity check over releases/
+                #      → INSPECT_PACKAGE_INTEGRITY (issue #452, not lint)
+                if issue.rule == _PACKAGE_HISTORY_RULE:
+                    code = issue_codes.INSPECT_PACKAGE_INTEGRITY
+                elif issue.rule in custom_rule_names:
+                    code = issue_codes.INSPECT_CUSTOM_POLICY
+                else:
+                    code = issue_codes.INSPECT_LINT_VIOLATION
                 stage.add_issue(
                     rec_severity,
                     code,
@@ -2990,14 +2997,13 @@ def _run_inspect(args, stage, issue_codes) -> int:
         # need to attach the per-step findings now.
         if grant_result is not None:
             if grants_files_written:
-                # Summary INFO: low-friction default — fix mode just
-                # generated/updated the .grt files from inferred DDL
-                # intent. Record once at info-level so the audit trail
-                # in ships.decisions.json shows what SHIPS did on the
-                # operator's behalf.
+                # `--fix-grants` (the default) just wrote .grt files for
+                # the operator. Recorded so the audit trail in
+                # ships.decisions.json shows what SHIPS did — not a
+                # violation. (#451)
                 stage.add_issue(
                     "info",
-                    issue_codes.INSPECT_GRANT_VIOLATION,
+                    issue_codes.INSPECT_GRANT_AUTO_GENERATED,
                     f"Auto-generated {grants_files_written} .grt file(s) "
                     f"from DDL intent (--fix-grants default). Pass "
                     f"--no-fix-grants to opt out and just lint.",
@@ -3011,14 +3017,14 @@ def _run_inspect(args, stage, issue_codes) -> int:
                     # absent from the .dcl file. Always a hard error.
                     stage.add_issue(
                         "error",
-                        issue_codes.INSPECT_GRANT_VIOLATION,
+                        issue_codes.INSPECT_GRANT_DRIFT,
                         f"Drifted grant: {_format_drifted_grant(entry)}",
                     )
                 elif _grant_issue_enabled(warn_extra_grants_severity):
                     # Extra-only drift is controlled by warn_extra_grants.
                     stage.add_issue(
                         warn_extra_grants_severity.lower(),
-                        issue_codes.INSPECT_GRANT_VIOLATION,
+                        issue_codes.INSPECT_GRANT_DRIFT,
                         f"Drifted grant: {_format_drifted_grant(entry)}",
                     )
             for entry in grant_result.missing:
@@ -3031,7 +3037,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
                 # default behaviour.
                 stage.add_issue(
                     "info",
-                    issue_codes.INSPECT_GRANT_VIOLATION,
+                    issue_codes.INSPECT_GRANT_MISSING,
                     f"Missing grant: {_format_missing_grant(entry)}. "
                     f"Drop --no-fix-grants (or run "
                     f"`ships inspect --fix-grants`) to auto-generate.",
@@ -3040,7 +3046,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
                 if _grant_issue_enabled(warn_external_grants_severity):
                     stage.add_issue(
                         warn_external_grants_severity.lower(),
-                        issue_codes.INSPECT_GRANT_VIOLATION,
+                        issue_codes.INSPECT_GRANT_EXTERNAL,
                         f"External grant: {_format_external_grant(entry)}",
                     )
 
@@ -5208,14 +5214,18 @@ def _run_analyze(args, stage, issue_codes) -> int:
         waves_path = waves_txt_path(source_dir)
 
     if result.waves:
-        if os.path.exists(waves_path) and not args.overwrite:
-            print(f"\n  ⚠ {waves_path} already exists. Use --overwrite to replace.")
-        else:
-            with open(waves_path, "w", encoding="utf-8") as f:
-                f.write(result.waves_file_content)
-            stage.set_outputs(waves_path=waves_path)
-            print(f"\n  ✓ Wave file written: {waves_path}")
-            print(f"    {len(result.waves)} waves, {len(result.objects)} objects")
+        # ``.ships/_waves.txt`` is a regenerable artefact, not user-edited
+        # state. Always rewrite it on analyse so downstream consumers
+        # (pipeline_report Payload tab, packaging) reflect the current
+        # source state — keeping the previous run's file frozen made the
+        # Payload tab render 'waves not computed yet' after every source
+        # edit (#449). ``--overwrite`` remains as a no-op flag for
+        # backwards compatibility.
+        with open(waves_path, "w", encoding="utf-8") as f:
+            f.write(result.waves_file_content)
+        stage.set_outputs(waves_path=waves_path)
+        print(f"\n  ✓ Wave file written: {waves_path}")
+        print(f"    {len(result.waves)} waves, {len(result.objects)} objects")
 
     if result.cycles:
         print(f"\n  ⚠ {len(result.cycles)} cycle(s) detected — review before deploying")
@@ -6210,7 +6220,14 @@ def _build_parser():
         help="Output path for _waves.txt (default: <source>/.ships/_waves.txt).",
     )
     az.add_argument(
-        "--overwrite", action="store_true", help="Overwrite existing _waves.txt."
+        "--overwrite",
+        action="store_true",
+        help=(
+            "Deprecated no-op — analyse always rewrites _waves.txt now "
+            "that the previous skip-if-exists behaviour caused stale "
+            "wave data to outlive source edits (#449). Kept so existing "
+            "scripts that pass --overwrite continue to parse."
+        ),
     )
     az.add_argument(
         "--graph",

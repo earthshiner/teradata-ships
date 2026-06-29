@@ -354,6 +354,32 @@ class TestBuildPackageAutoSplit:
         assert os.path.isfile(prereqs_archive)
         assert main_archive != prereqs_archive
 
+    def test_sidecars_match_live_archive_hashes(self, split_config):
+        """Every ``.sha256`` sidecar in the release group records the
+        digest of the actual on-disk archive — no stale digest left over
+        from an intermediate state. Regression for #450, where a Windows
+        write-cache (or external scanner touching the file post-write)
+        could leave the archive's bytes diverging from the digest that
+        ``_generate_checksum`` had just captured.
+        """
+        import hashlib
+
+        (main_pair, companion_pair) = build_package(split_config)
+        group_dir = Path(main_pair[0]).parent
+
+        archives = sorted(group_dir.glob("*.zip"))
+        assert archives, "expected at least one archive in the release group"
+
+        for archive in archives:
+            sidecar = archive.parent / (archive.name + ".sha256")
+            assert sidecar.is_file(), f"missing sidecar for {archive.name}"
+            recorded = sidecar.read_text(encoding="utf-8").split()[0].lower()
+            live = hashlib.sha256(archive.read_bytes()).hexdigest()
+            assert recorded == live, (
+                f"sidecar/archive mismatch for {archive.name}: "
+                f"sidecar={recorded[:16]}… live={live[:16]}…"
+            )
+
     def test_split_archive_names_sort_as_deploy_pair(self, split_config):
         """Split package filenames keep the release identity first and
         append deploy-order role suffixes so the pair sorts together."""
