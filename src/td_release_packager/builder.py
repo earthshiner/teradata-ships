@@ -486,6 +486,65 @@ def _check_working_tree(source_dir: str, allow_dirty: bool) -> bool:
     return True
 
 
+def _enrich_provenance_with_harvest_source(
+    provenance_doc: ProvenanceDocument, source_dir: str
+) -> None:
+    """Stamp ``harvest_source`` on every chain whose post-harvest
+    source-stage path is recorded in ``.ships/harvest/source_map.json``.
+
+    The source-stage path in a chain is the *post-harvest* payload
+    file (e.g. ``database/system/roles/{{DB_PREFIX}}_ROLE_ADMIN.rol``)
+    — the file SHIPS' build pipeline picked up. That is downstream of
+    the user-authored file (e.g.
+    ``90_access/CustomerDNA_ACCESS.role_admin.dcl``): harvest splits
+    multi-statement source files into one destination file per
+    statement, and renames them to the eponymous-form layout. Without
+    this enrichment, the package-report content-provenance chain
+    can't tell the operator which file to open to change the
+    deployed object.
+
+    No-op when the source map is missing (chains built outside the
+    harvest-aware build flow) or unreadable.
+
+    Args:
+        provenance_doc: The document about to be written.
+        source_dir:     SHIPS project root — ``.ships/harvest/source_map.json``
+                        lives under this.
+    """
+    source_map_path = os.path.join(source_dir, ".ships", "harvest", "source_map.json")
+    if not os.path.isfile(source_map_path):
+        return
+    try:
+        with open(source_map_path, encoding="utf-8") as f:
+            source_map = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return
+
+    entries = source_map.get("entries") if isinstance(source_map, dict) else None
+    if not isinstance(entries, dict) or not entries:
+        return
+
+    for chain in provenance_doc.entries.values():
+        if chain.harvest_source is not None:
+            continue
+        if not chain.stages:
+            continue
+        first = chain.stages[0]
+        if first.stage != "source":
+            continue
+        # Source-stage path is payload-relative (``database/...``);
+        # harvest source_map keys are payload-rooted
+        # (``payload/database/...``). Normalise slashes both ways.
+        key = first.path.replace("\\", "/").lstrip("/")
+        candidates = (key, f"payload/{key}")
+        entry = next((entries[k] for k in candidates if k in entries), None)
+        if entry is None:
+            continue
+        rel = entry.get("source_relpath") if isinstance(entry, dict) else None
+        if rel:
+            chain.harvest_source = str(rel).replace("\\", "/")
+
+
 def _build_package_impl(
     config: BuildConfig,
 ) -> Tuple[Tuple[str, BuildManifest], Optional[Tuple[str, BuildManifest]]]:
@@ -802,6 +861,15 @@ def _build_package_impl(
     # eponymous → token-resolved → package) for every payload file.
     # This must be written BEFORE the trust report is computed so
     # provenance_complete can validate the actual package artefact.
+    #
+    # Before write, enrich each chain with its ``harvest_source`` —
+    # the user-authored source path the file ultimately traces back
+    # to — pulled from ``<project>/.ships/harvest/source_map.json``
+    # (#466). The ``source`` stage records the post-harvest payload
+    # entry, which is downstream of the operator's actual edit.
+    # Without harvest_source the package report can't tell the
+    # operator which file to open to change the deployed object.
+    _enrich_provenance_with_harvest_source(provenance_doc, config.source_dir)
     provenance_path = _context_file(pkg_dir, "ships.provenance.json")
     provenance_doc.write(provenance_path)
     logger.info(

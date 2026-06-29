@@ -146,11 +146,26 @@ class ProvenanceChain:
     serialised into the v2 JSON document.
 
     Attributes:
-        stages: Ordered list of Stage entries — must contain exactly
-                the four stages in STAGE_ORDER once finalised.
+        stages:         Ordered list of Stage entries — must contain
+                        exactly the four stages in STAGE_ORDER once
+                        finalised.
+        harvest_source: Optional path to the **user-authored** source
+                        file the chain ultimately traces back to,
+                        relative to the harvest source root. The
+                        ``source`` stage's path is the
+                        *post-harvest* payload-relative path (where
+                        harvest dropped the file), which can differ
+                        materially from the file the operator
+                        actually edited — harvest renames + splits
+                        multi-statement source files into one
+                        destination file per statement. Populated
+                        from ``.ships/harvest/source_map.json``
+                        (#466) before write; ``None`` on chains
+                        built outside the harvest-aware build flow.
     """
 
     stages: List[Stage] = field(default_factory=list)
+    harvest_source: Optional[str] = None
 
     def add(self, stage: Stage) -> None:
         """
@@ -217,7 +232,10 @@ class ProvenanceChain:
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialise to a plain dict suitable for JSON output."""
-        return {"stages": [s.to_dict() for s in self.stages]}
+        d: Dict[str, Any] = {"stages": [s.to_dict() for s in self.stages]}
+        if self.harvest_source is not None:
+            d["harvest_source"] = self.harvest_source
+        return d
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ProvenanceChain":
@@ -251,6 +269,10 @@ class ProvenanceChain:
                     note=s.get("note"),
                 )
             )
+        # ``harvest_source`` is optional — pre-#466 documents won't
+        # carry it. ``None`` is the right default for chains built
+        # outside the harvest-aware build flow.
+        chain.harvest_source = data.get("harvest_source")
         return chain
 
 
