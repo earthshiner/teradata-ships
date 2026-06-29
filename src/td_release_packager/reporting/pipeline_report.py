@@ -194,7 +194,27 @@ def _stage_metric_pairs(stage: dict, name: str) -> List[Tuple[str, str]]:
 # ---------------------------------------------------------------------------
 
 
-def _timeline_tab(run: dict) -> str:
+def _load_source_map(project_dir: str) -> Optional[dict]:
+    """Load ``.ships/harvest/source_map.json`` if present (#466).
+
+    Returns ``None`` when the project hasn't been harvested yet, when
+    the file is missing, or when it's malformed — callers should treat
+    that as "no provenance available" and render issues without the
+    source subline.
+    """
+    path = os.path.join(project_dir, ".ships", "harvest", "source_map.json")
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.debug("pipeline_report: could not read source_map: %s", exc)
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _timeline_tab(run: dict, source_map: Optional[dict] = None) -> str:
     """Render the Run-timeline tab: one expandable row per recorded stage."""
     stages = run.get("stages", []) or []
     if not stages:
@@ -251,7 +271,7 @@ def _timeline_tab(run: dict) -> str:
             f"</summary>"
             f"{metrics_html}"
             f'<div style="background:#F8F9FA;border-top:1px solid #DEE2E6;'
-            f'padding:12px 16px;font-size:13px">{common.render_issue_list(issues)}</div>'
+            f'padding:12px 16px;font-size:13px">{common.render_issue_list(issues, source_map=source_map)}</div>'
             f"</details>"
         )
 
@@ -291,7 +311,11 @@ _STEP_TABS: Dict[str, Tuple[str, str]] = {
 }
 
 
-def _step_detail_tab(stages: List[dict], step_key: str) -> str:
+def _step_detail_tab(
+    stages: List[dict],
+    step_key: str,
+    source_map: Optional[dict] = None,
+) -> str:
     """Render a detail tab for one recorded step: metric cards + issues.
 
     Shared by Harvest / Inspect / Scan / Analyse — each is structurally the
@@ -299,8 +323,11 @@ def _step_detail_tab(stages: List[dict], step_key: str) -> str:
     them consistent (DRY).
 
     Args:
-        stages:   The latest run's stage list.
-        step_key: Canonical step name (key of ``_STEP_TABS``).
+        stages:     The latest run's stage list.
+        step_key:   Canonical step name (key of ``_STEP_TABS``).
+        source_map: Optional loaded ``.ships/harvest/source_map.json`` so
+            inspect findings can render the source file they trace back to
+            (#466).
     """
     title, command = _STEP_TABS.get(step_key, (step_key.title(), f"ships {step_key}"))
     stage = _find_stage(stages, step_key)
@@ -344,7 +371,7 @@ def _step_detail_tab(stages: List[dict], step_key: str) -> str:
     )
     issues_block = (
         f'<h3 style="font-size:14px;color:{common.NAVY};margin:8px 0 10px">Issues</h3>'
-        f"{common.render_issue_list(issues)}"
+        f"{common.render_issue_list(issues, source_map=source_map)}"
     )
     return header + metrics_html + issues_block
 
@@ -759,13 +786,30 @@ def generate_pipeline_report(project_dir: str) -> Optional[str]:
         f'<span style="color:#777">pre-package pipeline — regenerated after every step</span>'
     )
 
+    source_map = _load_source_map(project_dir)
     tabs = [
         Tab("tab-guide", "Guide", _guide_tab(run), active=True),
-        Tab("tab-timeline", "Run timeline", _timeline_tab(run)),
-        Tab("tab-harvest", "Harvest", _step_detail_tab(stages, "harvest")),
-        Tab("tab-inspect", "Inspect", _step_detail_tab(stages, "inspect")),
-        Tab("tab-scan", "Scan", _step_detail_tab(stages, "scan")),
-        Tab("tab-analyse", "Analyse", _step_detail_tab(stages, "analyse")),
+        Tab("tab-timeline", "Run timeline", _timeline_tab(run, source_map=source_map)),
+        Tab(
+            "tab-harvest",
+            "Harvest",
+            _step_detail_tab(stages, "harvest", source_map=source_map),
+        ),
+        Tab(
+            "tab-inspect",
+            "Inspect",
+            _step_detail_tab(stages, "inspect", source_map=source_map),
+        ),
+        Tab(
+            "tab-scan",
+            "Scan",
+            _step_detail_tab(stages, "scan", source_map=source_map),
+        ),
+        Tab(
+            "tab-analyse",
+            "Analyse",
+            _step_detail_tab(stages, "analyse", source_map=source_map),
+        ),
         Tab("tab-payload", "Payload", _payload_tab(project_dir)),
         Tab(
             "tab-tokens",

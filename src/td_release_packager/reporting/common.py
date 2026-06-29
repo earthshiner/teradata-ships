@@ -172,13 +172,69 @@ def issue_count_badges(issues: Sequence[dict]) -> str:
     return out
 
 
-def render_issue_list(issues: Sequence[dict]) -> str:
+def lookup_source_provenance(
+    location: str, source_map: Optional[dict]
+) -> Optional[dict]:
+    """Return the source-file entry for an inspect-finding location.
+
+    Inspect stores locations like ``DDL\\views\\foo.viw:37`` (relative
+    to ``payload/database/``, Windows backslashes, with a trailing
+    ``:line`` suffix). The harvest source map keys by full
+    ``payload/database/DDL/views/foo.viw`` paths with forward slashes.
+    This helper handles the common normalisations so callers don't
+    have to reinvent the mapping.
+
+    Args:
+        location: Issue location string from ``ships.decisions.json``.
+        source_map: Loaded ``.ships/harvest/source_map.json`` dict or
+            ``None``. When ``None`` or empty, the lookup short-circuits.
+
+    Returns:
+        The ``entries[<key>]`` dict (with ``source_relpath`` /
+        ``source_abspath`` / ``type``), or ``None`` if no match.
+    """
+    if not source_map or not location:
+        return None
+    entries = source_map.get("entries") or {}
+    if not entries:
+        return None
+
+    # Strip trailing ":<line>" suffix and normalise slashes.
+    raw = str(location)
+    if ":" in raw:
+        head, tail = raw.rsplit(":", 1)
+        if tail.isdigit():
+            raw = head
+    raw = raw.replace("\\", "/")
+    if raw.startswith("./"):
+        raw = raw[2:]
+
+    if raw in entries:
+        return entries[raw]
+    # Try common prefix expansions — inspect typically reports paths
+    # relative to ``payload/database/`` so prepend that and try.
+    for prefix in ("payload/database/", "payload/"):
+        candidate = prefix + raw
+        if candidate in entries:
+            return entries[candidate]
+    return None
+
+
+def render_issue_list(
+    issues: Sequence[dict],
+    source_map: Optional[dict] = None,
+) -> str:
     """Render a stage's issue list as an HTML detail block.
 
     Args:
         issues: The ``issues`` array from a decisions.json stage entry.
                 Each issue has ``severity`` / ``code`` / ``message`` and
                 an optional ``location``.
+        source_map: Optional loaded harvest source map (#466). When
+            provided, each issue's location is resolved to its source
+            file via :func:`lookup_source_provenance` and the source
+            path is rendered as a faint subline so the reader knows
+            which source file to edit.
 
     Returns:
         HTML string. A green "no issues" note when the list is empty.
@@ -209,6 +265,17 @@ def render_issue_list(issues: Sequence[dict]) -> str:
         )
         msg = h(str(issue.get("message", "")))
         loc = issue.get("location", "")
+        source_entry = lookup_source_provenance(str(loc), source_map) if loc else None
+        source_subline = ""
+        if source_entry:
+            source_rel = source_entry.get("source_relpath", "")
+            source_abs = source_entry.get("source_abspath", "")
+            if source_rel:
+                source_subline = (
+                    f'<div style="font-size:11px;color:#4A6FA5;'
+                    f'margin-top:2px" title="{a(source_abs)}">'
+                    f"↳ source: <code>{h(source_rel)}</code></div>"
+                )
         loc_html = (
             f'<div style="font-size:11px;color:#6C757D;margin-top:2px">{h(str(loc))}</div>'
             if loc
@@ -221,7 +288,8 @@ def render_issue_list(issues: Sequence[dict]) -> str:
             f'margin-right:8px;cursor:help;border-bottom:1px dotted {colour}"{title_attr}>'
             f"{code}</span>"
             f'<span style="font-size:12px;color:#333">{msg}</span>'
-            f"{loc_html}</div>"
+            f"{loc_html}"
+            f"{source_subline}</div>"
         )
     return "".join(rows)
 
