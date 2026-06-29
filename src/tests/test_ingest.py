@@ -758,6 +758,34 @@ class TestBuildTokenCandidates:
         assert "TD_SYSFNLIB" not in result
         assert "MyDB" in result
 
+    def test_pure_token_name_not_flagged(self):
+        """A name that's already a bare ``{{TOKEN}}`` reference is the
+        goal state — not a token candidate."""
+        db_names = {"{{DB_PREFIX}}": ["file1.tbl"]}
+        result = _build_token_candidates(db_names)
+        assert "{{DB_PREFIX}}" not in result
+
+    def test_token_plus_literal_suffix_not_flagged(self):
+        """The SHIPS Navigator's One-DB-PREFIX scaffolding output
+        (``{{DB_PREFIX}}_DOM_ACL_V`` and friends) is already tokenised —
+        the literal ``_<MODULE>_<TIER>`` suffix is structural and the
+        operator deliberately keeps it un-tokenised. Without this
+        carve-out every Shape-B database fired HARVEST_TOKEN_CANDIDATE
+        on harvest, swamping the report with false positives.
+        """
+        db_names = {
+            "{{DB_PREFIX}}_DOM_ACL_V": ["a.viw"],
+            "{{DB_PREFIX}}_DOM_STD_T": ["b.tbl"],
+            "{{DB_PREFIX}}_SEM_STD_V": ["c.viw"],
+            # A real candidate alongside, to make sure we didn't break detection.
+            "DEV_Hardcoded_DB": ["d.tbl"],
+        }
+        result = _build_token_candidates(db_names)
+        assert "{{DB_PREFIX}}_DOM_ACL_V" not in result
+        assert "{{DB_PREFIX}}_DOM_STD_T" not in result
+        assert "{{DB_PREFIX}}_SEM_STD_V" not in result
+        assert "DEV_Hardcoded_DB" in result
+
 
 # ---------------------------------------------------------------
 # _discover_files

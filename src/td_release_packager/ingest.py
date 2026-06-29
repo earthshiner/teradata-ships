@@ -2476,10 +2476,23 @@ def _inject_replace_view(content: str) -> Tuple[str, bool]:
 # ---------------------------------------------------------------
 
 
-#: Pattern matching a fully-formed ``{{TOKEN}}`` reference. Names
-#: that already match this shape are not "candidates" — they're
-#: the end-state token-candidate detection is supposed to lead to.
-_ALREADY_TOKEN_RE = re.compile(r"^\{\{[A-Za-z_][A-Za-z0-9_-]*\}\}$")
+#: Pattern matching a fully-formed ``{{TOKEN}}`` reference, with an
+#: optional literal suffix to cover the SHIPS Navigator's "One
+#: DB-PREFIX" scaffolding convention. Names that match this shape
+#: are not candidates — they're the end-state the token-candidate
+#: detection is supposed to lead to.
+#:
+#: Two shapes are accepted:
+#:
+#:   Shape A — pure token:               ``{{DB_PREFIX}}``
+#:   Shape B — token + literal suffix:   ``{{DB_PREFIX}}_DOM_ACL_V``
+#:
+#: Shape B is the canonical AI-Native Data Product output: a single
+#: prefix token plus a literal ``_<MODULE>_<TIER>`` structural
+#: suffix the operator deliberately keeps un-tokenised. Without the
+#: trailing ``\w*`` every Shape-B database fired ``HARVEST_TOKEN_CANDIDATE``
+#: on harvest, even though it was already tokenised (#469-follow-up).
+_ALREADY_TOKEN_RE = re.compile(r"^\{\{[A-Za-z_][A-Za-z0-9_-]*\}\}\w*$")
 
 
 def _build_token_candidates(
