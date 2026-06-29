@@ -501,6 +501,8 @@ def _payload_tab(project_dir: str) -> str:
         f"sealed package report carries the same objects with trust flags.</p>"
     )
 
+    footprint_card = _render_perm_footprint_card(project_dir)
+
     has_waves = any(r["wave"] is not None for r in records)
     if has_waves:
         body = waves.render_wave_svg(records)
@@ -513,7 +515,128 @@ def _payload_tab(project_dir: str) -> str:
             "to see parallel wave ordering. Objects are listed below.</div>"
             + _payload_object_list(records)
         )
-    return intro + body
+    return intro + footprint_card + body
+
+
+def _render_perm_footprint_card(project_dir: str) -> str:
+    """Render the allocated-PERM-space card for the Payload tab (#473).
+
+    Walks the payload's ``CREATE DATABASE`` / ``CREATE USER`` files and
+    surfaces the minimum permanent space the parent must have free
+    before ``ships deploy`` can succeed. Returns the empty string when
+    the payload has no prereq DDL — a project with no DATABASE/USER
+    declarations of its own makes no claim of its own.
+
+    The card is careful with its wording:
+      * "allocated perm space, not data size" — the figure is a
+        ceiling on container capacity, not a measure of payload weight.
+      * Tokenised PERM values (``PERM = {{TOKEN}}``) are excluded from
+        the total and called out separately so the reader can decide
+        to either resolve them via env-config first or accept the
+        partial figure.
+    """
+    from td_release_packager.environment_prereqs import _format_bytes
+    from td_release_packager.perm_footprint import compute_perm_footprint
+
+    fp = compute_perm_footprint(project_dir)
+    if not fp.per_database:
+        # No CREATE DATABASE/USER under pre-requisites/. Nothing to claim.
+        return ""
+
+    object_summary = f"{fp.db_count} {common.pluralise('database', fp.db_count)}" + (
+        f" / {fp.user_count} {common.pluralise('user', fp.user_count)}"
+        if fp.user_count
+        else ""
+    )
+    total_row = (
+        f'<div style="font-size:14px;color:#333;margin-bottom:8px">'
+        f"<strong>{h(_format_bytes(fp.total_bytes))}</strong> "
+        f'<span style="color:#6C757D">across {h(object_summary)}</span></div>'
+    )
+
+    parent_rows = ""
+    if fp.by_parent:
+        parent_rows = (
+            '<table style="font-size:12px;border-collapse:collapse;'
+            'margin-bottom:6px"><tbody>'
+            + "".join(
+                f"<tr>"
+                f'<td style="padding:2px 14px 2px 0;color:#333">{h(p.parent_name)}</td>'
+                f'<td style="padding:2px 14px 2px 0;color:#333;text-align:right">'
+                f"<strong>{h(_format_bytes(p.total_bytes))}</strong></td>"
+                f'<td style="padding:2px 0;color:#6C757D">'
+                f"({p.child_count} {common.pluralise('child', p.child_count)})</td>"
+                f"</tr>"
+                for p in fp.by_parent
+            )
+            + "</tbody></table>"
+        )
+
+    unresolved_block = ""
+    if fp.unresolved:
+        n = len(fp.unresolved)
+        unresolved_block = (
+            f'<div style="background:#fff3cd;border-left:4px solid #FFC107;'
+            f"padding:6px 10px;font-size:12px;color:#7a3b00;"
+            f'margin-top:8px">'
+            f"⚠ {n} {common.pluralise('database', n)} with tokenised "
+            f"<code>PERM</code> not counted "
+            f"(e.g. <code>PERM = {{{{PERM_DEV}}}}</code>) — resolve at "
+            f"build time via env-config to include in the total.</div>"
+        )
+
+    breakdown = ""
+    if fp.per_database:
+        breakdown_rows = "".join(
+            (
+                "<tr>"
+                f'<td style="padding:2px 14px 2px 0;color:#333">'
+                f"{h(d.child_name)}</td>"
+                f'<td style="padding:2px 14px 2px 0;color:#6C757D">'
+                f"{h(d.child_type)}</td>"
+                f'<td style="padding:2px 14px 2px 0;color:#333;text-align:right">'
+                + (
+                    "<code>{{TOKEN}}</code>"
+                    if d.tokenised_perm
+                    else f"<strong>{h(_format_bytes(d.perm_bytes))}</strong>"
+                )
+                + "</td>"
+                f'<td style="padding:2px 0;color:#6C757D">'
+                f"{h(d.parent_name or '—')}</td>"
+                "</tr>"
+            )
+            for d in fp.per_database
+        )
+        breakdown = (
+            '<details style="margin-top:8px"><summary style="cursor:pointer;'
+            'font-size:12px;color:#0D6EFD">Per-database breakdown</summary>'
+            '<table style="font-size:12px;border-collapse:collapse;'
+            'margin-top:6px"><thead><tr>'
+            '<th style="padding:2px 14px 2px 0;text-align:left;color:#6C757D">Database</th>'
+            '<th style="padding:2px 14px 2px 0;text-align:left;color:#6C757D">Kind</th>'
+            '<th style="padding:2px 14px 2px 0;text-align:right;color:#6C757D">PERM</th>'
+            '<th style="padding:2px 0;text-align:left;color:#6C757D">From parent</th>'
+            "</tr></thead><tbody>" + breakdown_rows + "</tbody></table></details>"
+        )
+
+    return (
+        f'<div style="background:#F8F9FA;border:1px solid {common.BORDER};'
+        f'border-radius:6px;padding:12px 16px;margin:12px 0">'
+        f'<div style="font-size:13px;font-weight:600;color:{common.NAVY};'
+        f'margin-bottom:8px">Allocated perm space '
+        f'<span style="font-weight:400;color:#6C757D">— the floor each '
+        f"parent must have free; allocation, not data size</span></div>"
+        + total_row
+        + (
+            f'<div style="font-size:12px;color:#6C757D;margin-bottom:4px">By parent:</div>'
+            if parent_rows
+            else ""
+        )
+        + parent_rows
+        + unresolved_block
+        + breakdown
+        + "</div>"
+    )
 
 
 # ---------------------------------------------------------------------------

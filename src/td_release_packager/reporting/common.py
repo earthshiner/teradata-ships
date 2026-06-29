@@ -97,18 +97,40 @@ def a(value: object) -> str:
 # ---------------------------------------------------------------------------
 
 
-def pluralise(noun: str, count: int) -> str:
-    """Return ``noun`` followed by a numerically-appropriate plural ``s``.
+#: Irregular English plurals SHIPS report copy actually uses. Kept
+#: small on purpose — extend only when a real report string surfaces a
+#: noun that the naive ``+s`` rule botches (e.g. ``childs``).
+_IRREGULAR_PLURALS: Dict[str, str] = {
+    "child": "children",
+    "person": "people",
+    "index": "indices",
+    "matrix": "matrices",
+}
 
-    Avoids double-pluralising nouns that are already plural in form
-    (e.g. ``statistics`` should stay ``statistics``, not ``statisticss``).
-    Words ending in ``s`` are left unchanged regardless of count; other
-    nouns get an ``s`` when ``count != 1``.
+
+def pluralise(noun: str, count: int) -> str:
+    """Return ``noun`` followed by a numerically-appropriate plural form.
+
+    Handles three cases:
+
+    * **Already-plural nouns** (``statistics``, ``analysis``-like
+      collective forms ending in ``s``) are returned unchanged so a
+      caller writing ``"3 statistics"`` doesn't get ``"3 statisticss"``.
+    * **Irregular plurals** are looked up in :data:`_IRREGULAR_PLURALS`
+      so ``child`` becomes ``children``, not ``childs``. Case of the
+      caller's input is preserved on the suffix lookup; the table is
+      keyed lower-case.
+    * **Regular nouns** get an ``s`` when ``count != 1``.
     """
     if count == 1:
         return noun
-    if noun.lower().endswith("s"):
+    lower = noun.lower()
+    if lower.endswith("s"):
         return noun
+    if lower in _IRREGULAR_PLURALS:
+        plural = _IRREGULAR_PLURALS[lower]
+        # Preserve a leading capital so ``Child`` → ``Children``.
+        return plural.capitalize() if noun[:1].isupper() else plural
     return f"{noun}s"
 
 
