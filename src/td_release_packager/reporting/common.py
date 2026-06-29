@@ -19,6 +19,9 @@ Public API
     fmt_duration(ms)              Human-readable millisecond duration.
     stage_status_badge(status, …) Coloured status pill for a stage.
     render_issue_list(issues)     Issue detail block for a stage.
+    render_issue_code_glossary()  Glossary block listing every registered
+                                  ships.decisions.json issue code with its
+                                  description, grouped by domain.
     Tab(id, label, body, active)  One tab definition.
     render_page(...)              Assemble a complete self-contained HTML doc.
 """
@@ -179,7 +182,14 @@ def render_issue_list(issues: Sequence[dict]) -> str:
 
     Returns:
         HTML string. A green "no issues" note when the list is empty.
+
+    Each ``code`` span carries a ``title`` attribute with the human
+    description from :data:`issue_codes.ISSUE_CODES`, so a reader can
+    hover any code to see what it means without leaving the page.
+    Unregistered codes (e.g. ad-hoc test fixtures) just get no tooltip.
     """
+    from td_release_packager.orchestrator.issue_codes import describe
+
     if not issues:
         return (
             '<p style="color:#28A745;font-size:13px;margin:0">No issues recorded.</p>'
@@ -189,7 +199,14 @@ def render_issue_list(issues: Sequence[dict]) -> str:
         sev = str(issue.get("severity", "info")).lower()
         colour = _SEV_COLOUR.get(sev, "#555")
         icon = _SEV_ICON.get(sev, "·")
-        code = h(str(issue.get("code", "")))
+        raw_code = str(issue.get("code", ""))
+        code = h(raw_code)
+        tooltip = describe(raw_code) if raw_code else ""
+        title_attr = (
+            f' title="{h(tooltip)}"'
+            if tooltip and tooltip != "(unregistered code)"
+            else ""
+        )
         msg = h(str(issue.get("message", "")))
         loc = issue.get("location", "")
         loc_html = (
@@ -201,11 +218,76 @@ def render_issue_list(issues: Sequence[dict]) -> str:
             f'<div style="padding:5px 0;border-bottom:1px solid #F0F0F0">'
             f'<span style="color:{colour};font-weight:700;margin-right:6px">{icon}</span>'
             f'<span style="font-family:monospace;font-size:12px;color:{colour};'
-            f'margin-right:8px">{code}</span>'
+            f'margin-right:8px;cursor:help;border-bottom:1px dotted {colour}"{title_attr}>'
+            f"{code}</span>"
             f'<span style="font-size:12px;color:#333">{msg}</span>'
             f"{loc_html}</div>"
         )
     return "".join(rows)
+
+
+def render_issue_code_glossary() -> str:
+    """Render every registered issue code as a glossary block.
+
+    Drives off :data:`issue_codes.ISSUE_CODES` so the catalogue stays
+    in sync with the source of truth — when a new code lands, it
+    appears in this glossary automatically. Codes are grouped by
+    their domain prefix (HARVEST_, INSPECT_, ANALYSE_, GENERATE_,
+    PACKAGE_, TOKEN_, PROPERTIES_) so a reader scanning for a stage's
+    findings finds them together. Within a domain, codes are listed
+    alphabetically.
+
+    Returns:
+        HTML block of ``<div class="guide-glossary-item">`` entries
+        ready to drop inside an existing ``guide-glossary`` container.
+    """
+    from td_release_packager.orchestrator.issue_codes import ISSUE_CODES
+
+    _DOMAINS: List[Tuple[str, str]] = [
+        ("HARVEST_", "Harvest"),
+        ("INSPECT_", "Inspect"),
+        ("ANALYSE_", "Analyse"),
+        ("GENERATE_", "Generate"),
+        ("PACKAGE_", "Package"),
+        ("TOKEN_", "Token"),
+        ("PROPERTIES_", "Properties"),
+    ]
+    by_domain: Dict[str, List[str]] = {label: [] for _prefix, label in _DOMAINS}
+    misc: List[str] = []
+    for code in sorted(ISSUE_CODES):
+        placed = False
+        for prefix, label in _DOMAINS:
+            if code.startswith(prefix):
+                by_domain[label].append(code)
+                placed = True
+                break
+        if not placed:
+            misc.append(code)
+    parts: List[str] = []
+    for _prefix, label in _DOMAINS:
+        codes = by_domain[label]
+        if not codes:
+            continue
+        parts.append(f'<div class="guide-glossary-item"><dt>{h(label)} codes</dt><dd>')
+        items = "".join(
+            (
+                f'<div style="margin-bottom:6px"><code style="font-weight:600">'
+                f"{h(code)}</code> — {h(ISSUE_CODES[code])}</div>"
+            )
+            for code in codes
+        )
+        parts.append(items + "</dd></div>")
+    if misc:
+        parts.append('<div class="guide-glossary-item"><dt>Other codes</dt><dd>')
+        items = "".join(
+            (
+                f'<div style="margin-bottom:6px"><code style="font-weight:600">'
+                f"{h(code)}</code> — {h(ISSUE_CODES[code])}</div>"
+            )
+            for code in misc
+        )
+        parts.append(items + "</dd></div>")
+    return "".join(parts)
 
 
 # ---------------------------------------------------------------------------

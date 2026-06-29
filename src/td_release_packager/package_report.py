@@ -1217,7 +1217,14 @@ def _build_provenance_tab(
         return "  ·  ".join(parts) if parts else ""
 
     def _issues_html(stage: dict) -> str:
-        """Render the issues list for one stage's detail panel."""
+        """Render the issues list for one stage's detail panel.
+
+        Each code span carries a ``title`` attribute with the human
+        description from :data:`issue_codes.ISSUE_CODES`, so a reader
+        can hover any code to see what it means.
+        """
+        from td_release_packager.orchestrator.issue_codes import describe
+
         issues = stage.get("issues", []) or []
         if not issues:
             return (
@@ -1231,7 +1238,14 @@ def _build_provenance_tab(
             sev = str(issue.get("severity", "info")).lower()
             colour = _SEV_COLOUR.get(sev, "#555")
             icon = _SEV_ICON.get(sev, "·")
-            code = _h(str(issue.get("code", "")))
+            raw_code = str(issue.get("code", ""))
+            code = _h(raw_code)
+            tooltip = describe(raw_code) if raw_code else ""
+            title_attr = (
+                f' title="{_h(tooltip)}"'
+                if tooltip and tooltip != "(unregistered code)"
+                else ""
+            )
             msg = _h(str(issue.get("message", "")))
             loc = issue.get("location", "")
             loc_html = (
@@ -1245,7 +1259,8 @@ def _build_provenance_tab(
                 f'<span style="color:{colour};font-weight:700;margin-right:6px">'
                 f"{icon}</span>"
                 f'<span style="font-family:monospace;font-size:12px;'
-                f'color:{colour};margin-right:8px">{code}</span>'
+                f"color:{colour};margin-right:8px;cursor:help;"
+                f'border-bottom:1px dotted {colour}"{title_attr}>{code}</span>'
                 f'<span style="font-size:12px;color:#333">{msg}</span>'
                 f"{loc_html}"
                 f"</div>"
@@ -1497,6 +1512,10 @@ def _guide_tab(manifest_dict: dict, records: List[Dict]) -> str:
         else ""
     )
 
+    from td_release_packager.reporting.common import render_issue_code_glossary
+
+    issue_code_glossary = render_issue_code_glossary()
+
     return f"""
 <div class="guide-hero">
   <div class="guide-hero-text">
@@ -1720,6 +1739,7 @@ def _guide_tab(manifest_dict: dict, records: List[Dict]) -> str:
   <dt>Release group</dt>
   <dd>A directory containing all packages that make up a release — typically a pre-requisites package and one or more main packages. <code>deploy_release.py</code> lives here and orchestrates the whole group.</dd>
 </div>
+{issue_code_glossary}
 </div>
 """
 
