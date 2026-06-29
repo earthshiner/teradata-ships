@@ -321,6 +321,8 @@ def _main():
         _cmd_clean(args)
     elif args.command == "notebook":
         sys.exit(_cmd_notebook(args))
+    elif args.command == "fix-package-integrity":
+        sys.exit(_cmd_fix_package_integrity(args))
     else:
         parser.print_help()
         sys.exit(1)
@@ -5669,6 +5671,123 @@ def _cmd_clean(args) -> None:
             print("  lifecycle_state: <unavailable>")
 
 
+def _cmd_fix_package_integrity(args) -> int:
+    """Regenerate ``.sha256`` sidecars across a project's ``releases/`` tree.
+
+    Walks every release group under ``<project>/releases/``, recomputes
+    each ``*.zip``'s SHA-256 from its current bytes, and writes the
+    matching ``<zip>.sha256`` sidecar. Used to repair legacy mismatches
+    left by builds produced before the per-stage-result append bug
+    (#463) was fixed — those builds shipped sidecars that disagreed
+    with their on-disk archives.
+
+    Does NOT touch the archives themselves — only the sidecars. The
+    archive bytes are trusted as-is (they have to be; we can't
+    reconstruct what the original generator intended). The goal is to
+    restore the invariant that every released archive has a sidecar
+    consistent with its bytes, so ``ships inspect`` stops reporting
+    ``INSPECT_PACKAGE_INTEGRITY`` on historical builds.
+
+    ``--dry-run`` previews the work without writing anything.
+
+    Returns:
+        Exit code — 0 on success, 1 if the project is malformed.
+    """
+    import hashlib
+
+    project = os.path.abspath(args.project)
+    releases_dir = os.path.join(project, "releases")
+    if not os.path.isdir(releases_dir):
+        print(f"No releases/ directory under {project} — nothing to fix.")
+        return 0
+
+    dry_run = bool(args.dry_run)
+    fixed = 0
+    matched = 0
+    no_sidecar_created = 0
+    skipped = 0
+    rows: List[str] = []
+
+    for group in sorted(os.listdir(releases_dir)):
+        group_dir = os.path.join(releases_dir, group)
+        if not os.path.isdir(group_dir):
+            continue
+        for filename in sorted(os.listdir(group_dir)):
+            if not filename.lower().endswith(".zip"):
+                continue
+            archive = os.path.join(group_dir, filename)
+            sidecar = archive + ".sha256"
+            try:
+                with open(archive, "rb") as fh:
+                    live = hashlib.sha256(fh.read()).hexdigest()
+            except OSError as exc:
+                rows.append(f"  ⚠ {group}/{filename}: cannot read — {exc}")
+                skipped += 1
+                continue
+
+            recorded = None
+            if os.path.isfile(sidecar):
+                try:
+                    recorded = (
+                        open(sidecar, encoding="utf-8")
+                        .readline()
+                        .strip()
+                        .split()[0]
+                        .lower()
+                    )
+                except (OSError, IndexError):
+                    recorded = None
+
+            if recorded == live:
+                matched += 1
+                continue
+
+            if dry_run:
+                if recorded is None:
+                    rows.append(
+                        f"  ✎ {group}/{filename}: would create sidecar (live={live[:12]}…)"
+                    )
+                else:
+                    rows.append(
+                        f"  ✎ {group}/{filename}: would refresh sidecar "
+                        f"(recorded={recorded[:12]}… → live={live[:12]}…)"
+                    )
+                fixed += 1
+                continue
+
+            with open(sidecar, "w", encoding="utf-8") as fh:
+                fh.write(f"{live}  {filename}\n")
+            if recorded is None:
+                rows.append(f"  + {group}/{filename}: created sidecar")
+                no_sidecar_created += 1
+            else:
+                rows.append(
+                    f"  ✓ {group}/{filename}: refreshed sidecar "
+                    f"({recorded[:12]}… → {live[:12]}…)"
+                )
+            fixed += 1
+
+    print(f"\n{'=' * 64}")
+    if dry_run:
+        print(f"  ships fix-package-integrity (dry-run) — {project}")
+    else:
+        print(f"  ships fix-package-integrity — {project}")
+    print(f"{'=' * 64}")
+    if rows:
+        for row in rows:
+            print(row)
+    print(
+        f"\n  {matched} archive(s) already consistent · "
+        f"{fixed} {'would be ' if dry_run else ''}refreshed"
+        + (f" ({no_sidecar_created} newly created)" if no_sidecar_created else "")
+        + (f" · {skipped} skipped" if skipped else "")
+    )
+    if dry_run and fixed:
+        print("\n  Re-run without --dry-run to apply.")
+    print(f"{'=' * 64}\n")
+    return 0
+
+
 def _build_parser():
     """Build the argument parser."""
     parser = argparse.ArgumentParser(
@@ -6961,6 +7080,31 @@ def _build_parser():
         help=(
             "Actually delete. Without this flag, runs as a dry-run "
             "and reports what would be removed."
+        ),
+    )
+
+    # -- fix-package-integrity -- (#465, root cause of #450 history)
+    # Recovery utility: regenerate ``.sha256`` sidecars under
+    # ``<project>/releases/`` so historical mismatches from pre-#463
+    # builds stop showing up in ``ships inspect`` output.
+    fpi = subs.add_parser(
+        "fix-package-integrity",
+        help=(
+            "[*] Recovery — regenerate .sha256 sidecars across "
+            "releases/ so historical mismatches stop firing in inspect."
+        ),
+    )
+    fpi.add_argument(
+        "--project",
+        required=True,
+        help="SHIPS project directory containing releases/.",
+    )
+    fpi.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Preview the work — report which sidecars would be "
+            "refreshed without writing anything."
         ),
     )
 
