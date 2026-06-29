@@ -1,28 +1,29 @@
 """
-orphan_database.py — Flag prereq database/user declarations the payload doesn't reference (#475).
+unreferenced_database.py — Note prereq database/user declarations the payload doesn't reference (#475, #479).
 
 Project-level inspect rule. Walks every ``.db`` / ``.usr`` file under
 ``<project>/payload/database/pre-requisites/`` and checks each declared
 database name against a set of "referenced" database names harvested
 from the rest of the payload. Anything declared-but-never-referenced is
-emitted as an ``orphan_database`` finding.
+emitted as an informational ``unreferenced_database`` finding.
 
-Typical cause: two naming conventions cross-wired. SHIPS' view-layer
-generator emits an abbreviated ``{{DB_PREFIX}}_<MOD>_<TIER>_V`` database
-to match the locking-view module token (``_DOM_/_MEM_/_OBS_/...``),
-while a hand-authored ``databases/`` tree under source already declared
-the full-name companion (``_Domain_STD_V`` / ``_Memory_STD_V`` / ...).
-Both lands in ``pre-requisites/databases/``; one gets used at deploy
-time, the other becomes dead infrastructure. The check surfaces the
-mismatch at lint time so the operator can pick a convention before the
-deploy goes out.
+Both outcomes are valid. Sometimes it's a naming-convention crossfire:
+SHIPS' view-layer generator emits an abbreviated
+``{{DB_PREFIX}}_<MOD>_<TIER>_V`` database to match the locking-view
+module token (``_DOM_/_MEM_/_OBS_/...``), while a hand-authored
+``databases/`` tree under source already declared the full-name
+companion (``_Domain_STD_V`` / ``_Memory_STD_V`` / ...). Both land in
+``pre-requisites/databases/``; one gets used at deploy time, the other
+becomes dead infrastructure. Equally often the declaration is
+intentional — an empty container (data lab, sandbox, schema users will
+populate themselves) that is perfectly valid to ship.
 
 The detector is deliberately *conservative*: it reports a database as
-orphan only when no qualified ``<db>.<obj>`` reference appears in any
-payload file, no grant targets/grantees mention it, and no other
+unreferenced only when no qualified ``<db>.<obj>`` reference appears in
+any payload file, no grant targets/grantees mention it, and no other
 ``.db`` / ``.usr`` declares ``CREATE ... FROM <db>``. False positives
-are kept to a minimum because the flag implies the operator should
-delete the file.
+are kept to a minimum because the operator may choose to reconcile the
+two declarations.
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ from typing import List, Set
 from td_release_packager.validate import ValidationIssue
 
 
-RULE_NAME = "orphan_database"
+RULE_NAME = "unreferenced_database"
 
 _PREREQ_DBS_SUBPATH = os.path.join("payload", "database", "pre-requisites", "databases")
 _PREREQ_USERS_SUBPATH = os.path.join("payload", "database", "pre-requisites", "users")
@@ -135,8 +136,8 @@ def _collect_referenced_databases(project_dir: str, declared: Set[str]) -> Set[s
     """Scan every payload file for database references; return their normalised names.
 
     ``declared`` is the set of *normalised* database names we're testing
-    for orphan status — used to skip the file that declares each (a
-    database doesn't count as referencing itself).
+    for the unreferenced state — used to skip the file that declares
+    each (a database doesn't count as referencing itself).
     """
     referenced: Set[str] = set()
     payload_root = os.path.join(project_dir, _PAYLOAD_SUBPATH)
@@ -191,10 +192,10 @@ def _collect_referenced_databases(project_dir: str, declared: Set[str]) -> Set[s
     return referenced
 
 
-def check_orphan_databases(
+def check_unreferenced_databases(
     project_dir: str, severity: str = "INFO"
 ) -> List[ValidationIssue]:
-    """Scan prereq ``.db`` / ``.usr`` files for orphan database declarations.
+    """Scan prereq ``.db`` / ``.usr`` files for unreferenced database declarations.
 
     Args:
         project_dir: SHIPS project root.
@@ -247,27 +248,29 @@ def check_orphan_databases(
                 rule=RULE_NAME,
                 severity=severity,
                 message=(
-                    f"{kind.title()} '{declared_name}' is declared but "
-                    f"nothing else in the payload references it. This "
-                    f"is sometimes a naming-convention crossfire (a "
+                    f"Informational: {kind.title()} '{declared_name}' "
+                    f"is declared in pre-requisites/ but no other "
+                    f"object in this payload qualifies a name with it. "
+                    f"Empty containers like data labs, sandboxes, or "
+                    f"schemas that downstream consumers populate "
+                    f"themselves are perfectly valid to ship — no "
+                    f"action is required. Mention this only because it "
+                    f"is occasionally a naming-convention crossfire: a "
                     f"hand-authored full-name declaration like "
-                    f"``{{{{DB_PREFIX}}}}_Domain_STD_V`` alongside the "
-                    f"view-layer generator's abbreviated "
-                    f"``{{{{DB_PREFIX}}}}_DOM_STD_V``), but often "
-                    f"intentional — empty containers like data labs, "
-                    f"sandboxes, or schemas users will populate "
-                    f"themselves are valid SHIPS payloads. Informational."
+                    f"``{{{{DB_PREFIX}}}}_Domain_STD_V`` lands next to "
+                    f"the view-layer generator's abbreviated sibling "
+                    f"``{{{{DB_PREFIX}}}}_DOM_STD_V`` and only one of "
+                    f"the pair ends up being used."
                 ),
                 remediation={
                     "safe_fix_available": False,
                     "automation_level": "manual_review_optional",
                     "requires_human_review": False,
                     "recommended_action": (
-                        "Review whether this declaration is intentional. "
-                        "If it's leftover from a naming-convention "
-                        "change, reconcile the two names. If it's an "
-                        "empty container for downstream consumers, no "
-                        "action needed."
+                        "No action needed in most cases. If you "
+                        "recognise this as leftover from a "
+                        "naming-convention change, reconcile the two "
+                        "names; otherwise leave the declaration as-is."
                     ),
                 },
             )

@@ -2527,25 +2527,26 @@ def _run_inspect(args, stage, issue_codes) -> int:
             if ph_issues:
                 lint_result.issues.extend(ph_issues)
 
-        # -- Orphan databases (issue #475) --
-        # Project-level check over payload/database/pre-requisites/. Flags
-        # database/user declarations the rest of the payload doesn't
-        # reference — typically a naming-convention crossfire where two
-        # CREATE DATABASE statements name the same logical role under
-        # different identifiers and only one ends up populated.
-        od_severity = rules_config.get("orphan_database", "WARNING")
-        if od_severity == "WARN":
-            od_severity = "WARNING"
-        if args.strict and od_severity == "WARNING":
-            od_severity = "ERROR"
-        if od_severity != "OFF":
-            from td_release_packager.orphan_database import (
-                check_orphan_databases,
+        # -- Unreferenced databases (issues #475, #479) --
+        # Project-level informational note over payload/database/pre-requisites/.
+        # Surfaces database/user declarations the rest of the payload doesn't
+        # reference. Most often a legitimate empty container; occasionally a
+        # naming-convention crossfire where two CREATE DATABASE statements name
+        # the same logical role under different identifiers and only one ends
+        # up populated.
+        ud_severity = rules_config.get("unreferenced_database", "WARNING")
+        if ud_severity == "WARN":
+            ud_severity = "WARNING"
+        if args.strict and ud_severity == "WARNING":
+            ud_severity = "ERROR"
+        if ud_severity != "OFF":
+            from td_release_packager.unreferenced_database import (
+                check_unreferenced_databases,
             )
 
-            od_issues = check_orphan_databases(args.project, severity=od_severity)
-            if od_issues:
-                lint_result.issues.extend(od_issues)
+            ud_issues = check_unreferenced_databases(args.project, severity=ud_severity)
+            if ud_issues:
+                lint_result.issues.extend(ud_issues)
 
         # -- Backward-incompatible contract changes (issue #171) --
         # Project-level: compares current payload contracts against the

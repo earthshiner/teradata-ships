@@ -1,7 +1,7 @@
 """
-test_orphan_database.py — Project-level orphan-database detector (#475).
+test_unreferenced_database.py — Project-level unreferenced-database detector (#475, #479).
 
-The detector walks ``payload/database/pre-requisites/`` and flags any
+The detector walks ``payload/database/pre-requisites/`` and notes any
 declared database the rest of the payload doesn't reference.
 """
 
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from td_release_packager.orphan_database import check_orphan_databases
+from td_release_packager.unreferenced_database import check_unreferenced_databases
 
 
 def _scaffold(project: Path) -> None:
@@ -44,8 +44,8 @@ def _write_payload_file(project: Path, relpath: str, body: str) -> None:
     p.write_text(body, encoding="utf-8")
 
 
-class TestOrphanDatabaseDetection:
-    def test_orphan_flagged_when_nothing_references(self, tmp_path):
+class TestUnreferencedDatabaseDetection:
+    def test_unreferenced_flagged_when_nothing_references(self, tmp_path):
         project = tmp_path / "proj"
         _scaffold(project)
         _write_db(
@@ -54,9 +54,9 @@ class TestOrphanDatabaseDetection:
             "CREATE DATABASE Lonely FROM DBC AS PERM = 0;\n",
         )
 
-        issues = check_orphan_databases(str(project))
+        issues = check_unreferenced_databases(str(project))
         assert len(issues) == 1
-        assert issues[0].rule == "orphan_database"
+        assert issues[0].rule == "unreferenced_database"
         assert "Lonely" in issues[0].message
         assert "pre-requisites/databases/Lonely.db" in issues[0].file
 
@@ -74,7 +74,7 @@ class TestOrphanDatabaseDetection:
             "CREATE MULTISET TABLE Used.Customer (id INTEGER) PRIMARY INDEX (id);\n",
         )
 
-        issues = check_orphan_databases(str(project))
+        issues = check_unreferenced_databases(str(project))
         assert issues == []
 
     def test_database_referenced_by_view_body_not_flagged(self, tmp_path):
@@ -96,9 +96,9 @@ class TestOrphanDatabaseDetection:
             "REPLACE VIEW Sink.MyView AS SELECT * FROM Source.Customer;\n",
         )
 
-        issues = check_orphan_databases(str(project))
+        issues = check_unreferenced_databases(str(project))
         # Both Source (referenced via FROM) and Sink (referenced via
-        # CREATE VIEW header) are referenced; neither is orphan.
+        # CREATE VIEW header) are referenced; neither is flagged.
         assert issues == []
 
     def test_database_referenced_as_grant_target_not_flagged(self, tmp_path):
@@ -113,7 +113,7 @@ class TestOrphanDatabaseDetection:
             "GRANT SELECT ON Other.t TO GranteeDb;\n",
         )
 
-        issues = check_orphan_databases(str(project))
+        issues = check_unreferenced_databases(str(project))
         # GranteeDb is the GRANT...TO target, so it's referenced.
         assert issues == []
 
@@ -130,12 +130,12 @@ class TestOrphanDatabaseDetection:
             "Child",
             "CREATE DATABASE Child FROM Parent AS PERM = 0;\n",
         )
-        # Child has nothing in it, so Child is orphan, but Parent is
-        # referenced (as Child's parent) so Parent is NOT orphan.
-        issues = check_orphan_databases(str(project))
+        # Child has nothing in it, so Child is unreferenced, but Parent
+        # is referenced (as Child's parent) so Parent is NOT flagged.
+        issues = check_unreferenced_databases(str(project))
         rules = [(i.rule, i.file) for i in issues]
         assert (
-            "orphan_database",
+            "unreferenced_database",
             "payload/database/pre-requisites/databases/Child.db",
         ) in rules
         assert not any("Parent.db" in f for _, f in rules)
@@ -145,14 +145,14 @@ class TestOrphanDatabaseDetection:
         _scaffold(project)
         _write_user(
             project,
-            "OrphanUser",
-            "CREATE USER OrphanUser FROM DBC AS PERM = 50M, PASSWORD = '...';\n",
+            "UnusedUser",
+            "CREATE USER UnusedUser FROM DBC AS PERM = 50M, PASSWORD = '...';\n",
         )
 
-        issues = check_orphan_databases(str(project))
+        issues = check_unreferenced_databases(str(project))
         assert len(issues) == 1
-        assert "OrphanUser" in issues[0].message
-        assert issues[0].file.endswith("OrphanUser.usr")
+        assert "UnusedUser" in issues[0].message
+        assert issues[0].file.endswith("UnusedUser.usr")
 
     def test_case_insensitive_matching(self, tmp_path):
         project = tmp_path / "proj"
@@ -168,7 +168,7 @@ class TestOrphanDatabaseDetection:
             "CREATE MULTISET TABLE MIXEDCASE.foo (id INTEGER) PRIMARY INDEX (id);\n",
         )
 
-        issues = check_orphan_databases(str(project))
+        issues = check_unreferenced_databases(str(project))
         assert issues == []
 
     def test_tokenised_name_matched_via_normalisation(self, tmp_path):
@@ -192,12 +192,12 @@ class TestOrphanDatabaseDetection:
             "REPLACE VIEW {{DB_PREFIX}}_DOM_STD_V.foo AS SELECT 1;\n",
         )
 
-        issues = check_orphan_databases(str(project))
+        issues = check_unreferenced_databases(str(project))
         assert issues == []
 
     def test_competing_naming_conventions_flags_unreferenced_one(self, tmp_path):
         """The real reporting-user scenario: ``_DOM_STD_V`` referenced by
-        views, ``_Domain_STD_V`` declared but orphan."""
+        views, ``_Domain_STD_V`` declared but unreferenced."""
         project = tmp_path / "proj"
         _scaffold(project)
         _write_db(
@@ -218,9 +218,9 @@ class TestOrphanDatabaseDetection:
             "SELECT * FROM {{DB_PREFIX}}_DOM_STD_T.booking;\n",
         )
 
-        issues = check_orphan_databases(str(project))
+        issues = check_unreferenced_databases(str(project))
         names = {Path(i.file).name for i in issues}
-        # The orphan is the un-referenced full-name database.
+        # The unreferenced declaration is the full-name database.
         assert "{{DB_PREFIX}}_Domain_STD_V.db" in names
         # The referenced (abbreviated) one is not flagged.
         assert "{{DB_PREFIX}}_DOM_STD_V.db" not in names
@@ -228,7 +228,7 @@ class TestOrphanDatabaseDetection:
         # declaration, so we don't generate spurious findings about it.
 
     def test_reference_inside_comment_does_not_count(self, tmp_path):
-        """A database name mentioned only in a ``-- comment`` is still orphan."""
+        """A database name mentioned only in a ``-- comment`` is still flagged."""
         project = tmp_path / "proj"
         _scaffold(project)
         _write_db(
@@ -243,8 +243,8 @@ class TestOrphanDatabaseDetection:
             "CREATE MULTISET TABLE Other.t (id INTEGER) PRIMARY INDEX (id);\n",
         )
 
-        issues = check_orphan_databases(str(project))
-        # Lonely is mentioned only in a comment, so it's still orphan.
+        issues = check_unreferenced_databases(str(project))
+        # Lonely is mentioned only in a comment, so it's still flagged.
         assert len(issues) == 1
         assert "Lonely" in issues[0].message
 
@@ -254,7 +254,7 @@ class TestOrphanDatabaseDetection:
         _write_db(project, "X", "CREATE DATABASE X FROM DBC AS PERM = 0;\n")
 
         for sev in ("ERROR", "WARNING", "INFO"):
-            issues = check_orphan_databases(str(project), severity=sev)
+            issues = check_unreferenced_databases(str(project), severity=sev)
             assert len(issues) == 1
             assert issues[0].severity == sev
 
@@ -262,5 +262,5 @@ class TestOrphanDatabaseDetection:
         project = tmp_path / "proj"
         (project / "payload" / "database" / "DDL" / "tables").mkdir(parents=True)
         # No pre-requisites/ tree at all.
-        issues = check_orphan_databases(str(project))
+        issues = check_unreferenced_databases(str(project))
         assert issues == []
