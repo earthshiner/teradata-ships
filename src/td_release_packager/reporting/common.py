@@ -408,6 +408,13 @@ BASE_CSS = f"""
 *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
 body {{ font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
        background: #f0f4f8; color: #212529; min-height: 100vh; }}
+.project-ribbon {{ background: {ORANGE}; color: {WHITE}; padding: 6px 24px;
+                   font-size: 13px; font-weight: 700; letter-spacing: .3px;
+                   display: flex; align-items: center; gap: 12px;
+                   text-transform: uppercase; }}
+.project-ribbon .ribbon-sep {{ color: rgba(255,255,255,.6); font-weight: 400; }}
+.project-ribbon .ribbon-version {{ font-weight: 400; letter-spacing: .2px;
+                                   text-transform: none; }}
 .hdr {{ background: {NAVY}; color: {WHITE}; padding: 0 24px;
         display: flex; align-items: center; gap: 16px; height: 56px; }}
 .hdr-title {{ font-size: 17px; font-weight: 700; letter-spacing: -.2px; }}
@@ -501,6 +508,8 @@ def render_page(
     tabs: Sequence[Tab],
     content_prefix: str = "",
     extra_css: str = "",
+    project_name: Optional[str] = None,
+    ships_version: Optional[str] = None,
 ) -> str:
     """Assemble a complete, self-contained SHIPS report HTML document.
 
@@ -521,6 +530,13 @@ def render_page(
         content_prefix: Optional raw HTML rendered inside the content area
                         before the tab panes (e.g. an action banner).
         extra_css:      Report-specific CSS appended after ``BASE_CSS``.
+        project_name:   Project this report belongs to (e.g. ``CustomerDNA``).
+                        When set, an orange ribbon is rendered above the
+                        navy header bar showing ``<project> · SHIPS v<ver>``
+                        (issue #481). Omitted when ``None``.
+        ships_version:  SHIPS version string for the ribbon. Defaults to
+                        ``td_release_packager.__version__`` when ``None``
+                        and ``project_name`` is set.
 
     Returns:
         The full HTML document as a string.
@@ -543,6 +559,24 @@ def render_page(
     sub_html = f'<div class="hdr-sub">{h(header_sub)}</div>' if header_sub else ""
     meta_bar = f'<div class="meta-bar">{meta_html}</div>' if meta_html else ""
 
+    # Project / version ribbon (issue #481) — rendered above the navy
+    # header bar so the reader sees the report's provenance immediately.
+    # Omitted when the caller hasn't supplied a project name so the
+    # legacy chrome (older tests, ad-hoc previews) keeps rendering
+    # identically.
+    ribbon_html = ""
+    if project_name:
+        from td_release_packager._version import __version__ as _DEFAULT_VERSION
+
+        version_text = ships_version or _DEFAULT_VERSION
+        ribbon_html = (
+            '<div class="project-ribbon">'
+            f"<span>{h(project_name)}</span>"
+            '<span class="ribbon-sep">·</span>'
+            f'<span class="ribbon-version">SHIPS v{h(version_text)}</span>'
+            "</div>"
+        )
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -556,6 +590,7 @@ def render_page(
 </head>
 <body>
 
+{ribbon_html}
 <div class="hdr">
   {_WORDMARK}
   <div>

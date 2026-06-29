@@ -331,6 +331,17 @@ class BuildManifest:
     # #115: changeset scope metadata when this is a partial package
     # ({mode, base, objects}); None for a full build of the whole payload.
     changeset: Optional[Dict[str, object]] = None
+    # #481: project the package belongs to (e.g. "CustomerDNA",
+    # "CallCentre"). Resolved from ``ships.yaml``'s ``project:`` field at
+    # Package time with a fallback to the project directory basename.
+    # Surfaces in the package_report.html ribbon and in every agentic
+    # JSON the package carries.
+    project_name: str = ""
+    # #481: SHIPS version that produced this package — stamped from
+    # ``td_release_packager.__version__`` at Package time so the
+    # consumer can answer "which SHIPS wrote this?" without inspecting
+    # external metadata.
+    ships_version: str = ""
     schema_version: str = "1.0"
 
 

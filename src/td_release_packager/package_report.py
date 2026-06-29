@@ -2153,6 +2153,8 @@ def generate_package_report(pkg_dir: str, manifest_dict: dict) -> str:
         tabs=tabs,
         content_prefix=_environment_prereq_banner(manifest_dict),
         extra_css=_PACKAGE_EXTRA_CSS,
+        project_name=manifest_dict.get("project_name") or None,
+        ships_version=manifest_dict.get("ships_version") or None,
     )
 
     report_path = os.path.join(pkg_dir, "package_report.html")

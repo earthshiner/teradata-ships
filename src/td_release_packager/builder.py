@@ -73,9 +73,23 @@ from td_release_packager.environment_prereqs import (
     write_environment_prereq_context,
     write_environment_prereq_payload,
 )
+from td_release_packager._version import __version__ as _SHIPS_VERSION
+from td_release_packager.project_paths import resolve_project_name
 
 
 CONTEXT_DIR = "context"
+
+
+def _resolve_build_project_name(source_dir: str) -> str:
+    """Resolve the project name stamped into the BuildManifest.
+
+    Issue #481 — the build manifest is the source of truth for the
+    project this package belongs to, surfaced in the package_report.html
+    ribbon and in every context/*.json artefact. ``source_dir`` is the
+    project root the operator pointed Package at, so ``ships.yaml`` (if
+    present) is the canonical source; otherwise the directory basename.
+    """
+    return resolve_project_name(source_dir)
 
 
 def _context_file(pkg_dir: str, filename: str) -> str:
@@ -854,6 +868,12 @@ def _build_package_impl(
         build_invocation=config.build_invocation,
         # #115: changeset scope (None for a full build).
         changeset=config.changeset,
+        # #481: project + SHIPS version stamped into the manifest so
+        # every downstream consumer (HTML report ribbon, context JSON
+        # files, deploy report) can answer "which project / which SHIPS
+        # version built this?" without inspecting external metadata.
+        project_name=_resolve_build_project_name(config.source_dir),
+        ships_version=_SHIPS_VERSION,
     )
 
     # -- Phase 8a: Write provenance document (v2) --
@@ -898,7 +918,12 @@ def _build_package_impl(
     )
 
     trust_report = compute_trust_report(config.source_dir, pkg_dir)
-    write_trust_result(pkg_dir, trust_report)
+    write_trust_result(
+        pkg_dir,
+        trust_report,
+        project_name=manifest.project_name,
+        ships_version=manifest.ships_version,
+    )
     manifest.trust = {"trust_ref": TRUST_RESULT_REF}
 
     # -- Phase 8b.2: Stamp action controls --
@@ -917,7 +942,12 @@ def _build_package_impl(
         role=manifest.role or "",
         has_dba_placeholders=has_dba_placeholders(pkg_dir),
     )
-    write_actions_result(pkg_dir, actions_report)
+    write_actions_result(
+        pkg_dir,
+        actions_report,
+        project_name=manifest.project_name,
+        ships_version=manifest.ships_version,
+    )
     manifest.actions_ref = ACTIONS_RESULT_REF
 
     # -- Phase 8b.3: Stamp capability flags (issue #149) --
@@ -935,7 +965,12 @@ def _build_package_impl(
             "require_approvals": manifest.require_approvals,
         }
     )
-    write_capabilities_result(pkg_dir, capabilities_report)
+    write_capabilities_result(
+        pkg_dir,
+        capabilities_report,
+        project_name=manifest.project_name,
+        ships_version=manifest.ships_version,
+    )
     manifest.capabilities_ref = CAPABILITIES_RESULT_REF
 
     # -- Phase 8b.4: Stamp the formal agent policy (issue #151) --
@@ -1309,6 +1344,9 @@ def _create_environment_prereqs_package_if_needed(
         ships_public_key=manifest.ships_public_key,
         # #397: carry the same build invocation onto the prereq half.
         build_invocation=manifest.build_invocation,
+        # #481: inherit project + SHIPS version from the parent build.
+        project_name=manifest.project_name,
+        ships_version=manifest.ships_version,
     )
     from td_release_packager.trust import (
         STATUS_BLOCKED,
@@ -1338,7 +1376,12 @@ def _create_environment_prereqs_package_if_needed(
     env_manifest.phase_inventory = _compute_phase_inventory(env_pkg_dir)
     env_manifest.file_count = sum(env_manifest.phase_inventory.values())
 
-    write_trust_result(env_pkg_dir, env_trust_report)
+    write_trust_result(
+        env_pkg_dir,
+        env_trust_report,
+        project_name=env_manifest.project_name,
+        ships_version=env_manifest.ships_version,
+    )
     env_manifest.trust = {"trust_ref": TRUST_RESULT_REF}
 
     from td_release_packager.actions import (
@@ -1352,7 +1395,12 @@ def _create_environment_prereqs_package_if_needed(
         role=env_manifest.role or "",
         has_dba_placeholders=has_dba_placeholders(env_pkg_dir),
     )
-    write_actions_result(env_pkg_dir, env_actions_report)
+    write_actions_result(
+        env_pkg_dir,
+        env_actions_report,
+        project_name=env_manifest.project_name,
+        ships_version=env_manifest.ships_version,
+    )
     env_manifest.actions_ref = ACTIONS_RESULT_REF
 
     from td_release_packager.capabilities import (
@@ -1369,7 +1417,12 @@ def _create_environment_prereqs_package_if_needed(
             "require_approvals": env_manifest.require_approvals,
         }
     )
-    write_capabilities_result(env_pkg_dir, env_capabilities)
+    write_capabilities_result(
+        env_pkg_dir,
+        env_capabilities,
+        project_name=env_manifest.project_name,
+        ships_version=env_manifest.ships_version,
+    )
     env_manifest.capabilities_ref = CAPABILITIES_RESULT_REF
 
     from td_release_packager.policy import (
@@ -1417,7 +1470,11 @@ def _create_environment_prereqs_package_if_needed(
     from td_release_packager.package_report import generate_package_report
 
     generate_package_report(env_pkg_dir, env_manifest.__dict__)
-    _generate_integrity_file(env_pkg_dir)
+    _generate_integrity_file(
+        env_pkg_dir,
+        project_name=env_manifest.project_name,
+        ships_version=env_manifest.ships_version,
+    )
     # Internal archive root drops the build-id so extraction into a
     # nested ``.ships-work/`` folder stays well under Windows MAX_PATH
     # (#395).  Archive filename on disk is unchanged.
@@ -1596,6 +1653,9 @@ def _split_into_paired_packages(
         package_built_at=manifest.package_built_at,
         package_max_age_days=manifest.package_max_age_days,
         package_age_violation_level=manifest.package_age_violation_level,
+        # #481: inherit project + SHIPS version from the parent build.
+        project_name=manifest.project_name,
+        ships_version=manifest.ships_version,
     )
 
     # 7. Detect external parent database/user dependencies and, when present,
@@ -1662,7 +1722,11 @@ def _split_into_paired_packages(
 
     # 8. Integrity fingerprints, then archive both. Prereqs first so
     #    the on-disk creation order matches the deploy order.
-    _generate_integrity_file(prereqs_pkg_dir)
+    _generate_integrity_file(
+        prereqs_pkg_dir,
+        project_name=prereqs_manifest.project_name,
+        ships_version=prereqs_manifest.ships_version,
+    )
     # Internal archive root drops the build-id so extraction into a
     # nested ``.ships-work/`` folder stays well under Windows MAX_PATH
     # (#395).  Archive filenames on disk are unchanged.
@@ -1673,7 +1737,11 @@ def _split_into_paired_packages(
         archive_path=os.path.join(parent_dir, prereqs_archive_filename),
     )
     _generate_checksum(prereqs_archive)
-    _generate_integrity_file(pkg_dir)
+    _generate_integrity_file(
+        pkg_dir,
+        project_name=manifest.project_name,
+        ships_version=manifest.ships_version,
+    )
     main_archive = _archive_package(
         pkg_dir,
         archive_format,
@@ -1855,7 +1923,11 @@ def _finalize_single_package(
     from td_release_packager.package_report import generate_package_report
 
     generate_package_report(main_pkg_dir, manifest.__dict__)
-    _generate_integrity_file(main_pkg_dir)
+    _generate_integrity_file(
+        main_pkg_dir,
+        project_name=manifest.project_name,
+        ships_version=manifest.ships_version,
+    )
     # Internal archive root drops the build-id so extraction into a
     # nested ``.ships-work/`` folder stays well under Windows MAX_PATH
     # (#395).  Archive filename on disk is unchanged.
@@ -2025,7 +2097,12 @@ def _refresh_environment_prereq_trust(pkg_dir: str, manifest: BuildManifest) -> 
             },
         )
 
-    write_trust_result(pkg_dir, report)
+    write_trust_result(
+        pkg_dir,
+        report,
+        project_name=manifest.project_name,
+        ships_version=manifest.ships_version,
+    )
     manifest.trust = {"trust_ref": TRUST_RESULT_REF}
 
     from td_release_packager.actions import (
@@ -2039,7 +2116,12 @@ def _refresh_environment_prereq_trust(pkg_dir: str, manifest: BuildManifest) -> 
         role=manifest.role or "",
         has_dba_placeholders=has_dba_placeholders(pkg_dir),
     )
-    write_actions_result(pkg_dir, refreshed_actions)
+    write_actions_result(
+        pkg_dir,
+        refreshed_actions,
+        project_name=manifest.project_name,
+        ships_version=manifest.ships_version,
+    )
     manifest.actions_ref = ACTIONS_RESULT_REF
 
     from td_release_packager.capabilities import (
@@ -2056,7 +2138,12 @@ def _refresh_environment_prereq_trust(pkg_dir: str, manifest: BuildManifest) -> 
             "require_approvals": manifest.require_approvals,
         }
     )
-    write_capabilities_result(pkg_dir, refreshed_capabilities)
+    write_capabilities_result(
+        pkg_dir,
+        refreshed_capabilities,
+        project_name=manifest.project_name,
+        ships_version=manifest.ships_version,
+    )
     manifest.capabilities_ref = CAPABILITIES_RESULT_REF
 
     from td_release_packager.policy import (
@@ -2153,7 +2240,11 @@ def repackage_package_dir(
     from td_release_packager.package_report import generate_package_report
 
     generate_package_report(package_dir, manifest.__dict__)
-    _generate_integrity_file(package_dir)
+    _generate_integrity_file(
+        package_dir,
+        project_name=manifest.project_name,
+        ships_version=manifest.ships_version,
+    )
 
     group_dir = _repackage_output_group_dir(package_dir, manifest)
     archive_format = (
@@ -4389,7 +4480,12 @@ def _archive_package(
     return actual_archive_path
 
 
-def _generate_integrity_file(pkg_dir: str) -> str:
+def _generate_integrity_file(
+    pkg_dir: str,
+    *,
+    project_name: str = "",
+    ships_version: str = "",
+) -> str:
     """Compute a SHA-256 fingerprint over every payload and lib/ file.
 
     Walks ``payload/`` and ``lib/`` recursively (sorted), hashes each file,
@@ -4398,6 +4494,12 @@ def _generate_integrity_file(pkg_dir: str) -> str:
     ``context/ships.integrity.json`` in the package so the embedded
     ``deploy.py`` can verify the package has not been tampered with
     before any database connection is opened.
+
+    ``project_name`` and ``ships_version`` (issue #481) are stamped into
+    the integrity document for consumer convenience. They are NOT part
+    of ``package_hash`` — the hash covers payload + lib only, so
+    rebuilding the same source under a newer SHIPS produces the same
+    hash even though the version string differs.
 
     Including ``lib/`` means that an attacker who edits the embedded
     deployer code (e.g. ``lib/database_package_deployer/preflight.py``)
@@ -4452,6 +4554,8 @@ def _generate_integrity_file(pkg_dir: str) -> str:
 
     integrity = {
         "schema_version": "1.0",
+        "ships_version": ships_version or _SHIPS_VERSION,
+        "project_name": project_name or "",
         "algorithm": "SHA-256",
         "package_hash": package_hash,
         "file_count": len(file_hashes),

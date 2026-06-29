@@ -135,8 +135,13 @@ def generate_report(
     # without having to open the separate package_report.html.
     package_trust = _load_package_trust(output_dir)
 
+    # #481: read project_name + ships_version from the package's
+    # build manifest so the ribbon on the deploy report mirrors the
+    # one on the package report.
+    build_meta = _load_context_json(output_dir, "ships.build.json")
+
     html = _build_html(
-        result, provenance, prov_status, source_view_links, package_trust
+        result, provenance, prov_status, source_view_links, package_trust, build_meta
     )
 
     with open(report_path, "w", encoding="utf-8") as f:
@@ -232,14 +237,24 @@ def _load_package_trust(pkg_dir: str) -> dict:
         The canonical trust document, or an empty dict when the file is
         absent or unreadable.
     """
+    return _load_context_json(pkg_dir, "ships.trust.json")
+
+
+def _load_context_json(pkg_dir: str, filename: str) -> dict:
+    """Load a JSON file from ``context/<filename>``, walking up from ``pkg_dir``.
+
+    Used by the report to find any of the agentic JSON documents the
+    package carries (trust, build, provenance). Returns ``{}`` when the
+    file is absent or unparseable so callers can chain ``.get()`` safely.
+    """
     import json
 
     candidate = os.path.abspath(pkg_dir)
     for _ in range(6):
-        trust_json = os.path.join(candidate, "context", "ships.trust.json")
-        if os.path.isfile(trust_json):
+        target = os.path.join(candidate, "context", filename)
+        if os.path.isfile(target):
             try:
-                with open(trust_json, encoding="utf-8") as fh:
+                with open(target, encoding="utf-8") as fh:
                     data = json.load(fh)
                 return data if isinstance(data, dict) else {}
             except Exception:
@@ -257,6 +272,7 @@ def _build_html(
     provenance_status: str = "",
     source_view_links: Optional[Dict[str, str]] = None,
     package_trust: Optional[dict] = None,
+    build_meta: Optional[dict] = None,
 ) -> str:
     """Build the complete HTML report string."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -298,6 +314,7 @@ def _build_html(
         )
 
     fg = "#FFFFFF" if status == "PASSED" else "#FFFFFF"
+    meta = build_meta or {}
     return _render_page(
         doc_title=f"{mode} Report — {result.deployment_id}",
         header_title=f"{mode} Report",
@@ -311,6 +328,8 @@ def _build_html(
         tabs=tabs,
         content_prefix=_html_provenance_notice(provenance_status),
         extra_css=_DEPLOY_CONTENT_CSS,
+        project_name=meta.get("project_name") or None,
+        ships_version=meta.get("ships_version") or None,
     )
 
 

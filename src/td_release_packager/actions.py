@@ -400,12 +400,32 @@ def compute_actions_report(
 # ---------------------------------------------------------------
 
 
-def write_actions_result(pkg_dir: str, report: ActionsReport) -> str:
-    """Write the canonical actions JSON to ``pkg_dir`` and return its path."""
+def write_actions_result(
+    pkg_dir: str,
+    report: ActionsReport,
+    *,
+    project_name: str = "",
+    ships_version: str = "",
+) -> str:
+    """Write the canonical actions JSON to ``pkg_dir`` and return its path.
+
+    Issue #481 — ``project_name`` and ``ships_version`` are stamped at
+    the top of the document so the consumer can answer "which project /
+    which SHIPS produced this?" without inspecting the surrounding
+    package. ``ships_version`` defaults to
+    ``td_release_packager.__version__`` when empty.
+    """
+    from td_release_packager._version import __version__ as _SHIPS_VERSION
+
+    document = {
+        "ships_version": ships_version or _SHIPS_VERSION,
+        "project_name": project_name or "",
+        **report.to_dict(),
+    }
     path = os.path.join(pkg_dir, "context", ACTIONS_RESULT_FILENAME)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(report.to_dict(), f, indent=2, ensure_ascii=False)
+        json.dump(document, f, indent=2, ensure_ascii=False)
         f.write("\n")
     return path
 

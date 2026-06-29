@@ -182,13 +182,39 @@ class DecisionsManifest:
 
         if os.path.exists(path):
             self.data = self._load_and_migrate(path)
+            self._stamp_provenance()
             return
+
+        from td_release_packager._version import __version__ as _SHIPS_VERSION
+        from td_release_packager.project_paths import resolve_project_name
+
+        # Project root is the parent of .ships/ — derive it from the path
+        # rather than threading it through every caller.
+        project_dir = os.path.dirname(os.path.dirname(os.path.abspath(path)))
 
         self.data = {
             "schema_version": SCHEMA_VERSION,
+            "ships_version": _SHIPS_VERSION,
+            "project_name": resolve_project_name(project_dir),
             "project": dict(project_meta) if project_meta else {},
             "runs": [],
         }
+
+    def _stamp_provenance(self) -> None:
+        """Ensure an existing manifest carries ships_version + project_name.
+
+        Old manifests written before issue #481 won't have these fields;
+        stamp them on load so downstream consumers always see them.
+        ``ships_version`` is updated to the current version (the latest
+        SHIPS to touch the file is the most informative value).
+        """
+        from td_release_packager._version import __version__ as _SHIPS_VERSION
+        from td_release_packager.project_paths import resolve_project_name
+
+        self.data["ships_version"] = _SHIPS_VERSION
+        if not self.data.get("project_name"):
+            project_dir = os.path.dirname(os.path.dirname(os.path.abspath(self.path)))
+            self.data["project_name"] = resolve_project_name(project_dir)
 
     # ---- persistence ------------------------------------------
 
