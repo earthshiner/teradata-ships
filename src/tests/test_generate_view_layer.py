@@ -1057,3 +1057,137 @@ class TestSkippedRun:
         assert result.errors == []
         assert result.skipped is False
         assert result.skip_reason is None
+
+
+# ===========================================================================
+# Section 14 — One-DB-PREFIX (Shape B) scaffolding support (#456)
+# ===========================================================================
+
+
+class TestOneDbPrefixShapeRecognition:
+    """The SHIPS Navigator's ``One DB-PREFIX`` scaffolding option emits
+    filenames of the shape ``{{DB_PREFIX}}_<MODULE>_<TIER>_T.<obj>.tbl``
+    — a single prefix token followed by a literal ``_T``/``_V`` tier
+    suffix. The generator must recognise this as a paired token shape
+    (issue #456); before the fix every Shape-B file was silently
+    skipped and the generator reported "no paired-token tables found"
+    on perfectly-well-formed payloads.
+    """
+
+    def test_parse_module_token_handles_shape_b(self):
+        assert parse_module_token("{{DB_PREFIX}}_DOM_STD_T") == (
+            "{{DB_PREFIX}}_DOM_STD",
+            "T",
+        )
+        assert parse_module_token("{{DB_PREFIX}}_DOM_ACL_V") == (
+            "{{DB_PREFIX}}_DOM_ACL",
+            "V",
+        )
+
+    def test_companion_token_flips_shape_b_tier_suffix(self):
+        assert companion_token("{{DB_PREFIX}}_DOM_STD_T") == "{{DB_PREFIX}}_DOM_STD_V"
+        assert companion_token("{{DB_PREFIX}}_DOM_ACL_V") == "{{DB_PREFIX}}_DOM_ACL_T"
+
+    def test_split_object_filename_captures_full_shape_b_token(self):
+        # Database token consumes the literal suffix up to the first ``.``
+        # *outside* the braces, not the first ``}}``.
+        assert split_object_filename("{{DB_PREFIX}}_DOM_STD_T.customer.tbl") == (
+            "{{DB_PREFIX}}_DOM_STD_T",
+            "customer",
+            ".tbl",
+        )
+        assert split_object_filename(
+            "{{DB_PREFIX}}_DOM_ACL_V.customer_current.viw"
+        ) == (
+            "{{DB_PREFIX}}_DOM_ACL_V",
+            "customer_current",
+            ".viw",
+        )
+
+    def test_rewrite_redirects_shape_b_t_to_v(self):
+        """View bodies referencing a Shape-B ``_T`` table are rewritten
+        through the matching ``_V`` locking view."""
+        body = (
+            "REPLACE VIEW {{DB_PREFIX}}_DOM_STD_V.customer AS\n"
+            "SELECT c.id FROM {{DB_PREFIX}}_DOM_STD_T.customer c;\n"
+        )
+        rewritten, count = rewrite_tables_to_views(body, [], "test")
+        assert "{{DB_PREFIX}}_DOM_STD_V.customer c" in rewritten
+        assert "{{DB_PREFIX}}_DOM_STD_T" not in rewritten
+        assert count == 1
+
+
+@pytest.fixture
+def one_db_prefix_project(tmp_path):
+    """A SHIPS project using the Navigator's One-DB-PREFIX shape (#456)."""
+    root = tmp_path / "Project"
+    _make_ships_project(root)
+
+    # A standard table under the One-DB-PREFIX shape.
+    _write(
+        root,
+        "payload/database/DDL/tables/{{DB_PREFIX}}_DOM_STD_T.customer.tbl",
+        (
+            "CREATE MULTISET TABLE {{DB_PREFIX}}_DOM_STD_T.customer "
+            "(\n"
+            "     customer_id INTEGER NOT NULL\n"
+            "    ,full_name   VARCHAR(200)\n"
+            ")\n"
+            "PRIMARY INDEX (customer_id);\n"
+        ),
+    )
+
+    # A business view that reads through the locking-view layer.
+    _write(
+        root,
+        "payload/database/DDL/views/{{DB_PREFIX}}_DOM_ACL_V.customer_current.viw",
+        (
+            "REPLACE VIEW {{DB_PREFIX}}_DOM_ACL_V.customer_current AS\n"
+            "SELECT c.customer_id, c.full_name\n"
+            "FROM {{DB_PREFIX}}_DOM_STD_T.customer AS c;\n"
+        ),
+    )
+    return root
+
+
+class TestOneDbPrefixEndToEnd:
+    """End-to-end run on a Shape-B payload produces the same shape of
+    output as a Shape-A run — locking view, business-view rewrite,
+    database file, grants — but with the prefix-token names preserved.
+    """
+
+    def test_run_is_not_skipped(self, one_db_prefix_project):
+        result = run(one_db_prefix_project, requested_modules=None, dry_run=False)
+        assert result.errors == []
+        assert result.skipped is False, (
+            f"One-DB-PREFIX payload was skipped: {result.skip_reason}"
+        )
+
+    def test_locking_view_emitted_with_shape_b_token(self, one_db_prefix_project):
+        run(one_db_prefix_project, requested_modules=None, dry_run=False)
+        # The locking view goes into the matching _V database.
+        locking = one_db_prefix_project / (
+            "payload/database/DDL/views/{{DB_PREFIX}}_DOM_STD_V.customer.viw"
+        )
+        assert locking.is_file(), "Shape-B locking view was not emitted"
+        text = locking.read_text(encoding="utf-8")
+        assert "{{DB_PREFIX}}_DOM_STD_V.customer" in text
+        # And it reads from the matching _T table.
+        assert "{{DB_PREFIX}}_DOM_STD_T.customer" in text
+
+    def test_business_view_rewritten_t_to_v(self, one_db_prefix_project):
+        run(one_db_prefix_project, requested_modules=None, dry_run=False)
+        view = one_db_prefix_project / (
+            "payload/database/DDL/views/{{DB_PREFIX}}_DOM_ACL_V.customer_current.viw"
+        )
+        text = view.read_text(encoding="utf-8")
+        # The business view should now read through the _V layer, not _T.
+        assert "{{DB_PREFIX}}_DOM_STD_V.customer" in text
+        assert "{{DB_PREFIX}}_DOM_STD_T.customer" not in text
+
+    def test_views_database_file_emitted(self, one_db_prefix_project):
+        run(one_db_prefix_project, requested_modules=None, dry_run=False)
+        db_file = one_db_prefix_project / (
+            "payload/database/pre-requisites/databases/{{DB_PREFIX}}_DOM_STD_V.db"
+        )
+        assert db_file.is_file()
