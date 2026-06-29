@@ -2990,14 +2990,13 @@ def _run_inspect(args, stage, issue_codes) -> int:
         # need to attach the per-step findings now.
         if grant_result is not None:
             if grants_files_written:
-                # Summary INFO: low-friction default — fix mode just
-                # generated/updated the .grt files from inferred DDL
-                # intent. Record once at info-level so the audit trail
-                # in ships.decisions.json shows what SHIPS did on the
-                # operator's behalf.
+                # `--fix-grants` (the default) just wrote .grt files for
+                # the operator. Recorded so the audit trail in
+                # ships.decisions.json shows what SHIPS did — not a
+                # violation. (#451)
                 stage.add_issue(
                     "info",
-                    issue_codes.INSPECT_GRANT_VIOLATION,
+                    issue_codes.INSPECT_GRANT_AUTO_GENERATED,
                     f"Auto-generated {grants_files_written} .grt file(s) "
                     f"from DDL intent (--fix-grants default). Pass "
                     f"--no-fix-grants to opt out and just lint.",
@@ -3011,14 +3010,14 @@ def _run_inspect(args, stage, issue_codes) -> int:
                     # absent from the .dcl file. Always a hard error.
                     stage.add_issue(
                         "error",
-                        issue_codes.INSPECT_GRANT_VIOLATION,
+                        issue_codes.INSPECT_GRANT_DRIFT,
                         f"Drifted grant: {_format_drifted_grant(entry)}",
                     )
                 elif _grant_issue_enabled(warn_extra_grants_severity):
                     # Extra-only drift is controlled by warn_extra_grants.
                     stage.add_issue(
                         warn_extra_grants_severity.lower(),
-                        issue_codes.INSPECT_GRANT_VIOLATION,
+                        issue_codes.INSPECT_GRANT_DRIFT,
                         f"Drifted grant: {_format_drifted_grant(entry)}",
                     )
             for entry in grant_result.missing:
@@ -3031,7 +3030,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
                 # default behaviour.
                 stage.add_issue(
                     "info",
-                    issue_codes.INSPECT_GRANT_VIOLATION,
+                    issue_codes.INSPECT_GRANT_MISSING,
                     f"Missing grant: {_format_missing_grant(entry)}. "
                     f"Drop --no-fix-grants (or run "
                     f"`ships inspect --fix-grants`) to auto-generate.",
@@ -3040,7 +3039,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
                 if _grant_issue_enabled(warn_external_grants_severity):
                     stage.add_issue(
                         warn_external_grants_severity.lower(),
-                        issue_codes.INSPECT_GRANT_VIOLATION,
+                        issue_codes.INSPECT_GRANT_EXTERNAL,
                         f"External grant: {_format_external_grant(entry)}",
                     )
 

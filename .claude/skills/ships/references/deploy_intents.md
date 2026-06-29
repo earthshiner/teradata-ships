@@ -90,7 +90,7 @@ Five discrete signals evaluated after each pipeline run. Produces a label, not a
 |-------------------------|-----------------------------------------------------------|
 | `inspect_token_format`  | INSPECT_TOKEN_MALFORMED error raised by inspect stage     |
 | `inspect_lint`          | INSPECT_LINT_VIOLATION error raised by inspect stage      |
-| `inspect_grants`        | INSPECT_GRANT_VIOLATION error raised by inspect stage     |
+| `inspect_grants`        | Any INSPECT_GRANT_* error raised by inspect stage         |
 | `provenance_complete`   | `_provenance.json` is absent from the payload             |
 | `build_reproducible`    | `source_dirty` flag is set in BUILD.json                  |
 

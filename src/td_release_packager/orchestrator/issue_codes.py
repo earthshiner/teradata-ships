@@ -78,8 +78,38 @@ INSPECT_LINT_VIOLATION = "INSPECT_LINT_VIOLATION"
 #: remediation metadata in the issue ``details`` (issue #167).
 INSPECT_CUSTOM_POLICY = "INSPECT_CUSTOM_POLICY"
 
-#: Step 2 — Cross-file grant validation found a drifted, missing,
-#: or orphaned grant relative to the inferred intent.
+#: Step 2 — Cross-file grant validation, per-condition codes (issue
+#: #451). A single ``INSPECT_GRANT_VIOLATION`` code was used to mean
+#: five different things at three different severities, so a routine
+#: info-level message like "Auto-generated 10 .grt files" reported as
+#: a "violation". Splitting the code lets ``explain`` and CI tooling
+#: group findings by what actually happened.
+#:
+#: ``INSPECT_GRANT_VIOLATION`` is retained as an alias for one release
+#: so dashboards filtering on the old code keep working.
+
+#: ``--fix-grants`` (the default) auto-generated one or more ``.grt``
+#: files from the inferred DDL intent. Always recorded at ``info``.
+INSPECT_GRANT_AUTO_GENERATED = "INSPECT_GRANT_AUTO_GENERATED"
+
+#: A grant targets an object whose DDL is not present in this package.
+#: Severity follows ``warn_external_grants`` (default ``info``).
+INSPECT_GRANT_EXTERNAL = "INSPECT_GRANT_EXTERNAL"
+
+#: DDL implies a grant that has no matching entry in the project's
+#: ``.dcl`` files. With ``--fix-grants`` (the default) these are
+#: auto-generated before being recorded, so this code only surfaces
+#: under ``--no-fix-grants``. Severity ``info``.
+INSPECT_GRANT_MISSING = "INSPECT_GRANT_MISSING"
+
+#: A ``.dcl`` entry diverges from the grant set inferred from DDL
+#: intent. Severity follows ``warn_extra_grants`` for extra-only
+#: drift; promoted to ``error`` when the drift includes missing
+#: privileges (the DDL implies a grant that's absent from .dcl).
+INSPECT_GRANT_DRIFT = "INSPECT_GRANT_DRIFT"
+
+#: Deprecated alias for the four codes above. Will be removed after
+#: one release. Consumers should switch to the per-condition codes.
 INSPECT_GRANT_VIOLATION = "INSPECT_GRANT_VIOLATION"
 
 
@@ -245,12 +275,36 @@ ISSUE_CODES: Dict[str, str] = {
         "automation_level, requires_human_review, recommended_action, "
         "etc.) is carried in the issue 'details' for agents and CI."
     ),
+    INSPECT_GRANT_AUTO_GENERATED: (
+        "`--fix-grants` (the default) auto-generated one or more "
+        "`.grt` files from the DDL intent. A routine bookkeeping "
+        "entry — not actionable. Pass `--no-fix-grants` to opt out."
+    ),
+    INSPECT_GRANT_EXTERNAL: (
+        "A grant targets an object whose DDL is not present in this "
+        "package. Common when granting onto a database that already "
+        "exists on the target system. Severity follows "
+        "`warn_external_grants` (default `info`)."
+    ),
+    INSPECT_GRANT_MISSING: (
+        "The DDL implies a grant that has no matching entry in the "
+        "project's `.dcl` files. With `--fix-grants` (the default) "
+        "these are auto-generated before being recorded; this code "
+        "only surfaces under `--no-fix-grants`. Drop `--no-fix-grants` "
+        "(or run `ships inspect --fix-grants`) to auto-generate."
+    ),
+    INSPECT_GRANT_DRIFT: (
+        "A `.dcl` entry diverges from the grant set inferred from "
+        "DDL intent. Severity follows `warn_extra_grants` for "
+        "extra-only drift; promoted to `error` when the drift "
+        "includes missing privileges (the DDL implies a grant that's "
+        "absent from `.dcl`). Reconcile the `.dcl` against the DDL "
+        "or re-run with `--fix-grants` to regenerate."
+    ),
     INSPECT_GRANT_VIOLATION: (
-        "Cross-file grant validation found a discrepancy between the "
-        "inferred grant set (from DDL intent analysis) and the .grt "
-        "files in the project's DCL/ tree — typically a drifted, "
-        "missing, or orphaned grant. Re-run with --fix-grants to "
-        "regenerate the .grt files."
+        "Deprecated alias for the per-condition grant codes "
+        "(INSPECT_GRANT_AUTO_GENERATED / EXTERNAL / MISSING / DRIFT). "
+        "Will be removed after one release."
     ),
 }
 

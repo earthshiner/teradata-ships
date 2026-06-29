@@ -20,7 +20,7 @@ to fix.
 |----------------------|-----------------------------------------|---------------------------------|
 | inspect_token_format | ships.decisions.json inspect stage      | Any INSPECT_TOKEN_MALFORMED err |
 | inspect_lint         | ships.decisions.json inspect stage      | Any INSPECT_LINT_VIOLATION err  |
-| inspect_grants       | ships.decisions.json inspect stage      | Any INSPECT_GRANT_VIOLATION err |
+| inspect_grants       | ships.decisions.json inspect stage      | Any INSPECT_GRANT_* error       |
 | provenance_complete  | context/ships.provenance.json existence | File absent from payload        |
 | build_reproducible   | context/ships.build.json.source_dirty   | source_dirty == true            |
 
@@ -47,9 +47,23 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from td_release_packager.orchestrator.issue_codes import (
+    INSPECT_GRANT_AUTO_GENERATED,
+    INSPECT_GRANT_DRIFT,
+    INSPECT_GRANT_EXTERNAL,
+    INSPECT_GRANT_MISSING,
     INSPECT_GRANT_VIOLATION,
     INSPECT_LINT_VIOLATION,
     INSPECT_TOKEN_MALFORMED,
+)
+
+#: All codes that contribute to the ``inspect_grants`` signal — the
+#: per-condition split (#451) plus the legacy alias.
+_GRANT_CODES = (
+    INSPECT_GRANT_AUTO_GENERATED,
+    INSPECT_GRANT_DRIFT,
+    INSPECT_GRANT_EXTERNAL,
+    INSPECT_GRANT_MISSING,
+    INSPECT_GRANT_VIOLATION,
 )
 
 
@@ -201,7 +215,7 @@ def compute_trust_report(source_dir: str, pkg_dir: str) -> TrustReport:
     )
     signals["inspect_grants"] = _inspect_signal(
         inspect_stage,
-        INSPECT_GRANT_VIOLATION,
+        _GRANT_CODES,
         "Grant drift detected",
         "Grant validation clean",
         source_dir,
@@ -266,7 +280,7 @@ def _find_latest_inspect_stage(decisions: dict) -> Optional[dict]:
 
 def _inspect_signal(
     stage: Optional[dict],
-    issue_code: str,
+    issue_code,
     fail_message_prefix: str,
     pass_message: str,
     source_dir: str = "",
@@ -276,6 +290,11 @@ def _inspect_signal(
 
     A missing stage (inspect never ran) is UNKNOWN — the operator
     should run inspect before promoting.
+
+    ``issue_code`` may be a single string or a tuple of strings —
+    the signal rolls up matches across every code in the tuple. This
+    lets one signal aggregate per-condition codes (e.g. the four
+    INSPECT_GRANT_* codes) without re-running the loop in the caller.
     """
     if stage is None:
         return TrustSignal(
@@ -284,11 +303,11 @@ def _inspect_signal(
             evidence_paths=[_EVIDENCE_INSPECT],
         )
 
+    codes = (issue_code,) if isinstance(issue_code, str) else tuple(issue_code)
     matching = [
         i
         for i in stage.get("issues", [])
-        if i.get("code") == issue_code
-        and not _is_generated_artifact_issue(i, source_dir)
+        if i.get("code") in codes and not _is_generated_artifact_issue(i, source_dir)
     ]
 
     errors = [i for i in matching if i.get("severity") == "error"]
