@@ -747,15 +747,72 @@ def generate_locking_view_ddl(table: TableSpec) -> str:
 # ===========================================================================
 
 
-def is_locking_view(content: str) -> bool:
-    """
-    Detect a 1:1 locking view by header marker.
+_LOCKING_ACCESS_RE = re.compile(r"\bLOCKING\s+ROW\s+FOR\s+ACCESS\b", re.IGNORECASE)
 
-    Mirrors the detector in ``td_release_packager/validate.py`` so a
-    view we generate here is recognised as exempt by the validator.
+
+def is_locking_view(
+    content: str,
+    *,
+    view_database_token: Optional[str] = None,
+    view_object_name: Optional[str] = None,
+) -> bool:
+    """Detect a 1:1 locking view by header marker OR canonical shape.
+
+    Two detectors run, either of which is sufficient:
+
+    * **Marker comment** — ``-- LOCKING VIEW`` (or the legacy aliases
+      ``-- 1:1 VIEW`` / ``-- DIRTY READ VIEW``) in the first 20 lines.
+      Mirrors the detector in ``validate.py`` so a view this module
+      generates is recognised as exempt by the validator.
+
+    * **Canonical shape** — the SHIPS Object Placement 1:1 locking-view
+      pattern: contains ``LOCKING ROW FOR ACCESS`` *and* a ``FROM``
+      clause targeting the matching ``_T`` companion of the view's
+      ``_V`` database with the same object name. This catches the
+      common case of an operator hand-authoring a locking view in the
+      canonical shape but forgetting (or not knowing about) the marker
+      comment — without it, the rewrite pass would turn every
+      ``_T.<obj>`` reference into ``_V.<obj>`` and produce a
+      self-reference that ``validate.view_macro_self_reference``
+      correctly flags as an error.
+
+    Args:
+        content: Raw view DDL text.
+        view_database_token: Optional. The view's own ``_V`` database
+            token (e.g. ``{{DB_PREFIX}}_DOM_STD_V``). Only used by the
+            structural detector — omit to fall back to marker-only.
+        view_object_name: Optional. The view's bare object name (e.g.
+            ``booking``). Only used by the structural detector.
     """
     header = "\n".join(content.split("\n")[:20])
-    return bool(re.search(r"--\s*LOCKING\s+VIEW", header, re.IGNORECASE))
+    if re.search(r"--\s*LOCKING\s+VIEW", header, re.IGNORECASE):
+        return True
+    if re.search(r"--\s*1:1\s+VIEW", header, re.IGNORECASE):
+        return True
+    if re.search(r"--\s*DIRTY\s+READ\s+VIEW", header, re.IGNORECASE):
+        return True
+
+    if not view_database_token or not view_object_name:
+        return False
+
+    if not _LOCKING_ACCESS_RE.search(content):
+        return False
+
+    # The body must SELECT FROM the _T companion of this view's _V
+    # database, with the same object name — the canonical 1:1 shape.
+    companion = companion_token(view_database_token)
+    if companion is None:
+        return False
+    body = _strip_sql_comments(content)
+    obj_re = re.compile(
+        r"\bFROM\s+"
+        + re.escape(companion)
+        + r"\s*\.\s*"
+        + re.escape(view_object_name)
+        + r"(?![A-Za-z0-9_])",
+        re.IGNORECASE,
+    )
+    return obj_re.search(body) is not None
 
 
 # ===========================================================================
@@ -1318,7 +1375,14 @@ def discover_views(project_root: Path) -> List[ViewSpec]:
                 module=module,
                 object_name=object_name,
                 raw_content=content,
-                is_locking_view=is_locking_view(content),
+                # Pass the view's own metadata so the structural detector
+                # can flag canonical 1:1 locking views that lack the
+                # marker comment but match the shape SHIPS itself emits.
+                is_locking_view=is_locking_view(
+                    content,
+                    view_database_token=token,
+                    view_object_name=object_name,
+                ),
             )
         )
     return specs

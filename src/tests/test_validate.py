@@ -459,6 +459,40 @@ class TestCheckViewMacroSelfReference:
         )
         assert _check_view_macro_self_reference("x.viw", ddl) == []
 
+    def test_comment_on_view_after_definition_not_flagged(self):
+        """``COMMENT ON VIEW <name> IS '...'`` after the view's ``;``
+        terminator is a separate DDL statement — its mention of the
+        view's qualified name is a catalogue update, not a body
+        self-reference. Regression for the airline CustomerDNA case
+        where the harvested ``.viw`` keeps the SHIPS-generated
+        ``COMMENT ON VIEW`` and the validator wrongly flagged it.
+        """
+        ddl = (
+            "CREATE VIEW {{DOM_V}}.Customer\n"
+            "(customer_sk, full_name)\n"
+            "AS\n"
+            "LOCKING ROW FOR ACCESS\n"
+            "SELECT customer_sk, full_name\n"
+            "FROM {{DOM_T}}.Customer\n"
+            ";\n"
+            "COMMENT ON VIEW {{DOM_V}}.Customer IS 'Customer master.';\n"
+        )
+        assert _check_view_macro_self_reference("x.viw", ddl) == []
+
+    def test_real_self_reference_after_comment_on_still_flagged(self):
+        """The comment-on truncation must not mask a real
+        self-reference that occurs before the body's ``;``."""
+        ddl = (
+            "CREATE VIEW {{DOM_V}}.X AS\n"
+            "LOCKING ROW FOR ACCESS\n"
+            "SELECT * FROM {{DOM_V}}.X\n"
+            ";\n"
+            "COMMENT ON VIEW {{DOM_V}}.X IS 'doc';\n"
+        )
+        issues = _check_view_macro_self_reference("x.viw", ddl)
+        assert len(issues) == 1
+        assert issues[0].rule == "view_macro_self_reference"
+
     def test_unqualified_self_reference_not_flagged(self):
         """Unqualified bare-name reference is not flagged here.
 
