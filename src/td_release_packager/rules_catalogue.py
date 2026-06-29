@@ -572,6 +572,33 @@ _RULES: dict[str, dict[str, object]] = {
         "risk": "medium",
         "requires_human_review": True,
     },
+    "orphan_database": {
+        "description": (
+            "A project-level note over "
+            "``payload/database/pre-requisites/``. Surfaces a ``.db`` "
+            "/ ``.usr`` declaration whose database name is not "
+            "referenced anywhere else in the payload — no table or "
+            "view qualified with it, no grant target / grantee "
+            "mentioning it, no child database created FROM it. "
+            "Sometimes the residue of a naming-convention crossfire "
+            "(a hand-authored full-name declaration alongside a "
+            "view-layer-generated abbreviated sibling for the same "
+            "role); often intentional — empty containers like data "
+            "labs, sandboxes, or schemas users populate themselves "
+            "are valid SHIPS payloads. Informational by default."
+        ),
+        "default_severity": "INFO",
+        "safe_fix_available": False,
+        "automation_level": "manual",
+        "recommended_action": (
+            "Review whether the declaration is intentional. If it's "
+            "leftover from a naming-convention change, reconcile the "
+            "two names. If it's an empty container for downstream "
+            "consumers, no action needed."
+        ),
+        "risk": "low",
+        "requires_human_review": False,
+    },
     "transaction_control_in_payload": {
         "description": (
             "A transaction-control statement (BT/ET, BEGIN/END TRANSACTION, "
