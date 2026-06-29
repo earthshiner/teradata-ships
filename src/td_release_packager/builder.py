@@ -4285,6 +4285,30 @@ def _archive_package(
                     arcname = (rel_dir / fname).as_posix()
                     zf.write(fpath, arcname)
 
+    # Force the archive to disk before any downstream step (notably
+    # ``_generate_checksum``) reads it. The ZipFile context manager
+    # closes the Python-side handle, but on Windows the kernel page
+    # cache can still hold the latest bytes for the OS to write back
+    # later — so a reader that opens the file immediately afterwards
+    # can see a stale view, while an AV scanner or sync agent that
+    # touches the file post-write can rewrite the on-disk bytes
+    # without us noticing. Both produce a .sha256 sidecar that
+    # disagrees with the archive (issue #450). The fsync is cheap and
+    # the only operation here that materially helps.
+    try:
+        _fd = os.open(actual_archive_path, os.O_RDONLY)
+        try:
+            os.fsync(_fd)
+        finally:
+            os.close(_fd)
+    except OSError:
+        # fsync is a best-effort guard; we'd rather complete the
+        # build than abort because of a transient handle issue.
+        logger.debug(
+            "Could not fsync %s — sidecar may be stale on some platforms",
+            actual_archive_path,
+        )
+
     # Remove the unarchived directory robustly — on Windows a bare
     # shutil.rmtree can race with antivirus or search-index handles.
     _rmtree_robust(pkg_dir)
