@@ -204,6 +204,16 @@ DEFAULT_RULES: Dict[str, str] = {
     # WARNING by default (early development); set to ERROR for
     # release/promotion workflows in config/inspect.conf.
     "non_linear_package_history": "WARNING",
+    # orphan_database (#475): a project-level check over
+    # payload/database/pre-requisites/. Flags ``.db`` / ``.usr``
+    # declarations that nothing in the payload references — typically a
+    # naming-convention crossfire where one CREATE DATABASE statement
+    # is hand-authored under a full-name shape (``_Domain_STD_V``) and
+    # the view-layer generator emits its sibling under an abbreviated
+    # shape (``_DOM_STD_V``). One gets populated at deploy time; the
+    # other becomes dead infrastructure. WARNING by default; promote to
+    # ERROR in clean-deploy workflows.
+    "orphan_database": "WARNING",
     # transaction_control_in_payload (issue #173): BT/ET, BEGIN/END
     # TRANSACTION, COMMIT, and ROLLBACK belong to the SHIPS deployer, which
     # owns the transaction boundary — they should not be hidden inside
@@ -573,6 +583,14 @@ def generate_default_config() -> str:
         "# and integrity sidecar mismatches. WARNING by default; set to",
         "# ERROR for release/promotion workflows.",
         f"non_linear_package_history={DEFAULT_RULES['non_linear_package_history']}",
+        "# orphan_database: project-level check over",
+        "# payload/database/pre-requisites/. Flags .db / .usr files whose",
+        "# declared database name nothing in the payload references —",
+        "# typically a naming-convention crossfire between hand-authored",
+        "# full-name declarations and view-layer-generated abbreviated",
+        "# siblings. WARNING by default; promote to ERROR in clean-deploy",
+        "# workflows.",
+        f"orphan_database={DEFAULT_RULES['orphan_database']}",
         "# transaction_control_in_payload: BT/ET, BEGIN/END TRANSACTION,",
         "# COMMIT, ROLLBACK belong to the deployer, not payload files.",
         "# WARNING by default; --strict promotes to ERROR. Transaction",

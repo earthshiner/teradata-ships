@@ -2527,6 +2527,26 @@ def _run_inspect(args, stage, issue_codes) -> int:
             if ph_issues:
                 lint_result.issues.extend(ph_issues)
 
+        # -- Orphan databases (issue #475) --
+        # Project-level check over payload/database/pre-requisites/. Flags
+        # database/user declarations the rest of the payload doesn't
+        # reference — typically a naming-convention crossfire where two
+        # CREATE DATABASE statements name the same logical role under
+        # different identifiers and only one ends up populated.
+        od_severity = rules_config.get("orphan_database", "WARNING")
+        if od_severity == "WARN":
+            od_severity = "WARNING"
+        if args.strict and od_severity == "WARNING":
+            od_severity = "ERROR"
+        if od_severity != "OFF":
+            from td_release_packager.orphan_database import (
+                check_orphan_databases,
+            )
+
+            od_issues = check_orphan_databases(args.project, severity=od_severity)
+            if od_issues:
+                lint_result.issues.extend(od_issues)
+
         # -- Backward-incompatible contract changes (issue #171) --
         # Project-level: compares current payload contracts against the
         # captured baseline (.ships/contracts.baseline.json). No-op until a
