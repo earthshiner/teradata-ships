@@ -25,7 +25,11 @@ Naming convention:
       - TOKEN_*       Token substitution / cascade resolution
       - PROPERTIES_*  .conf file handling
       - HARVEST_*     Harvest / ingest stage (item 4c)
-      - INSPECT_*     Inspect / validate stage (item 4b)
+      - INSPECT_*     Inspect / validate stage (item 4b);
+                      includes per-condition grant codes
+                      (AUTO_GENERATED/EXTERNAL/MISSING/DRIFT) and
+                      a project-level INSPECT_PACKAGE_INTEGRITY
+                      check over ``releases/``.
       - ANALYSE_*     Dependency analysis stage (item 4d)
       - PACKAGE_*     Package / build stage (item 4f)
       - GENERATE_*    Generate / view-layer stage (item 7)
@@ -111,6 +115,14 @@ INSPECT_GRANT_DRIFT = "INSPECT_GRANT_DRIFT"
 #: Deprecated alias for the four codes above. Will be removed after
 #: one release. Consumers should switch to the per-condition codes.
 INSPECT_GRANT_VIOLATION = "INSPECT_GRANT_VIOLATION"
+
+#: A project-level package-integrity check fired against
+#: ``<project>/releases/`` — sidecar/sha mismatch, missing sibling
+#: archive, orphaned prereqs half, mixed-build release group, reused
+#: or out-of-order build number. Distinct from INSPECT_LINT_VIOLATION
+#: because the target is the *built artefact tree*, not source DDL
+#: under ``payload/`` (issue #452).
+INSPECT_PACKAGE_INTEGRITY = "INSPECT_PACKAGE_INTEGRITY"
 
 
 # ---------------------------------------------------------------
@@ -305,6 +317,16 @@ ISSUE_CODES: Dict[str, str] = {
         "Deprecated alias for the per-condition grant codes "
         "(INSPECT_GRANT_AUTO_GENERATED / EXTERNAL / MISSING / DRIFT). "
         "Will be removed after one release."
+    ),
+    INSPECT_PACKAGE_INTEGRITY: (
+        "A project-level package-integrity check fired against "
+        "`<project>/releases/`. Typical triggers: a `.sha256` "
+        "sidecar that no longer matches its archive, a `requires` "
+        "sibling missing from a release group, an orphaned prereqs "
+        "half, archives that disagree on build number or timestamp, "
+        "a build number reused for different contents, or an "
+        "out-of-order build number. The originating rule "
+        "`non_linear_package_history` is carried in the message body."
     ),
 }
 

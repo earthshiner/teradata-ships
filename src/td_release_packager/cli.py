@@ -44,6 +44,7 @@ from typing import Any, Dict, List, Optional, Set
 from td_release_packager.builder import build_package
 from td_release_packager.build_counter import read_build_number
 from td_release_packager.ingest import ingest_directory
+from td_release_packager.package_history import RULE_NAME as _PACKAGE_HISTORY_RULE
 from td_release_packager.token_engine import (
     read_token_map,
     write_token_map,
@@ -2606,11 +2607,17 @@ def _run_inspect(args, stage, issue_codes) -> int:
                 if issue.line is not None:
                     location = f"{issue.file}:{issue.line}"
                 remediation = getattr(issue, "remediation", None)
-                code = (
-                    issue_codes.INSPECT_CUSTOM_POLICY
-                    if issue.rule in custom_rule_names
-                    else issue_codes.INSPECT_LINT_VIOLATION
-                )
+                # Three buckets of finding flow through this list:
+                #   1. Per-file Coding Discipline rules → INSPECT_LINT_VIOLATION
+                #   2. Custom lint policy rules → INSPECT_CUSTOM_POLICY
+                #   3. Project-level package-integrity check over releases/
+                #      → INSPECT_PACKAGE_INTEGRITY (issue #452, not lint)
+                if issue.rule == _PACKAGE_HISTORY_RULE:
+                    code = issue_codes.INSPECT_PACKAGE_INTEGRITY
+                elif issue.rule in custom_rule_names:
+                    code = issue_codes.INSPECT_CUSTOM_POLICY
+                else:
+                    code = issue_codes.INSPECT_LINT_VIOLATION
                 stage.add_issue(
                     rec_severity,
                     code,
