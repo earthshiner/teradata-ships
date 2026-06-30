@@ -217,6 +217,26 @@ class TestPackagingBlock:
         errs = validate(data)
         assert any(e.path == "packaging.default_env" for e in errs)
 
+    def test_root_parent_accepted(self):
+        """#501 — packaging.root_parent feeds args.root_parent so the
+        argless flow injects FROM <parent> into top-level DB/USER DDL."""
+        data = _valid_minimal()
+        data["packaging"] = {"root_parent": "DataProducts"}
+        assert validate(data) == []
+
+    def test_root_parent_must_be_non_empty(self):
+        """Blank / whitespace fails validation the same way name does."""
+        data = _valid_minimal()
+        data["packaging"] = {"root_parent": "  "}
+        errs = validate(data)
+        assert any(e.path == "packaging.root_parent" for e in errs)
+
+    def test_root_parent_must_be_string(self):
+        data = _valid_minimal()
+        data["packaging"] = {"root_parent": 42}
+        errs = validate(data)
+        assert any(e.path == "packaging.root_parent" for e in errs)
+
 
 # ---------------------------------------------------------------
 # apply_defaults()

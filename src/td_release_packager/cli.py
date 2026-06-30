@@ -4023,6 +4023,16 @@ def _apply_process_defaults_from_ships_yaml(args, project_dir: str) -> None:
             args.source = source
             derived.append(f"source={source}")
 
+    # #501 — packaging.root_parent feeds args.root_parent so `ships process
+    # --project .` argless picks up the configured root parent and the
+    # CREATE DATABASE/USER injection runs without a manual --root-parent flag.
+    # The CLI value (if passed) wins; the profile is the convention default.
+    if not getattr(args, "root_parent", None):
+        root_parent = packaging.get("root_parent")
+        if isinstance(root_parent, str) and root_parent.strip():
+            args.root_parent = root_parent
+            derived.append(f"root-parent={root_parent}")
+
     if derived:
         print(f"  Defaults from ships.yaml: {', '.join(derived)}")
 

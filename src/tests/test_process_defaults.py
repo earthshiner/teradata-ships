@@ -19,7 +19,7 @@ from td_release_packager.cli import _apply_process_defaults_from_ships_yaml
 
 
 def _args(**overrides) -> Namespace:
-    base = dict(source=None, env=None, env_config=None, name=None)
+    base = dict(source=None, env=None, env_config=None, name=None, root_parent=None)
     base.update(overrides)
     return Namespace(**base)
 
@@ -100,6 +100,41 @@ class TestPackagingBlock:
         assert args.env == "PRD"  # default_env wins over environments[0]
         # packaging.env_config is taken verbatim (no existence requirement).
         assert args.env_config == "config/env/PRD.conf"
+
+    def test_root_parent_supplied_from_packaging(self, tmp_path):
+        """#501 — packaging.root_parent feeds args.root_parent so the
+        argless flow injects FROM <parent> into top-level CREATE
+        DATABASE/USER statements without a manual --root-parent flag."""
+        _write_ships_yaml(
+            tmp_path,
+            {
+                "project": "OMR",
+                "environments": ["DEV"],
+                "packaging": {"root_parent": "DataProducts"},
+            },
+        )
+
+        args = _args()
+        _apply_process_defaults_from_ships_yaml(args, str(tmp_path))
+
+        assert args.root_parent == "DataProducts"
+
+    def test_root_parent_cli_value_wins(self, tmp_path):
+        """An explicit --root-parent on the CLI must NOT be overwritten
+        by packaging.root_parent — same precedence as name/env."""
+        _write_ships_yaml(
+            tmp_path,
+            {
+                "project": "OMR",
+                "environments": ["DEV"],
+                "packaging": {"root_parent": "FromYaml"},
+            },
+        )
+
+        args = _args(root_parent="FromCli")
+        _apply_process_defaults_from_ships_yaml(args, str(tmp_path))
+
+        assert args.root_parent == "FromCli"
 
 
 class TestPrecedenceAndNoOp:
