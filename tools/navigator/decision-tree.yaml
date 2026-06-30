@@ -46,7 +46,7 @@ questions:
 
   - id: source.owner_repo
     label: "GitHub owner/repo"
-    hint: "e.g. acme/customer-dna"
+    hint: "e.g. <code>acme/customer-dna</code>. A full clone URL (<code>https://github.com/acme/customer-dna.git</code>) or SSH URL (<code>git@github.com:acme/customer-dna.git</code>) is also accepted — the Navigator normalises it for you."
     kind: text
     show: {eq: {field: source.type, value: github}}
 

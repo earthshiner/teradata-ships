@@ -335,7 +335,9 @@ const QUESTIONS = [
       { value: "filesystem", label: "Filesystem" },
     ],
   },
-  { id: "source.owner_repo", label: "GitHub owner/repo", hint: "e.g. acme/customer-dna", kind: "text",
+  { id: "source.owner_repo", label: "GitHub owner/repo",
+    hint: "e.g. <code>acme/customer-dna</code>. A full clone URL (<code>https://github.com/acme/customer-dna.git</code>) or SSH URL (<code>git@github.com:acme/customer-dna.git</code>) is also accepted — the Navigator normalises it for you.",
+    kind: "text",
     show: a => a["source.type"] === "github" },
   { id: "source.ref", label: "GitHub ref (branch/tag/sha)", hint: "Defaults to <code>main</code> if blank.", kind: "text",
     show: a => a["source.type"] === "github" },
@@ -595,6 +597,36 @@ function safeLauncherStem(pkgName) {
   if (!cleaned) cleaned = "package";
   return "ships-run-" + cleaned;
 }
+
+// Issue #495 (follow-up) — normalise the GitHub owner/repo input.
+// Users routinely paste a full clone URL, an SSH URL, or a github.com link
+// instead of the bare `owner/repo` form. Without sanitisation the script
+// emits `git clone "https://github.com/<whatever-they-pasted>.git"` and the
+// URL ends up double-prefixed (e.g. https://github.com/https://github.com/...).
+// Accept any of these and reduce to the canonical `owner/repo`:
+//   - https://github.com/acme/foo            → acme/foo
+//   - https://github.com/acme/foo.git        → acme/foo
+//   - https://github.com/acme/foo.git/       → acme/foo
+//   - http://github.com/acme/foo             → acme/foo
+//   - github.com/acme/foo                    → acme/foo
+//   - git@github.com:acme/foo.git            → acme/foo
+//   - acme/foo                               → acme/foo  (already canonical)
+function sanitiseOwnerRepo(raw) {
+  if (raw == null) return "";
+  let s = String(raw).trim();
+  s = s.replace(/^git@github\.com:/i, "");
+  s = s.replace(/^https?:\/\/(www\.)?github\.com\//i, "");
+  s = s.replace(/^github\.com\//i, "");
+  s = s.replace(/\.git$/i, "");
+  s = s.replace(/\/+$/, "");
+  return s;
+}
+// Loose owner/repo validator — used by the banner to flag input that still
+// doesn't look usable after sanitisation. Permissive on the character set
+// (GitHub allows `-`, `_`, `.`) but rejects anything missing the `/`.
+function looksLikeOwnerRepo(s) {
+  return /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(String(s || ""));
+}
 function parseEnvs(raw) {
   if (!raw) return [];
   return raw.split(/[\s,;]+/).map(s => s.trim()).filter(Boolean);
@@ -611,6 +643,19 @@ function validate(a) {
   const issues = [];
   if (a["source.type"] === "github" && !a["source.owner_repo"])
     issues.push("GitHub owner/repo is empty.");
+  // Issue #495 (follow-up) — flag pasted clone URLs / SSH URLs / etc. so the
+  // user sees what the script will actually use. The Navigator silently
+  // normalises to `owner/repo`, but tell them anyway so the discrepancy
+  // between what they typed and what runs isn't a surprise.
+  if (a["source.type"] === "github" && a["source.owner_repo"]) {
+    const raw = String(a["source.owner_repo"]).trim();
+    const clean = sanitiseOwnerRepo(raw);
+    if (!looksLikeOwnerRepo(clean)) {
+      issues.push("GitHub owner/repo should be `owner/repo` (e.g. `acme/customer-dna`). Got: `" + raw + "`.");
+    } else if (clean !== raw) {
+      issues.push("GitHub owner/repo normalised to `" + clean + "` (the script strips https://github.com/, .git, and trailing slashes).");
+    }
+  }
   if (a["source.type"] === "filesystem" && !a["source.dir"])
     issues.push("Source directory is empty.");
   if (a["tokens.prefix"] && /_$/.test(a["tokens.prefix"]))
@@ -623,8 +668,8 @@ function validate(a) {
     issues.push("Could not parse any environment names from the env list.");
   if (a["package.name"] && /\s/.test(a["package.name"]))
     issues.push("Package name should have no spaces — use underscores.");
-  if (a["mode.style"] === "detailed" && a["source.type"] === "github")
-    issues.push("Detailed mode emits `ships harvest`, which does NOT accept --source-github. Switch to Quick mode, or git-clone the repo first and use a filesystem path.");
+  // The "Detailed + github" warning that used to live here is gone — the
+  // Navigator now emits an explicit `git clone` step for that case (#495).
   return issues;
 }
 
@@ -647,7 +692,11 @@ function generatePlan() {
   const prefix        = (a["tokens.prefix"] || "").trim();
   const sourceType    = a["source.type"];
   const sourceDir     = a["source.dir"] || "<source-dir>";
-  const ownerRepo     = (a["source.owner_repo"] || "<owner/repo>").trim();
+  // Issue #495 (follow-up) — sanitiseOwnerRepo() collapses pasted clone
+  // URLs / SSH URLs / github.com prefixes / trailing `.git` to the canonical
+  // `owner/repo` form so the emitted `git clone "https://github.com/$OWNER_REPO.git"`
+  // doesn't double-prefix the URL.
+  const ownerRepo     = sanitiseOwnerRepo(a["source.owner_repo"] || "") || "<owner/repo>";
   const ref           = (a["source.ref"] || "main").trim();
   const pkgName       = (a["package.name"] || "create_objects").trim();
   const mode          = a["mode.style"] || "quick";
@@ -1899,7 +1948,7 @@ function buildPlanJson() {
   return {
     mode: answers["mode.style"] || "quick",
     source: answers["source.type"] === "github"
-      ? { type: "github", owner_repo: answers["source.owner_repo"], ref: answers["source.ref"] || "main" }
+      ? { type: "github", owner_repo: sanitiseOwnerRepo(answers["source.owner_repo"]), ref: answers["source.ref"] || "main" }
       : { type: "filesystem", dir: answers["source.dir"] },
     tokens: {
       already: answers["tokens.already"],
