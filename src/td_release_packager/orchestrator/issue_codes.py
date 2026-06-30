@@ -145,6 +145,13 @@ HARVEST_CLASSIFICATION_WARNING = "HARVEST_CLASSIFICATION_WARNING"
 #: tokenise them.
 HARVEST_TOKEN_CANDIDATE = "HARVEST_TOKEN_CANDIDATE"
 
+#: The ``--source`` directory passed to harvest does not exist. Recorded
+#: at ``error`` level by the CLI dispatcher BEFORE re-raising the
+#: ``FileNotFoundError``, so the decisions ledger and the pipeline
+#: report carry the offending path instead of just a red stage with
+#: "No issues recorded." (#495)
+HARVEST_SOURCE_NOT_FOUND = "HARVEST_SOURCE_NOT_FOUND"
+
 
 # ---------------------------------------------------------------
 # Analyse domain (build-order item 4d)
@@ -213,6 +220,15 @@ ISSUE_CODES: Dict[str, str] = {
         "informational signal — the operator decides whether to tokenise it "
         "or leave it as a literal. Re-run harvest with --generate-token-map "
         "to produce a token_map.conf for substitution."
+    ),
+    HARVEST_SOURCE_NOT_FOUND: (
+        "The directory passed to `--source` does not exist on disk. The CLI "
+        "exits with code 1 and the offending path is in the message body. "
+        "Common causes: a placeholder from a generated script "
+        "(`<source-dir>` / `<cloned-source-dir>`) was not edited, an "
+        "absolute path was typed for the wrong machine, or a GitHub source "
+        "was used in Detailed mode without cloning first. The Navigator "
+        "now emits an explicit `git clone` step for that case."
     ),
     ANALYSE_CYCLE: (
         "A circular dependency was detected in the DDL object graph. The "

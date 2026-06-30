@@ -302,6 +302,7 @@ def lookup_source_provenance(
 def render_issue_list(
     issues: Sequence[dict],
     source_map: Optional[dict] = None,
+    stage_status: Optional[str] = None,
 ) -> str:
     """Render a stage's issue list as an HTML detail block.
 
@@ -314,9 +315,19 @@ def render_issue_list(
             file via :func:`lookup_source_provenance` and the source
             path is rendered as a faint subline so the reader knows
             which source file to edit.
+        stage_status: Optional stage status (``"success"`` /
+            ``"warning"`` / ``"error"`` / ``"no-op"`` / …) from the
+            decisions ledger. Used by the empty-issues branch to
+            distinguish "stage succeeded cleanly" from "stage failed
+            but recorded no detail" (#495) — the former gets a green
+            "No issues recorded." message; the latter gets a red
+            "Stage failed — no detailed issues logged." so the report
+            isn't visually self-contradictory.
 
     Returns:
-        HTML string. A green "no issues" note when the list is empty.
+        HTML string. A green "no issues" note when the list is empty
+        and the stage status is not ``"error"``; otherwise a red
+        "failed without detail" note.
 
     Each ``code`` span carries a ``title`` attribute with the human
     description from :data:`issue_codes.ISSUE_CODES`, so a reader can
@@ -326,6 +337,15 @@ def render_issue_list(
     from td_release_packager.orchestrator.issue_codes import describe
 
     if not issues:
+        # #495 — a failed stage with an empty issues list used to read
+        # "No issues recorded." in green, which directly contradicts
+        # the red ✗ badge above it. Render an honest red note instead.
+        if stage_status == "error":
+            return (
+                '<p style="color:#DC3545;font-size:13px;margin:0">'
+                "Stage failed — no detailed issues logged."
+                "</p>"
+            )
         return (
             '<p style="color:#28A745;font-size:13px;margin:0">No issues recorded.</p>'
         )
