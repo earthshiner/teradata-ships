@@ -882,6 +882,24 @@ _SYSTEM_SCOPE_TYPES = {
 # DDL-shaped _QUALIFIED_NAME_RE (issue #410).
 _DML_LIKE_TYPES = {"DML", "ORDERED_SQL"}
 
+# -- Volatile table CREATE detection (#497) --
+#
+# CREATE [MULTISET|SET] VOLATILE TABLE <name> is session-scoped — the
+# table lives in the session's spool, the database is the implicit
+# session user, and qualifying it with a database name is unusual and
+# almost always wrong. So a volatile table's CREATE statement legitimately
+# carries an unqualified name AND no token; the db_qualifier and
+# zero_tokens rules must exempt it or they fire false-positives on every
+# volatile-table file.
+#
+# GLOBAL TEMPORARY (semicolon-distinct keyword) is deliberately NOT
+# matched here — those tables ARE persistent in temp space and SHOULD
+# carry a database qualifier, so they keep their current lint behaviour.
+_VOLATILE_TABLE_RE = re.compile(
+    r"^\s*CREATE\s+(?:MULTISET\s+|SET\s+)?VOLATILE\s+(?:TRACE\s+)?TABLE\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+
 # -- Qualified name extraction --
 #
 # Anchored to start-of-statement (``^\s*`` + ``re.MULTILINE``) so a
@@ -2031,7 +2049,18 @@ def _check_db_qualifier(rel_path: str, content: str) -> List[ValidationIssue]:
     System-scope objects (Maps, Roles, Profiles, Authorisations,
     Foreign Servers) are excluded — they have no database qualifier
     by design.
+
+    Volatile tables (``CREATE [MULTISET|SET] VOLATILE TABLE``) are also
+    excluded (#497) — they are session-scoped, implicitly owned by the
+    session user, and qualifying them with a database name is unusual
+    and almost always wrong. GLOBAL TEMPORARY tables are NOT exempted
+    (different semantics — they live in temp space and should be
+    qualified).
     """
+    # Skip check for volatile tables — they legitimately carry no qualifier.
+    if _VOLATILE_TABLE_RE.search(content):
+        return []
+
     # Skip check for system-scope objects
     for pattern, obj_type in _CLASSIFY_PATTERNS:
         if pattern.search(content):
@@ -3017,6 +3046,13 @@ def _check_zero_tokens(rel_path: str, content: str) -> List[ValidationIssue]:
     # contain resolved literal names — do not fire on them.
     _path_parts = set(re.split(r"[/\\]", rel_path))
     if "payload" in _path_parts:
+        return []
+
+    # Volatile tables are session-scoped and have nothing to tokenise: the
+    # database is the implicit session user, not a name SHIPS can promote
+    # across environments (#497). Exempt them. GLOBAL TEMPORARY tables are
+    # not exempted — they live in temp space and should be qualified.
+    if _VOLATILE_TABLE_RE.search(content):
         return []
 
     # Must be a classifiable DDL/DML object type.

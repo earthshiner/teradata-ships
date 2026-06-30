@@ -316,3 +316,63 @@ def test_zero_tokens_config_off(tmp_path):
     result = validate_directory(str(tmp_path), rules_config={"zero_tokens": "OFF"})
     issues = [i for i in result.issues if i.rule == "zero_tokens"]
     assert issues == []
+
+
+# ---------------------------------------------------------------
+# Volatile-table exemption (#497)
+# ---------------------------------------------------------------
+
+
+def test_zero_tokens_pass_volatile_multiset_table():
+    """CREATE MULTISET VOLATILE TABLE — session-scoped, no qualifier expected."""
+    content = (
+        "CREATE MULTISET VOLATILE TABLE vt_sender_freq (\n"
+        "  party_id BIGINT NOT NULL,\n"
+        "  consignment_count INTEGER NOT NULL,\n"
+        "  consignee_network_flag DECIMAL(5,4) NOT NULL\n"
+        ") ON COMMIT PRESERVE ROWS;\n"
+    )
+    assert _check_zero_tokens("DDL/tables/vt_sender_freq.tbl", content) == []
+
+
+def test_zero_tokens_pass_volatile_set_table():
+    """CREATE SET VOLATILE TABLE — same exemption."""
+    content = (
+        "CREATE SET VOLATILE TABLE vt_sim (\n"
+        "  id BIGINT NOT NULL\n"
+        ") ON COMMIT PRESERVE ROWS;\n"
+    )
+    assert _check_zero_tokens("DDL/tables/vt_sim.tbl", content) == []
+
+
+def test_zero_tokens_pass_volatile_no_set_keyword():
+    """Bare CREATE VOLATILE TABLE (no SET/MULTISET) — still exempted."""
+    content = (
+        "CREATE VOLATILE TABLE vt_simple (\n"
+        "  id INTEGER NOT NULL\n"
+        ") ON COMMIT PRESERVE ROWS;\n"
+    )
+    assert _check_zero_tokens("DDL/tables/vt_simple.tbl", content) == []
+
+
+def test_zero_tokens_global_temporary_unqualified_still_flagged():
+    """GLOBAL TEMPORARY tables ARE persistent and SHOULD be qualified —
+    they are NOT exempted by the volatile-table rule (#497)."""
+    content = (
+        "CREATE MULTISET GLOBAL TEMPORARY TABLE gt_session_cache (\n"
+        "  id BIGINT NOT NULL\n"
+        ") ON COMMIT PRESERVE ROWS;\n"
+    )
+    issues = _check_zero_tokens("DDL/tables/gt_session_cache.tbl", content)
+    assert len(issues) == 1
+    assert issues[0].severity == "ERROR"
+    assert issues[0].rule == "zero_tokens"
+
+
+def test_zero_tokens_global_temporary_qualified_passes():
+    """Qualified GLOBAL TEMPORARY passes — case 2 (literal qualifier)."""
+    content = (
+        "CREATE MULTISET GLOBAL TEMPORARY TABLE TempDB.gt_x (id BIGINT) "
+        "ON COMMIT PRESERVE ROWS;\n"
+    )
+    assert _check_zero_tokens("DDL/tables/gt_x.tbl", content) == []

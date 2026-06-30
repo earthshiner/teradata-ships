@@ -86,6 +86,47 @@ class TestCheckDbQualifier:
         issues = _check_db_qualifier("test.auth", ddl)
         assert issues == []
 
+    # ---------------- Volatile-table exemption (#497) ----------------
+
+    def test_volatile_table_multiset_unqualified_passes(self):
+        """CREATE MULTISET VOLATILE TABLE — session-scoped, no qualifier expected."""
+        ddl = (
+            "CREATE MULTISET VOLATILE TABLE vt_sender_freq (\n"
+            "  party_id BIGINT NOT NULL\n"
+            ") ON COMMIT PRESERVE ROWS;"
+        )
+        assert _check_db_qualifier("DDL/tables/vt_sender_freq.tbl", ddl) == []
+
+    def test_volatile_table_set_unqualified_passes(self):
+        """CREATE SET VOLATILE TABLE — same exemption."""
+        ddl = (
+            "CREATE SET VOLATILE TABLE vt_sim (\n"
+            "  id BIGINT\n"
+            ") ON COMMIT PRESERVE ROWS;"
+        )
+        assert _check_db_qualifier("DDL/tables/vt_sim.tbl", ddl) == []
+
+    def test_volatile_table_no_set_keyword_unqualified_passes(self):
+        """Bare CREATE VOLATILE TABLE (no SET/MULTISET) — still exempted."""
+        ddl = "CREATE VOLATILE TABLE vt_x (id INTEGER) ON COMMIT PRESERVE ROWS;"
+        assert _check_db_qualifier("DDL/tables/vt_x.tbl", ddl) == []
+
+    def test_global_temporary_unqualified_still_flagged(self):
+        """GLOBAL TEMPORARY tables ARE persistent in temp space — keep linting them."""
+        ddl = (
+            "CREATE MULTISET GLOBAL TEMPORARY TABLE gt_x (\n"
+            "  id BIGINT\n"
+            ") ON COMMIT PRESERVE ROWS;"
+        )
+        issues = _check_db_qualifier("DDL/tables/gt_x.tbl", ddl)
+        assert len(issues) == 1
+        assert issues[0].rule == "db_qualifier"
+
+    def test_global_temporary_qualified_passes(self):
+        """Qualified GLOBAL TEMPORARY passes — unchanged behaviour."""
+        ddl = "CREATE GLOBAL TEMPORARY TABLE TempDB.gt_x (id BIGINT);"
+        assert _check_db_qualifier("DDL/tables/gt_x.tbl", ddl) == []
+
 
 # ---------------------------------------------------------------
 # _check_multiset
