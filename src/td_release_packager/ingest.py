@@ -207,6 +207,21 @@ _SQLJ_JAR_ALIAS_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+# Volatile-table CREATE detection (#509). A file containing any
+# ``CREATE [MULTISET|SET] VOLATILE TABLE`` is necessarily an ordered
+# execution script — the volatile table lives in the session's spool
+# and is dropped at session end, so the subsequent INSERTs that read
+# from it MUST run in the same session. Splitting such a file into
+# per-statement atomic artefacts would break the script semantically.
+# Mirrors the same pattern in :data:`validate._VOLATILE_TABLE_RE`
+# (added in #497 for the lint exemption); kept local rather than
+# imported because pulling validate into ingest would create a
+# heavyweight import cycle for a one-line regex.
+_VOLATILE_TABLE_RE = re.compile(
+    r"^\s*CREATE\s+(?:MULTISET\s+|SET\s+)?VOLATILE\s+(?:TRACE\s+)?TABLE\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+
 # -- MULTISET detection --
 _HAS_SET_MULTISET_RE = re.compile(
     r"CREATE\s+(?:MULTISET|SET)\s+",
@@ -614,6 +629,33 @@ def _ingest_directory_impl(
                     non_dml_classified = True
 
             if saw_grant and saw_revoke and saw_non_dcl:
+                _place_ordered_sql(
+                    raw_content=raw_content,
+                    src_path=src_path,
+                    source_dir=source_dir,
+                    project_dir=project_dir,
+                    payload_base=payload_base,
+                    apply_tokens=apply_tokens,
+                    kind_index=kind_index,
+                    result=result,
+                    prefix_mode_literals=prefix_mode_literals,
+                    prefix_tokens=prefix_tokens,
+                )
+                continue  # next source file
+
+            # #509 — a file that creates a volatile table is necessarily an
+            # ordered execution script. Volatile tables are session-scoped:
+            # they live in the spool and are dropped at session end, so any
+            # consumer ``INSERT … FROM vt_<name>`` MUST run in the same
+            # session as the ``CREATE VOLATILE TABLE``. Splitting per-
+            # statement places the CREATE and INSERTs in different files,
+            # which the deployer runs in separate sessions and breaks. The
+            # volatile-table CREATE itself is also session-scoped, so it
+            # never belongs in a payload that promotes across environments
+            # — keeping the file intact lets the operator script it via
+            # ``ships.yaml`` execution if they really want it deployed, or
+            # remove the file entirely (it's effectively a runtime helper).
+            if _VOLATILE_TABLE_RE.search(_strip_comments(raw_content)):
                 _place_ordered_sql(
                     raw_content=raw_content,
                     src_path=src_path,
