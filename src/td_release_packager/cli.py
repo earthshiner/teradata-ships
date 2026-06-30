@@ -3379,6 +3379,21 @@ def _run_build(args, stage, issue_codes) -> int:
             f"{len(result.selected)} object(s) packaged ({result.mode})"
         )
 
+    # #489: auto-resolve source_commit from the local git repo when the
+    # operator didn't pass --commit and the source isn't a github tarball
+    # (the github path already stamps args.commit during fetch). Without
+    # this, the most common packaging path — local source, no --commit
+    # — silently builds a package with empty source_commit, losing
+    # provenance. The helper is fail-soft: not-a-repo / no-git returns
+    # "" and the build proceeds exactly as it does today.
+    if not getattr(args, "commit", None):
+        from td_release_packager.builder import _resolve_local_commit
+
+        _auto_sha = _resolve_local_commit(args.project)
+        if _auto_sha:
+            args.commit = _auto_sha
+            print(f"  Resolved local commit : {_auto_sha[:12]}")
+
     # #397: snapshot the redacted top-level invocation so the package can
     # answer "what command + args built this?" after distribution, when
     # the project-side ships.decisions.json is no longer reachable. Derive

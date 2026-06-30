@@ -500,6 +500,43 @@ def _check_working_tree(source_dir: str, allow_dirty: bool) -> bool:
     return True
 
 
+def _resolve_local_commit(source_dir: str) -> str:
+    """Return the HEAD commit SHA for ``source_dir``, or ``""`` if not in a git repo.
+
+    Mirrors :func:`_check_working_tree`'s fail-soft philosophy: if
+    git is unavailable, the directory is not inside a git repo, or
+    the call errors out for any other reason, return ``""``. The
+    caller treats that the same way it has always treated an empty
+    ``--commit`` (no provenance stamp). This means a build that
+    works today never starts failing because of this helper.
+
+    Used by ``ships package`` to auto-populate ``source_commit`` from
+    the local repo when ``--commit`` was not passed and the project
+    is not a remote (``--source-github``) source — closing the
+    silent-provenance-loss gap on the most common packaging path.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=source_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        logger.debug("git not available — skipping commit auto-resolve")
+        return ""
+
+    if result.returncode != 0:
+        logger.debug(
+            "git rev-parse HEAD failed (rc=%d) — skipping commit auto-resolve",
+            result.returncode,
+        )
+        return ""
+
+    return result.stdout.strip()
+
+
 def _enrich_provenance_with_harvest_source(
     provenance_doc: ProvenanceDocument, source_dir: str
 ) -> None:
