@@ -770,15 +770,61 @@ function generatePlan() {
   // "Source directory not found". The clone uses $OWNER_REPO and $REF from
   // the shared vars block above, so retargeting the source is a one-line
   // edit at the top.
+  //
+  // Idempotent on re-run: if $SOURCE/.git exists we fetch + reset to $REF
+  // (so a second run picks up upstream changes and also resyncs after
+  // the operator changes $REF). If $SOURCE exists but isn't a git repo,
+  // we refuse rather than rm-rf-ing operator content. If it doesn't
+  // exist, we clone fresh.
   if (githubDetailed) {
-    prelude.push([
-      `git clone --depth 1 --branch "$REF"`,
-      `"https://github.com/$OWNER_REPO.git"`,
-      `"$SOURCE"`,
-    ]);
+    prelude.push({
+      raw: {
+        bash: [
+          'if [ -d "$SOURCE/.git" ]; then',
+          '  git -C "$SOURCE" fetch --depth 1 origin "$REF"',
+          '  git -C "$SOURCE" reset --hard FETCH_HEAD',
+          'elif [ -e "$SOURCE" ]; then',
+          '  echo "ERROR: $SOURCE exists but is not a git repo. Remove it or change SOURCE to clone elsewhere." >&2',
+          '  exit 1',
+          'else',
+          '  git clone --depth 1 --branch "$REF" "https://github.com/$OWNER_REPO.git" "$SOURCE"',
+          'fi',
+        ],
+        powershell: [
+          'if (Test-Path "$SOURCE\\.git") {',
+          '  git -C "$SOURCE" fetch --depth 1 origin "$REF"',
+          '  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
+          '  git -C "$SOURCE" reset --hard FETCH_HEAD',
+          '  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
+          '} elseif (Test-Path $SOURCE) {',
+          '  Write-Error "$SOURCE exists but is not a git repo. Remove it or change SOURCE to clone elsewhere."',
+          '  exit 1',
+          '} else {',
+          '  git clone --depth 1 --branch "$REF" "https://github.com/$OWNER_REPO.git" "$SOURCE"',
+          '  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
+          '}',
+        ],
+        cmd: [
+          'if exist "%SOURCE%\\.git" (',
+          '  git -C "%SOURCE%" fetch --depth 1 origin "%REF%"',
+          '  if errorlevel 1 exit /b 1',
+          '  git -C "%SOURCE%" reset --hard FETCH_HEAD',
+          '  if errorlevel 1 exit /b 1',
+          ') else (',
+          '  if exist "%SOURCE%" (',
+          '    echo ERROR: %SOURCE% exists but is not a git repo. Remove it or change SOURCE to clone elsewhere. 1>&2',
+          '    exit /b 1',
+          '  ) else (',
+          '    git clone --depth 1 --branch "%REF%" "https://github.com/%OWNER_REPO%.git" "%SOURCE%"',
+          '    if errorlevel 1 exit /b 1',
+          '  )',
+          ')',
+        ],
+      },
+    });
     rationale.push({
       step: "git clone",
-      why: "`ships harvest` doesn't accept --source-github (only `ships process` does in Quick mode), so Detailed mode must clone the source into $SOURCE first. The default $SOURCE lands under $OUTPUT_ROOT/_cloned-source — change it in the shared vars block if you want it elsewhere.",
+      why: "`ships harvest` doesn't accept --source-github (only `ships process` does in Quick mode), so Detailed mode must clone the source into $SOURCE first. The default $SOURCE lands under $OUTPUT_ROOT/_cloned-source — change it in the shared vars block if you want it elsewhere. The block is idempotent: a second run fetches + resets the existing clone to $REF instead of failing with 'destination path already exists'.",
     });
   }
 
@@ -1112,7 +1158,20 @@ function renderScript(script, shell, bashFlavour, launcherStem) {
   out.push("");
 
   if (script.prelude.length) {
-    for (const parts of script.prelude) emitCmd(parts);
+    for (const entry of script.prelude) {
+      if (Array.isArray(entry)) {
+        // Plain command — single verb (possibly multi-line via continuation
+        // operators). emitCmd appends the per-shell exit-code guard.
+        emitCmd(entry);
+      } else if (entry && entry.raw) {
+        // Pre-rendered per-shell block (#495 idempotent github clone). The
+        // block handles its own error handling, so we do NOT append the
+        // emitCmd guard — that would emit a useless duplicate of the inner
+        // check.
+        const lines = entry.raw[shell] || [];
+        for (const line of lines) out.push(line);
+      }
+    }
     out.push("");
   }
 
