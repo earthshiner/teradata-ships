@@ -23,6 +23,92 @@ Answers to the most common questions. Organised by topic — jump to the section
 
 > ⚠️ **Deprecation note (closes [#388](https://github.com/earthshiner/teradata-ships/issues/388)):** `token_map.conf` and the `--token-map` / `--generate-token-map` flags are kept for back-compatibility but should not be used in new projects. **Prefer `config/tokenise.conf`** — regex-based with capture groups, strictly more powerful. Authored via the SHIPS Navigator wizard (`tools/navigator/ships-navigator.html`), the `ships_author_token_map` MCP tool, or by hand. See `examples/callcentre/config/tokenise.conf` for a working example. The legacy guidance below still works.
 
+### Does SHIPS require a particular database naming convention?
+
+No. SHIPS adapts to your database naming — it does not dictate one. The `_STD_T` / `_STD_V` / `_BUS_V` names in the reference products are the SHIPS Object Placement Standard, which is a *recommendation*, not a mechanical dependency of the engine. Nothing in harvest, packaging, or deployment requires a type marker (`_T`, `_V`, `_F`, `_P`) anywhere in a database name, in any position.
+
+**What SHIPS actually requires.** One thing: every object must be database-*qualified* (`DB.Object`). This is the only naming rule with `ERROR` severity (`db_qualifier`), and it cares that a qualifier exists, not what it is called. `FINANCE.Customer`, `RAW.Customer`, `A_D01_OMR_STD.Customer` — all fine. An unqualified `CREATE TABLE Customer` is rejected because it would deploy into whatever database the DBA happens to be connected to.
+
+**How object types are determined — never from the name.** SHIPS classifies each object by its DDL verb (`CREATE TABLE`, `REPLACE VIEW`, `CREATE PROCEDURE`, `GRANT`, …) and stamps the type in the **file extension** (`.tbl`, `.viw`, `.spl`, `.dcl`). The database name is an opaque qualifier — SHIPS does not parse it to infer what it holds. So a type marker in the database name, wherever it sits, is invisible to classification.
+
+**Database naming — the three placement strategies.** When the views-layer needs to derive a views database from a tables database (the Generate step), the placement engine is configured in the `object_placement` section of your project's `ships.yaml` and supports every common scheme:
+
+| Strategy | Use when | Example |
+|---|---|---|
+| `separated` | A type marker derives one database from the other — **suffix, prefix, or midfix**, case-insensitive | `FINANCE_T` ↔ `FINANCE_V` (suffix); `T_FINANCE` ↔ `V_FINANCE` (prefix); `PROD_T_MORTGAGE` ↔ `PROD_V_MORTGAGE` (midfix) |
+| `colocated` | Tables and views live in the **same** database — no type marker at all | `FINANCE.Customer` and `FINANCE.Customer_view` in one database |
+| `mapped` | Naming has no derivable pattern — you supply explicit pairs | `RAWTABLES → REPORTING` honoured verbatim |
+
+The `separated` strategy works by placeholder position: you declare where the fixed type marker sits relative to one or more captured `{…}` placeholders, and the engine matches the tables name, captures every placeholder, and rewrites it into the views name with the marker swapped. A single `{BASE}` placeholder covers the common suffix and prefix schemes — only the pattern strings change.
+
+```yaml
+# SUFFIX — marker trails the base name:  FINANCE_T → FINANCE_V
+object_placement:
+  strategy: separated
+  database_pattern_tables: "{BASE}_T"
+  database_pattern_views:  "{BASE}_V"
+  locking_views: true
+```
+
+```yaml
+# PREFIX — marker leads the base name:  T_FINANCE → V_FINANCE
+object_placement:
+  strategy: separated
+  database_pattern_tables: "T_{BASE}"
+  database_pattern_views:  "V_{BASE}"
+  locking_views: true
+```
+
+A midfix scheme — where the type marker sits *between* two stable segments — uses a pattern with more than one placeholder. Each placeholder is captured from the tables name and preserved verbatim in the views name, while the literal discriminator between them is swapped:
+
+```yaml
+# MIDFIX — marker sits between two preserved segments:  PROD_T_MORTGAGE → PROD_V_MORTGAGE
+object_placement:
+  strategy: separated
+  database_pattern_tables: "{ENV}_T_{MODULE}"
+  database_pattern_views:  "{ENV}_V_{MODULE}"
+  locking_views: true
+```
+
+Here `{ENV}` and `{MODULE}` are captured and carried through unchanged (`PROD` and `MORTGAGE`), and only the middle `T` becomes `V`. The discriminator is not limited to a single letter or to two segments — the engine handles multi-character markers and additional segments equally, e.g. `{ENV}_DAT_{MODULE}` ↔ `{ENV}_ACC_{MODULE}` (`PROD_DAT_MORTGAGE` → `PROD_ACC_MORTGAGE`), or a four-token form `{ENV}_DAT_{REGION}_{MODULE}` ↔ `{ENV}_ACC_{REGION}_{MODULE}`. Matching is case-insensitive throughout.
+
+Between the three strategies, every database-naming scheme is covered: marker at the start, in the middle, at the end, no marker, or arbitrary-and-mapped.
+
+**The advisory rule you might see is about object *names*, not database names.** The `type_suffix` rule flags type markers encoded into an *object* name (`VW_Customer`, `sp_ProcessOrder`, `Customer_V`) — SHIPS prefers the type to live in the file extension. It is a `WARNING`, never blocks packaging, and is switched off in `config/inspect.conf` if your shop encodes types in object names:
+
+```properties
+type_suffix=OFF
+```
+
+It has nothing to do with database-name markers and never affects deployment.
+
+**Tokenisation handles any marker position too.** You are not confined to the leading-prefix convenience mode. The regex form in `config/tokenise.conf` matches an environment-varying segment wherever it sits, so a midfix or suffix environment marker tokenises as cleanly as a leading prefix.
+
+**Bring your own convention — or none.** If you want your own naming standard enforced, declare it as custom rules in `config/ships_lint_policy.yaml` and `inspect` runs them alongside the built-ins. If you want none, set the relevant rules to `OFF`. SHIPS will nudge you toward a standard only if you ask it to, and stay silent if you do not.
+
+> **Scope note.** Placement derivation matters chiefly when you run the view-layer **Generate** step (deriving a views database from a tables database). If you are not generating a locking-view layer, the question barely arises — your existing tables and views harvest and deploy as-is, whatever they are named.
+
+**In one line:** type marker at the front of the database name, in the middle, at the end, or not there at all — SHIPS has a placement strategy for each, plus an explicit map for anything irregular. It works with your names, not ours.
+
+---
+
+### Does SHIPS reject objects whose *names* contain a type marker (`VW_`, `sp_`, `_v`)?
+
+No. This is the object-name counterpart to the database-naming question above, and the answer is the same: SHIPS adapts. Classification is by DDL verb, and the type is stamped in the **file extension** (`.viw`, `.spl`, …), so `VW_Customer`, `sp_ProcessOrder`, and `Customer_v` all classify and deploy correctly. The position of the marker — prefix, midfix, or suffix — is irrelevant, because the name is never how SHIPS decides the type.
+
+The Coding Discipline linter does carry an advisory rule for this. Despite the name `type_suffix`, it covers both **leading and trailing** type markers on object names (`_V`, `_T`, `VW_`, `SP_`, etc.), because the SHIPS standard keeps the type in the extension rather than the object name. It is a `WARNING`, never blocks packaging, and is switched off in `config/inspect.conf`:
+
+```properties
+type_suffix=OFF
+```
+
+If you would rather SHIPS normalise the names than warn about them, harvest with `--remove-view-type-affixes`, which strips the `v_` prefix and `_v` suffix from view objects and updates qualified references to match. It is opt-in — by default your object names are preserved exactly as written.
+
+> Distinguish this from a type marker in the **database** name — that is governed by the placement strategies in *"Does SHIPS require a particular database naming convention?"* above, not by `type_suffix`.
+
+---
+
+
 ### My DDL still has hardcoded database names after harvest. Nothing was tokenised.
 
 Two things to check:
