@@ -618,9 +618,154 @@ function switchTab(btn, pane) {{
   btn.classList.add('active');
   document.getElementById(pane).classList.add('active');
 }}
+// Shared copy-to-clipboard helper used by the Deploy tab's command
+// blocks and the DBQL Lookup card (issue #483). Defined here in the
+// shared chrome so every SHIPS report supports the Copy button.
+function copyCmd(id) {{
+  var el = document.getElementById(id);
+  if (!el) {{ return; }}
+  var text = el.innerText;
+  navigator.clipboard.writeText(text).then(function() {{
+    var btn = el.nextElementSibling;
+    if (!btn) {{ return; }}
+    var orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    btn.style.background = '#198754';
+    setTimeout(function() {{
+      btn.textContent = orig;
+      btn.style.background = '{ORANGE}';
+    }}, 1500);
+  }});
+}}
 </script>
 </body>
 </html>"""
+
+
+def render_dbql_lookup_card(
+    manifest_dict: Dict[str, object],
+    *,
+    operator_extras: Optional[Dict[str, str]] = None,
+    title: str = "Find this in Teradata DBQL",
+    intro: Optional[str] = None,
+) -> str:
+    """Render the DBQL Lookup card (issue #483).
+
+    Shared by the package report's Deploy tab and the deploy report's
+    Deployment pane. Shows the QueryBand keys SHIPS sets on every
+    statement plus a copy-paste-ready ``DBC.DBQLogTbl`` filter so a DBA
+    (or agent) can find the trace without parsing the band format.
+
+    Args:
+        manifest_dict:   ``BuildManifest.__dict__`` for the package —
+                         supplies ``build_number`` / ``package_name`` /
+                         ``environment`` for the static keys.
+        operator_extras: Extra ``{key: value}`` pairs the deployer ran
+                         with (``DeployConfig.query_band``). Empty on
+                         the package report; populated on the deploy
+                         report when the operator passed ``--query-band``.
+        title:           Card heading. Defaults to "Find this in
+                         Teradata DBQL"; the deploy report typically
+                         overrides this to "QueryBand used by this
+                         deployment".
+        intro:           Optional override for the intro paragraph.
+
+    Returns:
+        Self-contained HTML snippet (no external CSS / JS required —
+        the surrounding report supplies ``copyCmd`` for the Copy SQL
+        button when present, otherwise the button is a no-op).
+    """
+    from td_release_packager.query_band import describe_query_band
+
+    qb = describe_query_band(
+        build_number=str(manifest_dict.get("build_number") or "?"),
+        package_name=str(manifest_dict.get("package_name") or "?"),
+        environment=str(manifest_dict.get("environment") or "?"),
+        operator_extras=operator_extras,
+    )
+
+    default_intro = (
+        "Every SQL statement SHIPS runs carries a QueryBand. After "
+        "deployment, use these keys to retrieve the trace from "
+        "<code>DBC.DBQLogTbl</code>. The values below are pre-filled "
+        "for this package; <code>PHASE</code> / <code>FILE</code> / "
+        "<code>STREAM</code> / <code>WAVE</code> are added dynamically "
+        "by the deployer and can be filtered the same way once the "
+        "deploy has run."
+    )
+    intro_text = intro if intro is not None else default_intro
+
+    def row(key: str, value: str, source: str) -> str:
+        return (
+            f'<tr><td style="padding:6px 12px;border-bottom:1px solid #f0f0f0">'
+            f"<code>{h(key)}</code></td>"
+            f'<td style="padding:6px 12px;border-bottom:1px solid #f0f0f0">'
+            f"<code>{h(value)}</code></td>"
+            f'<td style="padding:6px 12px;border-bottom:1px solid #f0f0f0;color:#666">'
+            f"{h(source)}</td></tr>"
+        )
+
+    rows = [
+        row("BUILD", qb["static"]["BUILD"], "manifest.build_number"),
+        row("PKG", qb["static"]["PKG"], "manifest.package_name"),
+        row("ENV", qb["static"]["ENV"], "manifest.environment"),
+    ]
+    for key in qb["dynamic_keys"]:
+        rows.append(
+            row(
+                key,
+                "(set at runtime)",
+                "deployer — per phase / file / wave-parallel stream",
+            )
+        )
+    for key, value in qb["operator_extras"].items():
+        rows.append(row(key, value, "operator extras (--query-band)"))
+
+    sql = (
+        "SELECT\n"
+        "    CAST(t1.CollectTimeStamp AS DATE FORMAT 'YYYY-MM-DD') AS DeployDate,\n"
+        "    t1.UserName,\n"
+        "    GetQueryBandValue(t1.QueryBand, 0, 'BUILD') AS Build,\n"
+        "    GetQueryBandValue(t1.QueryBand, 0, 'PHASE') AS Phase,\n"
+        "    GetQueryBandValue(t1.QueryBand, 0, 'FILE')  AS File,\n"
+        "    t1.StatementType,\n"
+        "    t1.NumResultRows\n"
+        "FROM DBC.DBQLogTbl t1\n"
+        "WHERE " + qb["dbql_filter_template"] + "\n"
+        "ORDER BY t1.CollectTimeStamp;"
+    )
+
+    return f"""
+<div style="margin-top:24px;border:1px solid {BORDER};border-radius:8px;
+  background:{WHITE};padding:18px 22px">
+  <div style="font-size:15px;font-weight:700;color:{NAVY};margin-bottom:6px">
+    {h(title)}
+  </div>
+  <p style="font-size:13px;color:#555;line-height:1.5;margin-bottom:14px">
+    {intro_text}
+  </p>
+  <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:14px">
+    <thead>
+      <tr style="background:{LIGHT};color:{NAVY}">
+        <th style="text-align:left;padding:8px 12px;border-bottom:2px solid {BORDER}">Key</th>
+        <th style="text-align:left;padding:8px 12px;border-bottom:2px solid {BORDER}">Value</th>
+        <th style="text-align:left;padding:8px 12px;border-bottom:2px solid {BORDER}">Source</th>
+      </tr>
+    </thead>
+    <tbody>
+      {"".join(rows)}
+    </tbody>
+  </table>
+  <div style="position:relative">
+    <pre id="dbql_filter_sql" style="background:#1E2761;color:#E8F0FE;padding:14px 48px 14px 16px;
+      border-radius:6px;font-size:13px;overflow-x:auto;margin:0;white-space:pre">{h(sql)}</pre>
+    <button onclick="copyCmd('dbql_filter_sql')"
+      style="position:absolute;top:8px;right:8px;background:{ORANGE};color:#fff;
+      border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:12px">
+      Copy SQL
+    </button>
+  </div>
+</div>"""
 
 
 def run_status_style(final_status: str) -> Tuple[str, str]:

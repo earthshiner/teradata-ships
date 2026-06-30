@@ -17,9 +17,16 @@ DBC.DBQLogTbl can then be queried:
 """
 
 import logging
-from typing import Dict, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+# Dynamic QueryBand keys — set by the deployer at runtime as work
+# progresses through phases, files, and wave-parallel streams. Listed
+# here so the package_report and ships.build.json can advertise them
+# even though their *values* only exist at deploy time.
+DYNAMIC_QUERY_BAND_KEYS: List[str] = ["PHASE", "FILE", "STREAM", "WAVE"]
 
 
 def build_query_band(
@@ -128,3 +135,65 @@ def clear_query_band(cursor):
         logger.debug("Query band cleared.")
     except Exception as e:
         logger.warning("Failed to clear query band: %s", e)
+
+
+def describe_query_band(
+    *,
+    build_number: str,
+    package_name: str,
+    environment: str,
+    operator_extras: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    """Return the canonical QueryBand description (issue #483).
+
+    Single source of truth shared by the package report's DBQL Lookup
+    card, the deploy report's same card, and the ``query_band`` block
+    stamped into ``ships.build.json`` so an agent (or DBA) can find
+    every statement in ``DBC.DBQLogTbl`` without having to parse the
+    band format themselves.
+
+    Args:
+        build_number:    Build number — becomes the ``BUILD`` band value.
+        package_name:    Logical package name — becomes ``PKG``.
+        environment:     Target environment — becomes ``ENV``.
+        operator_extras: Optional ``{key: value}`` pairs from
+                         ``DeployConfig.query_band`` (or the equivalent
+                         build-time configuration). Empty for a vanilla
+                         build manifest; populated on the deploy report
+                         when the operator passed ``--query-band`` extras.
+
+    Returns:
+        Four-key dict:
+
+        - ``static``: the always-set ``BUILD`` / ``PKG`` / ``ENV`` keys.
+        - ``dynamic_keys``: list of keys the deployer sets at runtime
+          (``PHASE``, ``FILE``, ``STREAM``, ``WAVE``). Listed so a
+          reader knows what to filter on; values are only known once a
+          deploy has actually run.
+        - ``operator_extras``: extra ``{key: value}`` pairs supplied by
+          the operator. Empty dict when none.
+        - ``dbql_filter_template``: ready-to-paste SQL WHERE-clause
+          fragment filtering ``DBC.DBQLogTbl`` on the static keys plus
+          any operator extras. Composed in a deterministic order so the
+          string is stable across runs.
+    """
+    static: Dict[str, str] = {
+        "BUILD": str(build_number),
+        "PKG": str(package_name),
+        "ENV": str(environment),
+    }
+    extras: Dict[str, str] = {
+        str(k): str(v) for k, v in sorted((operator_extras or {}).items())
+    }
+    clauses: List[str] = [
+        f"GetQueryBandValue(QueryBand, 0, '{k}') = '{v}'" for k, v in static.items()
+    ]
+    clauses.extend(
+        f"GetQueryBandValue(QueryBand, 0, '{k}') = '{v}'" for k, v in extras.items()
+    )
+    return {
+        "static": static,
+        "dynamic_keys": list(DYNAMIC_QUERY_BAND_KEYS),
+        "operator_extras": extras,
+        "dbql_filter_template": "\n  AND ".join(clauses),
+    }

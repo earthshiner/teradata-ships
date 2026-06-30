@@ -902,9 +902,8 @@ def _build_package_impl(
     # Write an initial manifest before trust computation.  The trust
     # build_reproducible signal reads source_dirty from context/ships.build.json;
     # the manifest is overwritten below after the trust block is stamped.
+    _write_manifest_json(pkg_dir, manifest)
     manifest_path = _context_file(pkg_dir, "ships.build.json")
-    with open(manifest_path, "w", encoding="utf-8") as f:
-        json.dump(manifest.__dict__, f, indent=2, ensure_ascii=False)
 
     # -- Phase 8b: Compute and stamp Phase 1 Trust Report --
     # Discrete signals (inspect results + package context artefacts) derive
@@ -1027,8 +1026,7 @@ def _build_package_impl(
     write_rules_result(pkg_dir)
     manifest.rules_ref = RULES_RESULT_REF
 
-    with open(manifest_path, "w", encoding="utf-8") as f:
-        json.dump(manifest.__dict__, f, indent=2, ensure_ascii=False)
+    _write_manifest_json(pkg_dir, manifest)
 
     # -- Phase 8c: Write agent-facing context artefacts --
     # These files are a compact handoff contract for humans, CI/CD,
@@ -1444,9 +1442,7 @@ def _create_environment_prereqs_package_if_needed(
     write_policy_result(env_pkg_dir, env_policy)
     env_manifest.policy_ref = POLICY_RESULT_REF
 
-    manifest_path = _context_file(env_pkg_dir, "ships.build.json")
-    with open(manifest_path, "w", encoding="utf-8") as f:
-        json.dump(env_manifest.__dict__, f, indent=2, ensure_ascii=False)
+    _write_manifest_json(env_pkg_dir, env_manifest)
 
     # Minimal provenance document: this package carries generated DBA-reviewed
     # payload rather than user-authored source DDL.
@@ -1712,9 +1708,7 @@ def _split_into_paired_packages(
         (pkg_dir, manifest),
         (prereqs_pkg_dir, prereqs_manifest),
     ):
-        manifest_path = _context_file(target_pkg_dir, "ships.build.json")
-        with open(manifest_path, "w", encoding="utf-8") as f:
-            json.dump(target_manifest.__dict__, f, indent=2, ensure_ascii=False)
+        _write_manifest_json(target_pkg_dir, target_manifest)
 
         _filter_provenance_to_present_payload(target_pkg_dir)
         write_context_artifacts(target_pkg_dir, target_manifest)
@@ -1774,10 +1768,30 @@ def _archive_ext(archive_format: str) -> str:
 
 
 def _write_manifest_json(pkg_dir: str, manifest: BuildManifest) -> None:
-    """Write the canonical package build manifest under context/."""
+    """Write the canonical package build manifest under context/.
+
+    Issue #483 — augments the raw ``BuildManifest`` dict with a
+    derived ``query_band`` block so a DBA or agent can find every
+    statement in ``DBC.DBQLogTbl`` without parsing the band format
+    themselves. The block is a view over the manifest's static keys
+    (build / package / environment), not new authoritative state.
+    """
     manifest_path = _context_file(pkg_dir, "ships.build.json")
+    document = dict(manifest.__dict__)
+    document["query_band"] = _manifest_query_band(manifest)
     with open(manifest_path, "w", encoding="utf-8") as f:
-        json.dump(manifest.__dict__, f, indent=2, ensure_ascii=False)
+        json.dump(document, f, indent=2, ensure_ascii=False)
+
+
+def _manifest_query_band(manifest: BuildManifest) -> Dict[str, object]:
+    """Return the canonical ``query_band`` block for a build manifest (#483)."""
+    from td_release_packager.query_band import describe_query_band
+
+    return describe_query_band(
+        build_number=manifest.build_number,
+        package_name=manifest.package_name,
+        environment=manifest.environment,
+    )
 
 
 def _role_sequence(role: str) -> int:
