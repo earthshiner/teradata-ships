@@ -1620,6 +1620,31 @@ def _cmd_scaffold(args):
                 for _line in _hint.splitlines():
                     print(f"    {_line}")
 
+            # Repo-state hint (#487) — `ships stage`, `ships package`
+            # (dirty-tree check), and `ships changeset` all rely on the
+            # project sitting inside a git repo. Surface that requirement
+            # at scaffold time so the operator isn't surprised later. Two
+            # branches:
+            #   - Already inside a repo → tell them which one (matters
+            #     when the project is nested in a monorepo).
+            #   - Not in a repo → suggest `git init` and explain why.
+            from td_release_packager.stager import _default_git_repo_root
+
+            _repo_root = _default_git_repo_root(project_dir)
+            print()
+            if _repo_root:
+                if os.path.abspath(_repo_root) == os.path.abspath(project_dir):
+                    print(f"    Git: project is the repo root ({_repo_root}).")
+                else:
+                    print(f"    Git: project is inside repo {_repo_root}.")
+            else:
+                print(
+                    "    Tip: this project is not inside a git repo. "
+                    "Run `git init` here\n"
+                    "         if you plan to use `ships stage` or "
+                    "version-control the payload."
+                )
+
         print(f"{'=' * 64}\n")
 
 
