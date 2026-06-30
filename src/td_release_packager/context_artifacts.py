@@ -1163,6 +1163,23 @@ def _package_state(trust: Dict[str, Any]) -> str:
     return "package-built-awaiting-deployment"
 
 
+def _manifest_query_band(manifest: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the canonical ``query_band`` block for an agent context document.
+
+    Issue #483 — same shape as the block stamped into
+    ``ships.build.json`` by the builder, so an agent reading either
+    document gets the static keys, dynamic-key list, and DBQL filter
+    template without parsing.
+    """
+    from td_release_packager.query_band import describe_query_band
+
+    return describe_query_band(
+        build_number=str(manifest.get("build_number") or ""),
+        package_name=str(manifest.get("package_name") or ""),
+        environment=str(manifest.get("environment") or ""),
+    )
+
+
 def _governance(manifest: Dict[str, Any]) -> Dict[str, Any]:
     """Extract agent-relevant governance and policy controls."""
     return {
@@ -1594,6 +1611,7 @@ def _build_agent_manifest_document(
         "tokens": _safe_token_summary(manifest),
         "warnings": manifest.get("warnings") or [],
         "governance": _governance(manifest),
+        "query_band": _manifest_query_band(manifest),
         "trust_ref": TRUST_RESULT_REF,
         "actions_ref": ACTIONS_RESULT_REF,
         "capabilities_ref": CAPABILITIES_RESULT_REF,

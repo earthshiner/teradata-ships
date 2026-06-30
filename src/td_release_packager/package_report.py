@@ -1993,6 +1993,8 @@ def _deploy_tab(manifest_dict: dict) -> str:
         "python deploy.py --host &lt;host&gt; --user &lt;user&gt; --continue-on-error",
     )
 
+    blocks += _common.render_dbql_lookup_card(manifest_dict)
+
     return f"""
 <div style="margin-bottom:16px;padding:12px 16px;background:{_LIGHT};
   border-radius:6px;font-size:14px">
@@ -2000,19 +2002,6 @@ def _deploy_tab(manifest_dict: dict) -> str:
   &nbsp;&nbsp; — run the commands below from inside the extracted package directory
 </div>
 {blocks}
-<script>
-function copyCmd(id) {{
-  var el = document.getElementById(id);
-  var text = el.innerText.replace(/</g,'<').replace(/>/g,'>');
-  navigator.clipboard.writeText(text).then(function() {{
-    var btn = el.nextElementSibling;
-    var orig = btn.textContent;
-    btn.textContent = 'Copied!';
-    btn.style.background = '#198754';
-    setTimeout(function() {{ btn.textContent = orig; btn.style.background = '#FF5F02'; }}, 1500);
-  }});
-}}
-</script>
 """
 
 

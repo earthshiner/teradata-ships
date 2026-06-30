@@ -291,6 +291,8 @@ def _build_html(
     status = "PASSED" if result.success else "FAILED"
     status_colour = "#28A745" if result.success else "#DC3545"
 
+    from td_release_packager.reporting.common import render_dbql_lookup_card
+
     deployment_content = [
         _html_provenance_notice(provenance_status),
         _html_action_items(result, provenance, source_view_links),
@@ -299,6 +301,17 @@ def _build_html(
         _html_preflight(result.preflight_result),
         _html_wave_summary(result),
         _html_object_results(result, provenance, source_view_links),
+        render_dbql_lookup_card(
+            build_meta or {},
+            title="QueryBand used by this deployment",
+            intro=(
+                "Every SQL statement this deployer ran carried a "
+                "QueryBand. Use the keys below to retrieve the trace "
+                "from <code>DBC.DBQLogTbl</code> — particularly useful "
+                "when troubleshooting a failure or comparing this run "
+                "against a prior build."
+            ),
+        ),
     ]
 
     # #359: render through the shared report chrome (reporting.common.render_page)
