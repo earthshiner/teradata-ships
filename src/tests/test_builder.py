@@ -23,6 +23,7 @@ from td_release_packager.builder import (
     _check_working_tree,
     _generate_integrity_file,
     _resolve_filename,
+    _resolve_local_commit,
     build_package,
 )
 from td_release_packager.models import BuildConfig
@@ -431,6 +432,108 @@ class TestCheckWorkingTree:
                 _check_working_tree("/fake/dir", allow_dirty=False)
         assert "file_a.tbl" in str(exc_info.value)
         assert "--allow-dirty" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------
+# _resolve_local_commit (#489) — auto-fill source_commit from local git
+# ---------------------------------------------------------------
+
+
+class TestResolveLocalCommit:
+    """Tests for the fail-soft `git rev-parse HEAD` helper.
+
+    The helper must NEVER raise — every non-success path returns ``""``
+    so the existing build flow (which treats an empty ``source_commit``
+    as "no provenance") continues to work unchanged when git is
+    missing or the source isn't under version control.
+    """
+
+    def _run(self, stdout: str, returncode: int = 0, side_effect=None) -> str:
+        mock_result = type("R", (), {"returncode": returncode, "stdout": stdout})()
+        with patch("td_release_packager.builder.subprocess.run") as mock_run:
+            if side_effect:
+                mock_run.side_effect = side_effect
+            else:
+                mock_run.return_value = mock_result
+            return _resolve_local_commit("/fake/dir")
+
+    def test_clean_repo_returns_head_sha(self):
+        sha = self._run(stdout="abc1234567890abcdef1234567890abcdef12345\n")
+        assert sha == "abc1234567890abcdef1234567890abcdef12345"
+
+    def test_not_a_repo_returns_empty_string(self):
+        sha = self._run(returncode=128, stdout="fatal: not a git repository\n")
+        assert sha == ""
+
+    def test_git_not_on_path_returns_empty_string(self):
+        sha = self._run(stdout="", side_effect=FileNotFoundError("git not found"))
+        assert sha == ""
+
+    def test_oserror_returns_empty_string(self):
+        sha = self._run(stdout="", side_effect=OSError("permissions"))
+        assert sha == ""
+
+    def test_trailing_whitespace_is_stripped(self):
+        sha = self._run(stdout="  abc12345  \n\n")
+        assert sha == "abc12345"
+
+    def test_calls_git_rev_parse_head(self):
+        """The helper must invoke `git rev-parse HEAD`, not any other command."""
+        mock_result = type("R", (), {"returncode": 0, "stdout": "deadbeef\n"})()
+        with patch(
+            "td_release_packager.builder.subprocess.run", return_value=mock_result
+        ) as mock_run:
+            _resolve_local_commit("/fake/dir")
+        argv = mock_run.call_args[0][0]
+        assert argv[:3] == ["git", "rev-parse", "HEAD"]
+        # And it must run from inside the source dir so git walks up to .git.
+        assert mock_run.call_args[1]["cwd"] == "/fake/dir"
+
+
+class TestResolveLocalCommitIntegration:
+    """End-to-end: a real `git init` + commit produces a real SHA."""
+
+    def _git_available(self) -> bool:
+        import subprocess
+
+        try:
+            subprocess.run(["git", "--version"], capture_output=True, check=True)
+            return True
+        except (OSError, subprocess.CalledProcessError):
+            return False
+
+    def test_resolves_head_from_real_repo(self, tmp_path):
+        if not self._git_available():
+            pytest.skip("git not on PATH")
+
+        import subprocess
+
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "ships.yaml").write_text("project: t\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q", "-b", "main"], cwd=project, check=True)
+        # Identity is required for a commit. Local config only.
+        subprocess.run(
+            ["git", "config", "user.email", "t@t.t"], cwd=project, check=True
+        )
+        subprocess.run(["git", "config", "user.name", "t"], cwd=project, check=True)
+        subprocess.run(["git", "add", "ships.yaml"], cwd=project, check=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "initial"], cwd=project, check=True
+        )
+
+        sha = _resolve_local_commit(str(project))
+        # Real SHA-1 hex, 40 chars.
+        assert len(sha) == 40
+        assert all(c in "0123456789abcdef" for c in sha)
+
+    def test_not_a_repo_returns_empty(self, tmp_path):
+        if not self._git_available():
+            pytest.skip("git not on PATH")
+
+        # tmp_path itself is not a git repo.
+        sha = _resolve_local_commit(str(tmp_path))
+        assert sha == ""
 
 
 # ---------------------------------------------------------------
