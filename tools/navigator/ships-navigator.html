@@ -829,10 +829,42 @@ function generatePlan() {
   }
 
   if (needsScaffold) {
-    const sc = [`ships scaffold --name "$NAME" --output "$OUTPUT_ROOT"`];
-    if (envs.length) sc.push(`--environments ${envs.join(",")}`);
-    prelude.push(sc);
-    rationale.push({ step: "scaffold", why: "Creates the SHIPS project layout (config/, payload/, db/) at $PROJECT with starter env files." });
+    // Issue #495 — idempotent on re-run. `ships scaffold` errors out if the
+    // project dir already exists (refusing to overwrite a hand-edited tree),
+    // so a second run always failed at scaffold. Now: --repair when the dir
+    // exists (adds missing files without overwriting), fresh scaffold
+    // otherwise. Same per-shell raw-block shape the github clone step uses.
+    const envSuffix = envs.length ? ` --environments ${envs.join(",")}` : "";
+    prelude.push({
+      raw: {
+        bash: [
+          'if [ -d "$PROJECT" ]; then',
+          `  ships scaffold --name "$NAME" --output "$OUTPUT_ROOT" --repair${envSuffix}`,
+          "else",
+          `  ships scaffold --name "$NAME" --output "$OUTPUT_ROOT"${envSuffix}`,
+          "fi",
+        ],
+        powershell: [
+          'if (Test-Path $PROJECT) {',
+          `  ships scaffold --name "$NAME" --output "$OUTPUT_ROOT" --repair${envSuffix}`,
+          "  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }",
+          "} else {",
+          `  ships scaffold --name "$NAME" --output "$OUTPUT_ROOT"${envSuffix}`,
+          "  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }",
+          "}",
+        ],
+        cmd: [
+          'if exist "%PROJECT%" (',
+          `  ships scaffold --name "%NAME%" --output "%OUTPUT_ROOT%" --repair${envSuffix}`,
+          "  if errorlevel 1 exit /b 1",
+          ") else (",
+          `  ships scaffold --name "%NAME%" --output "%OUTPUT_ROOT%"${envSuffix}`,
+          "  if errorlevel 1 exit /b 1",
+          ")",
+        ],
+      },
+    });
+    rationale.push({ step: "scaffold", why: "Creates the SHIPS project layout (config/, payload/, db/) at $PROJECT with starter env files. Idempotent on re-run: passes --repair when $PROJECT already exists, fresh scaffold otherwise — so a second run adds any newly-scaffolded files without touching what's already there." });
   }
 
   const headNotes = [];
