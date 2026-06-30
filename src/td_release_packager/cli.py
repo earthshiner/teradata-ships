@@ -319,6 +319,8 @@ def _main():
         _cmd_keygen(args)
     elif args.command == "clean":
         _cmd_clean(args)
+    elif args.command == "stage":
+        sys.exit(_cmd_stage(args))
     elif args.command == "notebook":
         sys.exit(_cmd_notebook(args))
     elif args.command == "fix-package-integrity":
@@ -5692,6 +5694,94 @@ def _cmd_clean(args) -> None:
             print("  lifecycle_state: <unavailable>")
 
 
+def _cmd_stage(args) -> int:
+    """Gate on scan + inspect, then ``git add`` SHIPS-owned paths (issue #487).
+
+    Thin CLI wrapper around
+    :func:`td_release_packager.stager.stage_project`. The stager itself
+    is decoupled from the CLI — it takes scan + inspect callables, so
+    tests can pass stubs and this function is the only place that
+    knows how to wire the real gates.
+    """
+    import argparse as _argparse
+
+    from td_release_packager.stager import stage_project
+
+    def _run_scan(project_dir: str) -> int:
+        # ``--all-envs`` is the meaningful default: without it ``ships
+        # scan`` only catches malformed-token format errors and returns
+        # 0 even with undefined env tokens, which would make the gate
+        # toothless. ``--all-envs`` against a project with no
+        # ``config/env/`` is a no-op (prints a warning, returns 0).
+        scan_ns = _argparse.Namespace(
+            project=project_dir,
+            env_config=None,
+            all_envs=True,
+            show_map=False,
+            format="text",
+            fail_on_orphan=False,
+            verbose=getattr(args, "verbose", False),
+        )
+        return _cmd_scan(scan_ns)
+
+    def _run_inspect_gate(project_dir: str) -> int:
+        from td_release_packager.orchestrator import issue_codes
+
+        # ``fix_*`` defaults are False here on purpose — the stage gate
+        # must not rewrite files. The operator runs ``ships inspect``
+        # explicitly when they want fixes applied, then re-runs stage.
+        inspect_ns = _argparse.Namespace(
+            project=project_dir,
+            config=None,
+            strict=getattr(args, "strict", False),
+            update_contract_baseline=False,
+            skip_tokens=False,
+            skip_keywords=False,
+            skip_commas=False,
+            fix_grants=False,
+            fix_ddl_terminators=False,
+            fix_non_ascii=False,
+            skip_grants=False,
+            dcl_dir=None,
+            verbose=getattr(args, "verbose", False),
+        )
+        try:
+            with _stage_recording(project_dir, "inspect") as stage:
+                return _run_inspect(inspect_ns, stage, issue_codes)
+        except FileNotFoundError as e:
+            print(f"\nERROR: {e}", file=sys.stderr)
+            return 1
+
+    result = stage_project(
+        args.project,
+        run_scan=_run_scan,
+        run_inspect=_run_inspect_gate,
+        dry_run=getattr(args, "dry_run", False),
+    )
+
+    print(f"\n{'=' * 64}")
+    print("  ships stage")
+    print(f"{'=' * 64}")
+
+    if not result.success:
+        if result.blocked_by:
+            print(f"  ✗ BLOCKED by `ships {result.blocked_by}`")
+        else:
+            print("  ✗ FAILED")
+        print(f"  {result.error}")
+        return 1
+
+    verb = "Would stage" if result.dry_run else "Staged"
+    print(f"  ✓ {verb} {len(result.staged_paths)} SHIPS-owned path(s):")
+    for p in result.staged_paths:
+        print(f"      {p}")
+    if result.dry_run:
+        print("\n  Re-run without --dry-run to update the git index.")
+    else:
+        print("\n  Next: `git commit -m '<message>'`")
+    return 0
+
+
 def _cmd_fix_package_integrity(args) -> int:
     """Regenerate ``.sha256`` sidecars across a project's ``releases/`` tree.
 
@@ -7101,6 +7191,41 @@ def _build_parser():
         help=(
             "Actually delete. Without this flag, runs as a dry-run "
             "and reports what would be removed."
+        ),
+    )
+
+    # -- stage -- (#487) — bounded git-staging gate for SHIPS-owned
+    # paths. Runs scan + inspect; refuses on failure; on pass, stages
+    # exactly ``ships.yaml`` + ``config/`` + ``payload/`` and stops.
+    # Deliberately does not commit, sign, or touch hooks (see issue
+    # comment thread — keep the surface tight).
+    st = subs.add_parser(
+        "stage",
+        help=(
+            "Stage SHIPS-owned paths (ships.yaml, config/, payload/) "
+            "after gating on scan + inspect. Does not commit."
+        ),
+    )
+    st.add_argument(
+        "--project",
+        required=True,
+        help="SHIPS project directory to stage.",
+    )
+    st.add_argument(
+        "--dry-run",
+        action="store_true",
+        dest="dry_run",
+        help=(
+            "Run the scan + inspect gates and print the paths that "
+            "would be staged without touching the git index."
+        ),
+    )
+    st.add_argument(
+        "--strict",
+        action="store_true",
+        help=(
+            "Promote inspect WARNING rules to ERROR while gating, so "
+            "warnings also block staging."
         ),
     )
 
