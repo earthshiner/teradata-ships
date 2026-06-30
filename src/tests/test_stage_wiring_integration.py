@@ -272,6 +272,25 @@ class TestHarvestStageRecording:
         codes = [i["code"] for i in stage["issues"]]
         assert issue_codes.HARVEST_UNCLASSIFIED in codes
 
+    def test_harvest_with_warnings_sets_stage_status_warning(self, tmp_path):
+        """#499 — a harvest run that records HARVEST_UNCLASSIFIED or
+        HARVEST_CLASSIFICATION_WARNING issues must set stage status to
+        'warning' so the pipeline report renders ⚠ instead of ✓."""
+        project = _make_project(tmp_path)
+        source = tmp_path / "src"
+        source.mkdir()
+        # An unclassifiable file forces a warning issue.
+        (source / "mystery.sql").write_text("SELECT 1;", encoding="utf-8")
+
+        args = _make_harvest_args(source, project)
+        _run(_cmd_ingest, args)
+
+        d = _read_decisions(project)
+        harvest_run = next(r for r in d["runs"] if r["stages"][0]["stage"] == "harvest")
+        stage = harvest_run["stages"][0]
+        # Stage status reflects the warnings (was 'success' before #499).
+        assert stage["status"] == "warning"
+
     def test_harvest_token_candidate_emits_info_issue(self, tmp_path):
         project = _make_project(tmp_path)
         source = tmp_path / "src"

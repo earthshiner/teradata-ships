@@ -178,3 +178,98 @@ class TestStripCommentsPreservingPositions:
         # same offsets in both)
         assert original[m.start() : m.end()] == cleaned[m.start() : m.end()]
         assert original[m.start() : m.end()].upper() == "CREATE TABLE"
+
+
+# ---------------------------------------------------------------
+# strip_comments_and_string_literals — single-pass state machine (#499)
+# ---------------------------------------------------------------
+
+
+class TestStripCommentsAndStringLiterals:
+    """The combined stripper must NOT mis-parse `--` inside a string
+    literal as the start of a SQL comment (#499). A sequential
+    "comments first, then strings" approach was previously eating
+    string content from `--` to end-of-line, which corrupted any
+    downstream paren / semicolon scan that depended on the cleaned text.
+    """
+
+    def _strip(self, content: str) -> str:
+        from td_release_packager.sql_text import strip_comments_and_string_literals
+
+        return strip_comments_and_string_literals(content)
+
+    def test_double_dash_inside_string_is_data_not_comment(self):
+        """The user-repro from CargoIntel — a string with ``--`` and a
+        balanced ``(...)`` inside it. The closing `';` must survive."""
+        original = (
+            "INSERT INTO t VALUES ('Tobacco disguised as plastics (ch.39). "
+            "avg_vpk 1.48 USD/kg vs benchmark 3.99 -- 63 pct under-declared.');"
+        )
+        cleaned = self._strip(original)
+        # The closing `);` MUST survive — without it the splitter sees
+        # unbalanced parens and bails out.
+        assert cleaned.rstrip().endswith(");")
+        # Total length preserved (position-preserving guarantee).
+        assert len(cleaned) == len(original)
+
+    def test_string_with_single_quote_inside_block_comment_is_text(self):
+        """A `'` inside `/* ... */` is comment text, NOT a string opener."""
+        original = "/* it's a comment with ' quote */ CREATE TABLE x (a INT);"
+        cleaned = self._strip(original)
+        # The CREATE TABLE survives intact.
+        assert "CREATE TABLE x (a INT);" in cleaned
+        assert len(cleaned) == len(original)
+
+    def test_doubled_quote_escape_inside_string_handled(self):
+        """Teradata embeds a single quote as ``''``. The stripper must
+        treat the doubled `''` as escaped (stay in string), not as
+        string-close then string-open."""
+        original = "INSERT INTO t VALUES ('it''s fine');"
+        cleaned = self._strip(original)
+        # Closing `);` survives — proves the stripper exited string mode
+        # at the right `'`.
+        assert cleaned.rstrip().endswith(");")
+        assert len(cleaned) == len(original)
+
+    def test_multiline_string_preserves_newlines(self):
+        original = "INSERT INTO t VALUES ('line one\nline two\nline three');"
+        cleaned = self._strip(original)
+        assert cleaned.count("\n") == original.count("\n")
+        assert cleaned.rstrip().endswith(");")
+
+    def test_block_comment_strips_inside(self):
+        original = "/* hello */ CREATE TABLE x (a INT);"
+        cleaned = self._strip(original)
+        assert "hello" not in cleaned
+        assert "CREATE TABLE x (a INT);" in cleaned
+
+    def test_line_comment_strips_to_eol(self):
+        original = "CREATE TABLE x (a INT); -- trailing note\nCREATE TABLE y (b INT);"
+        cleaned = self._strip(original)
+        assert "trailing note" not in cleaned
+        # Both CREATE TABLEs survive.
+        assert "CREATE TABLE x (a INT);" in cleaned
+        assert "CREATE TABLE y (b INT);" in cleaned
+
+    def test_user_repro_multi_insert_paren_balance(self):
+        """End-to-end: the user's CargoIntel fixture pattern — multiple
+        INSERT statements each with ``--`` inside string literals AND
+        balanced ``(...)`` parens — must leave the overall paren depth
+        back at zero."""
+        original = """
+        INSERT INTO t (a, b, c)
+        VALUES ('RP-001', 'Direct tobacco -- bulk sea', 'TOBACCO',
+            (SELECT id FROM other WHERE x = '24'),
+            'desc with -- inside');
+
+        INSERT INTO t (a, b, c)
+        VALUES ('RP-002', 'Direct tobacco -- air parcel', 'TOBACCO',
+            (SELECT id FROM other WHERE x = '25'),
+            'desc with -- 63 pct under-declared.');
+        """
+        cleaned = self._strip(original)
+        # Count balanced ( and ) — the cleaned text MUST have equal counts.
+        assert cleaned.count("(") == cleaned.count(")"), (
+            f"paren imbalance after strip: "
+            f"open={cleaned.count('(')}, close={cleaned.count(')')}"
+        )
