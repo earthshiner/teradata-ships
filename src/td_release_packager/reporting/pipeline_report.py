@@ -952,6 +952,7 @@ def generate_pipeline_report(project_dir: str) -> Optional[str]:
         tabs=tabs,
         extra_css=common.GUIDE_CSS,
         project_name=resolve_project_name(project_dir),
+        favicon_kind="pipeline",
     )
 
     report_dir = os.path.join(project_dir, REPORT_DIRNAME)

@@ -2144,6 +2144,7 @@ def generate_package_report(pkg_dir: str, manifest_dict: dict) -> str:
         extra_css=_PACKAGE_EXTRA_CSS,
         project_name=manifest_dict.get("project_name") or None,
         ships_version=manifest_dict.get("ships_version") or None,
+        favicon_kind="package",
     )
 
     report_path = os.path.join(pkg_dir, "package_report.html")

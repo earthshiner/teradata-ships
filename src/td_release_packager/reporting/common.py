@@ -43,6 +43,63 @@ LIGHT = "#F8F9FA"
 BORDER = "#DEE2E6"
 
 # ---------------------------------------------------------------------------
+# Per-report favicons (issue #485)
+# ---------------------------------------------------------------------------
+#
+# Every SHIPS HTML surface (Navigator, Pipeline, Package, Deploy, plus the
+# deploy report's four sub-modes) ships with a distinct inline SVG favicon
+# so a user with multiple report tabs open can tell them apart at a glance
+# in the browser's tab strip. Colour-coded variants of the same minimalist
+# glyph — a coloured disc with a single letter — keep the visual family
+# unified while still differentiating each surface.
+#
+# SVG inline data URI: no external request, opens directly from a ``file:``
+# URL, and renders crisply at any zoom. Modern browsers (Chrome / Edge /
+# Firefox / Safari) all support SVG favicons.
+
+#: Palette + glyph per report kind. Keep ASCII-only (no f-strings, no
+#: complex glyphs) so the inline SVG payload remains a literal string the
+#: data URI builder can pass through without further encoding.
+FAVICON_KINDS: Dict[str, Tuple[str, str]] = {
+    "navigator": (ORANGE, "N"),  # SHIPS Navigator wizard
+    "pipeline": ("#17A2B8", "P"),  # pre-package pipeline report
+    "package": ("#28A745", "B"),  # post-build package report
+    "deployment": (NAVY, "D"),  # deploy report — DEPLOYMENT mode
+    "dry_run": ("#FFC107", "D"),  # deploy report — DRY RUN mode
+    "explain": ("#6610F2", "E"),  # deploy report — EXPLAIN mode
+    "replay": ("#6C757D", "R"),  # deploy report — REPLAY mode
+}
+
+
+def favicon_data_uri(kind: str) -> str:
+    """Return an ``image/svg+xml`` data URI for the favicon of ``kind``.
+
+    Unknown kinds fall back to the ``package`` variant so a misconfigured
+    caller still produces a usable (if generic) favicon rather than a
+    blank tab. ``render_page()`` consumes this via ``favicon_kind``.
+    """
+    bg, letter = FAVICON_KINDS.get(kind, FAVICON_KINDS["package"])
+    fg = "#FFFFFF"
+    # 64x64 viewBox — large enough that the letter looks crisp at 16x16
+    # (the common tab favicon size) without anti-alias blur. The disc
+    # fills the whole canvas; the letter is centred via ``text-anchor``
+    # and a baseline offset tuned by eye.
+    svg = (
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>"
+        f"<circle cx='32' cy='32' r='30' fill='{bg}'/>"
+        f"<text x='32' y='44' font-family='Inter,Arial,sans-serif' "
+        f"font-size='36' font-weight='700' text-anchor='middle' "
+        f"fill='{fg}'>{letter}</text>"
+        "</svg>"
+    )
+    # Percent-encode the few characters that break inside an HTML attr.
+    # The SVG above uses single quotes so double quotes are safe; only
+    # ``#`` and ``%`` need escaping in a data URI.
+    encoded = svg.replace("%", "%25").replace("#", "%23")
+    return "data:image/svg+xml;utf8," + encoded
+
+
+# ---------------------------------------------------------------------------
 # Stage / issue status styling
 # ---------------------------------------------------------------------------
 #
@@ -510,6 +567,7 @@ def render_page(
     extra_css: str = "",
     project_name: Optional[str] = None,
     ships_version: Optional[str] = None,
+    favicon_kind: str = "package",
 ) -> str:
     """Assemble a complete, self-contained SHIPS report HTML document.
 
@@ -537,6 +595,12 @@ def render_page(
         ships_version:  SHIPS version string for the ribbon. Defaults to
                         ``td_release_packager.__version__`` when ``None``
                         and ``project_name`` is set.
+        favicon_kind:   Which favicon variant to embed in ``<head>``
+                        (issue #485). One of ``"pipeline"`` / ``"package"`` /
+                        ``"deployment"`` / ``"dry_run"`` / ``"explain"`` /
+                        ``"replay"`` / ``"navigator"``. Defaults to
+                        ``"package"`` so existing callers that don't set
+                        it still get a sensible favicon.
 
     Returns:
         The full HTML document as a string.
@@ -583,6 +647,7 @@ def render_page(
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{h(doc_title)}</title>
+<link rel="icon" type="image/svg+xml" href="{favicon_data_uri(favicon_kind)}">
 <style>
 {BASE_CSS}
 {extra_css}

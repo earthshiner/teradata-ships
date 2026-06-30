@@ -328,6 +328,14 @@ def _build_html(
 
     fg = "#FFFFFF" if status == "PASSED" else "#FFFFFF"
     meta = build_meta or {}
+    # Issue #485 — map the deploy mode to its favicon variant so the
+    # browser tab strip distinguishes DEPLOYMENT / DRY RUN / EXPLAIN /
+    # REPLAY at a glance.
+    favicon_kind = {
+        "DRY RUN": "dry_run",
+        "EXPLAIN": "explain",
+        "REPLAY": "replay",
+    }.get(mode, "deployment")
     return _render_page(
         doc_title=f"{mode} Report — {result.deployment_id}",
         header_title=f"{mode} Report",
@@ -343,6 +351,7 @@ def _build_html(
         extra_css=_DEPLOY_CONTENT_CSS,
         project_name=meta.get("project_name") or None,
         ships_version=meta.get("ships_version") or None,
+        favicon_kind=favicon_kind,
     )
 
 
