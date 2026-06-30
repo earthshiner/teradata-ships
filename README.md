@@ -179,7 +179,7 @@ SHIPS consists of two Python packages:
 
 | Package | Purpose |
 |---|---|
-| `td_release_packager` | Developer-side tooling: scaffold, harvest, inspect, analyse, package |
+| `td_release_packager` | Developer-side tooling: scaffold, harvest, inspect, analyse, package, stage |
 | `database_package_deployer` | DBA-side deployment engine: parse, pre-flight, deploy, rollback, report |
 
 ### The SHIPS Workflow

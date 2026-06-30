@@ -11,7 +11,7 @@ Walks a user through the SHIPS packaging decisions without an AI present and emi
 
 1. An ordered command sequence in **three shells** — PowerShell (`.ps1`), bash (`.sh`), and Windows cmd (`.bat`). Long paths bind to shell variables (`$SOURCE`, `$OUTPUT_ROOT`, `$NAME`, `$PROJECT`, `$PKG_NAME`, `$GRAPHS_DIR`, plus `$ENV` / `$ENV_CONFIG` reset per environment block) so retargeting is a one-line edit at the top of the script. Two emission modes:
    - **Quick** — one `ships process` call per environment (the full SHIPS pipeline behind one verb).
-   - **Detailed** — each pipeline step (`scaffold` / `harvest` / `generate` / `inspect` / `scan` / `analyse` / `package`) shown separately for transparency, CI scripting, or selective re-runs.
+   - **Detailed** — each pipeline step (`scaffold` / `harvest` / `generate` / `inspect` / `scan` / `analyse` / `package`) shown separately for transparency, CI scripting, or selective re-runs. (`ships stage` is a separate post-package git-staging gate, not a pipeline step — see the [user guide](../../docs/USER_GUIDE.md#ships-stage).)
 2. A `config/tokenise.conf` matching the chosen token model (prefix or per-database).
 3. One `config/env/<ENV>.conf` skeleton per target environment. If the source is already tokenised, the wizard instead emits `ships bootstrap-env-config` calls so SHIPS scaffolds the real env files from the payload's actual token usage.
 4. A `ships.yaml` with a `packaging:` profile (source, package name, default env, env-config) capturing the wizard's answers so `ships process --project .` re-runs argless (#382, consumed by the single front door #384).
