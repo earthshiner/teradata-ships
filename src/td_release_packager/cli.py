@@ -1704,9 +1704,7 @@ def _cmd_ingest(args):
                 # recorded." message. Stamp the offending path into the
                 # ledger before re-raising so the existing exit path runs
                 # unchanged.
-                stage.add_issue(
-                    "error", _ic.HARVEST_SOURCE_NOT_FOUND, str(inner)
-                )
+                stage.add_issue("error", _ic.HARVEST_SOURCE_NOT_FOUND, str(inner))
                 raise
     except FileNotFoundError as e:
         print(f"\nERROR: {e}", file=sys.stderr)

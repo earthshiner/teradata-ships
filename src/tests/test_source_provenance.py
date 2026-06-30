@@ -182,3 +182,36 @@ class TestRenderIssueListWithSourceMap:
         ]
         html = render_issue_list(issues, source_map=source_map)
         assert "↳ source:" not in html
+
+
+# ---------------------------------------------------------------
+# render_issue_list — empty-issues branch (#495)
+# ---------------------------------------------------------------
+
+
+class TestRenderIssueListEmpty:
+    """The empty-issues branch must not contradict the stage status badge."""
+
+    def test_empty_with_no_status_renders_green_no_issues(self):
+        """Back-compat — callers that don't pass stage_status get the
+        original 'No issues recorded.' green note."""
+        html = render_issue_list([])
+        assert "No issues recorded" in html
+        # Green colour (#28A745) signals "all good".
+        assert "#28A745" in html
+
+    def test_empty_with_success_status_renders_green_no_issues(self):
+        html = render_issue_list([], stage_status="success")
+        assert "No issues recorded" in html
+        assert "#28A745" in html
+
+    def test_empty_with_error_status_renders_red_failure_note(self):
+        """The failing stage WITH zero issues used to show 'No issues
+        recorded.' in green, contradicting the red ✗ badge above it.
+        Now it shows an honest red 'failed without detail' note."""
+        html = render_issue_list([], stage_status="error")
+        assert "No issues recorded" not in html
+        assert "Stage failed" in html
+        assert "no detailed issues logged" in html
+        # Red colour (#DC3545) matches the error badge.
+        assert "#DC3545" in html
