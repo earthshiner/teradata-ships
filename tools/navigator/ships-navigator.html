@@ -668,16 +668,33 @@ function generatePlan() {
   // block resets ENV + ENV_CONFIG so users can run the per-env section
   // standalone in a fresh terminal (Option A — simple over clever).
   const sep = os === "windows" ? "\\" : "/";
+  // Issue #495 — for github source in detailed mode, SOURCE used to be the
+  // unusable literal `<cloned-source-dir>` (harvest doesn't accept
+  // --source-github, so the script needed a real local path that nothing
+  // populated). Now derive a deterministic clone target under $OUTPUT_ROOT
+  // and emit an explicit `git clone` step at the top of the prelude. Quick
+  // mode uses `ships process --source-github` directly, so no clone is
+  // needed there and `$SOURCE` is unused.
+  const githubDetailed = sourceType === "github" && mode === "detailed";
   const sourceLit = sourceType === "filesystem" ? sourceDir
+                  : githubDetailed              ? `$OUTPUT_ROOT${sep}_cloned-source`
                   : sourceType === "github"     ? "<cloned-source-dir>"
                   : "<source-dir>";
 
-  const sharedVars = [["SOURCE", sourceLit]];
+  // SOURCE depends on OUTPUT_ROOT when we derive it (githubDetailed). Push
+  // OUTPUT_ROOT first in that case so `$OUTPUT_ROOT` is defined by the time
+  // the SOURCE assignment runs (PowerShell + cmd both evaluate left-to-right).
+  // Quick + github uses `ships process --source-github` directly, so $SOURCE
+  // is never referenced — skipping its declaration removes a confusing
+  // `<cloned-source-dir>` placeholder from the top of the script (#495).
+  const usesSourceVar = sourceType === "filesystem" || githubDetailed;
+  const sharedVars = [];
   if (sourceType === "github") {
     sharedVars.push(["OWNER_REPO", ownerRepo]);
     sharedVars.push(["REF",        ref]);
   }
   sharedVars.push(["OUTPUT_ROOT", parent]);
+  if (usesSourceVar) sharedVars.push(["SOURCE", sourceLit]);
   sharedVars.push(["NAME",        projName]);
   sharedVars.push(["PROJECT",     `$OUTPUT_ROOT${sep}$NAME`]);
   sharedVars.push(["PKG_NAME",    pkgName]);
@@ -697,6 +714,25 @@ function generatePlan() {
 
   const prelude = [];
   const rationale = [];
+
+  // Issue #495 — for github source in detailed mode, clone the repo into
+  // $SOURCE before any SHIPS verb runs. `ships harvest` doesn't accept
+  // --source-github, so without this the script would fail at harvest with
+  // "Source directory not found". The clone uses $OWNER_REPO and $REF from
+  // the shared vars block above, so retargeting the source is a one-line
+  // edit at the top.
+  if (githubDetailed) {
+    prelude.push([
+      `git clone --depth 1 --branch "$REF"`,
+      `"https://github.com/$OWNER_REPO.git"`,
+      `"$SOURCE"`,
+    ]);
+    rationale.push({
+      step: "git clone",
+      why: "`ships harvest` doesn't accept --source-github (only `ships process` does in Quick mode), so Detailed mode must clone the source into $SOURCE first. The default $SOURCE lands under $OUTPUT_ROOT/_cloned-source — change it in the shared vars block if you want it elsewhere.",
+    });
+  }
+
   if (needsScaffold) {
     const sc = [`ships scaffold --name "$NAME" --output "$OUTPUT_ROOT"`];
     if (envs.length) sc.push(`--environments ${envs.join(",")}`);
@@ -706,9 +742,12 @@ function generatePlan() {
 
   const headNotes = [];
   if (mode === "detailed" && sourceType === "github") {
-    headNotes.push("`ships harvest` does NOT accept --source-github.");
-    headNotes.push("Either git-clone the repo first and point $SOURCE at the clone,");
-    headNotes.push("OR switch to Quick mode (`ships process` accepts --source-github).");
+    // Issue #495 — the script now clones the source itself, so the old
+    // "you must clone first" warning becomes obsolete. Replace with a
+    // pointer at where the clone lands so the user knows where to look.
+    headNotes.push("`ships harvest` does NOT accept --source-github — Detailed mode");
+    headNotes.push("clones $OWNER_REPO into $SOURCE itself (the first prelude step).");
+    headNotes.push("Edit $SOURCE in the shared vars block to clone somewhere else.");
   }
 
   const perEnv = envList.map((env, idx) => {
@@ -820,7 +859,7 @@ function generatePlan() {
     rationale.push({ step: "package", why: "Builds the deployable release artefact per environment, resolving every {{TOKEN}} from that env's .conf file." });
   }
 
-  const script = { sharedVars, deployVars, prelude, perEnv, postlude, headNotes, mode };
+  const script = { sharedVars, deployVars, prelude, perEnv, postlude, headNotes, mode, sourcePreflightNeeded: usesSourceVar };
 
   // ---- tokenise.conf ----
   let tokeniseConf = null;
@@ -918,11 +957,26 @@ function renderScript(script, shell, bashFlavour, launcherStem) {
   };
 
   const emitCmd = (parts) => {
-    if (parts.length === 1) { out.push(xform(parts[0])); return; }
-    const indent = "  ";
-    out.push(xform(parts[0]) + cont);
-    for (let i = 1; i < parts.length; i++) {
-      out.push(indent + xform(parts[i]) + (i < parts.length - 1 ? cont : ""));
+    if (parts.length === 1) {
+      out.push(xform(parts[0]));
+    } else {
+      const indent = "  ";
+      out.push(xform(parts[0]) + cont);
+      for (let i = 1; i < parts.length; i++) {
+        out.push(indent + xform(parts[i]) + (i < parts.length - 1 ? cont : ""));
+      }
+    }
+    // Issue #495 — fail-fast across native commands.
+    // bash already aborts via `set -euo pipefail` in the preamble.
+    // PowerShell's `$ErrorActionPreference = "Stop"` only stops cmdlets, not
+    // native executables like `ships` (a Python console script), so a failed
+    // harvest would let the script run the rest of the pipeline regardless.
+    // cmd never auto-stops. Append the appropriate guard after every command
+    // so any non-zero exit halts the script.
+    if (shell === "powershell") {
+      out.push("if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }");
+    } else if (shell === "cmd") {
+      out.push("if errorlevel 1 exit /b 1");
     }
   };
 
@@ -960,6 +1014,10 @@ function renderScript(script, shell, bashFlavour, launcherStem) {
     out.push("# either copy the commands below and paste into your shell, or run first:");
     out.push("#   Unblock-File -Path .\\" + launcherStem + ".ps1");
     out.push('$ErrorActionPreference = "Stop"');
+    // Issue #495 — make native exes (like `ships`) honour ErrorActionPreference
+    // on PowerShell 7.3+. Older PowerShell ignores the unknown variable, so
+    // it's a free win — per-command $LASTEXITCODE checks below cover 5.1.
+    out.push('$PSNativeCommandUseErrorActionPreference = $true');
   } else {
     out.push("@echo off");
     out.push(":: If Windows blocks this with 'These files can't be opened' (Mark-of-the-Web),");
@@ -1006,6 +1064,45 @@ function renderScript(script, shell, bashFlavour, launcherStem) {
 
   if (script.prelude.length) {
     for (const parts of script.prelude) emitCmd(parts);
+    out.push("");
+  }
+
+  // Issue #495 — SOURCE preflight. The legacy `<source-dir>` placeholder is
+  // a valid bash/PowerShell/cmd path literal but obviously not a real
+  // directory. Without a preflight, `ships harvest` runs, fails with
+  // "Source directory not found", and (on PowerShell + cmd) the rest of the
+  // pipeline carries on with phantom output. Detect the placeholder OR a
+  // genuinely missing directory and abort with the actionable remedy.
+  //
+  // Runs AFTER the prelude so the github-detailed clone (also #495) has had
+  // a chance to populate $SOURCE.
+  if (script.sourcePreflightNeeded) {
+    out.push(`${cmnt} Preflight: $SOURCE must point at a real directory before harvest can run.`);
+    if (shell === "bash") {
+      out.push('if [ -z "${SOURCE:-}" ] || [ "$SOURCE" = "<source-dir>" ] || [ "$SOURCE" = "<cloned-source-dir>" ] || [ ! -d "$SOURCE" ]; then');
+      out.push('  echo "ERROR: \\$SOURCE is not a real directory: \'$SOURCE\'" >&2');
+      out.push('  echo "       Edit the SOURCE assignment near the top of this script, or" >&2');
+      out.push('  echo "       (for a GitHub source) clone the repo first and point SOURCE at the clone." >&2');
+      out.push("  exit 1");
+      out.push("fi");
+    } else if (shell === "powershell") {
+      out.push('if ([string]::IsNullOrEmpty($SOURCE) -or $SOURCE -eq "<source-dir>" -or $SOURCE -eq "<cloned-source-dir>" -or -not (Test-Path -PathType Container $SOURCE)) {');
+      out.push('  Write-Error "`$SOURCE is not a real directory: \'$SOURCE\'. Edit the SOURCE assignment near the top of this script, or (for a GitHub source) clone the repo first and point SOURCE at the clone."');
+      out.push("  exit 1");
+      out.push("}");
+    } else {
+      out.push('if "%SOURCE%"=="" goto :ships_navigator_source_missing');
+      out.push('if "%SOURCE%"=="<source-dir>" goto :ships_navigator_source_missing');
+      out.push('if "%SOURCE%"=="<cloned-source-dir>" goto :ships_navigator_source_missing');
+      out.push('if not exist "%SOURCE%\\*" goto :ships_navigator_source_missing');
+      out.push("goto :ships_navigator_source_ok");
+      out.push(":ships_navigator_source_missing");
+      out.push("echo ERROR: SOURCE is not a real directory: %SOURCE% 1>&2");
+      out.push("echo        Edit the SOURCE assignment near the top of this script, or 1>&2");
+      out.push("echo        (for a GitHub source) clone the repo first and point SOURCE at the clone. 1>&2");
+      out.push("exit /b 1");
+      out.push(":ships_navigator_source_ok");
+    }
     out.push("");
   }
 
