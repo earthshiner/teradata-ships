@@ -266,18 +266,20 @@ _VALID_SEVERITIES = {"ERROR", "WARNING", "WARN", "INFO", "OFF"}
 # Two orthogonal keys control comma placement inspection:
 #
 #   comma_style    — WHAT to check (domain-valued, not a severity)
-#     leading        flag files that use trailing commas (default)
+#     leading        flag files that use trailing commas
 #     trailing       flag files that use leading commas
-#     as-per-source  do not enforce any convention; emit a single
-#                    INFO note so ships.decisions.json records the policy
-#                    explicitly. Pair with comma_log_level=OFF to also
-#                    silence the INFO note (no output, no record).
+#     as-per-source  (default, #507) do not enforce any convention; emit a
+#                    single INFO note so ships.decisions.json records the
+#                    policy explicitly. Pair with comma_log_level=OFF to also
+#                    silence the INFO note (no output, no record). Set
+#                    comma_style=leading or comma_style=trailing in
+#                    inspect.conf to opt in to enforcement.
 #
 #   comma_log_level — HOW SEVERELY to report violations (severity-valued)
 #     WARNING  (default)
 #     ERROR    block deployment / fail --strict
 #     OFF      suppress all comma findings including INFO
-DEFAULT_COMMA_STYLE = "leading"
+DEFAULT_COMMA_STYLE = "as-per-source"
 _VALID_COMMA_STYLES = {"leading", "trailing", "as-per-source"}
 
 # Keys in inspect.conf that take domain values rather than severities.
@@ -538,13 +540,14 @@ def generate_default_config() -> str:
         f"keyword_case={DEFAULT_RULES['keyword_case']}",
         "#",
         "# comma_style controls WHAT is checked (domain-valued, not a severity):",
-        "#   leading      (default) — flag files that use trailing commas.",
-        "#   trailing               — flag files that use leading commas.",
-        "#   as-per-source          — no enforcement; one INFO note is emitted",
-        "#                           so ships.decisions.json records this as a deliberate",
-        "#                           policy choice. Pair with comma_log_level=OFF to",
-        "#                           silence the INFO note entirely (no screen output,",
-        "#                           no record in ships.decisions.json).",
+        "#   leading                 — flag files that use trailing commas.",
+        "#   trailing                — flag files that use leading commas.",
+        "#   as-per-source (default, #507) — no enforcement; one INFO note is",
+        "#                           emitted so ships.decisions.json records this as a",
+        "#                           deliberate policy choice. Pair with comma_log_level=OFF",
+        "#                           to silence the INFO note entirely (no screen output,",
+        "#                           no record in ships.decisions.json). Switch to leading",
+        "#                           or trailing to opt in to enforcement.",
         f"comma_style={DEFAULT_COMMA_STYLE}",
         "#",
         "# comma_log_level controls HOW SEVERELY violations are reported.",
