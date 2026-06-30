@@ -23,6 +23,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>SHIPS Navigator</title>
+<!-- Issue #485 — orange "N" disc favicon. Mirrors the Navigator
+     variant in src/td_release_packager/reporting/common.py FAVICON_KINDS
+     so the visual family stays in lockstep across all SHIPS HTML
+     surfaces. Inline SVG data URI — no external request. -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><circle cx='32' cy='32' r='30' fill='%23FF5F02'/><text x='32' y='44' font-family='Inter,Arial,sans-serif' font-size='36' font-weight='700' text-anchor='middle' fill='%23FFFFFF'>N</text></svg>">
 <style>
   :root {
     --td-orange: #FF5F02;
@@ -576,6 +581,20 @@ function baseName(p) {
   const i = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
   return i >= 0 ? trimmed.slice(i + 1) : trimmed;
 }
+// Build a filesystem-safe launcher stem from a package name (issue #485).
+// Multiple SHIPS projects in the same directory collide if every Navigator
+// run writes the same `ships-run.ps1` / `.sh` / `.bat`, so the bundled
+// launchers are named `ships-run-<sanitisedPkg>.*` instead.
+// Sanitiser rules: keep ASCII alnum / `_` / `-`, replace everything else
+// with `_`, collapse runs, trim leading/trailing `_`, fall back to
+// "package" if the input collapses to empty.
+function safeLauncherStem(pkgName) {
+  if (pkgName == null) return "ships-run-package";
+  let cleaned = String(pkgName).replace(/[^A-Za-z0-9_-]+/g, "_");
+  cleaned = cleaned.replace(/_+/g, "_").replace(/^_+|_+$/g, "");
+  if (!cleaned) cleaned = "package";
+  return "ships-run-" + cleaned;
+}
 function parseEnvs(raw) {
   if (!raw) return [];
   return raw.split(/[\s,;]+/).map(s => s.trim()).filter(Boolean);
@@ -851,7 +870,12 @@ function generatePlan() {
 // Render the script model in a chosen shell.
 // shell ∈ { "bash", "powershell", "cmd" }.
 // ---------------------------------------------------------------------------
-function renderScript(script, shell, bashFlavour) {
+function renderScript(script, shell, bashFlavour, launcherStem) {
+  // `launcherStem` is the bare filename (no extension) that the
+  // generated script's own self-reference comments should use, e.g.
+  // `ships-run-CustomerDNA`. Falls back to `ships-run` for callers
+  // that don't supply one (older tests or programmatic invocations).
+  if (!launcherStem) launcherStem = "ships-run";
   const out = [];
   // For cmd, rewrite $VAR_NAME → %VAR_NAME%. bash and PowerShell both use $VAR.
   const xform = s => shell === "cmd" ? s.replace(/\$([A-Z_][A-Z0-9_]*)/g, "%$1%") : s;
@@ -934,13 +958,13 @@ function renderScript(script, shell, bashFlavour) {
     out.push("# PowerShell — SHIPS Navigator generated script");
     out.push("# If Windows blocks this with 'These files can't be opened' (Mark-of-the-Web),");
     out.push("# either copy the commands below and paste into your shell, or run first:");
-    out.push("#   Unblock-File -Path .\\ships-run.ps1");
+    out.push("#   Unblock-File -Path .\\" + launcherStem + ".ps1");
     out.push('$ErrorActionPreference = "Stop"');
   } else {
     out.push("@echo off");
     out.push(":: If Windows blocks this with 'These files can't be opened' (Mark-of-the-Web),");
     out.push(":: either copy the commands below and paste into your shell, or in PowerShell run:");
-    out.push("::   Unblock-File -Path .\\ships-run.bat");
+    out.push("::   Unblock-File -Path .\\" + launcherStem + ".bat");
     out.push("setlocal");
   }
   out.push("");
@@ -1219,6 +1243,12 @@ function renderCommandsPanel(plan) {
     + " Long paths bind to shell variables (<code>$PROJECT</code>, <code>$SOURCE</code>, <code>$ENV_CONFIG</code> …) so retargeting is a one-line edit at the top.";
   panel.appendChild(modeBanner);
 
+  // Issue #485 — bundle the package name into the launcher filename so
+  // multiple SHIPS projects in the same directory don't overwrite each
+  // other's `ships-run.*` files. Derive once and reuse below.
+  const pkgName = (plan.package && plan.package.name) || "package";
+  const launcherStem = safeLauncherStem(pkgName);
+
   // Windows MOTW warning — SmartScreen blocks downloaded .ps1 / .bat files.
   const motwBanner = document.createElement("div");
   motwBanner.className = "warn";
@@ -1227,7 +1257,7 @@ function renderCommandsPanel(plan) {
     "<b>Windows note:</b> If you download the <code>.ps1</code> or <code>.bat</code>, Windows may block it " +
     "(\"These files can't be opened\" — Mark-of-the-Web). Two ways round it: " +
     "<b>(a)</b> use the <b>Copy</b> button and paste the commands into your terminal — no file, no block; or " +
-    "<b>(b)</b> in PowerShell run <code>Unblock-File -Path .\\ships-run.ps1</code> after download.";
+    "<b>(b)</b> in PowerShell run <code>Unblock-File -Path .\\" + escapeHtml(launcherStem) + ".ps1</code> after download.";
   panel.appendChild(motwBanner);
 
   // Tokenise.conf reminder — only on the "wizard configures tokenisation"
@@ -1250,9 +1280,9 @@ function renderCommandsPanel(plan) {
     panel.appendChild(tokBanner);
   }
 
-  const psText  = renderScript(plan.script, "powershell", plan.bashFlavour);
-  const shText  = renderScript(plan.script, "bash",       plan.bashFlavour);
-  const batText = renderScript(plan.script, "cmd",        plan.bashFlavour);
+  const psText  = renderScript(plan.script, "powershell", plan.bashFlavour, launcherStem);
+  const shText  = renderScript(plan.script, "bash",       plan.bashFlavour, launcherStem);
+  const batText = renderScript(plan.script, "cmd",        plan.bashFlavour, launcherStem);
 
   // The default shell (first in the OS-based order) renders expanded; the other
   // two collapse into <details> so users don't scroll past them but still see
@@ -1295,13 +1325,13 @@ function renderCommandsPanel(plan) {
   }
 
   if (plan.os === "windows") {
-    block("PowerShell (.ps1) — default for Windows paths", "ships-run.ps1", psText,  true);
-    block("Windows cmd (.bat)",                            "ships-run.bat", batText, false);
-    block("POSIX bash (.sh)",                              "ships-run.sh",  shText,  false);
+    block("PowerShell (.ps1) — default for Windows paths", launcherStem + ".ps1", psText,  true);
+    block("Windows cmd (.bat)",                            launcherStem + ".bat", batText, false);
+    block("POSIX bash (.sh)",                              launcherStem + ".sh",  shText,  false);
   } else {
-    block("POSIX bash (.sh) — default for POSIX paths",    "ships-run.sh",  shText,  true);
-    block("PowerShell (.ps1)",                             "ships-run.ps1", psText,  false);
-    block("Windows cmd (.bat)",                            "ships-run.bat", batText, false);
+    block("POSIX bash (.sh) — default for POSIX paths",    launcherStem + ".sh",  shText,  true);
+    block("PowerShell (.ps1)",                             launcherStem + ".ps1", psText,  false);
+    block("Windows cmd (.bat)",                            launcherStem + ".bat", batText, false);
   }
 }
 
@@ -1724,7 +1754,9 @@ function renderFaqPanel() {
       a: "<p>That's the Mark-of-the-Web flag on browser-downloaded files. Two ways round it:</p>"
        + "<p><b>(a)</b> Use the <b>Copy</b> button on the Commands tab and paste straight into your "
        + "terminal — no file, no block.</p>"
-       + "<p><b>(b)</b> Unblock the file once after downloading: <code>Unblock-File -Path .\\ships-run.ps1</code></p>",
+       + "<p><b>(b)</b> Unblock the downloaded file once. The launcher is named for your package, "
+       + "e.g. <code>Unblock-File -Path .\\ships-run-CustomerDNA.ps1</code> — substitute your "
+       + "package name.</p>",
     },
     {
       q: "PowerShell says \"running scripts is disabled on this system\".",
@@ -1935,11 +1967,16 @@ function downloadAllBundle() {
   if (!plan) return;
   const files = [];
 
+  // Issue #485 — per-package launcher stem so multiple SHIPS projects
+  // can live side by side without overwriting each other's launchers.
+  const pkgName = (plan.package && plan.package.name) || "package";
+  const launcherStem = safeLauncherStem(pkgName);
+
   // Commands in all three shells. bashFlavour is consulted only by the
   // bash renderer (PS / cmd ignore it) — see renderScript().
-  files.push({ name: "ships-run.ps1", body: renderScript(plan.script, "powershell", plan.bashFlavour) });
-  files.push({ name: "ships-run.sh",  body: renderScript(plan.script, "bash",       plan.bashFlavour) });
-  files.push({ name: "ships-run.bat", body: renderScript(plan.script, "cmd",        plan.bashFlavour) });
+  files.push({ name: launcherStem + ".ps1", body: renderScript(plan.script, "powershell", plan.bashFlavour, launcherStem) });
+  files.push({ name: launcherStem + ".sh",  body: renderScript(plan.script, "bash",       plan.bashFlavour, launcherStem) });
+  files.push({ name: launcherStem + ".bat", body: renderScript(plan.script, "cmd",        plan.bashFlavour, launcherStem) });
 
   if (plan.tokeniseConf) files.push({ name: "config/tokenise.conf", body: plan.tokeniseConf });
 
@@ -1956,7 +1993,7 @@ function downloadAllBundle() {
     "",
     "## Files",
     "",
-    "- `ships-run.ps1` / `ships-run.sh` / `ships-run.bat` — the command sequence in PowerShell, bash, and cmd. Pick the one for your shell.",
+    "- `" + launcherStem + ".ps1` / `" + launcherStem + ".sh` / `" + launcherStem + ".bat` — the command sequence in PowerShell, bash, and cmd. Pick the one for your shell.",
     plan.tokeniseConf ? "- `config/tokenise.conf` — token rewrite rules." : null,
     plan.envFiles.length ? "- `config/env/*.conf` — env file skeletons (replace `<fill-me>` before running)." : null,
     plan.tokensAlready ? "- (No env skeletons — source is already tokenised; the script runs `ships bootstrap-env-config` to seed real ones.)" : null,
