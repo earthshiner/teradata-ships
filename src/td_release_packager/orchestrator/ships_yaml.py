@@ -340,7 +340,12 @@ def validate(data: Dict[str, Any]) -> List[ValidationError]:
         if not isinstance(packaging_block, dict):
             errors.append(ValidationError("packaging", "must be a mapping"))
         else:
-            for key in ("source", "name", "default_env", "env_config"):
+            # ``root_parent`` (#501) — when set, harvest/process inject a
+            # ``FROM <root_parent>`` clause into top-level CREATE DATABASE /
+            # CREATE USER statements that don't already have one, so wave
+            # ordering can deploy them after their parent. Mirrors the
+            # ``--root-parent`` CLI flag for the argless workflow.
+            for key in ("source", "name", "default_env", "env_config", "root_parent"):
                 if key in packaging_block:
                     val = packaging_block[key]
                     if not isinstance(val, str) or not val.strip():

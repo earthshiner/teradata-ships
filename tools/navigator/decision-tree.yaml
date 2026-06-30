@@ -194,6 +194,12 @@ questions:
     hint: "Build artefact name. e.g. <code>create_objects</code>. No spaces; underscores OK."
     kind: text
 
+  # --- Q13 root parent for parentless CREATE DATABASE / CREATE USER (#501) ---
+  - id: package.root_parent
+    label: "Q13. Root database / user parent <i>(optional)</i>"
+    hint: "Only set this if your source has top-level <code>CREATE DATABASE</code> / <code>CREATE USER</code> statements WITHOUT a <code>FROM &lt;parent&gt;</code> clause. SHIPS will inject <code>FROM &lt;your-value&gt;</code> into those statements so wave ordering can deploy them after their parent. Existing <code>FROM</code> clauses are preserved. Leave blank if all your top-level DB/USER DDL already names a parent."
+    kind: text
+
   # --- Strict mode toggle ---
   - id: process.strict
     label: "Strict mode (abort on first stage error)?"

@@ -484,6 +484,14 @@ const QUESTIONS = [
     hint: "Build artefact name. e.g. <code>create_objects</code>. No spaces; underscores OK.",
     kind: "text" },
 
+  // --- Q13 root parent for parentless CREATE DATABASE / CREATE USER (#501) ---
+  { id: "package.root_parent",
+    label: "Q13. Root database / user parent <i>(optional)</i>",
+    hint: "Only set this if your source has top-level <code>CREATE DATABASE</code> / <code>CREATE USER</code> statements WITHOUT a <code>FROM &lt;parent&gt;</code> clause. " +
+          "SHIPS will inject <code>FROM &lt;your-value&gt;</code> into those statements so wave ordering can deploy them after their parent. " +
+          "Existing <code>FROM</code> clauses are preserved. Leave blank if all your top-level DB/USER DDL already names a parent.",
+    kind: "text" },
+
   // --- Strict mode toggle ---
   { id: "process.strict", label: "Strict mode (abort on first stage error)?",
     hint: "Off by default — developer mode runs all stages and summarises errors at the end. Tick for CI / platform mode.",
@@ -564,6 +572,7 @@ function applyPlan(plan) {
     if (typeof plan.project.scaffolded === "boolean") answers["project.scaffolded"] = plan.project.scaffolded;
   }
   if (plan.package && plan.package.name) answers["package.name"] = plan.package.name;
+  if (plan.package && plan.package.root_parent) answers["package.root_parent"] = plan.package.root_parent;
   if (typeof plan.strict === "boolean") answers["process.strict"] = plan.strict;
 }
 
@@ -699,6 +708,7 @@ function generatePlan() {
   const ownerRepo     = sanitiseOwnerRepo(a["source.owner_repo"] || "") || "<owner/repo>";
   const ref           = (a["source.ref"] || "main").trim();
   const pkgName       = (a["package.name"] || "create_objects").trim();
+  const rootParent    = (a["package.root_parent"] || "").trim();  // #501
   const mode          = a["mode.style"] || "quick";
   const wantGenerate  = a["generate.enabled"] !== "no";
   const wantAnalyse   = a["analyse.enabled"] !== "no";
@@ -747,6 +757,12 @@ function generatePlan() {
   sharedVars.push(["NAME",        projName]);
   sharedVars.push(["PROJECT",     `$OUTPUT_ROOT${sep}$NAME`]);
   sharedVars.push(["PKG_NAME",    pkgName]);
+  // #501 — root parent for parentless CREATE DATABASE/USER prereqs.
+  // Only emit the shared var when set, so projects whose top-level DB/USER
+  // DDL already names a parent don't see an unused $ROOT_PARENT cluttering
+  // the top of the script. When emitted, the corresponding `--root-parent`
+  // flag is appended to harvest / process / package below.
+  if (rootParent) sharedVars.push(["ROOT_PARENT", rootParent]);
   // Pin the package output dir. Without --output, `ships package`/`process`
   // default to the CURRENT directory — so running the script from anywhere
   // other than the project (e.g. the SHIPS repo) drops the release there.
@@ -904,6 +920,7 @@ function generatePlan() {
       pr.push(`--env-config "$ENV_CONFIG"`);
       pr.push(`--name "$PKG_NAME"`);
       pr.push(`--output "$RELEASES"`);
+      if (rootParent) pr.push(`--root-parent "$ROOT_PARENT"`);  // #501
       if (wantStrict) pr.push(`--strict`);
       commands.push(pr);
     } else {
@@ -914,6 +931,7 @@ function generatePlan() {
         if (!tokensAlready && tokenModel === "prefix") {
           h.push(`--prefix-token ${prefix || "<PREFIX>"}=DB_PREFIX`);
         }
+        if (rootParent) h.push(`--root-parent "$ROOT_PARENT"`);  // #501
         commands.push(h);
         if (wantGenerate) commands.push([`ships generate --project "$PROJECT"`]);
         commands.push([`ships inspect --project "$PROJECT"`]);
@@ -928,13 +946,17 @@ function generatePlan() {
           commands.push(az);
         }
       }
-      commands.push([
-        `ships package --project "$PROJECT"`,
-        `--env "$ENV"`,
-        `--name "$PKG_NAME"`,
-        `--env-config "$ENV_CONFIG"`,
-        `--output "$RELEASES"`,
-      ]);
+      {
+        const p = [
+          `ships package --project "$PROJECT"`,
+          `--env "$ENV"`,
+          `--name "$PKG_NAME"`,
+          `--env-config "$ENV_CONFIG"`,
+          `--output "$RELEASES"`,
+        ];
+        if (rootParent) p.push(`--root-parent "$ROOT_PARENT"`);  // #501
+        commands.push(p);
+      }
     }
 
     return { env, vars, commands };
@@ -1007,7 +1029,7 @@ function generatePlan() {
   // argless (consumed by the single front door, #384). Token model / prefix
   // live in config/tokenise.conf (emitted separately).
   const shipsYaml = makeShipsYaml({
-    projName, envList, sourceType, sourceDir, pkgName,
+    projName, envList, sourceType, sourceDir, pkgName, rootParent,
   });
 
   // ---- Guardrails (handover §6 + var-reuse note) ----
@@ -1291,7 +1313,7 @@ function makeTokeniseConf(model, prefix) {
 // `ships process --project .` is argless (consumed by the single front door,
 // #384). source is only emitted for a filesystem source (a GitHub source is
 // fetched per run via --source-github, not a stable local path).
-function makeShipsYaml({ projName, envList, sourceType, sourceDir, pkgName }) {
+function makeShipsYaml({ projName, envList, sourceType, sourceDir, pkgName, rootParent }) {
   const envs = (envList && envList.length ? envList : ["DEV"]);
   const defaultEnv = envs[0];
   const lines = [
@@ -1310,6 +1332,12 @@ function makeShipsYaml({ projName, envList, sourceType, sourceDir, pkgName }) {
   lines.push(`  name: ${pkgName}`);
   lines.push(`  default_env: ${defaultEnv}`);
   lines.push(`  env_config: config/env/${defaultEnv}.conf`);
+  // #501 — root_parent feeds `ships package` / `ships process` so a
+  // top-level CREATE DATABASE/USER without `FROM <parent>` gets one
+  // injected at harvest time. Only emit when the operator answered Q13.
+  if (rootParent) {
+    lines.push(`  root_parent: ${rootParent}`);
+  }
   return lines.join("\n") + "\n";
 }
 
@@ -2061,7 +2089,14 @@ function buildPlanJson() {
     envs: parseEnvs(answers["envs"]),
     externalParents: parseEnvs(answers["env.externalParents"]),
     project: { dir: answers["project.dir"], scaffolded: !!answers["project.scaffolded"] },
-    package: { name: answers["package.name"] || "create_objects" },
+    package: {
+      name: answers["package.name"] || "create_objects",
+      // #501 — only serialise root_parent when set so re-importing a plan
+      // without it doesn't inject a literal empty string.
+      ...(answers["package.root_parent"]?.trim()
+        ? { root_parent: answers["package.root_parent"].trim() }
+        : {}),
+    },
     strict: !!answers["process.strict"],
   };
 }
