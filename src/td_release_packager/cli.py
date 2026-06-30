@@ -1706,6 +1706,23 @@ def _cmd_ingest(args):
                 # unchanged.
                 stage.add_issue("error", _ic.HARVEST_SOURCE_NOT_FOUND, str(inner))
                 raise
+
+            # #501/#505 — root-parent injection runs HERE rather than at
+            # package time so the intervening ``ships inspect`` call (in
+            # Detailed mode) sees the corrected payload. Quick mode's
+            # ``ships process`` already does this between its harvest and
+            # inspect substeps; this branch covers the Detailed-mode
+            # operator who runs the verbs separately. The package-stage
+            # injection on cli.py:3304 is now a no-op (idempotent — the
+            # injector skips statements that already have a FROM clause).
+            if exit_code == 0 and getattr(args, "root_parent", None):
+                rp_injections = _apply_root_parent_option(
+                    args.project, args.root_parent
+                )
+                if rp_injections:
+                    print(
+                        f"  Root parent: {rp_injections} parentless prereq(s) updated"
+                    )
     except FileNotFoundError as e:
         print(f"\nERROR: {e}", file=sys.stderr)
         sys.exit(1)
@@ -6132,6 +6149,19 @@ def _build_parser():
         help="Override the default JSON audit destination "
         "(<project>/logs/reconcile_<timestamp>.json) for "
         "--reconcile mode. Relative paths resolve under --project.",
+    )
+    ig.add_argument(
+        "--root-parent",
+        help=(
+            "Root database/user parent for parentless CREATE DATABASE/USER "
+            "prerequisites (#501/#505). Injection runs immediately after "
+            "harvest so inspect and downstream verbs see the corrected "
+            "payload. Existing FROM clauses are preserved. The same flag is "
+            "available on `ships package` and `ships process` — passing it "
+            "on harvest in Detailed mode is required because the "
+            "package-stage injection happens too late for the intervening "
+            "inspect call."
+        ),
     )
 
     # -- generate --
