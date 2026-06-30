@@ -23,7 +23,7 @@ Five-phase Teradata DDL/DCL/DML deployment pipeline. Two Python packages:
 
 | Package | Role |
 |---|---|
-| `td_release_packager` | Developer-side: scaffold, harvest, inspect, analyse, package |
+| `td_release_packager` | Developer-side: scaffold, harvest, inspect, analyse, package, stage |
 | `database_package_deployer` | DBA-side: preflight, deploy, rollback, report |
 
 **Run tests:** `uv run pytest src/tests/ -q` (the full suite, including the MCP tools). Format first with `uv run ruff format src/`.

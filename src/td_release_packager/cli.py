@@ -7,6 +7,7 @@ Commands:
     inspect           Check DDL against Coding Discipline + validate grants.
     package           Build a release package for a target environment.
     scan              Scan source files and report all tokens found.
+    stage             Stage SHIPS-owned paths into git (scan + inspect gates + git add).
     analyze           Analyse DDL dependencies, generate waves, export graph.
     import-legacy     Import a pre-SHIPS sed substitution script and
                       emit a .conf file plus a migration sed.

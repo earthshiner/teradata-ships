@@ -3066,6 +3066,133 @@ def ships_clean(
 
 
 # ---------------------------------------------------------------
+# [G] Stage — bounded git-staging gate (#487).
+#
+# Synchronous (returns directly, no run_id). Runs `ships scan` (all
+# envs) and `ships inspect` as gates; on pass, `git add`s exactly the
+# SHIPS-owned paths (ships.yaml, config/, payload/) and stops. Does
+# not commit, sign, or touch hooks — staging is the verb, the caller
+# writes the commit message.
+#
+# Defaults to dry_run=False (unlike ships_clean): an unsuccessful
+# stage leaves the index untouched anyway, so the dry-run safety
+# valve is less important here than for an rmtree operation. Pass
+# dry_run=True to preview the path list.
+#
+# The gate callables are injected so the test suite can stub them.
+# Defaults shell out to ``python -m td_release_packager`` so the MCP
+# tool stays decoupled from CLI internals.
+# ---------------------------------------------------------------
+
+
+def _default_stage_runner(verb: str):
+    """Build a default scan/inspect runner that shells out to the SHIPS CLI."""
+    import subprocess as _sp
+    import sys as _sys
+
+    extra_args: list[str] = []
+    if verb == "scan":
+        # `--all-envs` is required for the scan gate to have teeth —
+        # see _cmd_stage in cli.py for the same rationale.
+        extra_args = ["--all-envs"]
+
+    def _run(project_dir: str) -> int:
+        return _sp.call(
+            [
+                _sys.executable,
+                "-m",
+                "td_release_packager",
+                verb,
+                "--project",
+                project_dir,
+                *extra_args,
+            ]
+        )
+
+    return _run
+
+
+def _ships_stage_impl(
+    project: str,
+    dry_run: bool = False,
+    run_scan=None,
+    run_inspect=None,
+    git=None,
+) -> dict:
+    """Synchronous stage-gate implementation.
+
+    Thin wrapper around :func:`td_release_packager.stager.stage_project`.
+    Returns ``StageResult.as_dict()`` so the MCP envelope matches the
+    in-process CLI result exactly.
+
+    ``run_scan`` / ``run_inspect`` / ``git`` default to subprocess
+    callables that shell out to ``python -m td_release_packager`` and
+    ``git``. Tests inject stubs.
+    """
+    from td_release_packager.stager import stage_project
+
+    result = stage_project(
+        project,
+        run_scan=run_scan if run_scan is not None else _default_stage_runner("scan"),
+        run_inspect=run_inspect
+        if run_inspect is not None
+        else _default_stage_runner("inspect"),
+        dry_run=dry_run,
+        git=git,
+    )
+    return result.as_dict()
+
+
+@mcp.tool()
+def ships_stage(
+    project: str,
+    dry_run: bool = False,
+) -> dict:
+    """Stage SHIPS-owned paths into the git index after scan + inspect gates (#487).
+
+    Synchronous — returns the result directly with no ``run_id`` and no
+    polling. Runs ``ships scan`` (against every env config) and
+    ``ships inspect`` over the project; if either gate fails, the
+    index is left untouched and the envelope reports
+    ``blocked_by="scan"`` or ``blocked_by="inspect"``. On pass,
+    ``git add`` is invoked with exactly these paths:
+
+        * ``ships.yaml``
+        * ``config/``
+        * ``payload/``
+
+    Explicit non-goals (kept tight so the verb does not drift into a
+    git wrapper):
+
+        * Does not commit. The caller writes the commit message.
+        * Does not invoke ``git commit``, configure signing, or
+          skip hooks.
+        * Does not stage non-SHIPS files. Anything outside the three
+          paths above is the caller's responsibility.
+
+    Guards:
+
+        * Refuses any directory missing ``ships.yaml`` (returns a
+          clean error, never raises).
+
+    Args:
+        project: SHIPS project directory (must contain ``ships.yaml``).
+        dry_run: When True, run the gates and report the paths that
+            would be staged without touching the git index.
+
+    Returns:
+        ``{"success": bool, "dry_run": bool, "project_dir": str,
+        "staged_paths": [str, ...], "blocked_by": "scan" | "inspect" | None,
+        "error": str | None, "scan_exit_code": int | None,
+        "inspect_exit_code": int | None}``.
+    """
+    try:
+        return _ships_stage_impl(project=project, dry_run=dry_run)
+    except Exception as e:  # noqa: BLE001
+        return {"success": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------
 # [G] Guidance — Phase D of #291 (#299)
 #
 # Read-only navigation: where am I in the pipeline (ships_status)

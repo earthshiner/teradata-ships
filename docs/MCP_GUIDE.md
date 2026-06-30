@@ -301,6 +301,31 @@ Args: {"project": "/projects/MortgagePlatform", "scope": "payload", "dry_run": f
 
 ---
 
+#### `ships_stage`
+
+Stage SHIPS-owned paths (`ships.yaml`, `config/`, `payload/`) into the git index after gating on `ships scan` and `ships inspect` ([#487](https://github.com/earthshiner/teradata-ships/issues/487)). **Synchronous** (returns directly — no `run_id`, no `ships_poll_build`). If either gate reports an error, the index is left untouched and the envelope reports `blocked_by="scan"` or `blocked_by="inspect"`.
+
+Bounded by design — does **not** commit, does **not** invoke `git commit`, configure signing, or skip hooks, and does **not** stage non-SHIPS files. The caller writes the commit message and runs `git commit` separately.
+
+Refuses any directory missing `ships.yaml` (returns a clean error, never raises).
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `project` | string | yes | SHIPS project directory (must contain `ships.yaml`) |
+| `dry_run` | bool | no | If true, run the gates and report the paths that would be staged without touching the git index (default: false) |
+
+**Returns:** `{"success": bool, "dry_run": bool, "project_dir": str, "staged_paths": [str, ...], "blocked_by": "scan" | "inspect" | null, "error": str | null, "scan_exit_code": int | null, "inspect_exit_code": int | null}`
+
+**Example (gate + stage):**
+```
+Tool: ships_stage
+Args: {"project": "/projects/MortgagePlatform"}
+# on success the caller follows up with its own:
+#   git commit -m "<message>"
+```
+
+---
+
 #### `ships_harvest`
 
 Harvest raw DDL files from a source directory into a SHIPS project. Classifies each file by DDL content, injects MULTISET where missing, renames to the eponymous convention, and places files in the correct payload subdirectory.

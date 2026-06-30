@@ -215,3 +215,118 @@ class TestShipsMetadataExport:
             str(tmp_path / "nope"), str(tmp_path / "out")
         )
         assert result["success"] is False
+
+
+# ---------------------------------------------------------------
+# ships_stage (#487) — bounded git-staging gate.
+#
+# The underlying ``stage_project`` is covered by test_stager.py; here we
+# only exercise the MCP wrapper: tool registration, default-path
+# envelope shape, and the injectable-callable surface used to keep
+# tests fast and offline.
+# ---------------------------------------------------------------
+
+
+def _stage_project_fixture(root: Path) -> Path:
+    project = root / "stage_proj"
+    project.mkdir()
+    (project / "ships.yaml").write_text("project: mcp_stage\n", encoding="utf-8")
+    (project / "config").mkdir()
+    (project / "payload" / "database" / "DDL").mkdir(parents=True)
+    (project / "payload" / "database" / "DDL" / "t.sql").write_text(
+        "CREATE TABLE x (i INTEGER);\n", encoding="utf-8"
+    )
+    return project
+
+
+class TestShipsStage:
+    def test_tool_is_registered(self):
+        """The MCP tool must be importable from ships_mcp."""
+        assert callable(getattr(ships_mcp, "ships_stage", None))
+        assert callable(getattr(ships_mcp, "_ships_stage_impl", None))
+
+    def test_refuses_non_ships_project(self, tmp_path):
+        result = ships_mcp.ships_stage(str(tmp_path / "nope"))
+        assert result["success"] is False
+        assert "ships.yaml" in (result["error"] or "")
+
+    def test_dry_run_with_passing_gates_lists_paths(self, tmp_path):
+        project = _stage_project_fixture(tmp_path)
+        result = ships_mcp._ships_stage_impl(
+            project=str(project),
+            dry_run=True,
+            run_scan=lambda _: 0,
+            run_inspect=lambda _: 0,
+            git=lambda _argv: 0,
+        )
+        assert result["success"] is True
+        assert result["dry_run"] is True
+        assert "ships.yaml" in result["staged_paths"]
+        assert "config" in result["staged_paths"]
+        assert "payload" in result["staged_paths"]
+
+    def test_scan_failure_blocks(self, tmp_path):
+        project = _stage_project_fixture(tmp_path)
+        git_calls = []
+        result = ships_mcp._ships_stage_impl(
+            project=str(project),
+            dry_run=False,
+            run_scan=lambda _: 1,
+            run_inspect=lambda _: 0,
+            git=lambda argv: git_calls.append(argv) or 0,
+        )
+        assert result["success"] is False
+        assert result["blocked_by"] == "scan"
+        # git must NOT have been invoked on a blocked gate.
+        assert git_calls == []
+
+    def test_inspect_failure_blocks(self, tmp_path):
+        project = _stage_project_fixture(tmp_path)
+        git_calls = []
+        result = ships_mcp._ships_stage_impl(
+            project=str(project),
+            dry_run=False,
+            run_scan=lambda _: 0,
+            run_inspect=lambda _: 1,
+            git=lambda argv: git_calls.append(argv) or 0,
+        )
+        assert result["success"] is False
+        assert result["blocked_by"] == "inspect"
+        assert git_calls == []
+
+    def test_clean_pass_invokes_git_with_owned_paths(self, tmp_path):
+        project = _stage_project_fixture(tmp_path)
+        git_calls = []
+        result = ships_mcp._ships_stage_impl(
+            project=str(project),
+            dry_run=False,
+            run_scan=lambda _: 0,
+            run_inspect=lambda _: 0,
+            git=lambda argv: git_calls.append(list(argv)) or 0,
+        )
+        assert result["success"] is True
+        assert result["blocked_by"] is None
+        assert len(git_calls) == 1
+        argv = git_calls[0]
+        assert argv[:2] == ["add", "--"]
+        assert set(argv[2:]) == {"ships.yaml", "config", "payload"}
+
+    def test_envelope_keys_are_stable(self, tmp_path):
+        project = _stage_project_fixture(tmp_path)
+        result = ships_mcp._ships_stage_impl(
+            project=str(project),
+            dry_run=True,
+            run_scan=lambda _: 0,
+            run_inspect=lambda _: 0,
+        )
+        for key in (
+            "success",
+            "dry_run",
+            "project_dir",
+            "staged_paths",
+            "blocked_by",
+            "error",
+            "scan_exit_code",
+            "inspect_exit_code",
+        ):
+            assert key in result
