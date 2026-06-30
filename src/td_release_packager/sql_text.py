@@ -91,16 +91,84 @@ def strip_string_literals_preserving_positions(content: str) -> str:
 
 def strip_comments_and_string_literals(content: str) -> str:
     """
-    Combined stripper: comments first, then string literals.
+    Combined stripper — single-pass state machine over the source.
 
-    The order matters — stripping comments first means any single
-    quote inside a comment is already blanked, so the literal pass
-    doesn't see ``'`` characters that would otherwise start a
-    spurious "literal" match.
+    A naive sequential approach (comments first, then strings, or
+    vice versa) is broken either way:
+
+    * Comments-first eats ``--`` markers found INSIDE string literals
+      and truncates everything from there to end-of-line, which can
+      leave the literal unterminated and cause the string-literal
+      pass to swallow code from later statements. (#499)
+    * Strings-first misreads ``'`` characters inside ``/* ... */`` /
+      ``-- ...`` comments as the start of a literal.
+
+    A single-pass lexer tracking the current state (``code`` /
+    ``string`` / ``line_comment`` / ``block_comment``) is the only
+    correct treatment: a ``--`` inside a string is data, a ``'`` inside
+    a comment is text. Output positions and line numbers are preserved
+    because every blanked character is replaced by a space (newlines
+    excepted) at its original offset.
 
     Use this in any rule check or content classifier that wants to
-    reason about REAL DDL only, ignoring documentation comments
-    AND dynamic-SQL strings inside procedure bodies.
+    reason about REAL DDL only, ignoring documentation comments AND
+    dynamic-SQL strings inside procedure bodies.
     """
-    no_comments = strip_comments_preserving_positions(content)
-    return strip_string_literals_preserving_positions(no_comments)
+    out: list[str] = []
+    n = len(content)
+    i = 0
+    state = "code"  # one of: code, string, line_comment, block_comment
+    while i < n:
+        c = content[i]
+        nxt = content[i + 1] if i + 1 < n else ""
+        if state == "code":
+            if c == "'":
+                state = "string"
+                out.append(" ")
+            elif c == "-" and nxt == "-":
+                state = "line_comment"
+                out.append(" ")
+                out.append(" ")
+                i += 2
+                continue
+            elif c == "/" and nxt == "*":
+                state = "block_comment"
+                out.append(" ")
+                out.append(" ")
+                i += 2
+                continue
+            else:
+                out.append(c)
+        elif state == "string":
+            if c == "'":
+                if nxt == "'":
+                    # Doubled-quote escape — still inside the literal.
+                    out.append(" ")
+                    out.append(" ")
+                    i += 2
+                    continue
+                state = "code"
+                out.append(" ")
+            elif c == "\n":
+                out.append("\n")
+            else:
+                out.append(" ")
+        elif state == "line_comment":
+            if c == "\n":
+                state = "code"
+                out.append("\n")
+            else:
+                out.append(" ")
+        else:  # block_comment
+            if c == "*" and nxt == "/":
+                state = "code"
+                out.append(" ")
+                out.append(" ")
+                i += 2
+                continue
+            if c == "\n":
+                out.append("\n")
+            else:
+                out.append(" ")
+        i += 1
+    return "".join(out)

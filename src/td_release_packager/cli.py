@@ -1859,6 +1859,14 @@ def _run_ingest(args, stage, issue_codes, apply_tokens) -> int:
             f"{db_name} ({len(files)} reference(s))",
         )
 
+    # Stage-status rollup (#499) — mirror what _run_inspect does at the
+    # bottom of its body. Without this, a harvest run with N warnings
+    # leaves the stage at the default ``success`` status and the report
+    # paints a ✓ next to the "N warnings" badge, which is visually
+    # contradictory in the same way #495 was for the empty-issues case.
+    if result.unclassified_files or result.classification_warnings:
+        stage.set_status("warning")
+
     print(f"\n{'=' * 64}")
     print("  DDL Harvest Results")
     print(f"{'=' * 64}")
