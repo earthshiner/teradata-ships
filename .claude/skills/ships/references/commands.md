@@ -11,6 +11,7 @@ Load this when a task needs exact SHIPS command names, flags, or phase sequencin
 - `python -m td_release_packager package --project <project> --env <env> --name <name> --env-config config/env/<env>.conf --output releases/`: build a release ZIP.
 - `python -m td_release_packager process --project <project> --source <raw-ddl> --env <env> --env-config config/env/<env>.conf --name <name>`: run scaffold/harvest/inspect/package flow for CI/CD.
 - `python -m td_release_packager process --project .`: argless full pipeline when `ships.yaml` has a `packaging:` profile (#384); precedence is explicit flag > profile > convention.
+- `python -m td_release_packager stage --project <project>`: gate on scan + inspect, then `git add` exactly the SHIPS-owned paths (`ships.yaml`, `config/`, `payload/`) (#487). Flags: `--dry-run`, `--strict`. Does not commit. Also exposed as the `ships_stage` MCP tool.
 
 ## Plan, wizard, changeset
 
