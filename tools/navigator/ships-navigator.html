@@ -1483,7 +1483,10 @@ function renderCommandsPanel(plan) {
   // Issue #485 — bundle the package name into the launcher filename so
   // multiple SHIPS projects in the same directory don't overwrite each
   // other's `ships-run.*` files. Derive once and reuse below.
-  const pkgName = (plan.package && plan.package.name) || "package";
+  // generatePlan() returns the package name as plan.pkgName (top-level);
+  // the older plan.package.name shape never existed at runtime so the
+  // fallback was firing every time — fixed in #493.
+  const pkgName = plan.pkgName || "package";
   const launcherStem = safeLauncherStem(pkgName);
 
   // Windows MOTW warning — SmartScreen blocks downloaded .ps1 / .bat files.
@@ -2206,7 +2209,9 @@ function downloadAllBundle() {
 
   // Issue #485 — per-package launcher stem so multiple SHIPS projects
   // can live side by side without overwriting each other's launchers.
-  const pkgName = (plan.package && plan.package.name) || "package";
+  // generatePlan() returns plan.pkgName (top-level string); the older
+  // plan.package.name shape never existed at runtime — fixed in #493.
+  const pkgName = plan.pkgName || "package";
   const launcherStem = safeLauncherStem(pkgName);
 
   // Commands in all three shells. bashFlavour is consulted only by the
