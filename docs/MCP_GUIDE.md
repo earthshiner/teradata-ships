@@ -314,7 +314,9 @@ Refuses any directory missing `ships.yaml` (returns a clean error, never raises)
 | `project` | string | yes | SHIPS project directory (must contain `ships.yaml`) |
 | `dry_run` | bool | no | If true, run the gates and report the paths that would be staged without touching the git index (default: false) |
 
-**Returns:** `{"success": bool, "dry_run": bool, "project_dir": str, "staged_paths": [str, ...], "blocked_by": "scan" | "inspect" | null, "error": str | null, "scan_exit_code": int | null, "inspect_exit_code": int | null}`
+**Returns:** `{"success": bool, "dry_run": bool, "project_dir": str, "staged_paths": [str, ...], "blocked_by": "scan" | "inspect" | null, "error": str | null, "scan_exit_code": int | null, "inspect_exit_code": int | null, "repo_root": str | null}`
+
+`repo_root` is the absolute path of the enclosing git repository (matches `project_dir` when the project IS the repo root; differs when the project is nested in a monorepo). The tool refuses with a clean error before scan/inspect run if the project is not inside a git repo.
 
 **Example (gate + stage):**
 ```

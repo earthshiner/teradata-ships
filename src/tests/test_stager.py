@@ -69,6 +69,18 @@ def _inspect_fail(_project_dir: str) -> int:
     return 1
 
 
+# Most tests want the repo gate to PASS so they can exercise the rest
+# of the flow — this stub treats the project directory as the repo
+# root (the common case for a scaffolded project that someone has
+# `git init`-ed). Tests for the not-in-repo branch override it.
+def _repo_is_project(p: str) -> str:
+    return p
+
+
+def _not_in_repo(_p: str):  # returns None — "not a git repo"
+    return None
+
+
 # ---------------------------------------------------------------
 # Project marker gate
 # ---------------------------------------------------------------
@@ -104,6 +116,66 @@ def test_refuses_non_ships_project(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------
+# Git-repo gate
+# ---------------------------------------------------------------
+
+
+def test_refuses_when_project_not_in_git_repo(tmp_path: Path) -> None:
+    """Project exists but is not inside any git repo → clean error, no gates run."""
+    project = _make_project(tmp_path)
+    git = _RecordingGit()
+    scan_calls: list[str] = []
+    inspect_calls: list[str] = []
+
+    def _scan(p):
+        scan_calls.append(p)
+        return 0
+
+    def _inspect(p):
+        inspect_calls.append(p)
+        return 0
+
+    result = stage_project(
+        str(project),
+        run_scan=_scan,
+        run_inspect=_inspect,
+        git=git,
+        git_repo_root=_not_in_repo,
+    )
+
+    assert result.success is False
+    assert "git repository" in (result.error or "").lower()
+    assert "git init" in (result.error or "")
+    assert result.repo_root is None
+    # Neither gate fired — the repo check is genuinely fail-fast.
+    assert scan_calls == []
+    assert inspect_calls == []
+    assert git.calls == []
+
+
+def test_repo_root_can_differ_from_project_dir(tmp_path: Path) -> None:
+    """Monorepo case: project nested under a different repo root surfaces both paths."""
+    monorepo = tmp_path / "monorepo"
+    project_dir = monorepo / "projects" / "X"
+    project_dir.mkdir(parents=True)
+    project = _make_project(project_dir)
+    git = _RecordingGit()
+
+    result = stage_project(
+        str(project),
+        run_scan=_ok,
+        run_inspect=_ok,
+        git=git,
+        git_repo_root=lambda _p: str(monorepo),
+    )
+
+    assert result.success is True
+    assert result.repo_root == str(monorepo)
+    assert result.project_dir == str(project)
+    assert result.repo_root != result.project_dir
+
+
+# ---------------------------------------------------------------
 # Gate 1: scan
 # ---------------------------------------------------------------
 
@@ -123,11 +195,13 @@ def test_scan_failure_blocks_with_blocked_by_scan(tmp_path: Path) -> None:
         run_scan=_scan_fail,
         run_inspect=_inspect,
         git=git,
+        git_repo_root=_repo_is_project,
     )
 
     assert result.success is False
     assert result.blocked_by == "scan"
     assert result.scan_exit_code == 1
+    assert result.repo_root == str(project)  # repo gate passed before scan blocked
     # Inspect is short-circuited and git stays untouched.
     assert inspect_ran[0] is False
     assert git.calls == []
@@ -148,6 +222,7 @@ def test_inspect_failure_blocks_with_blocked_by_inspect(tmp_path: Path) -> None:
         run_scan=_ok,
         run_inspect=_inspect_fail,
         git=git,
+        git_repo_root=_repo_is_project,
     )
 
     assert result.success is False
@@ -172,6 +247,7 @@ def test_clean_pass_stages_exactly_ships_owned_paths(tmp_path: Path) -> None:
         run_scan=_ok,
         run_inspect=_ok,
         git=git,
+        git_repo_root=_repo_is_project,
     )
 
     assert result.success is True
@@ -205,11 +281,13 @@ def test_dry_run_reports_paths_without_calling_git(tmp_path: Path) -> None:
         run_inspect=_ok,
         dry_run=True,
         git=git,
+        git_repo_root=_repo_is_project,
     )
 
     assert result.success is True
     assert result.dry_run is True
     assert result.staged_paths == list(SHIPS_OWNED_PATHS)
+    assert result.repo_root == str(project)
     # Gates still ran (the gate IS the point), but git did not.
     assert result.scan_exit_code == 0
     assert result.inspect_exit_code == 0
@@ -234,6 +312,7 @@ def test_unrelated_files_are_not_in_staged_paths(tmp_path: Path) -> None:
         run_scan=_ok,
         run_inspect=_ok,
         git=git,
+        git_repo_root=_repo_is_project,
     )
 
     assert result.success is True
@@ -261,6 +340,7 @@ def test_missing_payload_dir_is_skipped_not_fabricated(tmp_path: Path) -> None:
         run_scan=_ok,
         run_inspect=_ok,
         git=git,
+        git_repo_root=_repo_is_project,
     )
 
     assert result.success is True
@@ -283,6 +363,7 @@ def test_git_add_failure_is_surfaced(tmp_path: Path) -> None:
         run_scan=_ok,
         run_inspect=_ok,
         git=git,
+        git_repo_root=_repo_is_project,
     )
 
     assert result.success is False
@@ -304,6 +385,7 @@ def test_result_envelope_keys_are_stable(tmp_path: Path) -> None:
         run_scan=_ok,
         run_inspect=_ok,
         git=_RecordingGit(),
+        git_repo_root=_repo_is_project,
     )
     envelope = result.as_dict()
     for key in (
@@ -315,6 +397,7 @@ def test_result_envelope_keys_are_stable(tmp_path: Path) -> None:
         "error",
         "scan_exit_code",
         "inspect_exit_code",
+        "repo_root",
     ):
         assert key in envelope
 
@@ -382,5 +465,6 @@ def test_stage_result_is_dataclass_instance(tmp_path: Path) -> None:
         run_scan=_ok,
         run_inspect=_ok,
         git=_RecordingGit(),
+        git_repo_root=_repo_is_project,
     )
     assert isinstance(result, StageResult)

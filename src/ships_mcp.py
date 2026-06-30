@@ -3118,6 +3118,7 @@ def _ships_stage_impl(
     run_scan=None,
     run_inspect=None,
     git=None,
+    git_repo_root=None,
 ) -> dict:
     """Synchronous stage-gate implementation.
 
@@ -3125,9 +3126,9 @@ def _ships_stage_impl(
     Returns ``StageResult.as_dict()`` so the MCP envelope matches the
     in-process CLI result exactly.
 
-    ``run_scan`` / ``run_inspect`` / ``git`` default to subprocess
-    callables that shell out to ``python -m td_release_packager`` and
-    ``git``. Tests inject stubs.
+    ``run_scan`` / ``run_inspect`` / ``git`` / ``git_repo_root``
+    default to subprocess callables that shell out to ``python -m
+    td_release_packager`` and ``git``. Tests inject stubs.
     """
     from td_release_packager.stager import stage_project
 
@@ -3139,6 +3140,7 @@ def _ships_stage_impl(
         else _default_stage_runner("inspect"),
         dry_run=dry_run,
         git=git,
+        git_repo_root=git_repo_root,
     )
     return result.as_dict()
 
@@ -3174,6 +3176,9 @@ def ships_stage(
 
         * Refuses any directory missing ``ships.yaml`` (returns a
           clean error, never raises).
+        * Refuses any project that is not inside a git repository
+          (returns a clean error pointing the operator at ``git init``,
+          before scan or inspect run).
 
     Args:
         project: SHIPS project directory (must contain ``ships.yaml``).
@@ -3184,7 +3189,10 @@ def ships_stage(
         ``{"success": bool, "dry_run": bool, "project_dir": str,
         "staged_paths": [str, ...], "blocked_by": "scan" | "inspect" | None,
         "error": str | None, "scan_exit_code": int | None,
-        "inspect_exit_code": int | None}``.
+        "inspect_exit_code": int | None, "repo_root": str | None}``.
+        ``repo_root`` is the absolute path of the enclosing git repo
+        (matches ``project_dir`` when the project IS the repo root;
+        differs when the project is nested in a monorepo).
     """
     try:
         return _ships_stage_impl(project=project, dry_run=dry_run)

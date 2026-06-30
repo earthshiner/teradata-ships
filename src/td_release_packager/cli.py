@@ -5776,10 +5776,16 @@ def _cmd_stage(args) -> int:
     print(f"  ✓ {verb} {len(result.staged_paths)} SHIPS-owned path(s):")
     for p in result.staged_paths:
         print(f"      {p}")
+    if result.repo_root:
+        # When the project IS the repo root these two paths match; for
+        # a project nested inside a monorepo, showing the repo path
+        # explicitly is the only way the operator sees which index was
+        # touched.
+        print(f"\n  Repo: {result.repo_root}")
     if result.dry_run:
-        print("\n  Re-run without --dry-run to update the git index.")
+        print("  Re-run without --dry-run to update the git index.")
     else:
-        print("\n  Next: `git commit -m '<message>'`")
+        print("  Next: `git commit -m '<message>'`")
     return 0
 
 

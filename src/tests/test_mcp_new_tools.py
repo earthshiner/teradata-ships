@@ -239,6 +239,12 @@ def _stage_project_fixture(root: Path) -> Path:
     return project
 
 
+# Most TestShipsStage cases want the repo gate to PASS so they can
+# reach scan/inspect — treat the project dir as the repo root.
+def _repo_is_project(p):
+    return p
+
+
 class TestShipsStage:
     def test_tool_is_registered(self):
         """The MCP tool must be importable from ships_mcp."""
@@ -250,6 +256,20 @@ class TestShipsStage:
         assert result["success"] is False
         assert "ships.yaml" in (result["error"] or "")
 
+    def test_refuses_when_not_in_git_repo(self, tmp_path):
+        project = _stage_project_fixture(tmp_path)
+        result = ships_mcp._ships_stage_impl(
+            project=str(project),
+            dry_run=False,
+            run_scan=lambda _: 0,
+            run_inspect=lambda _: 0,
+            git=lambda _argv: 0,
+            git_repo_root=lambda _p: None,
+        )
+        assert result["success"] is False
+        assert "git repository" in (result["error"] or "").lower()
+        assert result["repo_root"] is None
+
     def test_dry_run_with_passing_gates_lists_paths(self, tmp_path):
         project = _stage_project_fixture(tmp_path)
         result = ships_mcp._ships_stage_impl(
@@ -258,12 +278,14 @@ class TestShipsStage:
             run_scan=lambda _: 0,
             run_inspect=lambda _: 0,
             git=lambda _argv: 0,
+            git_repo_root=_repo_is_project,
         )
         assert result["success"] is True
         assert result["dry_run"] is True
         assert "ships.yaml" in result["staged_paths"]
         assert "config" in result["staged_paths"]
         assert "payload" in result["staged_paths"]
+        assert result["repo_root"] == str(project)
 
     def test_scan_failure_blocks(self, tmp_path):
         project = _stage_project_fixture(tmp_path)
@@ -274,6 +296,7 @@ class TestShipsStage:
             run_scan=lambda _: 1,
             run_inspect=lambda _: 0,
             git=lambda argv: git_calls.append(argv) or 0,
+            git_repo_root=_repo_is_project,
         )
         assert result["success"] is False
         assert result["blocked_by"] == "scan"
@@ -289,6 +312,7 @@ class TestShipsStage:
             run_scan=lambda _: 0,
             run_inspect=lambda _: 1,
             git=lambda argv: git_calls.append(argv) or 0,
+            git_repo_root=_repo_is_project,
         )
         assert result["success"] is False
         assert result["blocked_by"] == "inspect"
@@ -303,6 +327,7 @@ class TestShipsStage:
             run_scan=lambda _: 0,
             run_inspect=lambda _: 0,
             git=lambda argv: git_calls.append(list(argv)) or 0,
+            git_repo_root=_repo_is_project,
         )
         assert result["success"] is True
         assert result["blocked_by"] is None
@@ -318,6 +343,7 @@ class TestShipsStage:
             dry_run=True,
             run_scan=lambda _: 0,
             run_inspect=lambda _: 0,
+            git_repo_root=_repo_is_project,
         )
         for key in (
             "success",
@@ -328,5 +354,6 @@ class TestShipsStage:
             "error",
             "scan_exit_code",
             "inspect_exit_code",
+            "repo_root",
         ):
             assert key in result

@@ -1036,7 +1036,9 @@ ships stage --project C:\Projects\OMR --strict
 - Does not invoke `git commit`, configure signing, or skip hooks.
 - Does not stage non-SHIPS files. Anything outside `ships.yaml`, `config/`, `payload/` is the caller's responsibility.
 
-Exit 0 on a clean stage (including `--dry-run`). Exit 1 when the project is missing `ships.yaml`, when `scan` or `inspect` blocks the stage, or when `git add` itself fails.
+Exit 0 on a clean stage (including `--dry-run`). Exit 1 when the project is missing `ships.yaml`, when the project is not inside a git repo, when `scan` or `inspect` blocks the stage, or when `git add` itself fails.
+
+The verb prints the absolute path of the enclosing git repository (`Repo: <path>`) on success. When the project IS the repo root these two paths match; when the project is nested in a larger repo (e.g. a monorepo with several SHIPS projects) the repo path tells you which index was touched.
 
 ---
 
