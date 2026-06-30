@@ -187,6 +187,7 @@ def _make_harvest_args(source: Path, project: Path, **overrides) -> Namespace:
         env_prefix=None,
         generate_token_map=False,
         reconcile=False,
+        root_parent=None,
     )
     for k, v in overrides.items():
         setattr(args, k, v)
@@ -290,6 +291,52 @@ class TestHarvestStageRecording:
         stage = harvest_run["stages"][0]
         # Stage status reflects the warnings (was 'success' before #499).
         assert stage["status"] == "warning"
+
+    def test_harvest_with_root_parent_injects_into_parentless_create_db(self, tmp_path):
+        """#505 — harvest --root-parent rewrites parentless CREATE DATABASE
+        statements in the payload, immediately after harvest so the
+        intervening inspect call (Detailed mode) sees the corrected
+        payload. Before #505 the argument wasn't even registered."""
+        project = _make_project(tmp_path)
+        source = tmp_path / "src"
+        source.mkdir()
+        (source / "MyChild.db").write_text(
+            "CREATE DATABASE MyChild AS PERM = 1000000;\n", encoding="utf-8"
+        )
+
+        args = _make_harvest_args(source, project, root_parent="DataProducts")
+        rc = _run(_cmd_ingest, args)
+        assert rc == 0
+
+        # The harvested payload file now carries `FROM DataProducts`.
+        prereq_dir = project / "payload" / "database" / "pre-requisites" / "databases"
+        harvested = list(prereq_dir.glob("*.db"))
+        assert harvested, f"no .db files placed under {prereq_dir}"
+        body = harvested[0].read_text(encoding="utf-8")
+        assert "FROM DataProducts" in body, (
+            f"expected `FROM DataProducts` injected; got:\n{body}"
+        )
+
+    def test_harvest_without_root_parent_leaves_payload_unchanged(self, tmp_path):
+        """No --root-parent flag → no injection. Confirms the new code is
+        a strict opt-in and doesn't change harvest behaviour for everyone."""
+        project = _make_project(tmp_path)
+        source = tmp_path / "src"
+        source.mkdir()
+        (source / "MyChild.db").write_text(
+            "CREATE DATABASE MyChild AS PERM = 1000000;\n", encoding="utf-8"
+        )
+
+        args = _make_harvest_args(source, project)  # root_parent=None
+        _run(_cmd_ingest, args)
+
+        prereq_dir = project / "payload" / "database" / "pre-requisites" / "databases"
+        harvested = list(prereq_dir.glob("*.db"))
+        assert harvested
+        body = harvested[0].read_text(encoding="utf-8")
+        assert "FROM " not in body.upper(), (
+            f"unexpected FROM clause injected without --root-parent; got:\n{body}"
+        )
 
     def test_harvest_token_candidate_emits_info_issue(self, tmp_path):
         project = _make_project(tmp_path)
