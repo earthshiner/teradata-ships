@@ -1694,7 +1694,20 @@ def _cmd_ingest(args):
 
     try:
         with _stage_recording(args.project, "harvest") as stage:
-            exit_code = _run_ingest(args, stage, _ic, apply_tokens)
+            try:
+                exit_code = _run_ingest(args, stage, _ic, apply_tokens)
+            except FileNotFoundError as inner:
+                # #495 — without this, the stage recorder marks the stage
+                # ``status="error"`` (via its BaseException handler) but never
+                # records WHY, leaving the decisions ledger and the pipeline
+                # report with a red stage and a misleading "No issues
+                # recorded." message. Stamp the offending path into the
+                # ledger before re-raising so the existing exit path runs
+                # unchanged.
+                stage.add_issue(
+                    "error", _ic.HARVEST_SOURCE_NOT_FOUND, str(inner)
+                )
+                raise
     except FileNotFoundError as e:
         print(f"\nERROR: {e}", file=sys.stderr)
         sys.exit(1)

@@ -80,6 +80,7 @@ class TestNewIssueCodes:
         assert issue_codes.is_registered(issue_codes.HARVEST_UNCLASSIFIED)
         assert issue_codes.is_registered(issue_codes.HARVEST_CLASSIFICATION_WARNING)
         assert issue_codes.is_registered(issue_codes.HARVEST_TOKEN_CANDIDATE)
+        assert issue_codes.is_registered(issue_codes.HARVEST_SOURCE_NOT_FOUND)
 
     def test_analyse_codes_in_registry(self):
         assert issue_codes.is_registered(issue_codes.ANALYSE_CYCLE)
@@ -229,6 +230,32 @@ class TestHarvestStageRecording:
         assert "total_files" in stage["inputs"]
         assert "classified" in stage["outputs"]
         assert stage["outputs"]["classified"] == 1
+
+    def test_harvest_missing_source_emits_issue(self, tmp_path):
+        """#495 — when --source does not exist, the harvest stage records a
+        HARVEST_SOURCE_NOT_FOUND issue carrying the offending path BEFORE the
+        stage exits with status=error, so the decisions ledger and the
+        pipeline report carry a real reason instead of "No issues recorded."
+        """
+        project = _make_project(tmp_path)
+        missing = tmp_path / "does_not_exist"
+
+        args = _make_harvest_args(missing, project)
+        rc = _run(_cmd_ingest, args)
+        assert rc == 1
+
+        d = _read_decisions(project)
+        harvest_run = next(
+            r for r in d["runs"] if any(s["stage"] == "harvest" for s in r["stages"])
+        )
+        stage = next(s for s in harvest_run["stages"] if s["stage"] == "harvest")
+        assert stage["status"] == "error"
+        codes = [i["code"] for i in stage["issues"]]
+        assert issue_codes.HARVEST_SOURCE_NOT_FOUND in codes
+        # The offending path appears in the issue message so the operator can
+        # see it from the report without re-running.
+        msgs = [i.get("message", "") for i in stage["issues"]]
+        assert any("does_not_exist" in m for m in msgs)
 
     def test_harvest_unclassified_file_emits_issue(self, tmp_path):
         project = _make_project(tmp_path)
