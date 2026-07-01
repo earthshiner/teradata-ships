@@ -2617,6 +2617,18 @@ def _run_inspect(args, stage, issue_codes) -> int:
         print(f"  Errors:           {lint_result.errors}")
         print(f"  Warnings:         {lint_result.warnings}")
 
+        # Fixable-finding lookup (issue #524). A finding is "fixable" when
+        # a fixer is registered in td_release_packager.fixers.FIX_REGISTRY
+        # for its rule id AND the rule is not a custom-policy rule (which
+        # never has a built-in fixer). Compute once so both the human
+        # print loop and the per-finding stage.add_issue calls agree.
+        from td_release_packager.fixers import FIX_REGISTRY
+
+        custom_rule_names = {r.name for r in custom_rules}
+
+        def _is_fixable(rule_id: str) -> bool:
+            return rule_id in FIX_REGISTRY and rule_id not in custom_rule_names
+
         if lint_result.issues:
             # Group by file
             by_file = {}
@@ -2635,7 +2647,33 @@ def _run_inspect(args, stage, issue_codes) -> int:
                         sev = "⚠"
                     else:
                         sev = "ℹ"
-                    print(f"      {sev}  [{issue.rule}] {issue.message}")
+                    # Inline "— fixable (run `ships fix`)" tag for findings
+                    # whose rule has a registered fixer. Signals the
+                    # cheapest remediation path at the finding line rather
+                    # than making the reader consult docs.
+                    fix_tag = (
+                        "  — fixable (run `ships fix`)"
+                        if _is_fixable(issue.rule)
+                        else ""
+                    )
+                    print(f"      {sev}  [{issue.rule}] {issue.message}{fix_tag}")
+
+            # Fixable-count summary line — mirrors the report tone and
+            # gives the reader a one-command remediation for the trivial
+            # cases without having to eyeball every finding.
+            fixable_count = sum(1 for i in lint_result.issues if _is_fixable(i.rule))
+            if fixable_count:
+                total = len(lint_result.issues)
+                print(
+                    f"\n  {total} finding(s), {fixable_count} auto-fixable — "
+                    f"run `ships fix` to apply."
+                )
+            else:
+                total = len(lint_result.issues)
+                print(
+                    f"\n  {total} finding(s), none auto-fixable — see "
+                    "remediation notes above."
+                )
 
             # Record one ships.decisions.json issue per lint finding. The
             # rule name is carried in the message so explain can
@@ -2644,7 +2682,6 @@ def _run_inspect(args, stage, issue_codes) -> int:
             # agents/CI can tell them apart from built-in Coding Discipline
             # violations; both may carry remediation metadata in details
             # (e.g. the built-in destructive_change rule, issue #169).
-            custom_rule_names = {r.name for r in custom_rules}
             for issue in lint_result.issues:
                 # Map validate.py severities into the recorder's
                 # vocabulary: ERROR/WARNING/INFO → error/warning/info.
@@ -2666,12 +2703,20 @@ def _run_inspect(args, stage, issue_codes) -> int:
                     code = issue_codes.INSPECT_CUSTOM_POLICY
                 else:
                     code = issue_codes.INSPECT_LINT_VIOLATION
+                # Enrich the details dict with fixability metadata
+                # (#524). Merges cleanly with any existing per-rule
+                # remediation payload so custom rules that carry their
+                # own details are preserved.
+                details = dict(remediation) if remediation else {}
+                if _is_fixable(issue.rule):
+                    details["fixable"] = True
+                    details["fixer_rule_id"] = issue.rule
                 stage.add_issue(
                     rec_severity,
                     code,
                     f"[{issue.rule}] {issue.message}",
                     location=location,
-                    details=remediation,
+                    details=details or None,
                 )
 
         if lint_result.passed:
