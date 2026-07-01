@@ -103,7 +103,6 @@ _RULES: dict[str, dict[str, object]] = {
         ),
         "default_severity": "ERROR",
         "safe_fix_available": True,
-        "no_fixer_yet": True,
         "automation_level": "guided",
         "recommended_action": (
             "Rename the file so its extension matches the DDL kind, or "
