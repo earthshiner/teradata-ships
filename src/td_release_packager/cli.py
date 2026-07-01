@@ -2498,7 +2498,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
         # ON by default. Pass --no-fix-ddl-terminators to opt out.
         ddl_terminator_fix_result = None
         if getattr(args, "fix_ddl_terminators", True):
-            from td_release_packager.validate import fix_ddl_terminators
+            from td_release_packager.fixers.ddl_terminator import fix_ddl_terminators
 
             ddl_terminator_fix_result = fix_ddl_terminators(
                 resolve_inspect_root(args.project)
@@ -2507,7 +2507,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
                 print(
                     f"\n  ✎ Auto-fixed missing DDL terminators in "
                     f"{ddl_terminator_fix_result.files_written} file(s) "
-                    f"({ddl_terminator_fix_result.statements_fixed} statement(s)) "
+                    f"({ddl_terminator_fix_result.totals.get('statements_fixed', 0)} statement(s)) "
                     f"— pass --no-fix-ddl-terminators to disable."
                 )
 
@@ -2519,14 +2519,14 @@ def _run_inspect(args, stage, issue_codes) -> int:
         # for those.
         non_ascii_fix_result = None
         if getattr(args, "fix_non_ascii", False):
-            from td_release_packager.validate import fix_non_ascii
+            from td_release_packager.fixers.non_ascii import fix_non_ascii
 
             non_ascii_fix_result = fix_non_ascii(args.project)
             if non_ascii_fix_result.files_written:
                 print(
                     f"\n  ✎ Auto-fixed non-ASCII characters in "
                     f"{non_ascii_fix_result.files_written} file(s) "
-                    f"({non_ascii_fix_result.chars_substituted} char(s)) "
+                    f"({non_ascii_fix_result.totals.get('chars_substituted', 0)} char(s)) "
                     f"— re-run inspect to confirm."
                 )
             else:

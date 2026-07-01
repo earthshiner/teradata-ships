@@ -65,6 +65,17 @@ RULES_RESULT_REF = f"context/{RULES_RESULT_FILENAME}"
 #   requires_human_review  True when the fix needs an operator's
 #                          judgement (security, governance, semantic
 #                          rename). False for mechanical reformatting.
+#   no_fixer_yet           True on rules that COULD be auto-fixed
+#                          (safe_fix_available=True) but where the
+#                          fixer has not been implemented in
+#                          td_release_packager.fixers yet. Set this
+#                          when you know a fixer belongs but scope
+#                          the build separately. The lockstep test
+#                          (test_fixers_registry_catalogue_lockstep.py)
+#                          uses this to distinguish "no fixer, and
+#                          that's a bug" from "no fixer yet, and
+#                          that's tracked". Delete the marker when the
+#                          fixer lands.
 
 _RULES: dict[str, dict[str, object]] = {
     # ---- Structural / naming -------------------------------------
@@ -76,6 +87,7 @@ _RULES: dict[str, dict[str, object]] = {
         ),
         "default_severity": "ERROR",
         "safe_fix_available": True,
+        "no_fixer_yet": True,
         "automation_level": "auto",
         "recommended_action": (
             "Add the database qualifier (e.g. ``MYDB.TableName``) before "
@@ -91,6 +103,7 @@ _RULES: dict[str, dict[str, object]] = {
         ),
         "default_severity": "ERROR",
         "safe_fix_available": True,
+        "no_fixer_yet": True,
         "automation_level": "guided",
         "recommended_action": (
             "Rename the file so its extension matches the DDL kind, or "
@@ -107,6 +120,7 @@ _RULES: dict[str, dict[str, object]] = {
         ),
         "default_severity": "ERROR",
         "safe_fix_available": True,
+        "no_fixer_yet": True,
         "automation_level": "auto",
         "recommended_action": (
             "Append the correct kind suffix to the token name in ``token_map.conf``."
@@ -121,6 +135,7 @@ _RULES: dict[str, dict[str, object]] = {
         ),
         "default_severity": "WARNING",
         "safe_fix_available": True,
+        "no_fixer_yet": True,
         "automation_level": "guided",
         "recommended_action": (
             "Replace the literal name with a ``{{TOKEN}}`` reference "
@@ -150,6 +165,7 @@ _RULES: dict[str, dict[str, object]] = {
         ),
         "default_severity": "WARNING",
         "safe_fix_available": True,
+        "no_fixer_yet": True,
         "automation_level": "guided",
         "recommended_action": (
             "Split the file so each DDL statement lives in its own file."
@@ -242,6 +258,7 @@ _RULES: dict[str, dict[str, object]] = {
         ),
         "default_severity": "WARNING",
         "safe_fix_available": True,
+        "no_fixer_yet": True,
         "automation_level": "guided",
         "recommended_action": (
             "Add an explicit column list between the view name and "
@@ -274,6 +291,7 @@ _RULES: dict[str, dict[str, object]] = {
         ),
         "default_severity": "ERROR",
         "safe_fix_available": True,
+        "no_fixer_yet": True,
         "automation_level": "guided",
         "recommended_action": ("Shorten the COMMENT text to 254 characters or fewer."),
         "risk": "low",
@@ -326,6 +344,7 @@ _RULES: dict[str, dict[str, object]] = {
         ),
         "default_severity": "OFF",
         "safe_fix_available": True,
+        "no_fixer_yet": True,
         "automation_level": "guided",
         "recommended_action": (
             "Create a ``.cls`` companion file declaring the object's "
@@ -389,6 +408,7 @@ _RULES: dict[str, dict[str, object]] = {
         ),
         "default_severity": "ERROR",
         "safe_fix_available": True,
+        "no_fixer_yet": True,
         "automation_level": "auto",
         "recommended_action": (
             "Move the file to the phase / kind directory listed in "

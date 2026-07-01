@@ -7,11 +7,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from td_release_packager.cli import _build_parser
-from td_release_packager.validate import (
-    DDLTerminatorFixResult,
-    fix_ddl_terminators,
-    validate_directory,
-)
+from td_release_packager.fixers import FixResult
+from td_release_packager.fixers.ddl_terminator import fix_ddl_terminators
+from td_release_packager.validate import validate_directory
 
 
 # ---------------------------------------------------------------
@@ -118,7 +116,7 @@ class TestSimpleFix:
         result = fix_ddl_terminators(str(project))
 
         assert result.files_written == 1
-        assert result.statements_fixed == 1
+        assert result.totals["statements_fixed"] == 1
         assert f.read_text(encoding="utf-8").endswith(");\n")
 
     def test_view_missing_terminator_is_fixed(self, tmp_path):
@@ -139,7 +137,7 @@ class TestSimpleFix:
         result = fix_ddl_terminators(str(project))
 
         assert result.files_written == 0
-        assert result.statements_fixed == 0
+        assert result.totals["statements_fixed"] == 0
         assert f.read_text(encoding="utf-8") == original
 
     def test_file_with_no_ddl_is_not_touched(self, tmp_path):
@@ -168,7 +166,7 @@ class TestBoundaryHandling:
         f = _write(project / "payload/database/DDL/tables/many.tbl", original)
         result = fix_ddl_terminators(str(project))
         assert result.files_written == 1
-        assert result.statements_fixed == 2
+        assert result.totals["statements_fixed"] == 2
         text = f.read_text(encoding="utf-8")
         # All four statements now end with ";"
         for letter in ("A", "B", "C", "D"):
@@ -299,9 +297,11 @@ class TestIdempotenceAndEndToEnd:
         )
         result = fix_ddl_terminators(str(project))
         d = result.to_dict()
+        assert d["rule_id"] == "ddl_terminator"
+        assert d["dry_run"] is False
         assert d["files_scanned"] >= 1
         assert d["files_written"] == 1
-        assert d["statements_fixed"] == 1
+        assert d["totals"]["statements_fixed"] == 1
         assert len(d["files"]) == 1
         entry = d["files"][0]
         assert entry["statements_fixed"] == 1
@@ -318,7 +318,8 @@ class TestEmptyAndWhitespace:
         project = _setup_project(tmp_path)
         _write(project / "payload/database/DDL/tables/empty.tbl", "")
         result = fix_ddl_terminators(str(project))
-        assert isinstance(result, DDLTerminatorFixResult)
+        assert isinstance(result, FixResult)
+        assert result.rule_id == "ddl_terminator"
         assert result.files_written == 0
 
     def test_no_files_in_project(self, tmp_path):
