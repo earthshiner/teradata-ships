@@ -17,6 +17,7 @@ import json
 from td_release_packager.ingest import _emit_source_map
 from td_release_packager.reporting.common import (
     lookup_source_provenance,
+    render_issue_category_summary,
     render_issue_list,
 )
 
@@ -215,3 +216,87 @@ class TestRenderIssueListEmpty:
         assert "no detailed issues logged" in html
         # Red colour (#DC3545) matches the error badge.
         assert "#DC3545" in html
+
+
+# ---------------------------------------------------------------
+# render_issue_category_summary — per-code count table (#513)
+# ---------------------------------------------------------------
+
+
+def _issue(code: str, sev: str, msg: str = "") -> dict:
+    return {"code": code, "severity": sev, "message": msg}
+
+
+class TestRenderIssueCategorySummary:
+    """The summary answers 'which knob do I turn first?' when there are
+    many findings of a few recurring codes (#513)."""
+
+    def test_returns_empty_when_below_threshold(self):
+        """Fewer than 5 issues → no summary. The flat list is already
+        the summary at that scale."""
+        issues = [
+            _issue("HARDCODED_NAME", "warning"),
+            _issue("COMMA_STYLE", "info"),
+        ]
+        assert render_issue_category_summary(issues) == ""
+
+    def test_returns_empty_when_only_one_code(self):
+        """Single (code, severity) bucket → no table (nothing to rank)."""
+        issues = [_issue("HARDCODED_NAME", "warning") for _ in range(10)]
+        assert render_issue_category_summary(issues) == ""
+
+    def test_renders_table_when_multiple_codes_and_over_threshold(self):
+        issues = (
+            [_issue("HARDCODED_NAME", "warning")] * 27
+            + [_issue("COMMA_STYLE", "info")] * 8
+            + [_issue("DB_QUALIFIER", "error")] * 2
+        )
+        html = render_issue_category_summary(issues)
+        assert "Findings by category" in html
+        assert "HARDCODED_NAME" in html
+        assert "COMMA_STYLE" in html
+        assert "DB_QUALIFIER" in html
+        # Counts render.
+        assert ">27<" in html
+        assert ">8<" in html
+        assert ">2<" in html
+
+    def test_error_appears_before_warning_appears_before_info(self):
+        """Severity precedence: error > warning > info, then count desc."""
+        issues = (
+            [_issue("A", "info")] * 10
+            + [_issue("B", "warning")] * 5
+            + [_issue("C", "error")] * 2
+        )
+        html = render_issue_category_summary(issues)
+        # C (error, 2) appears BEFORE B (warning, 5) appears BEFORE A (info, 10).
+        pos_a = html.index(">A<")
+        pos_b = html.index(">B<")
+        pos_c = html.index(">C<")
+        assert pos_c < pos_b < pos_a
+
+    def test_within_severity_higher_count_first(self):
+        """Two warning codes → the one with more findings ranks first."""
+        issues = [_issue("A", "warning")] * 3 + [_issue("B", "warning")] * 20
+        html = render_issue_category_summary(issues)
+        assert html.index(">B<") < html.index(">A<")
+
+    def test_min_total_threshold_configurable(self):
+        """`min_total=2` lets small stages summarise too — useful for
+        unit tests and for future opt-in tuning if the default becomes
+        too conservative."""
+        issues = [
+            _issue("A", "warning"),
+            _issue("B", "warning"),
+        ]
+        # Default (5) suppresses.
+        assert render_issue_category_summary(issues) == ""
+        # Lowered threshold surfaces the table.
+        html = render_issue_category_summary(issues, min_total=2)
+        assert "Findings by category" in html
+
+    def test_uncoded_issue_falls_back_to_placeholder(self):
+        """Issues with empty code shouldn't crash the aggregator."""
+        issues = [_issue("HARDCODED_NAME", "warning")] * 5 + [_issue("", "warning")] * 3
+        html = render_issue_category_summary(issues)
+        assert "(uncoded)" in html
