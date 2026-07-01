@@ -206,6 +206,53 @@ python -m td_release_packager package --project ./projects/MyProject \
 
 ---
 
+### Discovery Questions (when to ask what)
+
+When an MCP user says "package this for deployment" (or anything similarly under-specified), walk them through the SHIPS Navigator's discovery questions before recommending commands. Same funnel as `tools/navigator/ships-navigator.html` and `decision-tree.yaml`, delivered in conversation.
+
+Skip a question when its answer is already knowable — a scaffolded project, an existing `ships.yaml`, an existing `plan.json`, a repo you can inspect. Prefer calling `ships_plan` first (auto-answers what it can from source detection) and only ask about what remains.
+
+The questions cluster into three groups. Use the group headings when you present the questions to the user — it helps them see the shape of what SHIPS is about to do.
+
+**1 · Source** — where the DDL lives and what shape it's in
+
+| # | Question | Notes |
+|---|----------|-------|
+| Q1 | Where does your source come from — GitHub (`owner/repo` + ref) or filesystem path? | Determines whether the emitted script clones or reads locally. |
+| Q2 | Does the source already use `{{TOKEN}}` placeholders? | `yes` skips Q3/Q4 and triggers `bootstrap-env-config`. |
+| Q3 | Token shape — one `DB_PREFIX` (prefix model) or one binding per database (per-database)? | Only if Q2 is no/unsure. |
+| Q4 | Database name prefix (e.g. `CustomerDNA`) — often coincides with the data product name, but need not. | Only if Q2 is no/unsure. |
+| Q5 | Is the DDL already atomic (one object per file) and eponymously named? | Reassure on no/unsure — SHIPS auto-splits multi-object files. |
+
+**2 · Processing** — what SHIPS should do with the payload
+
+| # | Question | Notes |
+|---|----------|-------|
+| Q6 | Generate a view layer (locking / access / business views per the object-placement standard)? | Skip if source already carries views by hand. |
+| Q7 | Compute deploy waves (dependency analysis → `_waves.txt`)? | Recommended unless the user owns their ordering. |
+| Q8 | Export a dependency graph (incl. OpenLineage JSON)? | Off by default. If yes, ask for the OpenLineage namespace + project name. |
+| Q9 | Add an orphan-token scan (CI gate for clean env configs)? | Optional. |
+| Q10 | Target environments — comma-separated list, e.g. `DEV, TST, PRD`. Leave blank for an env-agnostic package. | Blank → `default` env, single `default.conf`. See the env-agnostic note below. |
+| — | External parent databases the package references but does not create (the `FROM` parent in `CREATE DATABASE Child FROM Parent`) — comma-separated, optional. | Only when Q2 is no. Otherwise the build's trust gate flags them. |
+
+**3 · Output** — where the package lands + build tweaks
+
+| # | Question | Notes |
+|---|----------|-------|
+| Q11 | Absolute path to the SHIPS project directory. Is it already scaffolded? | Drive letter (`C:\...`) implies Windows launcher output. |
+| Q12 | Package name (e.g. `create_objects`). | Also becomes the launcher stem and `plan-<pkg>.json` filename. |
+| Q13 | Root database / user parent for parentless `CREATE DATABASE` / `CREATE USER` statements? | Optional. Only if source has top-level DDL without a `FROM <parent>` clause. |
+| — | Strict mode (abort on first stage error)? | Off by default (developer mode). On for CI. |
+| — | Bash flavour for the emitted `.sh` (Git Bash / WSL / Cygwin)? | Only when the project path is Windows-shaped. |
+
+**Env-agnostic packages (Q10 blank).** SHIPS itself doesn't have a first-class env-agnostic concept — every package targets at least one env label. But a payload with zero `{{TOKEN}}` references is de-facto env-agnostic: the env-config file is empty, promotion between envs is a no-op, and the label is nominal. When Q10 is blank, the Navigator emits a single `config/env/default.conf` (with an explanatory header) and packages with `--env default`, so the intent reads correctly to anyone downstream instead of being masked by a fake `DEV` tag.
+
+**Show/hide logic.** The `decision-tree.yaml` file carries the canonical visibility and warning rules (e.g. Q3/Q4 hide when Q2 = yes). If you're auto-driving the funnel, honour the `show:` clauses there. If you're walking a human through it, just follow the cluster order above — the wizard's UX validated it with real users.
+
+**When to call `ships_plan` vs. asking.** Call `ships_plan` first whenever you have access to the source tree (GitHub or filesystem). Its detected answers become your defaults; only ask about what it couldn't determine (usually Q10 envs, Q12 package name, Q13 root parent).
+
+---
+
 ### Plan (Detect-and-Recommend)
 
 Inspect a raw source tree, auto-answer the detectable questions, and emit the recommended `ships` command sequence + rationale + `plan.json` — non-interactive (#379).

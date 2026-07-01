@@ -61,7 +61,7 @@ The questions encoded here, in order. In the HTML wizard they are visually group
 | Q7 | Dependency analysis (waves)? | Maps to `ships analyse` — emits `_waves.txt` |
 | Q8 | Export dependency graph? | Adds `--graph` to `analyse` (incl. OpenLineage JSON) + namespace / project name |
 | Q9 | Orphan-token scan? | Adds `ships scan --all-envs --fail-on-orphan` as a CI gate |
-| Q10 | Target environments | Free list — e.g. `DEV, TST, PRD` |
+| Q10 | Target environments | Free list — e.g. `DEV, TST, PRD`. Leave blank for env-agnostic → emits `config/env/default.conf` and packages with `--env default`. |
 | Q11 | Project path | Drive-letter selects Windows `.bat` output; checkbox controls whether `scaffold` runs |
 | Q12 | Package name | Build artefact name — e.g. `create_objects` |
 | Strict | Abort on first stage error | Maps to `--strict` on `process` |

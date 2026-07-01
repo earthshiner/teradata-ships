@@ -164,7 +164,11 @@ questions:
   # --- Q10 envs ---
   - id: envs
     label: "Q10. Target environments"
-    hint: "Comma- or space-separated. e.g. <code>DEV, TST, PRD</code>."
+    hint: >-
+      Comma- or space-separated. e.g. <code>DEV, TST, PRD</code>.
+      <b>Leave blank for an env-agnostic package</b> — the wizard emits a single
+      <code>config/env/default.conf</code> and packages with <code>--env default</code>.
+      See the <b>env files</b> tab for the env-agnostic explanation.
     kind: text
 
   # --- External parent databases → env-config EXTERNAL_PARENTS ---
