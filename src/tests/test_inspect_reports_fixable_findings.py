@@ -119,14 +119,15 @@ class TestHumanInlineTag:
     def test_unfixable_finding_has_no_tag(self, tmp_path):
         project = _setup_project(tmp_path)
         result = _run_inspect(project)
-        # hardcoded_name has NO fixer in v1 (#527 is deferred) → tag absent.
-        hn_lines = [
-            line for line in result.stdout.splitlines() if "[hardcoded_name]" in line
+        # comma_style has NO registered fixer → tag absent. (hardcoded_name
+        # DID land a fixer in #527, so it's a fixable finding now.)
+        cs_lines = [
+            line for line in result.stdout.splitlines() if "[comma_style]" in line
         ]
-        assert hn_lines, "expected a hardcoded_name finding in output"
-        for line in hn_lines:
+        assert cs_lines, "expected a comma_style finding in output"
+        for line in cs_lines:
             assert "fixable" not in line, (
-                f"hardcoded_name should not carry the fixable tag: {line!r}"
+                f"comma_style should not carry the fixable tag: {line!r}"
             )
 
 
@@ -164,11 +165,11 @@ class TestHumanSummaryLine:
             "name: unfixable\n", encoding="utf-8", newline=""
         )
         (project / "payload" / "database" / "DDL" / "tables").mkdir(parents=True)
-        # Terminated DDL with a hardcoded name — only hardcoded_name fires,
-        # and hardcoded_name has no fixer yet (#527 is deferred).
+        # Fully-tokenised, terminated DDL — the only informational
+        # finding is comma_style, which has no registered fixer.
         _write(
-            project / "payload/database/DDL/tables/Dev.T.tbl",
-            "CREATE MULTISET TABLE Dev.T (Id INTEGER) PRIMARY INDEX (Id);\n",
+            project / "payload/database/DDL/tables/Prod.T.tbl",
+            "CREATE MULTISET TABLE {{DB_T}}.T (Id INTEGER) PRIMARY INDEX (Id);\n",
         )
         result = _run_inspect(project)
         assert "none auto-fixable" in result.stdout, (
@@ -203,15 +204,16 @@ class TestJsonRecorderMetadata:
         _run_inspect(project)
         stage = _find_decisions_json(project)
         issues = stage.get("issues", [])
-        hn_issues = [i for i in issues if "[hardcoded_name]" in i.get("message", "")]
-        assert hn_issues, "no hardcoded_name issue in decisions.json"
-        for issue in hn_issues:
+        # comma_style has no fixer registered (unlike hardcoded_name after #527).
+        cs_issues = [i for i in issues if "[comma_style]" in i.get("message", "")]
+        assert cs_issues, "no comma_style issue in decisions.json"
+        for issue in cs_issues:
             details = issue.get("details") or {}
             # `fixable` may be absent OR may be False; both mean "not fixable".
             # We just want to be sure it's not accidentally True.
             assert not details.get("fixable"), (
-                f"hardcoded_name should not carry fixable=True: {details!r}"
+                f"comma_style should not carry fixable=True: {details!r}"
             )
             assert "fixer_rule_id" not in details, (
-                f"hardcoded_name should not carry fixer_rule_id: {details!r}"
+                f"comma_style should not carry fixer_rule_id: {details!r}"
             )

@@ -141,11 +141,13 @@ _RULES: dict[str, dict[str, object]] = {
         ),
         "default_severity": "WARNING",
         "safe_fix_available": True,
-        "no_fixer_yet": True,
         "automation_level": "guided",
         "recommended_action": (
-            "Replace the literal name with a ``{{TOKEN}}`` reference "
-            "and add the mapping to ``token_map.conf``."
+            "Run ``ships fix --rules hardcoded_name`` twice: once to "
+            "propose a plan under ``.ships/hardcoded_name.plan.json`` "
+            "(review + edit the plan to rename tokens or drop entries), "
+            "then again to apply. The fixer is opt-in because token "
+            "naming is a judgement call."
         ),
         "risk": "medium",
         "requires_human_review": True,
