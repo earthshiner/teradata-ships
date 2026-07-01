@@ -113,19 +113,26 @@ _RULES: dict[str, dict[str, object]] = {
     },
     "type_suffix": {
         "description": (
-            "Tokens that resolve to object names must end with the kind "
-            "suffix (``_T`` table, ``_V`` view, ``_M`` macro, ``_P`` "
-            "procedure / JAR, ``_F`` function, ``_X`` STO)."
+            "Object names must NOT carry a type suffix (``_T``, ``_V``, "
+            "``VW_``, etc.). In SHIPS's naming convention the type "
+            "suffix belongs on the containing database (e.g. "
+            "``Product_DOM_STD_T.Customer``), not on the object itself "
+            "(``Product_DOM_STD.Customer_T`` is a violation). See the "
+            "sibling ``token_naming`` rule for the corresponding check "
+            "that database tokens carry the right kind suffix."
         ),
         "default_severity": "ERROR",
-        "safe_fix_available": True,
-        "no_fixer_yet": True,
-        "automation_level": "auto",
+        "safe_fix_available": False,
+        "automation_level": "manual",
         "recommended_action": (
-            "Append the correct kind suffix to the token name in ``token_map.conf``."
+            "Rename the object to drop the type suffix and update every "
+            "reference (DDL bodies, DCL, DML, view definitions) that "
+            "qualified it. Not an auto-fix candidate — a rename touches "
+            "every cross-file reference and needs operator judgement to "
+            "confirm no external consumers depend on the suffixed name."
         ),
-        "risk": "low",
-        "requires_human_review": False,
+        "risk": "medium",
+        "requires_human_review": True,
     },
     "hardcoded_name": {
         "description": (
@@ -402,16 +409,24 @@ _RULES: dict[str, dict[str, object]] = {
     },
     "object_placement": {
         "description": (
-            "Each file must live in the phase directory that matches "
-            "its DDL kind (``03_ddl/tables`` for tables, etc.)."
+            "A view must NOT reference a tables-database directly. The "
+            "SHIPS object-placement standard puts a 1:1 locking view "
+            "layer (``*_STD_V``) between the tables database "
+            "(``*_STD_T``) and its consumers; views should read from "
+            "the view database, not the tables database. Flagged when "
+            "a payload view qualifies an object with a tables-database "
+            "identifier resolved via ``config/object_placement.yaml``."
         ),
         "default_severity": "ERROR",
         "safe_fix_available": True,
         "no_fixer_yet": True,
         "automation_level": "auto",
         "recommended_action": (
-            "Move the file to the phase / kind directory listed in "
-            "``config/object_placement.yaml``."
+            "Replace the tables-database qualifier with the "
+            "corresponding views database from "
+            "``config/object_placement.yaml`` (SHIPS already computes "
+            "the mapping via ``placement.resolve_views_database``). "
+            "A fixer for this is viable but not yet built."
         ),
         "risk": "low",
         "requires_human_review": False,
