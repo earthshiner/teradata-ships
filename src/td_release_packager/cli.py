@@ -274,6 +274,8 @@ def _main():
         _cmd_ingest(args)
     elif args.command == "inspect":
         _cmd_validate(args)
+    elif args.command == "fix":
+        sys.exit(_cmd_fix(args))
     elif args.command == "package":
         _cmd_build(args)
     elif args.command == "deploy":
@@ -3232,6 +3234,241 @@ def _cmd_repackage(args):
     except (FileNotFoundError, ValueError) as exc:
         print(f"\nERROR: {exc}", file=sys.stderr)
         sys.exit(1)
+
+
+def _cmd_fix(args) -> int:
+    """Apply registered auto-fixes to a SHIPS project's payload/ / config/.
+
+    Dispatches to :data:`td_release_packager.fixers.FIX_REGISTRY`, resolving
+    the rule set from the flags: ``--rules a,b,c`` explicit; ``--all`` every
+    registered fixer; nothing → the default-on subset.
+
+    Exit codes follow the ruff convention:
+
+    * ``0`` — success (either nothing to do, or writes applied cleanly).
+    * ``1`` — ``--dry-run`` and changes would have been made (CI gate signal).
+    * ``2`` — a fixer raised or an argument was invalid (unknown rule id,
+      missing project, etc.). Errors that individual fixers absorb into
+      :attr:`FixResult.errors` don't bump the exit code by themselves, but
+      any non-empty ``errors`` list is surfaced in the report.
+    """
+    import json
+
+    from td_release_packager.fixers import FIX_REGISTRY, default_on_rules
+
+    project = args.project
+    if not os.path.isdir(project):
+        _emit_fix_error(args, f"project directory does not exist: {project!r}")
+        return 2
+
+    # Resolve the rule set. --rules and --all are mutually exclusive at
+    # argparse level (mutually_exclusive_group), so at most one is set here.
+    if getattr(args, "all_rules", False):
+        selected = sorted(FIX_REGISTRY.keys())
+    elif getattr(args, "rules", None):
+        raw = [r.strip() for r in args.rules.split(",") if r.strip()]
+        unknown = [r for r in raw if r not in FIX_REGISTRY]
+        if unknown:
+            available = ", ".join(sorted(FIX_REGISTRY.keys())) or "(none)"
+            _emit_fix_error(
+                args,
+                f"unknown rule id(s) in --rules: {', '.join(sorted(unknown))}. "
+                f"Registered fixers: {available}",
+            )
+            return 2
+        selected = raw
+    else:
+        selected = default_on_rules()
+
+    # Run each selected fixer. Any exception from a fixer aborts the run
+    # with exit code 2 — that's an infrastructure failure (I/O, malformed
+    # source, walker crash), not the kind of per-file error a fixer should
+    # be recording in FixResult.errors and continuing past.
+    dry_run = bool(getattr(args, "dry_run", False))
+    results = []
+    for rule_id in selected:
+        spec = FIX_REGISTRY[rule_id]
+        try:
+            result = spec.apply(project, dry_run)
+        except Exception as exc:
+            _emit_fix_error(args, f"fixer {rule_id!r} failed: {exc}")
+            return 2
+        results.append((spec, result))
+
+    # Report. --json emits one envelope to stdout; the human path prints
+    # a per-rule block + a summary line.
+    if getattr(args, "json", False):
+        json.dump(_fix_json_envelope(project, dry_run, selected, results), sys.stdout)
+        sys.stdout.write("\n")
+    else:
+        _print_fix_human_report(project, dry_run, selected, results)
+
+    # Exit code — 1 iff dry-run and there is pending work; else 0. Per-file
+    # errors don't bump the exit code because a fixer that continued past
+    # them may still have produced useful writes; the report surfaces them.
+    total_changes = sum(len(result.files_changed) for _, result in results)
+    if dry_run and total_changes > 0:
+        return 1
+    return 0
+
+
+def _emit_fix_error(args, message: str) -> None:
+    """Emit a `ships fix` error to the right stream in the right shape.
+
+    Under ``--json`` we still emit a machine-readable envelope so a caller
+    parsing stdout does not have to also parse stderr. Under the human
+    path we mirror the tone of the rest of the CLI: a stderr line
+    prefixed with ``ships fix:``.
+    """
+    import json
+
+    if getattr(args, "json", False):
+        json.dump({"success": False, "error": message}, sys.stdout)
+        sys.stdout.write("\n")
+    else:
+        print(f"ships fix: {message}", file=sys.stderr)
+
+
+def _fix_json_envelope(
+    project: str, dry_run: bool, selected: list, results: list
+) -> dict:
+    """Build the ``--json`` payload — one envelope per run.
+
+    Shape mirrors the MCP ``ships_fix`` tool where per-rule fields overlap
+    (``rule_id`` / ``dry_run`` / ``files_scanned`` / ``files_changed`` /
+    ``files``) so callers can consume either surface with the same
+    parser. The CLI-only wrapper adds ``project``, the ``rules`` list
+    (what was actually run vs. what was requested), and an aggregate
+    ``totals`` block across every rule.
+    """
+    rule_payloads = []
+    total_scanned = 0
+    total_changed = 0
+    total_errors = 0
+    for spec, result in results:
+        d = result.to_dict()
+        total_scanned += d.get("files_scanned", 0)
+        total_changed += d.get("files_changed_count", 0)
+        total_errors += len(d.get("errors", []))
+        rule_payloads.append(d)
+    return {
+        "success": True,
+        "project": project,
+        "dry_run": dry_run,
+        "rules_requested": selected,
+        "rules_run": [spec.rule_id for spec, _ in results],
+        "totals": {
+            "files_scanned": total_scanned,
+            "files_changed": total_changed,
+            "errors": total_errors,
+        },
+        "rules": rule_payloads,
+    }
+
+
+def _print_fix_human_report(
+    project: str, dry_run: bool, selected: list, results: list
+) -> None:
+    """Print the per-rule human report used when ``--json`` is not set.
+
+    Layout is one indented block per rule (matches the inspect-report
+    aesthetic elsewhere in the CLI). Rules with no matches print
+    ``no changes needed`` on their own line rather than showing an
+    empty file list — reduces vertical noise in a clean-tree run.
+    """
+    from td_release_packager.fixers import FIX_REGISTRY
+
+    mode = "dry-run" if dry_run else "apply"
+    print(f"\nships fix ({mode}) — project: {project}\n")
+
+    for spec, result in results:
+        default_note = "" if spec.default_on else "  (opt-in)"
+        print(f"  {spec.rule_id}{default_note}")
+
+        if not result.files_changed and not result.errors:
+            print("    no changes needed")
+            print()
+            continue
+
+        for entry in result.files_changed:
+            # Per-file line — path + a compact "+N" counter for whichever
+            # rule-specific total is under details. Falls back to "+1" so
+            # the row still says "something happened here" for fixers whose
+            # per-file details dict is empty.
+            counter = _summarise_file_details(entry.details)
+            print(f"    {entry.file}  {counter}")
+
+        for err in result.errors:
+            print(f"    ✗  {err.get('file', '?')}  — {err.get('error', 'error')}")
+
+        verb = "would be rewritten" if dry_run else "rewritten"
+        summary_bits = [f"{len(result.files_changed)} file(s) {verb}"]
+        for key, value in result.totals.items():
+            if value:
+                summary_bits.append(f"{value} {key.replace('_', ' ')}")
+        icon = "→" if dry_run else "✓"
+        print(f"    {icon}  " + ", ".join(summary_bits))
+        print()
+
+    # Aggregate summary. Under --dry-run the phrasing matches the exit
+    # code semantics (exit 1 => "N file(s) would change").
+    total_scanned = sum(r.files_scanned for _, r in results)
+    total_changed = sum(len(r.files_changed) for _, r in results)
+    total_errors = sum(len(r.errors) for _, r in results)
+
+    # If the caller passed rule ids that don't exist, we exit before we
+    # get here — no need to mention that. But if the *default-on* set
+    # happened to be empty because the operator set default_on=False on
+    # every fixer, note it so they don't wonder why nothing ran.
+    if not selected:
+        print(
+            "  (no fixers selected — the default-on set is empty. "
+            "Pass --all or --rules to run something.)"
+        )
+        return
+
+    if not results:
+        # Every selected rule was known but produced no run — currently
+        # unreachable, but defensive against a future filter step.
+        return
+
+    _ = FIX_REGISTRY  # keep the import used above; helps readability
+    if total_changed == 0 and total_errors == 0:
+        print(f"  ✓  Nothing to do ({total_scanned} file(s) scanned).")
+    elif dry_run:
+        print(
+            f"  →  {total_changed} file(s) would be rewritten "
+            f"({total_scanned} scanned"
+            + (f", {total_errors} error(s)" if total_errors else "")
+            + "). Re-run without --dry-run to apply."
+        )
+    else:
+        print(
+            f"  ✓  {total_changed} file(s) rewritten "
+            f"({total_scanned} scanned"
+            + (f", {total_errors} error(s)" if total_errors else "")
+            + ")."
+        )
+
+
+def _summarise_file_details(details: dict) -> str:
+    """Compact per-file counter for the human report.
+
+    Prefers well-known numeric keys (``statements_fixed``,
+    ``chars_substituted``, ``total_chars_substituted``) so the visible
+    counter matches the language a reader already knows from inspect
+    findings. Falls back to a plain ``+1`` when the fixer records no
+    such counter — still enough for the eye to register the row.
+    """
+    for key in ("statements_fixed", "total_chars_substituted", "chars_substituted"):
+        if key in details and isinstance(details[key], int):
+            return f"+{details[key]}"
+    # Detail dict may carry a mapping like the per-codepoint substitution
+    # map from non_ascii — sum those values to get a total.
+    for value in details.values():
+        if isinstance(value, dict) and all(isinstance(v, int) for v in value.values()):
+            return f"+{sum(value.values())}"
+    return "+1"
 
 
 def _cmd_build(args):
@@ -6287,6 +6524,67 @@ def _build_parser():
         "The DCL directory has three subdirectories: "
         "roles/ (grants to roles), users/ (grants to users), "
         "inter_db/ (grants between databases).",
+    )
+
+    # -- fix -- (#521)
+    # Runs registered fixers from td_release_packager.fixers.FIX_REGISTRY.
+    # Writes by default; --dry-run reports without writing and exits 1
+    # if changes would have been made (ruff convention for CI gates).
+    fx = subs.add_parser(
+        "fix",
+        help=(
+            "[F] Fix — apply registered auto-fixes from the inspect rules "
+            "catalogue (ddl_terminator, non_ascii, …)."
+        ),
+        description=(
+            "Applies automated fixes to a SHIPS project's payload/ (and "
+            "config/ for a small number of fixers). Every rule that has an "
+            "auto-fix is registered in td_release_packager.fixers.FIX_REGISTRY; "
+            "run without --rules / --all to apply the default-on subset, or "
+            "restrict with --rules a,b,c. Pass --dry-run in CI to fail the "
+            "build (exit code 1) if there is anything to fix."
+        ),
+    )
+    fx.add_argument(
+        "--project",
+        required=True,
+        help="SHIPS project directory (the parent of payload/).",
+    )
+    _fx_selector = fx.add_mutually_exclusive_group()
+    _fx_selector.add_argument(
+        "--rules",
+        default=None,
+        help=(
+            "Comma-separated list of rule ids to apply — e.g. "
+            "`ddl_terminator,non_ascii`. Omit to apply the default-on "
+            "subset. Mutually exclusive with --all."
+        ),
+    )
+    _fx_selector.add_argument(
+        "--all",
+        dest="all_rules",
+        action="store_true",
+        help=(
+            "Apply every registered fixer, including opt-in ones "
+            "(non_ascii). Mutually exclusive with --rules."
+        ),
+    )
+    fx.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Report what would change without writing. Exit code 1 when "
+            "any file would have been rewritten — use in CI as a "
+            "pre-merge gate."
+        ),
+    )
+    fx.add_argument(
+        "--json",
+        action="store_true",
+        help=(
+            "Emit a machine-readable summary to stdout instead of the "
+            "human report. Same envelope shape as the MCP ships_fix tool."
+        ),
     )
 
     # -- package --
