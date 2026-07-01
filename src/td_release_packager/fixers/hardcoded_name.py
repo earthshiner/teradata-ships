@@ -1,4 +1,4 @@
-"""Auto-fixer for the ``hardcoded_name`` inspect rule (#527 — Phase 1 MVP).
+"""Auto-fixer for the ``hardcoded_name`` inspect rule (#527, #541 Phase 2a).
 
 Plan-file workflow (agent-friendly, no interactive TTY yet):
 
@@ -15,16 +15,21 @@ Plan-file workflow (agent-friendly, no interactive TTY yet):
 Registered ``default_on=False`` — the fix requires operator judgement
 per the rules catalogue (``requires_human_review: True``).
 
-Follow-ups tracked separately:
+Phase 2a features (this module):
+
+* **Smart proposals** — when ``<project>/config/tokenise.conf`` exists,
+  apply its substitution rules to each candidate literal to compute
+  the proposed token. Falls back to verbatim wrap when no rule matches
+  or no config exists.
+* **Persistent skip list** — ``.ships/hardcoded_name.exceptions``
+  carries operator-declared "always skip this literal" decisions
+  across runs. Merged with the system-database set at scan time.
+
+Deferred to Phase 2b:
 
 * Interactive TTY prompt with y/e/s/S/q actions.
-* ``.ships/hardcoded_name.exceptions`` skip file.
 * Atomic updates to ``config/tokenise.conf`` and
   ``config/token_map.conf`` alongside the payload rewrite.
-* MCP tools (``ships_propose_hardcoded_name_plan``,
-  ``ships_apply_hardcoded_name_plan``).
-* Consultation of the project's tokenisation model to pick tokens
-  intelligently (prefix / per-database vs. today's verbatim wrap).
 """
 
 from __future__ import annotations
@@ -73,9 +78,105 @@ def _looks_like_alias(literal: str) -> bool:
 _PLAN_SCHEMA_VERSION = 1
 _PLAN_RELATIVE_PATH = os.path.join(".ships", "hardcoded_name.plan.json")
 
+_EXCEPTIONS_SCHEMA_VERSION = 1
+_EXCEPTIONS_RELATIVE_PATH = os.path.join(".ships", "hardcoded_name.exceptions.json")
+
 
 def _plan_path(project_dir: str) -> str:
     return os.path.join(project_dir, _PLAN_RELATIVE_PATH)
+
+
+def _exceptions_path(project_dir: str) -> str:
+    return os.path.join(project_dir, _EXCEPTIONS_RELATIVE_PATH)
+
+
+def _load_exceptions(project_dir: str) -> frozenset[str]:
+    """Load the operator-declared "always skip this literal" list.
+
+    File shape (versioned JSON, evolves without breaking older readers):
+
+        {
+          "schema_version": 1,
+          "exclude": ["Legacy_DB", "Prototype_STAGING"]
+        }
+
+    Returns an empty set when the file is missing or malformed —
+    exceptions are additive to the built-in system-database exclusions,
+    never a replacement for them.
+    """
+    path = _exceptions_path(project_dir)
+    if not os.path.isfile(path):
+        return frozenset()
+    try:
+        with open(path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return frozenset()
+    if not isinstance(doc, dict):
+        return frozenset()
+    if doc.get("schema_version") != _EXCEPTIONS_SCHEMA_VERSION:
+        return frozenset()
+    exclude = doc.get("exclude")
+    if not isinstance(exclude, list):
+        return frozenset()
+    return frozenset(e for e in exclude if isinstance(e, str) and e)
+
+
+def _load_tokenise_rules(project_dir: str):
+    """Load and parse ``<project>/config/tokenise.conf`` if present.
+
+    Returns a list of parsed migration rules ready for
+    ``apply_migration_rules_to_text``, or ``None`` when the file is
+    missing or the parser rejects it. Callers treat ``None`` as
+    "no smart proposals" and fall back to verbatim wrap.
+    """
+    path = os.path.join(project_dir, "config", "tokenise.conf")
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            content = fh.read()
+    except OSError:
+        return None
+    # Lazy import — source_migrator is heavyweight and rarely needed.
+    from td_release_packager.source_migrator import parse_migration_sed
+
+    try:
+        rules, errors = parse_migration_sed(content)
+    except Exception:
+        return None
+    if errors and not rules:
+        return None
+    return rules
+
+
+def _smart_propose_token(literal: str, rules) -> str:
+    """Compute the proposed ``{{token}}`` for a literal.
+
+    When ``rules`` is None (no tokenise.conf), returns ``{{literal}}``
+    verbatim. Otherwise runs the tokenise rules against the literal —
+    if the transformed text differs and looks like a well-formed
+    token reference, returns it. Otherwise falls back to verbatim.
+    """
+    verbatim = f"{{{{{literal}}}}}"
+    if not rules:
+        return verbatim
+
+    from td_release_packager.source_migrator import apply_migration_rules_to_text
+
+    try:
+        transformed, _hits = apply_migration_rules_to_text(literal, rules)
+    except Exception:
+        return verbatim
+    # Only accept the transformation when it produced a non-trivial
+    # token-shaped result. A rule that maps ``ProdDB`` to ``{{DB_PREFIX}}``
+    # is exactly what we want; a rule that maps it to itself, or to a
+    # bare identifier, is not — fall back to the safe wrap.
+    if transformed == literal:
+        return verbatim
+    if "{{" not in transformed or "}}" not in transformed:
+        return verbatim
+    return transformed
 
 
 def _load_plan(project_dir: str) -> dict | None:
@@ -112,23 +213,22 @@ def _write_plan(project_dir: str, proposals: list[dict]) -> str:
     return path
 
 
-def _propose_token(literal: str) -> str:
-    """Propose a ``{{token}}`` for a hardcoded literal.
-
-    MVP: verbatim wrap — ``Foo`` becomes ``{{Foo}}``. An operator can
-    rename the token in the plan file before applying. Phase 2 will
-    consult ``config/tokenise.conf`` to pick a smarter proposal (prefix
-    stripping, per-database mapping).
-    """
-    return f"{{{{{literal}}}}}"
-
-
-def _discover_literals(source_dir: str) -> dict[str, list[dict]]:
+def _discover_literals(
+    source_dir: str, extra_exclude: frozenset[str] = frozenset()
+) -> dict[str, list[dict]]:
     """Walk the payload and return ``{literal: [occurrences]}``.
 
-    Skips SHIPS-generated paths, system databases, and references
-    inside comments or string literals. Occurrence entries carry
-    ``{"file", "line"}`` for the human/agent reviewing the plan.
+    Skips SHIPS-generated paths, system databases, operator-declared
+    exceptions, and references inside comments or string literals.
+    Occurrence entries carry ``{"file", "line"}`` for the human/agent
+    reviewing the plan.
+
+    Args:
+        source_dir:    SHIPS project directory to walk.
+        extra_exclude: Additional literals to skip. Merged with the
+                       built-in ``_SYSTEM_DATABASES`` set — never
+                       replaces it. Callers typically populate this
+                       from ``_load_exceptions``.
     """
     from td_release_packager.discovery import resolve_harvest_extensions
     from td_release_packager.validate import (
@@ -173,6 +273,8 @@ def _discover_literals(source_dir: str) -> dict[str, list[dict]]:
                     continue
                 db_name = _strip_identifier_quotes(raw_db)
                 if db_name.upper() in _SYSTEM_DATABASES:
+                    continue
+                if db_name in extra_exclude:
                     continue
                 if _looks_like_alias(db_name):
                     continue
@@ -334,12 +436,17 @@ def fix_hardcoded_name(source_dir: str, dry_run: bool = False) -> FixResult:
     plan = _load_plan(source_dir)
 
     if plan is None:
-        # Propose mode.
-        literals = _discover_literals(source_dir)
+        # Propose mode. Consult the two Phase-2a inputs — the persistent
+        # exceptions file (skip literals the operator has already told
+        # us are not to be tokenised) and ``config/tokenise.conf`` (use
+        # its rules to pick smart tokens).
+        exceptions = _load_exceptions(source_dir)
+        rules = _load_tokenise_rules(source_dir)
+        literals = _discover_literals(source_dir, extra_exclude=exceptions)
         proposals = [
             {
                 "literal": literal,
-                "token": _propose_token(literal),
+                "token": _smart_propose_token(literal, rules),
                 "occurrences": occurrences,
             }
             for literal, occurrences in sorted(literals.items())

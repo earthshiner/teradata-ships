@@ -2995,6 +2995,141 @@ def ships_fix(project: str, rule_id: str, dry_run: bool = True) -> dict:
 
 
 # ---------------------------------------------------------------
+# hardcoded_name — agent-facing plan/apply for the tokenisation
+# fixer (issue #541 Phase 2a).
+#
+# The plan-file workflow of the fixer is intentionally agent-friendly:
+# ships_propose_hardcoded_name_plan returns the current proposals
+# WITHOUT writing anything, so an agent can present the plan to a
+# human for review. ships_apply_hardcoded_name_plan takes an
+# operator-approved plan and applies it non-interactively. Between
+# the two, the operator can rename tokens or drop entries the agent
+# proposed but the human doesn't want to tokenise.
+# ---------------------------------------------------------------
+
+
+@mcp.tool()
+def ships_propose_hardcoded_name_plan(project: str) -> dict:
+    """Return a plan for tokenising hardcoded database qualifiers.
+
+    Walks the payload and computes ``{{token}}`` proposals for each
+    hardcoded literal, respecting the project's ``config/tokenise.conf``
+    (used for smart proposals) and ``.ships/hardcoded_name.exceptions``
+    (operator-declared skip list). Does not write anything to disk.
+
+    Args:
+        project: SHIPS project directory (the parent of ``payload/``).
+
+    Returns:
+        {"success": bool, "plan": {"schema_version": 1,
+                                    "proposals": [{"literal": str,
+                                                   "token": str,
+                                                   "occurrences": [...]}]}}
+    """
+    try:
+        from td_release_packager.fixers.hardcoded_name import (
+            _discover_literals,
+            _load_exceptions,
+            _load_tokenise_rules,
+            _PLAN_SCHEMA_VERSION,
+            _smart_propose_token,
+        )
+
+        exceptions = _load_exceptions(project)
+        rules = _load_tokenise_rules(project)
+        literals = _discover_literals(project, extra_exclude=exceptions)
+        proposals = [
+            {
+                "literal": literal,
+                "token": _smart_propose_token(literal, rules),
+                "occurrences": occurrences,
+            }
+            for literal, occurrences in sorted(literals.items())
+        ]
+        return {
+            "success": True,
+            "plan": {
+                "schema_version": _PLAN_SCHEMA_VERSION,
+                "proposals": proposals,
+            },
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@mcp.tool()
+def ships_apply_hardcoded_name_plan(
+    project: str, plan: dict, dry_run: bool = False
+) -> dict:
+    """Apply an operator-approved plan to the payload.
+
+    Writes the plan to ``.ships/hardcoded_name.plan.json`` (overwriting
+    any existing plan there), then dispatches the fixer in apply mode.
+    On success the plan file is consumed. Under ``dry_run=True`` no
+    files are written and the plan file is not written either.
+
+    Args:
+        project: SHIPS project directory.
+        plan:    Plan dict — usually the object returned by
+                 ``ships_propose_hardcoded_name_plan`` after operator
+                 review (edited tokens, dropped entries).
+        dry_run: When True, walk the plan and report what would change
+                 without touching any files.
+
+    Returns:
+        {"success": bool, "dry_run": bool, "files_scanned": int,
+         "files_changed": int, "files": [{"file": str, ...}],
+         "totals": dict, "errors": list}
+    """
+    try:
+        import json as _json
+
+        from td_release_packager.fixers.hardcoded_name import (
+            _plan_path,
+            _PLAN_SCHEMA_VERSION,
+            fix_hardcoded_name,
+        )
+
+        proposals = plan.get("proposals") if isinstance(plan, dict) else None
+        if not isinstance(proposals, list):
+            return {
+                "success": False,
+                "error": "plan must be a dict with a 'proposals' list",
+            }
+
+        if not dry_run:
+            # Materialise the operator-approved plan so the fixer's
+            # apply path reads it and consumes it. Mirrors the file
+            # shape the fixer writes itself.
+            path = _plan_path(project)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8", newline="") as fh:
+                _json.dump(
+                    {
+                        "schema_version": _PLAN_SCHEMA_VERSION,
+                        "proposals": proposals,
+                    },
+                    fh,
+                    indent=2,
+                )
+                fh.write("\n")
+
+        result = fix_hardcoded_name(source_dir=project, dry_run=dry_run)
+        summary = result.to_dict()
+        return {
+            "success": True,
+            "dry_run": dry_run,
+            "files_scanned": summary.get("files_scanned", 0),
+            "files_changed": summary.get("files_changed_count", 0),
+            "files": summary.get("files", []),
+            "totals": summary.get("totals", {}),
+            "errors": summary.get("errors", []),
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------
 # [C] Clean — explicit reset of prior pipeline output.
 #
 # Synchronous (returns directly, no run_id). Defaults to dry_run=True
