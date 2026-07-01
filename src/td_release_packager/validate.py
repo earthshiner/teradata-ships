@@ -3692,7 +3692,7 @@ def _check_non_ascii_literals(rel_path: str, content: str) -> List[ValidationIss
             )
 
             autofix_hint = (
-                " Run `ships inspect --fix-non-ascii` to substitute it automatically."
+                " Run `ships fix --rules non_ascii` to substitute it automatically."
                 if char in _NON_ASCII_AUTO_FIX_REPLACEMENTS
                 else ""
             )

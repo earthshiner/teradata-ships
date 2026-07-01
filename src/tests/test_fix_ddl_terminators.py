@@ -13,46 +13,35 @@ from td_release_packager.validate import validate_directory
 
 
 # ---------------------------------------------------------------
-# CLI default
+# CLI surface
 # ---------------------------------------------------------------
 
 
-class TestCLIDefault:
-    """``ships inspect --fix-ddl-terminators`` is ON by default."""
+class TestCLIFlags:
+    """After #522, ``ships inspect`` no longer exposes ``--fix-ddl-terminators``.
 
-    def test_fix_ddl_terminators_defaults_to_true(self):
-        """The flag uses BooleanOptionalAction with default=True so a
-        bare ``ships inspect`` rewrites missing semi-colons. The fix
-        is mechanically safe (Teradata requires the terminator for
-        deploy) and operates only on payload files, so making the
-        operator opt in to a known-safe fix is friction we don't want.
-        """
-        parser = _build_parser()
-        args = parser.parse_args(["inspect", "--project", "."])
-        assert args.fix_ddl_terminators is True
+    Auto-fixing moved to the dedicated ``ships fix`` verb (#521).
+    ``--fix-grants`` still exists on inspect pending #526.
+    """
 
-    def test_no_fix_ddl_terminators_opts_out(self):
-        """BooleanOptionalAction generates ``--no-fix-ddl-terminators``
-        as the opt-out for the same flag."""
-        parser = _build_parser()
-        args = parser.parse_args(
-            ["inspect", "--project", ".", "--no-fix-ddl-terminators"]
-        )
-        assert args.fix_ddl_terminators is False
+    def test_fix_ddl_terminators_flag_removed_from_inspect(self):
+        import pytest
 
-    def test_explicit_fix_ddl_terminators_stays_true(self):
-        """Passing the flag explicitly still means True, for users who
-        scripted against the pre-default form."""
         parser = _build_parser()
-        args = parser.parse_args(["inspect", "--project", ".", "--fix-ddl-terminators"])
-        assert args.fix_ddl_terminators is True
+        with pytest.raises(SystemExit):
+            parser.parse_args(["inspect", "--project", ".", "--fix-ddl-terminators"])
+
+    def test_no_fix_ddl_terminators_flag_removed_from_inspect(self):
+        import pytest
+
+        parser = _build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["inspect", "--project", ".", "--no-fix-ddl-terminators"])
 
     def test_fix_grants_defaults_to_true(self):
-        """``--fix-grants`` is also ON by default. Missing grants are
-        derivable from DDL intent, the writer is additive (extras and
-        orphans are left for human review), and the operation is
-        idempotent — so making operators opt in is friction we don't
-        want. Pass ``--no-fix-grants`` to opt out."""
+        """``--fix-grants`` remains on inspect until #526 migrates it into
+        the fix registry. Kept default-on because grants are derivable
+        from DDL intent and the writer is additive."""
         parser = _build_parser()
         args = parser.parse_args(["inspect", "--project", "."])
         assert args.fix_grants is True

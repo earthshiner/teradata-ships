@@ -20,6 +20,7 @@ Usage:
     python -m td_release_packager scaffold --name MortgagePlatform --output /projects
     python -m td_release_packager build --source . --env DEV --name create_objects --env-config config/env/DEV.conf
     python -m td_release_packager inspect --source . --fix-grants
+    python -m td_release_packager fix --project .
     python -m td_release_packager scan --source .
     python -m td_release_packager analyze --source . --graph ./output/
     python -m td_release_packager analyze --source . --graph . --formats dot,json,openlineage
@@ -2302,18 +2303,6 @@ def _run_inspect(args, stage, issue_codes) -> int:
         stage.set_config_resolved(
             "fix_grants", getattr(args, "fix_grants", True), "layer-5", "cli"
         )
-        stage.set_config_resolved(
-            "fix_ddl_terminators",
-            getattr(args, "fix_ddl_terminators", True),
-            "layer-5",
-            "cli",
-        )
-        stage.set_config_resolved(
-            "fix_non_ascii",
-            getattr(args, "fix_non_ascii", False),
-            "layer-5",
-            "cli",
-        )
 
         # ==============================================================
         # Step 0 — Token format check
@@ -2492,51 +2481,12 @@ def _run_inspect(args, stage, issue_codes) -> int:
         if hasattr(args, "skip_commas") and args.skip_commas:
             rules_config["leading_commas"] = "OFF"
 
-        # -- Optional: auto-fix missing DDL terminators (issue #253) --
-        # Runs BEFORE the lint pass so any fixed statements are absent
-        # from the post-fix report. Inserting ';' at a DDL boundary is
-        # mechanically safe (Teradata requires it for deploy and the
-        # addition cannot change statement semantics), so this fixer is
-        # ON by default. Pass --no-fix-ddl-terminators to opt out.
-        ddl_terminator_fix_result = None
-        if getattr(args, "fix_ddl_terminators", True):
-            from td_release_packager.fixers.ddl_terminator import fix_ddl_terminators
-
-            ddl_terminator_fix_result = fix_ddl_terminators(
-                resolve_inspect_root(args.project)
-            )
-            if ddl_terminator_fix_result.files_written:
-                print(
-                    f"\n  ✎ Auto-fixed missing DDL terminators in "
-                    f"{ddl_terminator_fix_result.files_written} file(s) "
-                    f"({ddl_terminator_fix_result.totals.get('statements_fixed', 0)} statement(s)) "
-                    f"— pass --no-fix-ddl-terminators to disable."
-                )
-
-        # -- Optional: auto-fix non-ASCII characters (issue #257) --
-        # Substitutes the deterministic suggestion-map characters
-        # (em-dash, bullet, arrow, box-drawing) with their documented
-        # ASCII equivalents. U+FFFD and other unmapped codepoints are
-        # left alone — the operator still gets a [non_ascii] finding
-        # for those.
-        non_ascii_fix_result = None
-        if getattr(args, "fix_non_ascii", False):
-            from td_release_packager.fixers.non_ascii import fix_non_ascii
-
-            non_ascii_fix_result = fix_non_ascii(args.project)
-            if non_ascii_fix_result.files_written:
-                print(
-                    f"\n  ✎ Auto-fixed non-ASCII characters in "
-                    f"{non_ascii_fix_result.files_written} file(s) "
-                    f"({non_ascii_fix_result.totals.get('chars_substituted', 0)} char(s)) "
-                    f"— re-run inspect to confirm."
-                )
-            else:
-                print(
-                    "\n  ✓ No deterministic non-ASCII characters found "
-                    "(--fix-non-ascii had nothing to fix)."
-                )
-
+        # NOTE: `ships inspect` no longer performs any payload writes.
+        # The auto-fixers for `ddl_terminator` and `non_ascii` moved to
+        # `ships fix` in #522 — see td_release_packager.fixers. `ships
+        # process` runs fix as a pipeline stage once #523 lands; for now,
+        # run `ships fix` before `ships inspect` if you want auto-fixes
+        # applied prior to the lint pass.
         # -- Load custom lint policy (issue #167) --
         # Fail closed in strict mode; warn-and-ignore a structurally broken
         # policy in developer mode (rule-level errors are skipped by the
@@ -3165,16 +3115,6 @@ def _run_inspect(args, stage, issue_codes) -> int:
             lint_errors=lint_result.errors,
             lint_warnings=lint_result.warnings,
             files_with_issues=lint_result.files_with_issues,
-            ddl_terminator_fix=(
-                ddl_terminator_fix_result.to_dict()
-                if ddl_terminator_fix_result is not None
-                else None
-            ),
-            non_ascii_fix=(
-                non_ascii_fix_result.to_dict()
-                if non_ascii_fix_result is not None
-                else None
-            ),
         )
 
         # The recorder auto-rolls up "error" issues into the run's
@@ -6074,8 +6014,6 @@ def _cmd_stage(args) -> int:
             skip_keywords=False,
             skip_commas=False,
             fix_grants=False,
-            fix_ddl_terminators=False,
-            fix_non_ascii=False,
             skip_grants=False,
             dcl_dir=None,
             verbose=getattr(args, "verbose", False),
@@ -6490,28 +6428,11 @@ def _build_parser():
         "known-safe fix is friction. Pass --no-fix-grants to opt out "
         "and just lint instead.",
     )
-    vl.add_argument(
-        "--fix-ddl-terminators",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Append the missing ';' to DDL statements that violate the "
-        "ddl_terminator rule. Rewrites payload files in place; preserves "
-        "trailing whitespace and comments. Skips generated paths "
-        "(releases/, .ships-work/, _rollback/). ON by default — inserting "
-        "a semi-colon at a DDL boundary is mechanically safe and Teradata "
-        "requires it for deploy. Pass --no-fix-ddl-terminators to opt out "
-        "and just lint instead.",
-    )
-    vl.add_argument(
-        "--fix-non-ascii",
-        action="store_true",
-        help="Replace deterministic non-ASCII characters with their "
-        "lossless ASCII equivalent: em-dash (U+2014) -> ' - ', bullet "
-        "(U+2022) -> '-', right arrow (U+2192) -> '->', box-drawing "
-        "(U+2500) -> '-'. Characters NOT in the suggestion map (notably "
-        "U+FFFD — original byte is lost) are deliberately left for "
-        "human review. Skips generated paths.",
-    )
+    # --fix-ddl-terminators and --fix-non-ascii moved to `ships fix` in #522.
+    # inspect is strictly read-only now — the fixers live in
+    # td_release_packager.fixers and are invoked via `ships fix --rules
+    # ddl_terminator,non_ascii` (or default-on selection for ddl_terminator).
+    # --fix-grants is still here pending #526.
     vl.add_argument(
         "--skip-grants",
         action="store_true",
