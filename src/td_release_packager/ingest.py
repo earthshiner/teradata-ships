@@ -1058,6 +1058,15 @@ def _ingest_directory_impl(
         except Exception as e:
             result.errors.append(f"Error processing {os.path.basename(src_path)}: {e}")
 
+    # #517 — heartbeat: the placement loop is often the longest silent
+    # stretch of a harvest run. Emit a summary line so the operator sees
+    # the process is transitioning to post-loop work rather than hung.
+    logger.info(
+        "Placement complete: %d atomic artefact(s) placed from %d source file(s)",
+        len(result.files_placed),
+        len(source_files),
+    )
+
     # -- Build token candidate report --
     if detect_tokens:
         result.token_candidates = _build_token_candidates(all_db_names)
@@ -1072,6 +1081,8 @@ def _ingest_directory_impl(
         obj_type in ("DATABASE", "USER") for _, _, obj_type in result.files_placed
     )
     if prereq_placed:
+        # #517 — heartbeat before the topological-order computation.
+        logger.info("Emitting pre-requisite deployment order...")
         prereq_dir = os.path.join(payload_base, "pre-requisites")
         if os.path.isdir(prereq_dir):
             prereq_result = _emit_prereq_order(prereq_dir)
@@ -1093,6 +1104,8 @@ def _ingest_directory_impl(
                     f"the source DDL to enable automatic ordering."
                 )
 
+    # #517 — heartbeat before the placement mirror + source map emission.
+    logger.info("Writing placement index and source map...")
     result.placement_index_dir, result.placement_index_files = (
         _emit_database_placement_mirror(project_dir, result.files_placed)
     )
