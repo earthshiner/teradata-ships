@@ -2836,17 +2836,21 @@ def ships_author_token_map(
 
 
 def _fix_registry() -> dict:
-    """Map inspect rule_code → registered tree-level fixer.
+    """Map inspect rule_code → registered tree-level fixer callable.
 
-    Built lazily so importing ships_mcp does not pull in
-    ``validate``'s heavyweight dependency graph at module load.
+    Thin adapter over the shared ``td_release_packager.fixers.FIX_REGISTRY``
+    introduced in #520. Returns ``{rule_id: apply_callable}`` so the
+    ``ships_fix`` and ``ships_list_fixable_rules`` tools can stay callable-
+    shaped internally; the FixerSpec metadata (default_on, write_scope)
+    is available via ``fixers.FIX_REGISTRY`` for callers that need it.
+
+    Built lazily so importing ships_mcp does not pull in the fixer
+    package (which in turn pulls in ``validate``'s heavyweight
+    dependency graph) at module load.
     """
-    from td_release_packager.validate import fix_ddl_terminators, fix_non_ascii
+    from td_release_packager.fixers import FIX_REGISTRY
 
-    return {
-        "ddl_terminator": fix_ddl_terminators,
-        "non_ascii": fix_non_ascii,
-    }
+    return {rule_id: spec.apply for rule_id, spec in FIX_REGISTRY.items()}
 
 
 @mcp.tool()
@@ -2973,12 +2977,17 @@ def ships_fix(project: str, rule_id: str, dry_run: bool = True) -> dict:
         fixer = registry[rule_id]
         result = fixer(source_dir=project, dry_run=dry_run)
         summary = result.to_dict()
+        # `files_changed` here means "how many files matched the fixer"
+        # regardless of whether they were written — under dry_run the
+        # matched files exist but files_written stays 0 (design decision
+        # #520). Read the raw match count so a dry-run preview still
+        # reports the size of the pending change.
         return {
             "success": True,
             "rule_id": rule_id,
             "dry_run": dry_run,
             "files_scanned": summary.get("files_scanned", 0),
-            "files_changed": summary.get("files_written", 0),
+            "files_changed": summary.get("files_changed_count", 0),
             "files": summary.get("files", []),
         }
     except Exception as e:

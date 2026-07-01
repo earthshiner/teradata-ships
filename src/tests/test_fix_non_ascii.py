@@ -6,11 +6,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from td_release_packager.validate import (
-    NonAsciiFixResult,
-    fix_non_ascii,
-    validate_directory,
-)
+from td_release_packager.fixers import FixResult
+from td_release_packager.fixers.non_ascii import fix_non_ascii
+from td_release_packager.validate import validate_directory
 
 
 # ---------------------------------------------------------------
@@ -146,10 +144,13 @@ class TestResultShape:
         )
         result = fix_non_ascii(str(project))
         assert result.files_written == 1
-        fix = result.files_fixed[0]
-        assert fix.substitutions["—"] == 2
-        assert fix.substitutions["•"] == 1
-        assert fix.total_chars_substituted == 3
+        fix = result.files_changed[0]
+        # Substitutions are stored under the Unicode codepoint key from
+        # FixResult day one so JSON output is stable across dry_run and
+        # apply paths. Char-key access moved to the details map.
+        assert fix.details["substitutions"]["U+2014"] == 2
+        assert fix.details["substitutions"]["U+2022"] == 1
+        assert fix.details["total_chars_substituted"] == 3
 
     def test_to_dict_uses_unicode_codepoint_keys(self, tmp_path):
         project = _setup_project(tmp_path)
@@ -159,8 +160,10 @@ class TestResultShape:
         )
         result = fix_non_ascii(str(project))
         d = result.to_dict()
+        assert d["rule_id"] == "non_ascii"
+        assert d["dry_run"] is False
         assert d["files_written"] == 1
-        assert d["chars_substituted"] == 1
+        assert d["totals"]["chars_substituted"] == 1
         assert d["files"][0]["substitutions"]["U+2014"] == 1
 
 
@@ -248,7 +251,8 @@ class TestDefensive:
         project = _setup_project(tmp_path)
         _write(project / "payload/database/DDL/views/v.viw", "")
         result = fix_non_ascii(str(project))
-        assert isinstance(result, NonAsciiFixResult)
+        assert isinstance(result, FixResult)
+        assert result.rule_id == "non_ascii"
         assert result.files_written == 0
 
     def test_no_source_files(self, tmp_path):
