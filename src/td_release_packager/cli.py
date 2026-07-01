@@ -4331,6 +4331,31 @@ def _cmd_process_impl(args):
                 f"{root_parent_injections} parentless prereq(s) updated"
             )
 
+        # ---- [F] Fix ---------------------------------------------
+        # Runs the registered auto-fixers so inspect sees a pre-fixed
+        # payload. Rule set is resolved from three layers (later wins):
+        #   1. `td_release_packager.fixers.default_on_rules()`
+        #   2. `packaging.fix.rules` in ships.yaml (adds opt-in fixers
+        #      project-wide) minus `packaging.fix.disable` (subtracts
+        #      default-on fixers a specific project doesn't want)
+        #   3. `--fix-rule <name>` on the CLI (repeatable, overrides
+        #      layer 2's `rules` list for this invocation)
+        # `--no-fix` skips the stage entirely.
+        if not getattr(args, "no_fix", False):
+            print("  [F] Fix …")
+            fix_dry_run = bool(getattr(args, "dry_run", False))
+            selected_rules = _resolve_process_fix_rules(project_dir, args)
+            with run.stage("fix") as stage:
+                _run_process_fix(project_dir, selected_rules, fix_dry_run, stage)
+            if stage.status == "error":
+                failed_stages.append("fix")
+                if strict:
+                    _print_process_aborted("fix", strict)
+                    sys.exit(1)
+            _maybe_pause("fix", stage.status, args)
+        else:
+            print("  [F] Fix … skipped (--no-fix)")
+
         # ---- [I] Inspect ----------------------------------------
         print("  [I] Inspect …")
         inspect_args = _build_process_namespace(
@@ -4487,6 +4512,158 @@ def _print_process_aborted(stage_name: str, strict: bool) -> None:
         f"\n  ✗ Process aborted after {stage_name} (--strict mode — "
         f"errors block continuation).",
         file=sys.stderr,
+    )
+
+
+def _resolve_process_fix_rules(project_dir: str, args) -> list[str]:
+    """Resolve the fix stage's rule set from defaults + ships.yaml + CLI (#523).
+
+    Precedence (later wins):
+
+    1. ``td_release_packager.fixers.default_on_rules()`` — every fixer
+       whose :class:`FixerSpec` declares ``default_on=True``.
+    2. ``packaging.fix.rules`` in ``ships.yaml`` — adds opt-in fixers
+       project-wide. ``packaging.fix.disable`` subtracts default-on
+       fixers a specific project doesn't want (e.g. a project that
+       authors grants by hand can put ``disable: [grants_derivation]``).
+    3. ``--fix-rule <name>`` on the CLI (repeatable) — overrides layer 2's
+       ``rules`` list for this invocation. Additive against defaults; if
+       the operator wants a subtract, they use ``--no-fix`` and then run
+       ``ships fix --rules`` explicitly.
+
+    Unknown rule ids are dropped with a warning rather than raising —
+    the fix stage prefers to run the known subset than to abort the
+    whole pipeline for a typo in ships.yaml.
+    """
+    from td_release_packager.fixers import FIX_REGISTRY, default_on_rules
+
+    selected = set(default_on_rules())
+
+    # Layer 2 — ships.yaml packaging.fix.
+    ships_yaml = _read_packaging_fix_block(project_dir)
+    if ships_yaml is not None:
+        for rule_id in ships_yaml.get("rules", []) or []:
+            if rule_id in FIX_REGISTRY:
+                selected.add(rule_id)
+            else:
+                print(
+                    f"  ⚠  ships.yaml packaging.fix.rules references unknown "
+                    f"rule {rule_id!r} — skipping.",
+                )
+        for rule_id in ships_yaml.get("disable", []) or []:
+            selected.discard(rule_id)
+
+    # Layer 3 — --fix-rule on the CLI.
+    cli_rules = getattr(args, "fix_rules", None) or []
+    for rule_id in cli_rules:
+        if rule_id in FIX_REGISTRY:
+            selected.add(rule_id)
+        else:
+            print(
+                f"  ⚠  --fix-rule {rule_id!r} is not registered — skipping.",
+            )
+
+    return sorted(selected)
+
+
+def _read_packaging_fix_block(project_dir: str) -> dict | None:
+    """Return the ``packaging.fix`` sub-block from ``<project>/ships.yaml``.
+
+    Silently returns None when ships.yaml is missing, malformed, or
+    lacks the block — the fix stage falls back to defaults.
+    """
+    try:
+        import os
+
+        import yaml
+    except ImportError:
+        return None
+
+    path = os.path.join(project_dir, "ships.yaml")
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = yaml.safe_load(fh) or {}
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    packaging = data.get("packaging")
+    if not isinstance(packaging, dict):
+        return None
+    fix_block = packaging.get("fix")
+    return fix_block if isinstance(fix_block, dict) else None
+
+
+def _run_process_fix(
+    project_dir: str, selected_rules: list[str], dry_run: bool, stage
+) -> None:
+    """Run the process pipeline's fix stage against ``project_dir``.
+
+    Dispatches each selected rule's fixer, aggregates the results, prints
+    a compact per-rule summary, and records the aggregate to the stage
+    recorder for ``ships.decisions.json``. A fixer that raises produces
+    an error issue on the stage (which the caller checks); per-file
+    errors surfaced inside :class:`FixResult.errors` are recorded as
+    warnings and do not fail the stage.
+    """
+    from td_release_packager.fixers import FIX_REGISTRY
+
+    stage.set_config_resolved("project", project_dir, "layer-5", "cli")
+    stage.set_config_resolved("dry_run", dry_run, "layer-5", "cli")
+    stage.set_config_resolved("selected_rules", list(selected_rules), "layer-5", "cli")
+
+    if not selected_rules:
+        print("    (no fixers selected — packaging.fix.disable emptied the set)")
+        stage.set_outputs(files_scanned=0, files_changed=0, errors=0)
+        return
+
+    total_scanned = 0
+    total_changed = 0
+    total_errors = 0
+    per_rule_summaries: list[dict] = []
+
+    for rule_id in selected_rules:
+        spec = FIX_REGISTRY[rule_id]
+        try:
+            result = spec.apply(project_dir, dry_run)
+        except Exception as exc:
+            stage.add_issue(
+                "error",
+                "PROCESS_FIX_STAGE_ERROR",
+                f"fixer {rule_id!r} raised: {exc}",
+            )
+            print(f"    ✗  {rule_id}: {exc}")
+            return
+
+        per_rule_summaries.append(result.to_dict())
+        total_scanned += result.files_scanned
+        total_changed += len(result.files_changed)
+        total_errors += len(result.errors)
+
+        if result.files_changed:
+            verb = "would rewrite" if dry_run else "rewrote"
+            print(f"    ✓  {rule_id}: {verb} {len(result.files_changed)} file(s)")
+        elif result.errors:
+            print(
+                f"    ⚠  {rule_id}: {len(result.errors)} error(s) — see decisions.json"
+            )
+        else:
+            print(f"    ·  {rule_id}: no changes needed")
+
+        for err in result.errors:
+            stage.add_issue(
+                "warning",
+                "PROCESS_FIX_FILE_ERROR",
+                f"{rule_id}: {err.get('file', '?')} — {err.get('error', '?')}",
+            )
+
+    stage.set_outputs(
+        files_scanned=total_scanned,
+        files_changed=total_changed,
+        errors=total_errors,
+        per_rule=per_rule_summaries,
     )
 
 
@@ -7203,6 +7380,25 @@ def _build_parser():
         default=False,
         help="Skip the generate stage (for projects that do not use "
         "the SHIPS view-layer generator).",
+    )
+    pr.add_argument(
+        "--no-fix",
+        action="store_true",
+        dest="no_fix",
+        default=False,
+        help="Skip the fix stage entirely — inspect sees the pre-fix "
+        "payload. Restores the pre-#523 pipeline shape for anyone who "
+        "wants pure verification.",
+    )
+    pr.add_argument(
+        "--fix-rule",
+        action="append",
+        dest="fix_rules",
+        default=None,
+        metavar="RULE",
+        help="Add an opt-in fixer to the fix stage's default-on set for "
+        "this invocation. Repeatable — e.g. --fix-rule non_ascii "
+        "--fix-rule other_rule. Overrides packaging.fix.rules in ships.yaml.",
     )
     pr.add_argument(
         "--inspect-config",

@@ -56,6 +56,7 @@ STAGES: Tuple[str, ...] = (
     "scaffold",
     "harvest",
     "generate",
+    "fix",
     "inspect",
     "analyse",
     "package",
@@ -367,6 +368,31 @@ def validate(data: Dict[str, Any]) -> List[ValidationError]:
                         f"{default_env!r} is not one of environments {environments}",
                     )
                 )
+
+            # ``fix`` sub-block (#523) — per-project defaults for the
+            # `ships process` fix stage. Adds opt-in fixers to the
+            # default-on set, or subtracts default-on fixers that a
+            # particular project doesn't want (e.g. a project that
+            # authors grants by hand can put ``disable: [grants_derivation]``
+            # here).
+            fix_block = packaging_block.get("fix")
+            if fix_block is not None:
+                if not isinstance(fix_block, dict):
+                    errors.append(ValidationError("packaging.fix", "must be a mapping"))
+                else:
+                    for list_key in ("rules", "disable"):
+                        entries = fix_block.get(list_key)
+                        if entries is None:
+                            continue
+                        if not isinstance(entries, list) or not all(
+                            isinstance(e, str) and e.strip() for e in entries
+                        ):
+                            errors.append(
+                                ValidationError(
+                                    f"packaging.fix.{list_key}",
+                                    "must be a list of non-empty strings",
+                                )
+                            )
 
     # -- stages block — optional; each entry must be a known stage with
     #    valid strict/on_error values --
