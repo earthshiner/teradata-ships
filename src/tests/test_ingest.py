@@ -1909,7 +1909,13 @@ INSERT INTO x.log_two (id) VALUES (2);
     def test_ingest_mixed_dcl_and_actions_kept_as_ordered_sql(
         self, tmp_path, tmp_project
     ):
-        """GRANT/action/REVOKE choreography must stay in source order."""
+        """GRANT/action/REVOKE choreography must stay in source order
+        inside the bundled ``.ordered.osql``. Post-#511 the GRANT/REVOKE
+        statements are ALSO extracted as standalone DCL inventory
+        artefacts so catalogue / dependency-graph / grant-discipline
+        tooling can see them without parsing the bundle. Teradata
+        GRANT/REVOKE is idempotent so the deployer running both is benign.
+        """
         src = tmp_path / "source"
         src.mkdir()
         (src / "temporary_access.sql").write_text(
@@ -1932,8 +1938,16 @@ INSERT INTO x.log_two (id) VALUES (2);
         body = ordered.read_text(encoding="utf-8")
         assert body.index("GRANT SELECT") < body.index("INSERT INTO")
         assert body.index("INSERT INTO") < body.index("REVOKE SELECT")
+        # #511 — DCL inventory artefacts ARE emitted now. Each GRANT /
+        # REVOKE in the source produces a standalone .dcl alongside the
+        # bundle.
         dcl_dir = tmp_project / "payload" / "database" / "DCL"
-        assert not list(dcl_dir.rglob("*.dcl"))
+        dcl_files = list(dcl_dir.rglob("*.dcl"))
+        assert dcl_files, "expected grant inventory .dcl files"
+        dcl_blob = "\n".join(p.read_text(encoding="utf-8") for p in dcl_files)
+        assert "GRANT SELECT" in dcl_blob
+        assert "REVOKE SELECT" in dcl_blob
+        # The bundle is still recorded as ORDERED_SQL in result.files_placed.
         assert any(row[2] == "ORDERED_SQL" for row in result.files_placed)
 
     def test_ingest_clean_rmtrees_entire_payload_tree(

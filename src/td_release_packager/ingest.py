@@ -1408,6 +1408,119 @@ def _place_ordered_sql(
         )
     )
 
+    # #511 — also extract GRANT/REVOKE chunks as standalone inventory
+    # artefacts in DCL/inter_db/. The grants STAY inside the
+    # .ordered.osql for execution semantics (the ordered script needs
+    # them for its session-scoped work, e.g. a CREATE VOLATILE TABLE
+    # SELECT … FROM other_db needs the GRANT to read from other_db).
+    # Teradata GRANT/REVOKE is idempotent, so the deployer running
+    # both the .ordered.osql and the inventory .dcl is benign. The
+    # extraction gives catalogue / dependency-graph / grant-discipline
+    # tooling visibility into grants that would otherwise hide inside
+    # the bundle.
+    _place_grants_as_inventory(
+        raw_content=raw_content,
+        src_path=src_path,
+        source_dir=source_dir,
+        project_dir=project_dir,
+        payload_base=payload_base,
+        apply_tokens=apply_tokens,
+        kind_index=kind_index,
+        result=result,
+        prefix_mode_literals=prefix_mode_literals,
+    )
+
+
+def _place_grants_as_inventory(
+    *,
+    raw_content: str,
+    src_path: str,
+    source_dir: str,
+    project_dir: str,
+    payload_base: str,
+    apply_tokens: Optional[Dict[str, str]],
+    kind_index: Optional[Dict[str, str]],
+    result: IngestResult,
+    prefix_mode_literals: Optional[Set[str]] = None,
+) -> None:
+    """Extract GRANT/REVOKE chunks from a file routed through
+    :func:`_place_ordered_sql` and place each as a standalone DCL
+    inventory artefact (#511).
+
+    The grants remain inside the bundled ``.ordered.osql`` for execution;
+    these duplicates exist purely so the catalogue, dependency graph,
+    and grant-discipline lint can see them without parsing the bundle.
+    """
+    from td_release_packager.classifier import base_type, classify
+
+    statements = _split_multi_statement(raw_content, src_path)
+    if len(statements) <= 1:
+        # Single statement → not a multi-chunk file. Nothing to extract.
+        return
+
+    for chunk in statements:
+        chunk_clean = _strip_comments(chunk)
+        cls = classify(path=src_path, content=chunk_clean)
+        obj_type = base_type(cls.type)
+        if obj_type not in ("GRANT", "REVOKE"):
+            continue
+
+        subdir = _TYPE_TO_SUBDIR.get(obj_type, "DCL/inter_db")
+        ext = _TYPE_TO_EXT.get(obj_type, ".dcl")
+
+        db_name, obj_name = _extract_qualified_name(chunk_clean)
+        if obj_name:
+            identity = f"{db_name}.{obj_name}" if db_name else obj_name
+            try:
+                dest_name = derive_filename_from_text(identity, ext)
+            except FilenameDerivationError:
+                # Names that can't form an eponymous filename get the
+                # source-basename fallback — same convention the main
+                # placement loop uses.
+                base = os.path.splitext(os.path.basename(src_path))[0]
+                dest_name = f"{base}{ext}"
+        else:
+            base = os.path.splitext(os.path.basename(src_path))[0]
+            dest_name = f"{base}{ext}"
+
+        content = chunk.strip()
+        if apply_tokens:
+            content = _apply_kind_aware_tokens(
+                content,
+                "T",
+                apply_tokens,
+                kind_index or {},
+                prefix_mode_literals=prefix_mode_literals,
+            )
+
+        dest_dir = os.path.join(payload_base, subdir)
+        os.makedirs(dest_dir, exist_ok=True)
+        gitkeep = os.path.join(dest_dir, ".gitkeep")
+        if os.path.exists(gitkeep):
+            try:
+                os.remove(gitkeep)
+            except OSError:
+                pass
+
+        dest_path = os.path.join(dest_dir, dest_name)
+        # GRANT/REVOKE aggregate by appending — multiple grants per
+        # grantee land in one eponymous file, same as the main loop's
+        # ``aggregating_types`` behaviour.
+        mode = "a" if os.path.exists(dest_path) else "w"
+        with open(dest_path, mode, encoding="utf-8") as f:
+            if mode == "a":
+                f.write("\n")
+            f.write(content)
+            f.write("\n")
+
+        result.files_placed.append(
+            (
+                os.path.relpath(src_path, source_dir),
+                os.path.relpath(dest_path, project_dir),
+                obj_type,
+            )
+        )
+
 
 def _clean_payload_tree(payload_base: str) -> int:
     """
