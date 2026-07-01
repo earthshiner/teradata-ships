@@ -153,8 +153,10 @@ Coding Discipline rules registered there.
 Useful add-ons:
 
 - `--strict` — promote warnings to errors. Use in CI gates.
-- `--fix-grants`, `--fix-ddl-terminators`, `--fix-non-ascii` —
-  auto-repair the safe categories in place.
+- `--fix-grants` — auto-repair missing `.grt` entries in place.
+- `ships fix` (separate verb) — auto-repair DDL terminators, non-ASCII
+  characters, and every other rule in the fix registry. Run it before
+  `inspect` (or wait for the process pipeline stage in #523).
 
 ## 4. Analyse — dependency waves
 

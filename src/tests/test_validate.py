@@ -2769,10 +2769,14 @@ class TestResolveInspectRoot:
 
 
 class TestNonAsciiAutoFixHint:
-    """Non-ASCII findings point the operator at ``--fix-non-ascii``."""
+    """Non-ASCII findings point the operator at ``ships fix --rules non_ascii``.
 
-    def test_em_dash_finding_mentions_auto_fix_flag(self, tmp_path):
-        """An em-dash is in the auto-fix table — message must advertise the flag."""
+    Message updated in #522 when the ``--fix-non-ascii`` flag on ``ships
+    inspect`` was removed — the fixer moved to ``ships fix``.
+    """
+
+    def test_em_dash_finding_mentions_auto_fix_command(self, tmp_path):
+        """An em-dash is in the auto-fix table — message must advertise the command."""
         f = tmp_path / "x.viw"
         f.write_text(
             "REPLACE VIEW x.v AS SELECT 1 AS y; -- description — note\n",
@@ -2781,13 +2785,13 @@ class TestNonAsciiAutoFixHint:
         result = validate_directory(str(tmp_path))
         nas = [i for i in result.issues if i.rule == "non_ascii"]
         assert nas, "Expected a non_ascii finding for the em-dash"
-        assert any("--fix-non-ascii" in i.message for i in nas)
+        assert any("ships fix --rules non_ascii" in i.message for i in nas)
 
     def test_unmappable_char_does_not_advertise_auto_fix(self, tmp_path):
-        """A char without an auto-fix entry must NOT advertise the flag.
+        """A char without an auto-fix entry must NOT advertise the command.
 
-        Avoids the false promise of "run --fix-non-ascii" when the
-        fix flag won't actually substitute this character.
+        Avoids the false promise of "run ships fix --rules non_ascii" when
+        the fixer won't actually substitute this character.
         """
         # U+FFFD REPLACEMENT CHARACTER — explicitly excluded from the
         # auto-fix table (the original byte is gone, no safe substitute).
@@ -2799,4 +2803,4 @@ class TestNonAsciiAutoFixHint:
         result = validate_directory(str(tmp_path))
         nas = [i for i in result.issues if i.rule == "non_ascii"]
         assert nas, "Expected a non_ascii finding for U+FFFD"
-        assert not any("--fix-non-ascii" in i.message for i in nas)
+        assert not any("ships fix" in i.message for i in nas)

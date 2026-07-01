@@ -183,7 +183,7 @@ _RULES: dict[str, dict[str, object]] = {
         "automation_level": "auto",
         "recommended_action": (
             "Replace non-ASCII characters with ASCII equivalents; "
-            "``ships inspect --fix-non-ascii`` does this automatically."
+            "``ships fix --rules non_ascii`` does this automatically."
         ),
         "risk": "low",
         "requires_human_review": False,
@@ -279,8 +279,8 @@ _RULES: dict[str, dict[str, object]] = {
         "automation_level": "auto",
         "recommended_action": (
             "Append a semicolon to the final statement; "
-            "``ships inspect --fix-ddl-terminators`` does this "
-            "automatically."
+            "``ships fix`` does this automatically (ddl_terminator is "
+            "default-on)."
         ),
         "risk": "low",
         "requires_human_review": False,
