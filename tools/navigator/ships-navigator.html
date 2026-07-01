@@ -2158,7 +2158,7 @@ function renderInspectPanel() {
   fixable.appendChild(fxh);
   const fxp = document.createElement("p");
   fxp.style.fontSize = "13px"; fxp.style.margin = "4px 0";
-  fxp.innerHTML = "Some rules have an automated fix. Run <code>ships fix</code> to apply the default-on set (<code>ddl_terminator</code> — appends missing semi-colons), <code>ships fix --rules non_ascii</code> to opt into the em-dash / arrow / bullet substitution, or <code>ships fix --all</code> for the whole registry. <code>ships inspect --fix-grants</code> still generates missing <code>.grt</code> entries in place; that migration is tracked separately.";
+  fxp.innerHTML = "Some rules have an automated fix. Run <code>ships fix</code> to apply the default-on set (<code>ddl_terminator</code> appends missing semi-colons; <code>grants_derivation</code> generates missing <code>.grt</code> entries from DDL intent), <code>ships fix --rules non_ascii</code> to opt into the em-dash / arrow / bullet substitution, or <code>ships fix --all</code> for the whole registry.";
   fixable.appendChild(fxp);
   panel.appendChild(fixable);
 }

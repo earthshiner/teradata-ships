@@ -460,6 +460,28 @@ _RULES: dict[str, dict[str, object]] = {
         "risk": "medium",
         "requires_human_review": True,
     },
+    "grants_derivation": {
+        "description": (
+            "Repair grant drift by generating or appending .grt / .dcl "
+            "files under payload/database/DCL/ from the grant set the "
+            "payload's DDL implies. Additive: missing grants are added, "
+            "extras and orphans are left for human review. Not a lint "
+            "finding — always default_severity OFF so it never appears "
+            "in inspect output; ``ships fix`` (or ``ships fix --rules "
+            "grants_derivation``) is the only invocation surface."
+        ),
+        "default_severity": "OFF",
+        "safe_fix_available": True,
+        "automation_level": "auto",
+        "recommended_action": (
+            "Run ``ships fix`` to derive the missing grants from DDL "
+            "intent. The derived grants live in ``payload/database/DCL/`` "
+            "and are validated by the ``warn_extra_grants`` / "
+            "``review_unmapped_grants`` rules the next time inspect runs."
+        ),
+        "risk": "low",
+        "requires_human_review": False,
+    },
     "warn_extra_grants": {
         "description": (
             "DCL contains a grant that the inferred grant set does not require. "
