@@ -33,6 +33,7 @@ from td_release_packager.fixers._result import FixResult, FixResultFile
 # are unique) but sorting alphabetically keeps diffs stable when new
 # fixers land.
 from td_release_packager.fixers import ddl_terminator  # noqa: E402, F401
+from td_release_packager.fixers import extension  # noqa: E402, F401
 from td_release_packager.fixers import grants  # noqa: E402, F401
 from td_release_packager.fixers import non_ascii  # noqa: E402, F401
 
