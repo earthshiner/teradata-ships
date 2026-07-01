@@ -6,7 +6,8 @@ Standardised Teradata DDL deployment methodology.
 
     Scaffold:  python -m td_release_packager scaffold --name MyProject
     Harvest:   python -m td_release_packager harvest --source /raw/ --project .
-    Inspect:   python -m td_release_packager inspect --source . [--fix-grants]
+    Fix:       python -m td_release_packager fix --project .
+    Inspect:   python -m td_release_packager inspect --source .
     Package:   python -m td_release_packager package --source . --env DEV ...
     Ship:      python deploy.py --host myserver --user dbc
 """

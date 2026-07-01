@@ -357,12 +357,14 @@ python -m td_release_packager harvest `
   --token-map C:\Projects\OMR\config\token_map.conf
 ```
 
-6. Inspect, generate missing grant files if desired, and analyse dependencies.
+6. Generate missing grant files (via `ships fix`), inspect, and analyse dependencies.
 
 ```powershell
+python -m td_release_packager fix `
+  --project C:\Projects\OMR
+
 python -m td_release_packager inspect `
-  --project C:\Projects\OMR `
-  --fix-grants
+  --project C:\Projects\OMR
 
 python -m td_release_packager analyze `
   --project C:\Projects\OMR `
@@ -374,7 +376,7 @@ Arguments:
 
 | Argument | Explanation |
 |---|---|
-| `--fix-grants` | Writes inferred `.grt` files under `payload\database\DCL\inter_db\`. |
+| `ships fix` (default-on) | Runs the default-on subset of the fix registry — includes `grants_derivation` (writes inferred `.grt` files under `payload\database\DCL\inter_db\`) and `ddl_terminator`. Pass `--dry-run` for a preview. |
 | `--graph` | Directory for dependency graph exports. |
 | `--formats` | Graph export formats. |
 

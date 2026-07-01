@@ -359,8 +359,8 @@ SIGNAL_EXPLANATIONS: dict[str, tuple[str, str, str]] = {
         "always a hard error. Drifted entries with only extra manual "
         "privileges have configurable severity, and external grants default "
         "to INFO because they are commonly legitimate.",
-        "Missing inferred grants: run 'ships inspect --fix-grants' to append "
-        "the required GRANT statements to the correct .dcl file. "
+        "Missing inferred grants: run 'ships fix' (default-on grants_derivation) "
+        "to append the required GRANT statements to the correct .dcl file. "
         "Extra manual privileges (warn_extra_grants): set to WARNING or OFF in "
         "inspect.conf if intentional grants beyond what SHIPS infers are expected. "
         "External grants (warn_external_grants): default INFO — common when a "
