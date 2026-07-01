@@ -88,8 +88,8 @@ questions:
 
   # --- Q4 prefix ---
   - id: tokens.prefix
-    label: "Q4. Product prefix"
-    hint: "Bare prefix without trailing underscore. e.g. <code>CustomerDNA</code>."
+    label: "Q4. Database name prefix"
+    hint: "Bare prefix without trailing underscore. Often coincides with the data product name, but need not — e.g. <code>CustomerDNA</code>."
     kind: text
     show:
       all:

@@ -47,7 +47,7 @@ and a lockstep test (`src/tests/test_decision_tree.py::TestLockstep`) fails the
 build if the YAML and the inline copy drift. Edit the YAML and mirror the change
 in the HTML in the same commit.
 
-The questions encoded here, in order:
+The questions encoded here, in order. In the HTML wizard they are visually grouped into three outlined boxes — **Source** (Q1–Q5), **Processing** (Q6–Q10 + external parents), **Output** (Q11–Q13 + strict + bash flavour) — so new users can see at a glance which questions describe the payload, which drive what SHIPS does with it, and which shape the built package. The Mode selector sits ungrouped above the first box because it's a display preference, not part of the payload.
 
 | # | Question | Notes |
 |---|----------|-------|
@@ -55,7 +55,7 @@ The questions encoded here, in order:
 | Q1 | Source location | `github` (owner/repo + ref) or `filesystem` (path) |
 | Q2 | Already tokenised? | `yes` skips Q3/Q4 and triggers `bootstrap-env-config` for each env |
 | Q3 | Token shape | `prefix` (one `DB_PREFIX`) or `per_database` (one binding per db) |
-| Q4 | Product prefix | e.g. `CustomerDNA` |
+| Q4 | Database name prefix | e.g. `CustomerDNA` — often the data product name, but need not be |
 | Q5 | Atomic & eponymous? | Reassures on `no` / `unsure` that SHIPS auto-splits multi-object files (incl. procedures/macros/triggers/functions) into atomic, eponymous files |
 | Q6 | Generate view layer? | Maps to `ships generate` (or `--skip-generate` on Quick) — locking/access/business views |
 | Q7 | Dependency analysis (waves)? | Maps to `ships analyse` — emits `_waves.txt` |
