@@ -623,6 +623,15 @@ def _stage_recording(project_dir: str, stage_name: str):
             # exited and RunRecorder.__exit__ has already finalised it.
             _propagate_stage_to_otel_span(stage, otel_span)
 
+            # #517 — heartbeat: these four refresh calls (project index,
+            # actions, policy, pipeline report) can add several seconds on
+            # large projects and are the last silent stretch of a harvest
+            # run. Announce them as a group so the operator sees the
+            # process is still moving rather than hung.
+            logger.info(
+                "Refreshing project index, actions, policy, and pipeline report..."
+            )
+
             # Refresh ships.project.json and ships.project_actions.json
             # after every stage so an agent opening the project sees the
             # latest lifecycle state, recommended next actions, and
