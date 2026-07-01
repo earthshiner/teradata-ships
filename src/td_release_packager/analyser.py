@@ -1428,7 +1428,7 @@ def format_summary(result: AnalysisResult) -> str:
 
     # Cycles
     if result.cycles:
-        lines.append(f"  ⚠ Cycles detected:   {len(result.cycles)}")
+        lines.append(f"  ⚠  Cycles detected:   {len(result.cycles)}")
     else:
         lines.append("  Cycles:              None")
 
@@ -1466,7 +1466,7 @@ def format_summary(result: AnalysisResult) -> str:
     # Cycles
     if result.cycles:
         lines.append("")
-        lines.append("  ⚠ Circular dependencies:")
+        lines.append("  ⚠  Circular dependencies:")
         for cycle in result.cycles:
             lines.append(f"    {' → '.join(cycle)}")
 

@@ -2230,7 +2230,7 @@ def _dispatch_deploy(
                         f"{_drift_result.diff_text}"
                     )
                     if on_drift == "abort":
-                        logger.error("  ⚠ DRIFT ABORT: %s", _drift_msg)
+                        logger.error("  ⚠  DRIFT ABORT: %s", _drift_msg)
                         _fail_result = ObjectDeployResult(
                             database_name=parsed.database_name,
                             object_name=parsed.object_name,
@@ -2248,7 +2248,7 @@ def _dispatch_deploy(
                         )
                         return _fail_result
                     elif on_drift == "skip":
-                        logger.warning("  ⚠ DRIFT SKIP: %s", _drift_msg)
+                        logger.warning("  ⚠  DRIFT SKIP: %s", _drift_msg)
                         _skip_result = ObjectDeployResult(
                             database_name=parsed.database_name,
                             object_name=parsed.object_name,
@@ -2266,7 +2266,7 @@ def _dispatch_deploy(
                         )
                         return _skip_result
                     else:  # continue
-                        logger.warning("  ⚠ DRIFT CONTINUE: %s", _drift_msg)
+                        logger.warning("  ⚠  DRIFT CONTINUE: %s", _drift_msg)
 
         if parsed.strategy == DeployStrategy.IDEMPOTENT_DEPLOY:
             package_dir = (
@@ -3225,7 +3225,7 @@ def _rollback_single_dry_run(
                     _rb_text = _f.read()
                 if _is_c_external(_rb_text):
                     base_msg += (
-                        " ⚠ C external routine — DDL will be restored but the "
+                        " ⚠  C external routine — DDL will be restored but the "
                         "compiled binary may not match. Consider 'ships rollback "
                         "--to-tag <prev-tag>' for a complete binary rollback."
                     )
@@ -3324,7 +3324,7 @@ def _rollback_single(
                 f"the previous JAR version, or reinstall manually from the previous "
                 f"package archive."
             )
-            logger.warning("  ⚠ %s", _jar_msg)
+            logger.warning("  ⚠  %s", _jar_msg)
             manifest.update_state(qualified_name, DeployState.SKIPPED, error=_jar_msg)
             return ObjectDeployResult(
                 database_name=db,
@@ -3411,7 +3411,7 @@ def _rollback_single(
                     f"definition. Verify the binary or use 'ships rollback --to-tag "
                     f"<prev-tag>' to restore the correct version."
                 )
-                logger.warning("  ⚠ %s", _c_warning)
+                logger.warning("  ⚠  %s", _c_warning)
 
             return ObjectDeployResult(
                 database_name=db,
@@ -3421,7 +3421,7 @@ def _rollback_single(
                 message=(
                     f"Rolled back {qualified_name} — restored "
                     f"from {os.path.basename(rollback_file)}."
-                    + (f" ⚠ {_c_warning}" if _c_warning else "")
+                    + (f" ⚠  {_c_warning}" if _c_warning else "")
                 ),
                 warnings=[_c_warning] if _c_warning else [],
             )

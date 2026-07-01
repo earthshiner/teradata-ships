@@ -1952,7 +1952,7 @@ def _run_ingest(args, stage, issue_codes, apply_tokens) -> int:
     if result.unclassified_files:
         print("\n  Unclassified files (manual review needed):")
         for f in result.unclassified_files:
-            print(f"    ⚠ {f}")
+            print(f"    ⚠  {f}")
 
     # -- Generate token map if requested --
     env_prefix = getattr(args, "env_prefix", None)
@@ -2012,14 +2012,14 @@ def _run_ingest(args, stage, issue_codes, apply_tokens) -> int:
         # warnings (issue #409).
         if legacy_migration_rules:
             print(
-                "\n  ⚠ config/tokenise.conf was applied, but the names above "
+                "\n  ⚠  config/tokenise.conf was applied, but the names above "
                 "matched no rule —\n"
                 "    check its prefix/pattern. They will surface as "
                 "'hardcoded_name' warnings in inspect."
             )
         else:
             print(
-                "\n  ⚠ No tokenisation ran — the names above are still literal "
+                "\n  ⚠  No tokenisation ran — the names above are still literal "
                 "and will surface\n"
                 "    as 'hardcoded_name' warnings in inspect. To tokenise them, "
                 "do one of:\n"
@@ -2036,12 +2036,12 @@ def _run_ingest(args, stage, issue_codes, apply_tokens) -> int:
     if result.warnings:
         print("\n  Warnings:")
         for w in result.warnings:
-            print(f"    ⚠ {w}")
+            print(f"    ⚠  {w}")
 
     if result.classification_warnings:
         print("\n  Classification warnings:")
         for w in result.classification_warnings:
-            print(f"    ⚠ {w}")
+            print(f"    ⚠  {w}")
 
     if result.subtypes:
         from collections import Counter
@@ -2561,7 +2561,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
                     location=f"config/{POLICY_FILENAME}",
                 )
                 return 1
-            print(f"\n  ⚠ Custom lint policy ignored — {exc}", file=sys.stderr)
+            print(f"\n  ⚠  Custom lint policy ignored — {exc}", file=sys.stderr)
             stage.add_issue(
                 "warning",
                 issue_codes.INSPECT_LINT_VIOLATION,
@@ -2675,7 +2675,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
             for file, issues in sorted(by_file.items()):
                 err_count = sum(1 for i in issues if i.severity == "ERROR")
                 file_icon = "✗" if err_count > 0 else "⚠"
-                print(f"\n    {file_icon} {file}")
+                print(f"\n    {file_icon}  {file}")
                 for issue in issues:
                     if issue.severity == "ERROR":
                         sev = "✗"
@@ -2683,7 +2683,7 @@ def _run_inspect(args, stage, issue_codes) -> int:
                         sev = "⚠"
                     else:
                         sev = "ℹ"
-                    print(f"      {sev} [{issue.rule}] {issue.message}")
+                    print(f"      {sev}  [{issue.rule}] {issue.message}")
 
             # Record one ships.decisions.json issue per lint finding. The
             # rule name is carried in the message so explain can
@@ -3290,7 +3290,7 @@ def _cmd_build_impl(args):
             sys.exit(1)
         elif not declared_env:
             print(
-                f"  ⚠ No SHIPS_ENV declared in {os.path.basename(args.env_config)} "
+                f"  ⚠  No SHIPS_ENV declared in {os.path.basename(args.env_config)} "
                 f"— environment cross-check skipped.",
             )
 
@@ -3605,7 +3605,7 @@ def _run_build(args, stage, issue_codes) -> int:
     if manifest.warnings:
         print("\n  Warnings:")
         for w in manifest.warnings:
-            print(f"    ⚠ {w}")
+            print(f"    ⚠  {w}")
 
     print()
     return 0
@@ -4803,7 +4803,7 @@ def _cmd_verify(args):
 
         # Warnings are informational — show with ⚠ but do not block deployment
         for i in warnings:
-            print(f"    ⚠ {i.get('code', '?')}: {i.get('message', '')}")
+            print(f"    ⚠  {i.get('code', '?')}: {i.get('message', '')}")
         if warnings and not errors:
             print(
                 f"    ↳ {len(warnings)} warning(s) above are informational "
@@ -4960,7 +4960,7 @@ def _run_generate(args, stage, issue_codes) -> int:
     if result.warnings:
         print("\n  Warnings:")
         for w in result.warnings:
-            print(f"    ⚠ {w}")
+            print(f"    ⚠  {w}")
 
     if result.errors:
         print("\n  Errors:")
@@ -5066,7 +5066,7 @@ def _cmd_scan(args):
         env_configs = sorted(_glob.glob(pattern))
         if not env_configs:
             print(
-                f"  ⚠ No *.conf files found in {os.path.join(source_dir, 'config', 'env')}"
+                f"  ⚠  No *.conf files found in {os.path.join(source_dir, 'config', 'env')}"
             )
     elif getattr(args, "env_config", None):
         env_configs = [args.env_config]
@@ -5275,7 +5275,7 @@ def _scan_print_text(
                         )
                 if orphans:
                     print(
-                        f"\n  ⚠ {label} ORPHAN tokens (defined but never referenced):"
+                        f"\n  ⚠  {label} ORPHAN tokens (defined but never referenced):"
                     )
                     for w in orphans:
                         print(f"      {w}")
@@ -5392,7 +5392,9 @@ def _run_analyze(args, stage, issue_codes) -> int:
         print(f"    {len(result.waves)} waves, {len(result.objects)} objects")
 
     if result.cycles:
-        print(f"\n  ⚠ {len(result.cycles)} cycle(s) detected — review before deploying")
+        print(
+            f"\n  ⚠  {len(result.cycles)} cycle(s) detected — review before deploying"
+        )
 
     # -- Export graph (if requested) -------------------------------
     if args.graph:
@@ -5934,7 +5936,7 @@ def _cmd_fix_package_integrity(args) -> int:
                 with open(archive, "rb") as fh:
                     live = hashlib.sha256(fh.read()).hexdigest()
             except OSError as exc:
-                rows.append(f"  ⚠ {group}/{filename}: cannot read — {exc}")
+                rows.append(f"  ⚠  {group}/{filename}: cannot read — {exc}")
                 skipped += 1
                 continue
 
