@@ -271,7 +271,10 @@ def _timeline_tab(run: dict, source_map: Optional[dict] = None) -> str:
             f"</summary>"
             f"{metrics_html}"
             f'<div style="background:#F8F9FA;border-top:1px solid #DEE2E6;'
-            f'padding:12px 16px;font-size:13px">{common.render_issue_list(issues, source_map=source_map, stage_status=status)}</div>'
+            f'padding:12px 16px;font-size:13px">'
+            f"{common.render_issue_category_summary(issues)}"
+            f"{common.render_issue_list(issues, source_map=source_map, stage_status=status)}"
+            f"</div>"
             f"</details>"
         )
 
@@ -371,6 +374,7 @@ def _step_detail_tab(
     )
     issues_block = (
         f'<h3 style="font-size:14px;color:{common.NAVY};margin:8px 0 10px">Issues</h3>'
+        f"{common.render_issue_category_summary(issues)}"
         f"{common.render_issue_list(issues, source_map=source_map, stage_status=status)}"
     )
     return header + metrics_html + issues_block
