@@ -985,10 +985,17 @@ class TestCheckLeadingCommas:
         assert issues[0].rule == "comma_style"
         assert issues[0].severity == "WARNING"
 
-    def test_default_style_is_leading(self):
-        """Calling without style= uses the default (leading)."""
+    def test_default_style_is_as_per_source(self):
+        """Calling without style= uses the default (as-per-source per #507).
+
+        The default produces a single INFO finding stating the policy is
+        unenforced — files PASS regardless of which comma style they use.
+        Switching back to leading/trailing enforcement is an opt-in
+        through inspect.conf."""
         issues = _check_leading_commas("t.tbl", self._TRAILING)
         assert len(issues) == 1
+        assert issues[0].severity == "INFO"
+        assert issues[0].rule == "comma_style"
 
     # -- trailing mode --
 
