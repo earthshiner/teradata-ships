@@ -92,8 +92,10 @@ INSPECT_CUSTOM_POLICY = "INSPECT_CUSTOM_POLICY"
 #: ``INSPECT_GRANT_VIOLATION`` is retained as an alias for one release
 #: so dashboards filtering on the old code keep working.
 
-#: ``--fix-grants`` (the default) auto-generated one or more ``.grt``
-#: files from the inferred DDL intent. Always recorded at ``info``.
+#: ``ships fix`` (default-on ``grants_derivation``) auto-generated one
+#: or more ``.grt`` files from the inferred DDL intent. Always recorded
+#: at ``info``. Retained for pre-#526 audit trails; new runs emit this
+#: from the fix stage in ``ships process`` (#523), not from inspect.
 INSPECT_GRANT_AUTO_GENERATED = "INSPECT_GRANT_AUTO_GENERATED"
 
 #: A grant targets an object whose DDL is not present in this package.
@@ -101,9 +103,8 @@ INSPECT_GRANT_AUTO_GENERATED = "INSPECT_GRANT_AUTO_GENERATED"
 INSPECT_GRANT_EXTERNAL = "INSPECT_GRANT_EXTERNAL"
 
 #: DDL implies a grant that has no matching entry in the project's
-#: ``.dcl`` files. With ``--fix-grants`` (the default) these are
-#: auto-generated before being recorded, so this code only surfaces
-#: under ``--no-fix-grants``. Severity ``info``.
+#: ``.dcl`` files. Run ``ships fix`` to auto-generate the .grt entry.
+#: Severity ``info``.
 INSPECT_GRANT_MISSING = "INSPECT_GRANT_MISSING"
 
 #: A ``.dcl`` entry diverges from the grant set inferred from DDL
@@ -304,9 +305,11 @@ ISSUE_CODES: Dict[str, str] = {
         "etc.) is carried in the issue 'details' for agents and CI."
     ),
     INSPECT_GRANT_AUTO_GENERATED: (
-        "`--fix-grants` (the default) auto-generated one or more "
-        "`.grt` files from the DDL intent. A routine bookkeeping "
-        "entry — not actionable. Pass `--no-fix-grants` to opt out."
+        "`ships fix` (default-on `grants_derivation`) auto-generated "
+        "one or more `.grt` files from the DDL intent. A routine "
+        "bookkeeping entry — not actionable. Retained for pre-#526 "
+        "audit trails; new runs record this from the fix stage in "
+        "`ships process`, not from inspect."
     ),
     INSPECT_GRANT_EXTERNAL: (
         "A grant targets an object whose DDL is not present in this "
@@ -316,18 +319,16 @@ ISSUE_CODES: Dict[str, str] = {
     ),
     INSPECT_GRANT_MISSING: (
         "The DDL implies a grant that has no matching entry in the "
-        "project's `.dcl` files. With `--fix-grants` (the default) "
-        "these are auto-generated before being recorded; this code "
-        "only surfaces under `--no-fix-grants`. Drop `--no-fix-grants` "
-        "(or run `ships inspect --fix-grants`) to auto-generate."
+        "project's `.dcl` files. Run `ships fix` (default-on "
+        "`grants_derivation`) to auto-generate the entry."
     ),
     INSPECT_GRANT_DRIFT: (
         "A `.dcl` entry diverges from the grant set inferred from "
         "DDL intent. Severity follows `warn_extra_grants` for "
         "extra-only drift; promoted to `error` when the drift "
         "includes missing privileges (the DDL implies a grant that's "
-        "absent from `.dcl`). Reconcile the `.dcl` against the DDL "
-        "or re-run with `--fix-grants` to regenerate."
+        "absent from `.dcl`). Reconcile the `.dcl` against the DDL, "
+        "or run `ships fix` to regenerate the missing statements."
     ),
     INSPECT_GRANT_VIOLATION: (
         "Deprecated alias for the per-condition grant codes "

@@ -852,8 +852,8 @@ def _guide_tab(run: dict) -> str:
   <dt>Grant inference</dt>
   <dd>Inspect derives a minimum-required grant set from DDL intent (e.g. a
       view selecting from another database implies a SELECT grant).
-      <code>--fix-grants</code> writes the derived set into
-      <code>.grt</code> files.</dd>
+      <code>ships fix</code> (default-on <code>grants_derivation</code>)
+      writes the derived set into <code>.grt</code> files.</dd>
 </div>
 <div class="guide-glossary-item">
   <dt>Drift</dt>

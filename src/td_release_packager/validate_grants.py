@@ -860,7 +860,7 @@ def _render_missing_grant_append_block(
     return "\n".join(
         [
             "",
-            "/* SHIPS --fix-grants: missing inferred grants appended */",
+            "/* SHIPS ships fix (grants_derivation): missing inferred grants appended */",
             statements,
             "",
         ]

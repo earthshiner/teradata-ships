@@ -599,7 +599,7 @@ SHIPS infers grants from your DDL. If you have a view `{{STD_DATABASE}}.Customer
 
 If you want to manage grants explicitly, place them as `.dcl` files in `payload/database/DCL/inter_db/`.
 
-The inspect rule `skip_grants` is `true` by default in the `process` command — grant validation is advisory. In a stricter pipeline, run inspect with `--fix-grants` to generate missing grants.
+The inspect rule `skip_grants` is `true` by default in the `process` command — grant validation is advisory. In a stricter pipeline, run `ships fix` (default-on `grants_derivation`) to generate missing grants before inspect.
 
 ---
 
@@ -863,7 +863,8 @@ python -m td_release_packager inspect --project C:\Projects\OMR
 | `--config` | No | Path to `inspect.conf` (default: auto-detect in project) |
 | `--strict` | No | Promote all WARNING rules to ERROR |
 | `--skip-grants` | No | Skip grant validation |
-| `--fix-grants` | No | Re-generate missing grant files |
+
+Auto-fixes (missing grant files, DDL terminators, non-ASCII substitution) live in the `ships fix` verb — run it before `ships inspect` (or let `ships process` run its default-on fix stage).
 
 ---
 

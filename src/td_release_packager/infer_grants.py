@@ -905,7 +905,7 @@ def find_ddl_files(project_dir: Path) -> List[Path]:
     (.viw, .spl, .mcr, .trg, .fnc).  In a full SHIPS project the canonical
     grant-inference source is ``payload/``.  Hidden build/harvest artefacts
     such as ``.ships/`` may contain resolved copies of the same DDL and must
-    not contribute additional physical-name grants during inspect --fix-grants.
+    not contribute additional physical-name grants during `ships fix --rules grants_derivation`.
 
     Args:
         project_dir: Root directory of the SHIPS project.

@@ -672,10 +672,11 @@ def _build_package_impl(
     _refresh_prereq_order_in_package(pkg_dir)
 
     # -- Phase 6c: Backfill inferred inter-database grants into the package --
-    # Inspect --fix-grants can persist these into the project payload, but a
-    # package must be self-contained even when the source tree has not been
-    # pre-repaired.  Infer against the resolved package SQL and write only
-    # missing generated DCL into the package staging directory.
+    # `ships fix` (default-on grants_derivation) can persist these into the
+    # project payload, but a package must be self-contained even when the
+    # source tree has not been pre-repaired.  Infer against the resolved
+    # package SQL and write only missing generated DCL into the package
+    # staging directory.
     generated_dcl = _backfill_missing_inferred_dcl(pkg_dir)
     if generated_dcl:
         file_count += generated_dcl

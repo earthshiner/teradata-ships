@@ -79,8 +79,8 @@ Step 2 compares the grants *implied* by the package's DDL against the `.dcl` fil
 | Outcome   | Severity | Meaning                                                              |
 |-----------|----------|----------------------------------------------------------------------|
 | Consistent | —       | Persisted `.dcl` matches what the DDL implies. No action needed.     |
-| Drifted   | ERROR    | `.dcl` exists but its privilege set differs from the DDL implication. Run `--fix-grants` to append missing inferred grants. Extra grants are not removed automatically. |
-| Missing   | ERROR    | DDL implies a grant but no `.dcl` file exists. Run `--fix-grants` to create it. |
+| Drifted   | ERROR    | `.dcl` exists but its privilege set differs from the DDL implication. Run `ships fix` (default-on `grants_derivation`) to append missing inferred grants. Extra grants are not removed automatically. |
+| Missing   | ERROR    | DDL implies a grant but no `.dcl` file exists. Run `ships fix` to create it. |
 | External  | INFO *   | A `.dcl` file exists for a grantee — role, database, or user — that no DDL in the package implies. The grantee is *external* to the package's intent. |
 
 \* **External grants are reported at INFO by default** — they are commonly legitimate (e.g. a role granted access in this package whose `GRANT ROLE … TO USER` lives outside). See `inspect.warn_external_grants` below to change the severity.
@@ -120,7 +120,7 @@ When `INFO` (the default), external-grant `.dcl` files are surfaced in the repor
 
 When `WARNING` or `WARN`, external grants are reported as warnings. When `ERROR`, external grants cause the package to be **BLOCKED** — use this strict posture for fully self-contained packages where every grant must be traceable to in-package DDL. When `OFF`, external grants are suppressed entirely from the report.
 
-Both settings can be set independently in `inspect.conf`. Missing grants (inferred by SHIPS but absent from the `.dcl` file) and missing `.dcl` files entirely remain hard errors regardless of either setting. Use `--fix-grants` to repair missing inferred grants additively: SHIPS appends the required `GRANT` statements to the correct `.dcl` file and leaves extra/external grants untouched for review.
+Both settings can be set independently in `inspect.conf`. Missing grants (inferred by SHIPS but absent from the `.dcl` file) and missing `.dcl` files entirely remain hard errors regardless of either setting. Use `ships fix` (default-on `grants_derivation`) to repair missing inferred grants additively: SHIPS appends the required `GRANT` statements to the correct `.dcl` file and leaves extra/external grants untouched for review.
 
 ---
 
