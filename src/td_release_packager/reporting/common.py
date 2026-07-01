@@ -393,6 +393,105 @@ def render_issue_list(
     return "".join(rows)
 
 
+# ---------------------------------------------------------------
+# Category summary — findings grouped by code with counts (#513)
+# ---------------------------------------------------------------
+
+# Severity precedence — errors first, then warnings, then info,
+# then anything unrecognised.
+_SEV_RANK = {"error": 0, "warning": 1, "info": 2}
+
+
+def render_issue_category_summary(
+    issues: Sequence[dict],
+    min_total: int = 5,
+) -> str:
+    """Render a per-code count table above the flat issue list (#513).
+
+    A stage with many findings of a few recurring codes is painful to
+    triage from a flat list — a category summary answers "which knob
+    do I turn first?" at a glance. Rows are sorted by severity
+    precedence (error > warning > info), then by count descending
+    within each severity.
+
+    Args:
+        issues: The ``issues`` array from a decisions.json stage entry.
+                Each issue has ``severity`` / ``code`` / ``message`` and
+                an optional ``location``.
+        min_total: Threshold below which no summary is rendered (default
+                   ``5``). Stages with only a handful of issues are
+                   just fine to read as a flat list — the summary is
+                   only useful when scanning becomes work.
+
+    Returns:
+        HTML string. Empty string when ``len(issues) < min_total`` or
+        the list has fewer than 2 distinct codes (nothing to summarise).
+
+    Each code cell carries a ``title`` attribute with the human
+    description from :data:`issue_codes.ISSUE_CODES`, matching the
+    tooltip behaviour of the flat list.
+    """
+    from td_release_packager.orchestrator.issue_codes import describe
+
+    if len(issues) < min_total:
+        return ""
+
+    # Aggregate: (code, severity) → count. Two same-code entries with
+    # different severities are rare in practice (a rule promoted to
+    # ERROR under --strict) but keeping them separate lets the reader
+    # see the split, not a false consolidation.
+    buckets: Dict[Tuple[str, str], int] = {}
+    for issue in issues:
+        code = str(issue.get("code", "")).strip() or "(uncoded)"
+        sev = str(issue.get("severity", "info")).lower()
+        buckets[(code, sev)] = buckets.get((code, sev), 0) + 1
+
+    if len(buckets) < 2:
+        # Only one (code, severity) bucket — the flat list is already
+        # the summary. Rendering a table with a single row is noise.
+        return ""
+
+    ordered = sorted(
+        buckets.items(),
+        key=lambda kv: (_SEV_RANK.get(kv[0][1], 3), -kv[1], kv[0][0]),
+    )
+
+    rows_html: List[str] = []
+    for (code, sev), count in ordered:
+        colour = _SEV_COLOUR.get(sev, "#555")
+        icon = _SEV_ICON.get(sev, "·")
+        tooltip = describe(code)
+        title_attr = (
+            f' title="{h(tooltip)}"'
+            if tooltip and tooltip != "(unregistered code)"
+            else ""
+        )
+        rows_html.append(
+            "<tr>"
+            f'<td style="padding:4px 10px 4px 0;color:{colour};font-weight:700;'
+            f'text-align:center;width:16px">{icon}</td>'
+            f'<td style="padding:4px 10px 4px 0;font-family:monospace;font-size:12px;'
+            f'color:{colour};cursor:help;border-bottom:1px dotted {colour}"{title_attr}>'
+            f"{h(code)}</td>"
+            f'<td style="padding:4px 10px 4px 0;font-size:12px;color:#666">'
+            f"{sev.upper()}</td>"
+            f'<td style="padding:4px 0;font-size:13px;font-weight:600;color:#333;'
+            f'text-align:right">{count}</td>'
+            "</tr>"
+        )
+
+    return (
+        '<div style="margin-bottom:12px;padding:10px 12px;background:#FFFFFF;'
+        f'border:1px solid {BORDER};border-radius:4px">'
+        '<div style="font-size:11px;font-weight:700;color:#666;text-transform:uppercase;'
+        'letter-spacing:0.5px;margin-bottom:6px">Findings by category</div>'
+        '<table style="border-collapse:collapse;width:100%">'
+        f"{''.join(rows_html)}"
+        "</table>"
+        "</div>"
+    )
+
+
 def render_issue_code_glossary() -> str:
     """Render every registered issue code as a glossary block.
 
