@@ -96,6 +96,46 @@
     border-left: 3px solid var(--td-orange);
     border-radius: 4px;
   }
+
+  /* Question grouping — full outlined box with a coloured header band.
+     Signals which questions describe the Source, which drive Processing,
+     and which shape the Output package. Colour palettes are muted so the
+     per-question orange rail still reads as the primary "answer this"
+     affordance inside each group. */
+  .qgroup {
+    margin-bottom: 20px;
+    border: 2px solid var(--qgroup-border, var(--td-grey-2));
+    border-radius: 6px;
+    background: var(--td-white);
+    overflow: hidden;
+  }
+  .qgroup-header {
+    background: var(--qgroup-border, var(--td-grey-2));
+    color: var(--td-white);
+    padding: 10px 14px;
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  }
+  .qgroup-header .qgroup-title {
+    font-weight: 700; font-size: 13px; letter-spacing: 0.4px;
+    text-transform: uppercase;
+  }
+  .qgroup-header .qgroup-sub {
+    font-weight: 400; font-size: 12px; opacity: 0.9;
+  }
+  .qgroup-body {
+    padding: 14px 14px 2px;
+    background: var(--qgroup-bg, var(--td-white));
+  }
+  .qgroup-body .question:last-child { margin-bottom: 12px; }
+  /* Inherit the group's colour on each question's left rail so the visual
+     tie between the group and its cards is obvious — otherwise every card
+     still reads as "orange = generic question". Ungrouped questions
+     (e.g. the Mode selector) keep the default orange. */
+  .qgroup-body .question { border-left-color: var(--qgroup-border); }
+
+  .qgroup.qgroup-source     { --qgroup-border: #3a5f7d; --qgroup-bg: #f4f8fb; }
+  .qgroup.qgroup-processing { --qgroup-border: #c67b2f; --qgroup-bg: #fdf6ec; }
+  .qgroup.qgroup-output     { --qgroup-border: #3a7d3a; --qgroup-bg: #f2f7f2; }
   .question .qlabel { font-weight: 600; margin-bottom: 6px; display: block; }
   .question .qhint { font-size: 12px; color: var(--td-grey-3); margin-bottom: 10px; }
   .question .qhint abbr { border-bottom: 1px dotted var(--td-grey-3); cursor: help; text-decoration: none; }
@@ -373,8 +413,8 @@ const QUESTIONS = [
   // --- Q4 prefix ---
   {
     id: "tokens.prefix",
-    label: "Q4. Product prefix",
-    hint: "Bare prefix without trailing underscore. e.g. <code>CustomerDNA</code>.",
+    label: "Q4. Database name prefix",
+    hint: "Bare prefix without trailing underscore. Often coincides with the data product name, but need not — e.g. <code>CustomerDNA</code>.",
     kind: "text",
     show: a => a["tokens.already"] && a["tokens.already"] !== "yes",
   },
@@ -521,6 +561,46 @@ const QUESTIONS = [
 ];
 
 // ---------------------------------------------------------------------------
+// Question grouping — visual only, no lockstep concern with decision-tree.yaml
+// (the lockstep test asserts on question IDs, not layout). Groups render as
+// titled outlined boxes so a new user can tell at a glance which questions
+// describe the Source, which drive Processing, and which shape the Output.
+// IDs absent from QUESTION_GROUP (e.g. mode.style) render ungrouped above
+// the first group.
+// ---------------------------------------------------------------------------
+const GROUP_DEFS = {
+  source:     { title: "1 · Source",     sub: "Where the DDL lives and what shape it's in" },
+  processing: { title: "2 · Processing", sub: "What SHIPS should do with the payload" },
+  output:     { title: "3 · Output",     sub: "Where the built package lands + build tweaks" },
+};
+const QUESTION_GROUP = {
+  "source.type":         "source",
+  "source.owner_repo":   "source",
+  "source.ref":          "source",
+  "source.dir":          "source",
+  "tokens.already":      "source",
+  "tokens.model":        "source",
+  "tokens.prefix":       "source",
+  "atomic.eponymous":    "source",
+
+  "generate.enabled":    "processing",
+  "analyse.enabled":     "processing",
+  "analyse.graph":       "processing",
+  "analyse.namespace":   "processing",
+  "analyse.projectName": "processing",
+  "scan.enabled":        "processing",
+  "envs":                "processing",
+  "env.externalParents": "processing",
+
+  "project.dir":         "output",
+  "project.scaffolded":  "output",
+  "package.name":        "output",
+  "package.root_parent": "output",
+  "process.strict":      "output",
+  "bash.flavour":        "output",
+};
+
+// ---------------------------------------------------------------------------
 // State + persistence.
 // ---------------------------------------------------------------------------
 const answers = {};
@@ -605,6 +685,15 @@ function safeLauncherStem(pkgName) {
   cleaned = cleaned.replace(/_+/g, "_").replace(/^_+|_+$/g, "");
   if (!cleaned) cleaned = "package";
   return "ships-run-" + cleaned;
+}
+// Mirrors safeLauncherStem so plan.json downloads track the package name the
+// same way the launcher scripts do — two SHIPS projects side by side don't
+// overwrite each other's plan.json. Same sanitiser rules for consistency.
+function safePlanFilename(pkgName) {
+  if (pkgName == null) return "plan.json";
+  let cleaned = String(pkgName).replace(/[^A-Za-z0-9_-]+/g, "_");
+  cleaned = cleaned.replace(/_+/g, "_").replace(/^_+|_+$/g, "");
+  return cleaned ? "plan-" + cleaned + ".json" : "plan.json";
 }
 
 // Issue #495 (follow-up) — normalise the GitHub owner/repo input.
@@ -1030,7 +1119,7 @@ function generatePlan() {
             : "Cleans payload/ and copies the source in. Pick a tokenisation mode in Q2/Q3 before running.",
     });
     if (wantGenerate) rationale.push({ step: "generate", why: "Builds view-layer DDL from the harvested base tables, following the object-placement standard." });
-    rationale.push({ step: "inspect", why: "Runs Step 0 lint + Step 0b token-coverage. Auto-loads config/inspect.conf. NEVER pass an env file behind --config." });
+    rationale.push({ step: "inspect", why: "Two checks: (1) lint rules from config/inspect.conf (auto-loaded), and (2) token coverage — every {{TOKEN}} the payload uses must be bound in every config/env/*.conf. Inspect discovers env files itself; --config expects the lint file, not an env file." });
     if (wantScan) rationale.push({ step: "scan", why: "Validates every {{TOKEN}} reference against every env .conf, and fails if a defined token is never referenced (orphan)." });
     if (wantAnalyse) rationale.push({
       step: "analyse",
@@ -1067,8 +1156,8 @@ function generatePlan() {
 
   // ---- Guardrails (handover §6 + var-reuse note) ----
   const guardrails = [
-    "Step 0b coverage requires every token referenced by the payload (content AND filenames) to be bound in every env file.",
-    "config/inspect.conf is rule=SEVERITY; config/env/<ENV>.conf is TOKEN=value. Never pass an env file behind inspect --config.",
+    "Token coverage: every {{TOKEN}} the payload uses — in file contents AND filenames — must be bound in every env file. Missing bindings fail inspect.",
+    "Two config files, easy to mix up: config/inspect.conf holds lint rules (rule=SEVERITY), config/env/<ENV>.conf holds env bindings (TOKEN=value). Passing an env file to inspect --config fails — inspect tries to parse tokens as rules.",
     "inspect has no --env flag — coverage auto-discovers config/env/*.conf.",
     "harvest cleans payload/ by default. Use --keep-existing only for an overlay re-harvest.",
     "Atomic + eponymous applies to DDL only. DCL is grouped per granted-ON database; DML is kept whole (order preserved).",
@@ -1455,81 +1544,107 @@ function makeEnvConf(envName, tokenModel, prefix, externalParents) {
 function renderQuestions() {
   const root = document.getElementById("questions");
   root.innerHTML = "";
+  const groupBodies = {};
   for (const qDef of QUESTIONS) {
     if (qDef.show && !qDef.show(answers)) {
       delete answers[qDef.id];
       continue;
     }
-    const wrap = document.createElement("div");
-    wrap.className = "question";
-
-    const lbl = document.createElement("label");
-    lbl.className = "qlabel";
-    lbl.innerHTML = qDef.label;
-    wrap.appendChild(lbl);
-
-    if (qDef.hint) {
-      const h = document.createElement("div");
-      h.className = "qhint";
-      h.innerHTML = qDef.hint;
-      wrap.appendChild(h);
-    }
-
-    if (qDef.kind === "radio") {
-      const grp = document.createElement("div");
-      grp.className = "radios";
-      for (const opt of qDef.options) {
-        const id = `${qDef.id}__${opt.value}`;
-        const oLbl = document.createElement("label");
-        oLbl.setAttribute("for", id);
-        if (answers[qDef.id] === opt.value) oLbl.classList.add("active");
-        oLbl.textContent = opt.label;
-        const inp = document.createElement("input");
-        inp.type = "radio"; inp.name = qDef.id; inp.id = id; inp.value = opt.value;
-        if (answers[qDef.id] === opt.value) inp.checked = true;
-        inp.addEventListener("change", () => {
-          answers[qDef.id] = opt.value;
-          persist(); renderAll();
-        });
-        oLbl.prepend(inp);
-        grp.appendChild(oLbl);
-      }
-      wrap.appendChild(grp);
-
-      if (qDef.warnOn) {
-        const w = qDef.warnOn(answers[qDef.id]);
-        if (w) {
-          const div = document.createElement("div");
-          div.className = "warn";
-          div.textContent = w;
-          wrap.appendChild(div);
-        }
-      }
-    } else if (qDef.kind === "text") {
-      const inp = document.createElement("input");
-      inp.type = "text";
-      inp.value = answers[qDef.id] || "";
-      inp.addEventListener("input", () => {
-        answers[qDef.id] = inp.value;
-        persist(); renderOutputs();
-      });
-      wrap.appendChild(inp);
-    } else if (qDef.kind === "checkbox") {
-      const lbl2 = document.createElement("label");
-      lbl2.className = "check";
-      const inp = document.createElement("input");
-      inp.type = "checkbox";
-      inp.checked = !!answers[qDef.id];
-      inp.addEventListener("change", () => {
-        answers[qDef.id] = inp.checked;
-        persist(); renderOutputs();
-      });
-      lbl2.appendChild(inp);
-      lbl2.appendChild(document.createTextNode(" yes"));
-      wrap.appendChild(lbl2);
-    }
-    root.appendChild(wrap);
+    const card = buildQuestionCard(qDef);
+    const gid = QUESTION_GROUP[qDef.id];
+    if (!gid) { root.appendChild(card); continue; }
+    if (!groupBodies[gid]) groupBodies[gid] = createGroupContainer(gid, root);
+    groupBodies[gid].appendChild(card);
   }
+}
+
+function createGroupContainer(gid, parent) {
+  const meta = GROUP_DEFS[gid];
+  const grp = document.createElement("div");
+  grp.className = "qgroup qgroup-" + gid;
+  const hdr = document.createElement("div");
+  hdr.className = "qgroup-header";
+  hdr.innerHTML =
+    `<span class="qgroup-title">${meta.title}</span>` +
+    `<span class="qgroup-sub">${meta.sub}</span>`;
+  const body = document.createElement("div");
+  body.className = "qgroup-body";
+  grp.appendChild(hdr);
+  grp.appendChild(body);
+  parent.appendChild(grp);
+  return body;
+}
+
+function buildQuestionCard(qDef) {
+  const wrap = document.createElement("div");
+  wrap.className = "question";
+
+  const lbl = document.createElement("label");
+  lbl.className = "qlabel";
+  lbl.innerHTML = qDef.label;
+  wrap.appendChild(lbl);
+
+  if (qDef.hint) {
+    const h = document.createElement("div");
+    h.className = "qhint";
+    h.innerHTML = qDef.hint;
+    wrap.appendChild(h);
+  }
+
+  if (qDef.kind === "radio") {
+    const grp = document.createElement("div");
+    grp.className = "radios";
+    for (const opt of qDef.options) {
+      const id = `${qDef.id}__${opt.value}`;
+      const oLbl = document.createElement("label");
+      oLbl.setAttribute("for", id);
+      if (answers[qDef.id] === opt.value) oLbl.classList.add("active");
+      oLbl.textContent = opt.label;
+      const inp = document.createElement("input");
+      inp.type = "radio"; inp.name = qDef.id; inp.id = id; inp.value = opt.value;
+      if (answers[qDef.id] === opt.value) inp.checked = true;
+      inp.addEventListener("change", () => {
+        answers[qDef.id] = opt.value;
+        persist(); renderAll();
+      });
+      oLbl.prepend(inp);
+      grp.appendChild(oLbl);
+    }
+    wrap.appendChild(grp);
+
+    if (qDef.warnOn) {
+      const w = qDef.warnOn(answers[qDef.id]);
+      if (w) {
+        const div = document.createElement("div");
+        div.className = "warn";
+        div.textContent = w;
+        wrap.appendChild(div);
+      }
+    }
+  } else if (qDef.kind === "text") {
+    const inp = document.createElement("input");
+    inp.type = "text";
+    inp.value = answers[qDef.id] || "";
+    inp.addEventListener("input", () => {
+      answers[qDef.id] = inp.value;
+      persist(); renderOutputs();
+    });
+    wrap.appendChild(inp);
+  } else if (qDef.kind === "checkbox") {
+    const lbl2 = document.createElement("label");
+    lbl2.className = "check";
+    const inp = document.createElement("input");
+    inp.type = "checkbox";
+    inp.checked = !!answers[qDef.id];
+    inp.addEventListener("change", () => {
+      answers[qDef.id] = inp.checked;
+      persist(); renderOutputs();
+    });
+    lbl2.appendChild(inp);
+    lbl2.appendChild(document.createTextNode(" yes"));
+    wrap.appendChild(lbl2);
+  }
+  return wrap;
 }
 
 // ---------------------------------------------------------------------------
@@ -1547,6 +1662,7 @@ function renderOutputs() {
   renderRationalePanel(plan);
   renderGlossaryPanel();
   renderFaqPanel();
+  refreshPlanButtonLabels();
   window.__lastPlan = plan; // for Download-all
 }
 
@@ -1716,7 +1832,7 @@ function renderEnvsPanel(plan) {
     "<b>What they are.</b> One file per target environment, binding every <code>{{TOKEN}}</code> the payload references to a concrete value for that environment " +
     "(e.g. <code>DB_PREFIX=CustomerDNA_DEV</code> in DEV, <code>DB_PREFIX=CustomerDNA_PRD</code> in PRD)." +
     "<br><br><b>Where they live.</b> <code>&lt;project&gt;/config/env/&lt;ENV&gt;.conf</code> — one per environment." +
-    "<br><br><b>Used by.</b> <code>ships inspect</code> (Step 0b auto-discovers every <code>config/env/*.conf</code> and fails if any token is unbound), " +
+    "<br><br><b>Used by.</b> <code>ships inspect</code> (auto-discovers every <code>config/env/*.conf</code> during its token-coverage check and fails if any token the payload uses is unbound), " +
     "<code>ships scan</code> with <code>--all-envs</code>, and <code>ships package</code> via <code>--env-config</code> " +
     "(resolves the tokens into the concrete values baked into the per-env package)." +
     "<br><br><b>Hard rule.</b> Every token referenced by the payload (content AND filenames) must be bound in every env file. " +
@@ -1834,9 +1950,11 @@ function renderRationalePanel(plan) {
 
   const actions = document.createElement("div");
   actions.className = "actions";
-  const text = JSON.stringify(buildPlanJson(), null, 2);
-  actions.appendChild(makeCopyBtn(text, "Copy plan.json"));
-  actions.appendChild(makeDownloadBtn("plan.json", text));
+  const planJson = buildPlanJson();
+  const text = JSON.stringify(planJson, null, 2);
+  const planFname = safePlanFilename(planJson.package && planJson.package.name);
+  actions.appendChild(makeCopyBtn(text, "Copy " + planFname));
+  actions.appendChild(makeDownloadBtn(planFname, text));
   panel.appendChild(actions);
 }
 
@@ -2025,7 +2143,7 @@ function renderGlossaryPanel() {
   const terms = [
     ["atomic", "One database object per file. SHIPS enforces this so dependency analysis can reason about each object independently."],
     ["eponymous", "Filename matches the object inside it (<code>DB.Object.ext</code>). Required for deterministic packaging."],
-    ["coverage (Step 0b)", "Every <code>{{TOKEN}}</code> the payload references (content AND filenames) must be bound in every <code>config/env/*.conf</code>. Missing bindings fail inspect."],
+    ["token coverage", "Every <code>{{TOKEN}}</code> the payload references (content AND filenames) must be bound in every <code>config/env/*.conf</code>. Missing bindings fail <code>ships inspect</code>."],
     ["view layer", "Companion views generated alongside base tables per the object-placement standard: <code>STD_V</code> (locking views), <code>ACL_V</code> (access views), <code>BUS_V</code> (business views)."],
     ["wave", "An ordered batch of objects with no intra-batch dependencies. <code>ships analyse</code> emits <code>_waves.txt</code> so deploy proceeds wave-by-wave."],
     ["token candidate", "A literal database name that <em>could</em> become a token. Discoverable with <code>ships analyse_token_candidates</code> (MCP) or implicitly during harvest."],
@@ -2323,7 +2441,9 @@ function downloadAllBundle() {
 
   if (plan.shipsYaml) files.push({ name: "ships.yaml", body: plan.shipsYaml });
 
-  files.push({ name: "plan.json", body: JSON.stringify(buildPlanJson(), null, 2) });
+  const planJson = buildPlanJson();
+  const planFname = safePlanFilename(planJson.package && planJson.package.name);
+  files.push({ name: planFname, body: JSON.stringify(planJson, null, 2) });
 
   const readme = [
     "# SHIPS Navigator bundle",
@@ -2337,7 +2457,7 @@ function downloadAllBundle() {
     plan.envFiles.length ? "- `config/env/*.conf` — env file skeletons (replace `<fill-me>` before running)." : null,
     plan.tokensAlready ? "- (No env skeletons — source is already tokenised; the script runs `ships bootstrap-env-config` to seed real ones.)" : null,
     plan.shipsYaml ? "- `ships.yaml` — project master config with a `packaging:` profile so `ships process --project .` runs argless." : null,
-    "- `plan.json` — the answers you gave. Paste into the wizard to re-hydrate.",
+    "- `" + planFname + "` — the answers you gave. Paste into the wizard to re-hydrate.",
     "",
     "## Running",
     "",
@@ -2409,11 +2529,14 @@ document.getElementById("download-all").addEventListener("click", downloadAllBun
 // fresh on click so they always reflect the current form state, not a
 // snapshot from when the panel last rendered.
 document.getElementById("save-plan").addEventListener("click", () => {
-  const text = JSON.stringify(buildPlanJson(), null, 2);
-  downloadBlob("plan.json", new Blob([text], { type: "application/json" }));
+  const plan = buildPlanJson();
+  const text = JSON.stringify(plan, null, 2);
+  const fname = safePlanFilename(plan.package && plan.package.name);
+  downloadBlob(fname, new Blob([text], { type: "application/json" }));
 });
 document.getElementById("copy-plan").addEventListener("click", (e) => {
-  const text = JSON.stringify(buildPlanJson(), null, 2);
+  const plan = buildPlanJson();
+  const text = JSON.stringify(plan, null, 2);
   const btn = e.currentTarget;
   const original = btn.textContent;
   try {
@@ -2430,6 +2553,18 @@ document.getElementById("copy-plan").addEventListener("click", (e) => {
     setTimeout(() => { btn.textContent = original; }, 1500);
   }
 });
+
+// Refresh the top-of-panel Copy / Save button labels so they mirror the
+// current package name — matches the "Download ships-run-<pkg>.ps1" pattern
+// on the Commands panel. Called from renderOutputs each time answers change.
+function refreshPlanButtonLabels() {
+  const plan = buildPlanJson();
+  const fname = safePlanFilename(plan.package && plan.package.name);
+  const saveBtn = document.getElementById("save-plan");
+  const copyBtn = document.getElementById("copy-plan");
+  if (saveBtn) saveBtn.textContent = "Save " + fname;
+  if (copyBtn) copyBtn.textContent = "Copy " + fname;
+}
 
 function renderAll() {
   renderQuestions();
