@@ -36,6 +36,7 @@ from td_release_packager.fixers import ddl_terminator  # noqa: E402, F401
 from td_release_packager.fixers import extension  # noqa: E402, F401
 from td_release_packager.fixers import grants  # noqa: E402, F401
 from td_release_packager.fixers import non_ascii  # noqa: E402, F401
+from td_release_packager.fixers import object_placement  # noqa: E402, F401
 
 __all__ = [
     "FIX_REGISTRY",

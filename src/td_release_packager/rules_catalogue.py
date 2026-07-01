@@ -419,14 +419,13 @@ _RULES: dict[str, dict[str, object]] = {
         ),
         "default_severity": "ERROR",
         "safe_fix_available": True,
-        "no_fixer_yet": True,
         "automation_level": "auto",
         "recommended_action": (
-            "Replace the tables-database qualifier with the "
-            "corresponding views database from "
-            "``config/object_placement.yaml`` (SHIPS already computes "
-            "the mapping via ``placement.resolve_views_database``). "
-            "A fixer for this is viable but not yet built."
+            "Run ``ships fix`` (default-on ``object_placement``) to "
+            "rewrite the tables-database qualifier to the corresponding "
+            "views database from ``config/object_placement.yaml``. The "
+            "fixer preserves quoting and skips references inside "
+            "comments or string literals."
         ),
         "risk": "low",
         "requires_human_review": False,
