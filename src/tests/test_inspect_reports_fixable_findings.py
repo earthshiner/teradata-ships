@@ -63,9 +63,6 @@ def _run_inspect(project: Path, *extra_args: str) -> subprocess.CompletedProcess
         "inspect",
         "--project",
         str(project),
-        # `--fix-grants` still writes .grt files (until #526). Disable
-        # so it doesn't muddy the JSON details we're asserting on.
-        "--no-fix-grants",
         *extra_args,
     ]
     return subprocess.run(cmd, capture_output=True, text=True)

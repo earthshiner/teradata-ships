@@ -1,20 +1,15 @@
-"""``ships inspect`` is read-only — regression guard for #522.
+"""``ships inspect`` is read-only — regression guard for #522 / #526.
 
-The ``--fix-ddl-terminators`` and ``--fix-non-ascii`` flags used to make
-``inspect`` write to ``payload/`` as a side effect of a verb whose name
-promises "look, don't touch." #522 removed those flags; the auto-fixers
-live under ``ships fix`` now.
+The ``--fix-ddl-terminators``, ``--fix-non-ascii`` (removed in #522),
+and ``--fix-grants`` (removed in #526) flags used to make ``inspect``
+write to ``payload/`` as a side effect of a verb whose name promises
+"look, don't touch." All three fixers now live under ``ships fix``.
 
 This module asserts inspect never writes to ``payload/`` under any of
 the argument combinations it accepts. Snapshots every file's content
 + mtime before, runs inspect, and diffs after — any change fails the
 test with the offending path so a future regression surfaces exactly
 which flag or code path reintroduced the write.
-
-Note the ``--fix-grants`` exception: it still writes ``.grt`` files
-under ``dcl/`` (also part of ``payload/`` in the SHIPS project
-layout). It stays until #526 migrates grants into the fix registry.
-The read-only test therefore uses ``--no-fix-grants`` on every run.
 """
 
 from __future__ import annotations
@@ -74,8 +69,6 @@ def _run_inspect(project: Path, *extra_args: str) -> subprocess.CompletedProcess
         "inspect",
         "--project",
         str(project),
-        # --no-fix-grants because --fix-grants stays until #526.
-        "--no-fix-grants",
         *extra_args,
     ]
     return subprocess.run(cmd, capture_output=True, text=True)
@@ -105,25 +98,21 @@ class TestInspectIsReadOnly:
         before = _snapshot(project)
         _run_inspect(project)
         after = _snapshot(project)
-        _assert_no_payload_writes(before, after, "ships inspect --no-fix-grants")
+        _assert_no_payload_writes(before, after, "ships inspect")
 
     def test_inspect_strict_writes_nothing(self, tmp_path):
         project = _setup_project(tmp_path)
         before = _snapshot(project)
         _run_inspect(project, "--strict")
         after = _snapshot(project)
-        _assert_no_payload_writes(
-            before, after, "ships inspect --strict --no-fix-grants"
-        )
+        _assert_no_payload_writes(before, after, "ships inspect --strict")
 
     def test_inspect_skip_grants_writes_nothing(self, tmp_path):
         project = _setup_project(tmp_path)
         before = _snapshot(project)
         _run_inspect(project, "--skip-grants")
         after = _snapshot(project)
-        _assert_no_payload_writes(
-            before, after, "ships inspect --skip-grants --no-fix-grants"
-        )
+        _assert_no_payload_writes(before, after, "ships inspect --skip-grants")
 
     def test_removed_flags_reject_cleanly(self, tmp_path):
         """The old flags now fail with an argparse error, not a silent no-op.
@@ -137,6 +126,8 @@ class TestInspectIsReadOnly:
             "--fix-ddl-terminators",
             "--no-fix-ddl-terminators",
             "--fix-non-ascii",
+            "--fix-grants",
+            "--no-fix-grants",
         ):
             result = _run_inspect(project, removed_flag)
             assert result.returncode != 0, (

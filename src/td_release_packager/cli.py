@@ -19,8 +19,8 @@ Commands:
 Usage:
     python -m td_release_packager scaffold --name MortgagePlatform --output /projects
     python -m td_release_packager build --source . --env DEV --name create_objects --env-config config/env/DEV.conf
-    python -m td_release_packager inspect --source . --fix-grants
     python -m td_release_packager fix --project .
+    python -m td_release_packager inspect --project .
     python -m td_release_packager scan --source .
     python -m td_release_packager analyze --source . --graph ./output/
     python -m td_release_packager analyze --source . --graph . --formats dot,json,openlineage
@@ -68,7 +68,6 @@ from td_release_packager.validate import (
 from td_release_packager.version_args import add_version_argument
 from td_release_packager.validate_grants import (
     validate_grants,
-    fix_grants,
     format_report as format_grant_report,
 )
 
@@ -2300,9 +2299,6 @@ def _run_inspect(args, stage, issue_codes) -> int:
         stage.set_config_resolved(
             "skip_grants", getattr(args, "skip_grants", False), "layer-5", "cli"
         )
-        stage.set_config_resolved(
-            "fix_grants", getattr(args, "fix_grants", True), "layer-5", "cli"
-        )
 
         # ==============================================================
         # Step 0 — Token format check
@@ -2729,7 +2725,10 @@ def _run_inspect(args, stage, issue_codes) -> int:
         # ==============================================================
 
         skip_grants = getattr(args, "skip_grants", False)
-        do_fix = getattr(args, "fix_grants", True)
+        # #526 removed --fix-grants from `ships inspect` — the fixer lives in
+        # the `ships fix` verb now. Inspect is strictly read-only. Any caller
+        # still setting fix_grants=True on a synthesised Namespace (e.g. an
+        # older process pipeline) gets a validate-only pass here.
         dcl_dir = None
         if hasattr(args, "dcl_dir") and args.dcl_dir:
             dcl_dir = Path(args.dcl_dir)
@@ -2887,35 +2886,10 @@ def _run_inspect(args, stage, issue_codes) -> int:
         grants_files_written = 0
         if skip_grants:
             print("\n  ℹ Grant validation skipped (--skip-grants)")
-        elif do_fix:
-            # -- Fix mode: generate/update .grt files --
-            grant_result, grants_files_written = fix_grants(
-                project_dir,
-                dcl_dir=dcl_dir,
-                verbose=args.verbose,
-            )
-
-            _grant_passed = _effective_grant_passed(grant_result)
-            grant_icon = _status_icon(_grant_passed)
-            grant_status = "PASSED" if _grant_passed else "FAILED"
-
-            print(f"\n{'=' * 64}")
-            print(
-                f"  {grant_icon} Step 2: Grant Validation — {grant_status}"
-                f" (--fix-grants){_grant_suffix(grant_result)}"
-            )
-            print(f"{'=' * 64}")
-            print(f"  .grt files written: {grants_files_written}")
-            print(
-                format_grant_report(
-                    grant_result,
-                    extra_grants_severity=warn_extra_grants_severity,
-                    external_grants_severity=warn_external_grants_severity,
-                )
-            )
-            print(f"{'=' * 64}")
         else:
-            # -- Validate mode: compare and report --
+            # -- Validate mode: compare and report (read-only) --
+            # The fixer moved to `ships fix` (default-on) in #526. Inspect
+            # never writes to payload/ under any argument combination now.
             grant_result = validate_grants(
                 project_dir,
                 dcl_dir=dcl_dir,
@@ -3089,18 +3063,9 @@ def _run_inspect(args, stage, issue_codes) -> int:
         # itself was set up at the top of this function — we only
         # need to attach the per-step findings now.
         if grant_result is not None:
-            if grants_files_written:
-                # `--fix-grants` (the default) just wrote .grt files for
-                # the operator. Recorded so the audit trail in
-                # ships.decisions.json shows what SHIPS did — not a
-                # violation. (#451)
-                stage.add_issue(
-                    "info",
-                    issue_codes.INSPECT_GRANT_AUTO_GENERATED,
-                    f"Auto-generated {grants_files_written} .grt file(s) "
-                    f"from DDL intent (--fix-grants default). Pass "
-                    f"--no-fix-grants to opt out and just lint.",
-                )
+            # #526 removed the "auto-generated N .grt files" info line
+            # from this stage — the fixer moved to `ships fix`. Inspect
+            # only reports drift and orphans now.
             # Drifted entries — severity depends on whether all drift is
             # extra-only (manually added grants) or includes missing privs
             # (inferred grants absent from the .dcl file).
@@ -3123,17 +3088,13 @@ def _run_inspect(args, stage, issue_codes) -> int:
             for entry in grant_result.missing:
                 # Missing grants are derivable from intent — the DDL
                 # implies the grant, the operator just hasn't written
-                # the matching .grt entry. With --fix-grants ON by
-                # default these are auto-generated before this point,
-                # so this branch only fires under --no-fix-grants.
-                # Surface as informational with a pointer back at the
-                # default behaviour.
+                # the matching .grt entry. Since #526 removed inspect's
+                # --fix-grants flag, `ships fix` is the only auto-generator.
                 stage.add_issue(
                     "info",
                     issue_codes.INSPECT_GRANT_MISSING,
                     f"Missing grant: {_format_missing_grant(entry)}. "
-                    f"Drop --no-fix-grants (or run "
-                    f"`ships inspect --fix-grants`) to auto-generate.",
+                    f"Run `ships fix` to auto-generate.",
                 )
             for entry in grant_result.orphaned:
                 if _grant_issue_enabled(warn_external_grants_severity):
@@ -3148,7 +3109,9 @@ def _run_inspect(args, stage, issue_codes) -> int:
             payload_dir=payload_dir,
             files_scanned=lint_result.files_scanned,
             grant_validation_skipped=skip_grants,
-            grant_validation_fix_mode=do_fix,
+            # Inspect is read-only after #526 — the grants fixer moved to
+            # `ships fix`, so this is always False now.
+            grant_validation_fix_mode=False,
         )
         stage.set_outputs(
             token_format_passed=token_ok,
@@ -4376,7 +4339,6 @@ def _cmd_process_impl(args):
             strict=strict,
             config=getattr(args, "inspect_config", None),
             skip_grants=True,
-            fix_grants=False,
             skip_tokens=False,
             skip_keywords=False,
             skip_commas=False,
@@ -6058,7 +6020,6 @@ def _cmd_stage(args) -> int:
             skip_tokens=False,
             skip_keywords=False,
             skip_commas=False,
-            fix_grants=False,
             skip_grants=False,
             dcl_dir=None,
             verbose=getattr(args, "verbose", False),
@@ -6461,23 +6422,13 @@ def _build_parser():
         action="store_true",
         help="Disable leading comma checks (legacy; prefer inspect.conf).",
     )
-    vl.add_argument(
-        "--fix-grants",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Generate or update .grt files in dcl/ to match the inferred "
-        "grant set from DDL intent analysis. ON by default — missing "
-        "grants are derivable from the DDL, idempotent, and the writer "
-        "only adds entries that intent implies (extras and orphans are "
-        "left for human review), so making the operator opt in to a "
-        "known-safe fix is friction. Pass --no-fix-grants to opt out "
-        "and just lint instead.",
-    )
-    # --fix-ddl-terminators and --fix-non-ascii moved to `ships fix` in #522.
-    # inspect is strictly read-only now — the fixers live in
-    # td_release_packager.fixers and are invoked via `ships fix --rules
-    # ddl_terminator,non_ascii` (or default-on selection for ddl_terminator).
-    # --fix-grants is still here pending #526.
+    # --fix-ddl-terminators / --fix-non-ascii / --fix-grants all moved to
+    # `ships fix` in #522 (ddl_terminator, non_ascii) and #526 (grants).
+    # `ships inspect` is now strictly read-only. The fixers live in
+    # td_release_packager.fixers and are invoked via `ships fix` (the
+    # default-on subset covers ddl_terminator and grants_derivation),
+    # `ships fix --rules non_ascii` for the opt-in case, or `ships fix
+    # --all` for the whole registry.
     vl.add_argument(
         "--skip-grants",
         action="store_true",

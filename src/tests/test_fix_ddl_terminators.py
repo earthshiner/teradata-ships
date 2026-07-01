@@ -18,10 +18,9 @@ from td_release_packager.validate import validate_directory
 
 
 class TestCLIFlags:
-    """After #522, ``ships inspect`` no longer exposes ``--fix-ddl-terminators``.
-
-    Auto-fixing moved to the dedicated ``ships fix`` verb (#521).
-    ``--fix-grants`` still exists on inspect pending #526.
+    """After #522 (ddl_terminator, non_ascii) and #526 (grants), ``ships
+    inspect`` exposes no auto-fix flags at all — inspect is strictly
+    read-only. All three fixers live in ``ships fix``.
     """
 
     def test_fix_ddl_terminators_flag_removed_from_inspect(self):
@@ -38,23 +37,19 @@ class TestCLIFlags:
         with pytest.raises(SystemExit):
             parser.parse_args(["inspect", "--project", ".", "--no-fix-ddl-terminators"])
 
-    def test_fix_grants_defaults_to_true(self):
-        """``--fix-grants`` remains on inspect until #526 migrates it into
-        the fix registry. Kept default-on because grants are derivable
-        from DDL intent and the writer is additive."""
-        parser = _build_parser()
-        args = parser.parse_args(["inspect", "--project", "."])
-        assert args.fix_grants is True
+    def test_fix_grants_flag_removed_from_inspect(self):
+        import pytest
 
-    def test_no_fix_grants_opts_out(self):
         parser = _build_parser()
-        args = parser.parse_args(["inspect", "--project", ".", "--no-fix-grants"])
-        assert args.fix_grants is False
+        with pytest.raises(SystemExit):
+            parser.parse_args(["inspect", "--project", ".", "--fix-grants"])
 
-    def test_explicit_fix_grants_stays_true(self):
+    def test_no_fix_grants_flag_removed_from_inspect(self):
+        import pytest
+
         parser = _build_parser()
-        args = parser.parse_args(["inspect", "--project", ".", "--fix-grants"])
-        assert args.fix_grants is True
+        with pytest.raises(SystemExit):
+            parser.parse_args(["inspect", "--project", ".", "--no-fix-grants"])
 
 
 # ---------------------------------------------------------------

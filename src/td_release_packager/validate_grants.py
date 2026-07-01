@@ -896,6 +896,7 @@ def fix_grants(
     project_dir: Path,
     dcl_dir: Optional[Path] = None,
     verbose: bool = False,
+    dry_run: bool = False,
 ) -> Tuple[GrantValidationResult, int]:
     """
     Repair grant drift by adding missing inferred grants.
@@ -911,6 +912,13 @@ def fix_grants(
         dcl_dir:     Directory containing inter-db .dcl files. Defaults to
                      ``project_dir/payload/database/DCL/inter_db``.
         verbose:     Forwarded to infer_grants for diagnostic output.
+        dry_run:     When True, count what *would* be written without
+                     touching the filesystem. The returned
+                     ``files_written`` reports the projected total. The
+                     status classification runs identically (no writes
+                     occur, so post-fix status equals pre-fix status);
+                     this is the shape the ``grants_derivation`` fixer
+                     needs for the ``ships fix`` verb (#526).
 
     Returns:
         ``(result, files_written)`` where:
@@ -918,12 +926,22 @@ def fix_grants(
                             also contains extra grants, it may still be
                             reported as drifted after missing grants are
                             appended.
-            files_written:  Count of DCL/role DDL files created or updated.
+            files_written:  Count of DCL/role DDL files created or updated
+                            (or projected under ``dry_run``).
     """
     project_dir = Path(project_dir).resolve()
     dcl_dir = _resolve_dcl_dir(project_dir, dcl_dir)
 
-    files_written = _relocate_role_grants_from_inter_db(project_dir, dcl_dir)
+    # Relocations and role-file creations touch disk unconditionally.
+    # Under ``dry_run`` we skip both, at the cost of not counting them —
+    # the vast majority of ``ships fix`` grants dry-runs surface the
+    # projections that matter (missing DCL files, drifted files with
+    # missing privs), and the relocate/role-file paths are legacy /
+    # cleanup passes that the operator typically sees once.
+    if not dry_run:
+        files_written = _relocate_role_grants_from_inter_db(project_dir, dcl_dir)
+    else:
+        files_written = 0
 
     consolidated, raw_results, ddl_count = _infer_expected_grants(project_dir, verbose)
 
@@ -942,7 +960,11 @@ def fix_grants(
         sources = [r for r in raw_results if r["grantee"] == grantee]
 
         if pre_status.missing:
-            if _write_full_expected_grants_file(
+            if dry_run:
+                # A missing DCL file will always be created — one write
+                # per grantee. Count without invoking the writer.
+                files_written += 1
+            elif _write_full_expected_grants_file(
                 pre_status.file_path,
                 grantee,
                 expected,
@@ -951,16 +973,24 @@ def fix_grants(
             ):
                 files_written += 1
         elif pre_status.drifted and pre_status.missing_privs:
-            if _append_missing_grants_to_file(
+            if dry_run:
+                files_written += 1
+            elif _append_missing_grants_to_file(
                 pre_status.file_path,
                 grantee,
                 pre_status.missing_privs,
             ):
                 files_written += 1
 
-        statuses.append(_classify_grantee(grantee, expected, target_dcl_dir))
+        # Under dry_run there was no write, so the post-fix status is
+        # identical to the pre-fix classification.
+        if dry_run:
+            statuses.append(pre_status)
+        else:
+            statuses.append(_classify_grantee(grantee, expected, target_dcl_dir))
 
-    files_written += _write_missing_role_files(project_dir)
+    if not dry_run:
+        files_written += _write_missing_role_files(project_dir)
 
     # Orphans are not touched — surface them in the result
     orphans = _find_orphans(set(consolidated.keys()), dcl_dir)

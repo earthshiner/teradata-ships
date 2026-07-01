@@ -174,12 +174,11 @@ python -m td_release_packager inspect --project $PROJECT --strict
 A demo package should be not just `ERROR`-free but ideally
 **warning-free** — the SE who deploys it cannot easily triage findings in
 the field. `--strict` promotes warnings to errors so nothing soft slips
-through. Run `ships fix --project $PROJECT` (default-on) and
+through. Run `ships fix --project $PROJECT` (default-on — clears
+DDL terminators and grants derivation) and
 `ships fix --project $PROJECT --rules non_ascii` to clear the mechanical
 categories before the final build. `comment_length` is a guided fix
-(truncation is a judgement call) and `set_multiset` is manual; grant
-findings are cleared by the still-live `ships inspect --fix-grants`
-until #526 migrates it into the fix registry.
+(truncation is a judgement call) and `set_multiset` is manual.
 
 ## 6. Analyse — deploy order
 
