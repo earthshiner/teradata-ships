@@ -1,35 +1,38 @@
-"""Auto-fixer for the ``hardcoded_name`` inspect rule (#527, #541 Phase 2a).
+"""Auto-fixer for the ``hardcoded_name`` inspect rule (#527, #541 Phase 2a + 2b).
 
-Plan-file workflow (agent-friendly, no interactive TTY yet):
+Plan-file workflow (agent-friendly):
 
-1. **First run (dry-run or apply on a plan-less project)** — scans the
-   payload for hardcoded database qualifiers, proposes a ``{{token}}``
-   for each, and writes ``.ships/hardcoded_name.plan.json``. The plan
-   is human-editable JSON: operators (or an agent) review it, delete
-   entries they don't want tokenised, and rename tokens as needed.
-2. **Second run (apply mode, plan present)** — reads the plan and
-   rewrites every ``literal`` in payload files to the paired ``token``,
-   then deletes the plan file so the next run starts a fresh proposal
-   cycle.
+1. **First run (propose mode)** — scans the payload for hardcoded
+   database qualifiers, proposes a ``{{token}}`` for each, and writes
+   ``.ships/hardcoded_name.plan.json``. Operators (or an agent) review,
+   delete entries they don't want tokenised, and rename tokens.
+2. **Second run (apply mode)** — reads the plan, rewrites every
+   ``literal`` in payload files to the paired ``token``, and updates
+   ``config/tokenise.conf`` + ``config/token_map.conf`` so the
+   mapping survives re-harvest. The plan file is consumed on
+   success.
 
 Registered ``default_on=False`` — the fix requires operator judgement
 per the rules catalogue (``requires_human_review: True``).
 
-Phase 2a features (this module):
+Features:
 
 * **Smart proposals** — when ``<project>/config/tokenise.conf`` exists,
   apply its substitution rules to each candidate literal to compute
   the proposed token. Falls back to verbatim wrap when no rule matches
-  or no config exists.
+  or no config exists. (Phase 2a.)
 * **Persistent skip list** — ``.ships/hardcoded_name.exceptions``
   carries operator-declared "always skip this literal" decisions
   across runs. Merged with the system-database set at scan time.
-
-Deferred to Phase 2b:
-
-* Interactive TTY prompt with y/e/s/S/q actions.
-* Atomic updates to ``config/tokenise.conf`` and
-  ``config/token_map.conf`` alongside the payload rewrite.
+  (Phase 2a.)
+* **Atomic config updates** — apply mode extends
+  ``config/tokenise.conf`` and ``config/token_map.conf`` alongside
+  the payload rewrite. If any config write fails, every payload
+  rewrite is rolled back to its pre-fix content. (Phase 2b.)
+* **Interactive review helper** — :func:`interactive_review` walks
+  the plan proposals one at a time with y/e/s/S/q actions and updates
+  the plan in place. Wired to the CLI via ``ships review-plan``.
+  Testable via stream injection. (Phase 2b.)
 """
 
 from __future__ import annotations
@@ -290,6 +293,84 @@ def _discover_literals(
     return literals
 
 
+def _extend_tokenise_conf(project_dir: str, subs: dict[str, str]) -> None:
+    """Append ``regex::^<literal>$:=<token>`` rules to ``config/tokenise.conf``.
+
+    Idempotent — skips rules whose exact ``regex::…`` line is already
+    present. Creates the file (with a header) when it doesn't exist.
+    Every rule anchors both ends so ``Prod`` doesn't match ``ProdOther``.
+    """
+    conf_dir = os.path.join(project_dir, "config")
+    conf_path = os.path.join(conf_dir, "tokenise.conf")
+    existing = ""
+    if os.path.isfile(conf_path):
+        with open(conf_path, encoding="utf-8") as fh:
+            existing = fh.read()
+    new_lines: list[str] = []
+    for literal, token in sorted(subs.items()):
+        rule = f"regex::^{literal}$:={token}"
+        if rule not in existing and rule not in "\n".join(new_lines):
+            new_lines.append(rule)
+    if not new_lines:
+        return
+    os.makedirs(conf_dir, exist_ok=True)
+    with open(conf_path, "a", encoding="utf-8", newline="") as fh:
+        if existing and not existing.endswith("\n"):
+            fh.write("\n")
+        if not existing:
+            fh.write(
+                "# tokenise.conf — literal → token substitution rules.\n"
+                "# One rule per line: regex::PATTERN:=REPLACEMENT\n"
+                "# Auto-appended by `ships fix --rules hardcoded_name`.\n"
+                "\n"
+            )
+        for line in new_lines:
+            fh.write(line + "\n")
+
+
+def _extend_token_map_conf(project_dir: str, subs: dict[str, str]) -> None:
+    """Append ``LITERAL=TOKEN`` entries to ``config/token_map.conf``.
+
+    Idempotent — skips literals already listed as an LHS. The mapping
+    lets ``ships scan`` (and any tool reading the map) see the token
+    without re-inferring it from tokenise.conf.
+    """
+    conf_dir = os.path.join(project_dir, "config")
+    conf_path = os.path.join(conf_dir, "token_map.conf")
+    existing_literals: set[str] = set()
+    existing_text = ""
+    if os.path.isfile(conf_path):
+        with open(conf_path, encoding="utf-8") as fh:
+            existing_text = fh.read()
+        for line in existing_text.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            key, _, _ = stripped.partition("=")
+            if key.strip():
+                existing_literals.add(key.strip())
+    new_lines: list[str] = []
+    for literal, token in sorted(subs.items()):
+        if literal in existing_literals:
+            continue
+        new_lines.append(f"{literal}={token}")
+    if not new_lines:
+        return
+    os.makedirs(conf_dir, exist_ok=True)
+    with open(conf_path, "a", encoding="utf-8", newline="") as fh:
+        if existing_text and not existing_text.endswith("\n"):
+            fh.write("\n")
+        if not existing_text:
+            fh.write(
+                "# token_map.conf — literal database name → {{TOKEN}} map.\n"
+                "# One mapping per line: LITERAL_NAME={{TOKEN_NAME}}\n"
+                "# Auto-appended by `ships fix --rules hardcoded_name`.\n"
+                "\n"
+            )
+        for line in new_lines:
+            fh.write(line + "\n")
+
+
 def _apply_plan(
     source_dir: str,
     plan: dict,
@@ -327,6 +408,11 @@ def _apply_plan(
     )
 
     total_subs = 0
+
+    # Snapshots of pre-fix payload content, keyed by absolute path.
+    # Populated only in apply mode so a config-write failure can roll
+    # back every payload rewrite the fixer just performed.
+    payload_snapshots: dict[str, bytes] = {}
 
     for root, dirs, filenames in os.walk(source_dir):
         dirs.sort()
@@ -383,6 +469,7 @@ def _apply_plan(
 
             if not dry_run:
                 try:
+                    payload_snapshots[file_path] = content.encode("utf-8")
                     with open(file_path, "w", encoding="utf-8", newline="") as fh:
                         fh.write(new_content)
                 except OSError as exc:
@@ -407,6 +494,42 @@ def _apply_plan(
             )
 
     result.totals["substitutions"] = total_subs
+
+    # Extend the two config files atomically with the payload rewrite.
+    # On failure, roll back every payload write from the snapshots so
+    # the fixer either commits everything or nothing. Skipped under
+    # dry_run — that path never wrote anything to begin with.
+    if not dry_run and payload_snapshots:
+        try:
+            _extend_tokenise_conf(source_dir, subs)
+            _extend_token_map_conf(source_dir, subs)
+        except OSError as exc:
+            for restored_path, original_bytes in payload_snapshots.items():
+                try:
+                    with open(restored_path, "wb") as fh:
+                        fh.write(original_bytes)
+                except OSError:
+                    # Best-effort rollback — if we can't restore a
+                    # file, surface it so the operator can eyeball
+                    # the tree. Don't crash.
+                    result.errors.append(
+                        {
+                            "file": os.path.relpath(restored_path, source_dir),
+                            "error": (
+                                "rollback failed after config write error — "
+                                "restore this file manually"
+                            ),
+                        }
+                    )
+            result.errors.append(
+                {
+                    "file": "config/",
+                    "error": (f"config write failed, payload rolled back: {exc}"),
+                }
+            )
+            # Signal the caller no changes stuck.
+            result.files_changed.clear()
+            result.totals["substitutions"] = 0
 
 
 def fix_hardcoded_name(source_dir: str, dry_run: bool = False) -> FixResult:
@@ -473,6 +596,184 @@ def fix_hardcoded_name(source_dir: str, dry_run: bool = False) -> FixResult:
                 }
             )
     return result
+
+
+# ---------------------------------------------------------------------------
+# Interactive review (Phase 2b)
+# ---------------------------------------------------------------------------
+
+
+class ReviewResult:
+    """Summary of an :func:`interactive_review` session."""
+
+    __slots__ = ("accepted", "edited", "skipped", "skipped_all", "quit_early")
+
+    def __init__(self) -> None:
+        self.accepted = 0
+        self.edited = 0
+        self.skipped = 0
+        self.skipped_all: list[str] = []
+        self.quit_early = False
+
+    def to_dict(self) -> dict:
+        return {
+            "accepted": self.accepted,
+            "edited": self.edited,
+            "skipped": self.skipped,
+            "skipped_all": list(self.skipped_all),
+            "quit_early": self.quit_early,
+        }
+
+
+def _write_exceptions(project_dir: str, exclude: list[str]) -> None:
+    """Merge ``exclude`` into ``.ships/hardcoded_name.exceptions.json``.
+
+    Preserves any literals already listed — additive only. Creates
+    the file when it doesn't exist.
+    """
+    path = _exceptions_path(project_dir)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    existing: set[str] = set()
+    if os.path.isfile(path):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                doc = json.load(fh)
+            if isinstance(doc, dict) and isinstance(doc.get("exclude"), list):
+                existing = {e for e in doc["exclude"] if isinstance(e, str)}
+        except (OSError, json.JSONDecodeError):
+            existing = set()
+    merged = sorted(existing | {e for e in exclude if e})
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        json.dump(
+            {"schema_version": _EXCEPTIONS_SCHEMA_VERSION, "exclude": merged},
+            fh,
+            indent=2,
+        )
+        fh.write("\n")
+
+
+def interactive_review(
+    project_dir: str,
+    input_stream=None,
+    output_stream=None,
+) -> ReviewResult:
+    """Walk the plan proposals interactively and update the plan in place.
+
+    For each proposal presents the literal, the current proposed token,
+    and the list of occurrences, then prompts for one of five actions:
+
+    * ``y`` — accept the proposal as-is.
+    * ``e`` — edit the token before accepting. Prompts for a replacement
+      (must contain ``{{...}}`` — reject and re-prompt otherwise).
+    * ``s`` — skip this proposal (remove from the plan).
+    * ``S`` — skip AND add the literal to
+      ``.ships/hardcoded_name.exceptions.json`` so future runs don't
+      re-propose it.
+    * ``q`` — quit without processing any more proposals. Unreviewed
+      proposals are left in the plan file as-is.
+
+    The plan on disk is rewritten to reflect the operator's decisions.
+
+    Args:
+        project_dir:   SHIPS project directory (parent of ``.ships/``).
+        input_stream:  File-like source of input lines. Defaults to
+                       ``sys.stdin``. Tests inject :class:`io.StringIO`.
+        output_stream: File-like sink for prompts and messages.
+                       Defaults to ``sys.stdout``.
+
+    Returns:
+        :class:`ReviewResult` with per-action counts and a
+        ``quit_early`` flag.
+    """
+    import sys
+
+    inp = input_stream if input_stream is not None else sys.stdin
+    out = output_stream if output_stream is not None else sys.stdout
+
+    review = ReviewResult()
+
+    plan = _load_plan(project_dir)
+    if plan is None:
+        out.write(
+            f"no plan file to review ({_PLAN_RELATIVE_PATH} missing or malformed)\n"
+        )
+        return review
+
+    proposals = list(plan.get("proposals", []))
+    keep: list[dict] = []
+    total = len(proposals)
+
+    def _readline() -> str:
+        out.flush()
+        return inp.readline().rstrip("\n")
+
+    for idx, proposal in enumerate(proposals, start=1):
+        if review.quit_early:
+            keep.append(proposal)
+            continue
+
+        literal = proposal.get("literal", "")
+        token = proposal.get("token", "")
+        occurrences = proposal.get("occurrences", [])
+
+        out.write(
+            f"\n[{idx}/{total}] literal: {literal!r}\n"
+            f"        token:   {token!r}\n"
+            f"        {len(occurrences)} occurrence(s)\n"
+        )
+        for occ in occurrences[:5]:
+            out.write(f"          {occ.get('file')}:{occ.get('line')}\n")
+        if len(occurrences) > 5:
+            out.write(f"          ... {len(occurrences) - 5} more\n")
+
+        while True:
+            out.write("  [y] accept  [e] edit  [s] skip  [S] skip-all  [q] quit: ")
+            choice = _readline().strip()
+            if choice in {"y", "e", "s", "S", "q"}:
+                break
+            out.write("  ! unrecognised — pick one of y/e/s/S/q\n")
+
+        if choice == "y":
+            keep.append(proposal)
+            review.accepted += 1
+        elif choice == "e":
+            while True:
+                out.write(f"    new token (blank to keep {token!r}): ")
+                new_token = _readline().strip()
+                if not new_token:
+                    keep.append(proposal)
+                    review.accepted += 1
+                    break
+                if "{{" in new_token and "}}" in new_token:
+                    edited = dict(proposal)
+                    edited["token"] = new_token
+                    keep.append(edited)
+                    review.edited += 1
+                    break
+                out.write("    ! token must contain '{{...}}'\n")
+        elif choice == "s":
+            review.skipped += 1
+        elif choice == "S":
+            review.skipped += 1
+            review.skipped_all.append(literal)
+        elif choice == "q":
+            review.quit_early = True
+            keep.append(proposal)
+
+    # Write plan back with the operator's decisions applied.
+    if review.skipped_all:
+        _write_exceptions(project_dir, review.skipped_all)
+    if keep:
+        _write_plan(project_dir, keep)
+    else:
+        # Every proposal was skipped — remove the empty plan so the
+        # next run starts a fresh cycle.
+        try:
+            os.remove(_plan_path(project_dir))
+        except OSError:
+            pass
+
+    return review
 
 
 SPEC = register(

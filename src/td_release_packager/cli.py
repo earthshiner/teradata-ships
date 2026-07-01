@@ -276,6 +276,8 @@ def _main():
         _cmd_validate(args)
     elif args.command == "fix":
         sys.exit(_cmd_fix(args))
+    elif args.command == "review-plan":
+        sys.exit(_cmd_review_plan(args))
     elif args.command == "package":
         _cmd_build(args)
     elif args.command == "deploy":
@@ -3257,6 +3259,46 @@ def _cmd_fix(args) -> int:
     total_changes = sum(len(result.files_changed) for _, result in results)
     if dry_run and total_changes > 0:
         return 1
+    return 0
+
+
+def _cmd_review_plan(args) -> int:
+    """Walk an existing fixer plan interactively (#541 Phase 2b).
+
+    Currently only the ``hardcoded_name`` fixer emits a review-able plan
+    file (under ``.ships/hardcoded_name.plan.json``). Future rules with
+    plan-file workflows can register their own review helpers and be
+    dispatched here by name.
+    """
+    project = args.project
+    if not os.path.isdir(project):
+        print(
+            f"ships review-plan: project directory does not exist: {project!r}",
+            file=sys.stderr,
+        )
+        return 2
+
+    rule = args.rule
+    if rule != "hardcoded_name":
+        print(
+            f"ships review-plan: no review helper registered for rule "
+            f"{rule!r}. Currently only 'hardcoded_name' has one.",
+            file=sys.stderr,
+        )
+        return 2
+
+    from td_release_packager.fixers.hardcoded_name import interactive_review
+
+    review = interactive_review(project)
+    summary = review.to_dict()
+    print()
+    print(
+        f"  reviewed: accepted={summary['accepted']}, "
+        f"edited={summary['edited']}, "
+        f"skipped={summary['skipped']}, "
+        f"skipped-all={len(summary['skipped_all'])}, "
+        f"quit-early={summary['quit_early']}"
+    )
     return 0
 
 
@@ -6678,6 +6720,35 @@ def _build_parser():
         help=(
             "Emit a machine-readable summary to stdout instead of the "
             "human report. Same envelope shape as the MCP ships_fix tool."
+        ),
+    )
+
+    # -- review-plan -- (#541 Phase 2b)
+    # Interactive review of a fixer's plan file. Currently supports
+    # only ``hardcoded_name`` (which emits
+    # ``.ships/hardcoded_name.plan.json`` in propose mode). Runs a
+    # per-proposal y/e/s/S/q prompt over stdin.
+    rp = subs.add_parser(
+        "review-plan",
+        help=("[F] Fix — interactively review a fixer plan file (hardcoded_name)."),
+        description=(
+            "Walks a fixer's plan file one proposal at a time and lets you "
+            "accept, edit, skip, skip-all (persist to exceptions), or quit. "
+            "The plan file is rewritten in place with your decisions applied. "
+            "Currently only 'hardcoded_name' has a review helper."
+        ),
+    )
+    rp.add_argument(
+        "--project",
+        required=True,
+        help="SHIPS project directory (the parent of .ships/).",
+    )
+    rp.add_argument(
+        "--rule",
+        default="hardcoded_name",
+        help=(
+            "Rule whose plan file to review. Defaults to 'hardcoded_name' "
+            "(the only rule that currently emits a plan file)."
         ),
     )
 
